@@ -1,0 +1,117 @@
+name: Build training dataset from self-play segments
+
+# Assembles the checkpoint segments that self-play pushed to the
+# gha-segments-16cards branch (segments/ckpt-<RUN_ID>-lines<a>-<b>.jsonl.gz)
+# into one gzip dataset (datasets/<name>.jsonl.gz) for nnue-train.yml.
+#
+# A run's segments are selected by the timestamp inside its RUN_ID
+# (gha-YYYYMMDDTHHMMSSZ-<github run id>[-s<shard>]), so a round is simply a
+# time window: since <= run start < until. Give the window of the round you
+# want; runs from an earlier round (different depth/settings) stay out.
+#
+# push=false only uploads the result as a run artifact (dry run: check the line
+# count first). push=true also commits datasets/<name>.jsonl.gz to the data
+# branch. Nothing is ever deleted from segments/.
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: "Dataset name, e.g. round3-full  ->  datasets/round3-full.jsonl.gz"
+        required: true
+      since:
+        description: "Include runs started at/after this UTC time, format YYYYMMDDTHHMMSSZ (e.g. 20260919T035300Z)"
+        required: true
+      until:
+        description: "Include runs started before this UTC time (empty = no upper bound)"
+        required: false
+        default: ""
+      push:
+        description: "Commit the dataset to the data branch (true/false)"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout data branch
+        uses: actions/checkout@v4
+        with:
+          ref: gha-segments-16cards
+
+      - name: Assemble
+        id: build
+        env:
+          NAME: ${{ inputs.name }}
+          SINCE: ${{ inputs.since }}
+          UNTIL: ${{ inputs.until }}
+        run: |
+          set -eu
+          mkdir -p /tmp/out
+          : > /tmp/out/data.jsonl
+          : > /tmp/out/files.txt
+          # sorted so a run's checkpoints stay in order (lines a-b ascending
+          # per run is guaranteed by the numeric sort on the range start)
+          ls segments/ckpt-gha-*.jsonl.gz | while read -r f; do
+            base=$(basename "$f")
+            ts=$(echo "$base" | sed -E 's/^ckpt-gha-([0-9]{8}T[0-9]{6}Z)-.*/\1/')
+            start=$(echo "$base" | sed -E 's/.*-lines([0-9]+)-[0-9]+(-final)?\.jsonl\.gz$/\1/')
+            printf '%s %010d %s\n' "$ts" "$start" "$f"
+          done | sort | while read -r ts start f; do
+            if [[ "$ts" < "$SINCE" ]]; then continue; fi
+            if [ -n "$UNTIL" ] && [[ ! "$ts" < "$UNTIL" ]]; then continue; fi
+            echo "$f" >> /tmp/out/files.txt
+            gunzip -c "$f" >> /tmp/out/data.jsonl
+          done
+          FILES=$(wc -l < /tmp/out/files.txt)
+          LINES=$(wc -l < /tmp/out/data.jsonl)
+          echo "segments: $FILES, positions (lines): $LINES"
+          if [ "$LINES" -eq 0 ]; then echo "nothing matched the window" >&2; exit 1; fi
+          gzip -9 -c /tmp/out/data.jsonl > "/tmp/out/${NAME}.jsonl.gz"
+          ls -la /tmp/out/
+          echo "files=$FILES" >> "$GITHUB_OUTPUT"
+          echo "lines=$LINES" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Dataset \`$NAME\`"
+            echo ""
+            echo "- window: since \`$SINCE\` until \`${UNTIL:-(open)}\`"
+            echo "- segments: $FILES"
+            echo "- positions: **$LINES**"
+            echo "- size: $(du -h "/tmp/out/${NAME}.jsonl.gz" | cut -f1) gzip"
+            echo "- pushed to data branch: ${{ inputs.push }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload dataset (artifact)
+        uses: actions/upload-artifact@v7
+        with:
+          name: dataset-${{ inputs.name }}
+          path: |
+            /tmp/out/${{ inputs.name }}.jsonl.gz
+            /tmp/out/files.txt
+          retention-days: 14
+
+      - name: Commit dataset to the data branch
+        if: ${{ inputs.push == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NAME: ${{ inputs.name }}
+          LINES: ${{ steps.build.outputs.lines }}
+        shell: bash --noprofile --norc -uo pipefail {0}
+        run: |
+          mkdir -p datasets
+          cp "/tmp/out/${NAME}.jsonl.gz" "datasets/${NAME}.jsonl.gz"
+          git config user.email "actions@github.com"
+          git config user.name "gha-selfplay-bot"
+          git add "datasets/${NAME}.jsonl.gz"
+          git commit -q -m "Add training dataset ${NAME} (${LINES} positions)"
+          for i in 1 2 3; do
+            git fetch origin gha-segments-16cards -q
+            git rebase origin/gha-segments-16cards -q && break
+            git rebase --abort 2>/dev/null
+            sleep 5
+          done
+          git push -q "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:gha-segments-16cards
