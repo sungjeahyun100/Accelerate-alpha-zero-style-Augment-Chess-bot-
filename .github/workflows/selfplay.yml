@@ -1,14 +1,17 @@
 name: Cloud self-play (16-card engine)
 
+# Team repo version: started by hand only (workflow_dispatch). The original project also ran it
+# every 6 hours from a cron schedule (job max runtime is 6 h); add that back deliberately if you
+# want unattended self-play:  schedule: [{ cron: "7 */6 * * *" }]
 on:
   workflow_dispatch: {}
-  schedule:
-    # Every 6 hours -- GitHub-hosted job max runtime is 6h, so this keeps
-    # back-to-back coverage with only a small gap between jobs.
-    - cron: "7 */6 * * *"
 
 permissions:
   contents: write
+
+defaults:
+  run:
+    working-directory: infra
 
 # One self-play run at a time: a manual dispatch while the 6-hourly cron run is
 # active waits instead of doubling the load on the data branch.

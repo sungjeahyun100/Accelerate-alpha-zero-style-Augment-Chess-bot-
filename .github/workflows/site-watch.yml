@@ -1,9 +1,9 @@
 name: site-watch
 # Daily check whether the live site (augmentchess.org) shipped a new bundle / aiWorker; if so run parity tests.
 # Read-only: never commits, pushes, opens issues, or touches last-seen.json in the repo.
+# Team repo version: manual start (workflow_dispatch). The original ran daily at 03:17 UTC:
+#   schedule: [{ cron: "17 3 * * *" }]
 on:
-  schedule:
-    - cron: "17 3 * * *"
   workflow_dispatch:
 permissions:
   contents: read
@@ -18,7 +18,7 @@ jobs:
           node-version: 22
       - name: Check live site
         id: check
-        working-directory: tools/site-parity
+        working-directory: infra/tools/site-parity
         run: |
           set +e
           node check-site-update.js > "$RUNNER_TEMP/check.txt" 2>&1
@@ -39,7 +39,7 @@ jobs:
           echo "site-watch: ${{ steps.check.outputs.status }} - $(head -n1 "$RUNNER_TEMP/check.txt")" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Fetch real worker and run parity tests
         if: steps.check.outputs.status == 'changed'
-        working-directory: tools/site-parity
+        working-directory: infra/tools/site-parity
         run: |
           set +e
           R="$RUNNER_TEMP/site-watch-report.md"
@@ -65,7 +65,7 @@ jobs:
           echo
           {
             echo
-            echo "Next (manual): review, then run \`node tools/site-parity/check-site-update.js --save\` locally and commit last-seen.json."
+            echo "Next (manual): review, then run \`node infra/tools/site-parity/check-site-update.js --save\` locally and commit last-seen.json."
           } >> "$R"
           cat "$R" >> "$GITHUB_STEP_SUMMARY"
           cp "$R" "$GITHUB_WORKSPACE/site-watch-report.md"

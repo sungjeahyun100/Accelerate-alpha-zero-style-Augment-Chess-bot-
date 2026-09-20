@@ -18,11 +18,14 @@ name: CI (engine checks)
 #   node tools/ci/golden-eval.js --update
 on:
   push:
-    branches: [master]
-    paths-ignore:
-      - "**.md"
-      - "logs/**"
+    branches: [main]
+    paths:
+      - "infra/**"
+      - ".github/workflows/ci.yml"
   pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/ci.yml"
   workflow_dispatch: {}
 
 concurrency:
@@ -31,6 +34,10 @@ concurrency:
 
 permissions:
   contents: read
+
+defaults:
+  run:
+    working-directory: infra
 
 jobs:
   checks:

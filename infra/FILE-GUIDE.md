@@ -56,20 +56,23 @@
 | `tools/site-parity/README.md`, `TRIAGE.md` | 사용법과 발견된 차이 분류 | 규칙 차이 사례집 |
 | `tools/review-calibration/*` | 검색 점수를 승률로 바꾸는 보정 분석 | 가치 출력을 승률로 보정할 때 참고 |
 
-## 6. 클라우드 자동화 템플릿 (`workflows-templates/`)
+## 6. 클라우드 자동화 (`.github/workflows/`)
 
-GitHub Actions 파일 6개입니다. **활성화되지 않도록 `.github/workflows/`가 아니라 여기에 두었습니다.** 쓰려면 `.github/workflows/`로 옮기고, 경로를 `infra/` 기준으로 고쳐야 합니다.
+GitHub Actions 6개입니다. 모두 `infra/` 폴더 기준으로 동작하도록 고쳐 두었습니다(`infra/` 안에서 실행하고, 산출물 경로에 `infra/`를 붙임). 무거운 작업은 **자동으로 시작되지 않고 손으로 시작(workflow_dispatch)**합니다.
 
-| 파일 | 하는 일 |
-|---|---|
-| `selfplay.yml` | 자가대국 병렬 실행과 조각 저장(데이터 브랜치에 15분마다 체크포인트), 목표량에 도달하면 스스로 종료 |
-| `dataset-build.yml` | 조각을 시간 창으로 골라 하나의 데이터셋으로 묶기 |
-| `nnue-train.yml` | 인코딩 캐시를 쓰며 학습하고, 모델을 데이터 브랜치에 저장 |
-| `match.yml` | 두 모델의 병렬 대전과 요약(신뢰구간, 판정 파일 `verdict.json`) |
-| `ci.yml` | 문법, 스모크, 골든 평가 검사 |
-| `site-watch.yml` | 하루 한 번 사이트 업데이트를 감지하고 규칙 대조 실행 |
+| 파일 | 하는 일 | 시작 방식 |
+|---|---|---|
+| `ci.yml` | 문법, 스모크, 골든 평가 검사 | `infra/**` 변경 시 푸시와 PR에서 자동 |
+| `selfplay.yml` | 자가대국 병렬 실행과 조각 저장(데이터 브랜치 `gha-segments-16cards`에 15분마다 체크포인트), 목표량에 도달하면 스스로 종료 | 수동. 원본은 6시간마다 cron이었으나 뺐음 |
+| `dataset-build.yml` | 조각을 시간 창으로 골라 하나의 데이터셋으로 묶기 | 수동 |
+| `nnue-train.yml` | 인코딩 캐시를 쓰며 학습하고 가중치를 아티팩트로 저장(`save_model`이면 데이터 브랜치에도) | 수동. 원본의 "학습 결과를 main에 자동 커밋" 단계는 뺐음 |
+| `match.yml` | 두 모델의 병렬 대전과 요약(신뢰구간, 판정 파일 `verdict.json`) | 수동 |
+| `site-watch.yml` | 사이트 업데이트를 감지하고 규칙 대조 실행 | 수동. 원본은 매일 cron이었으나 뺐음 |
 
-한도: 공개 저장소 기준 동시 작업 20개, 작업당 최대 6시간.
+주의:
+- 데이터 브랜치(`gha-segments-16cards`)는 첫 자가대국 실행 때 자동으로 생깁니다. 학습, 대전, 데이터셋 빌드는 그 브랜치의 자료가 있어야 돕니다.
+- 이 저장소에서 아직 한 번도 실행해 보지 않은 채 경로만 고친 것입니다. **`ci.yml`부터 실행해 보고**, 나머지는 처음 실행할 때 로그를 꼭 확인하세요. 로컬에서는 문법 검사, 스모크 테스트, 골든 평가, YAML 문법 검사까지 확인했습니다.
+- 한도: 공개 저장소 기준 동시 작업 20개, 작업당 최대 6시간.
 
 ## 7. 문서 (`docs/`)와 라이선스
 
@@ -105,4 +108,4 @@ node smoke-merged.js           # 통과하면 ALL SMOKE CHECKS PASSED
 node tools/ci/golden-eval.js   # 평가 함수 회귀 검사
 ```
 
-이 폴더의 코드는 Vamp-pire/Augment-Chess-Engine-Twist에서 복사한 것입니다. 원본 라이선스는 CC BY-NC-ND 4.0(저작권자 Vamp-pire)이고 적용 범위는 `SOURCE-NOTICE.md`에 있으니, 수정해서 배포하려면 저작권자와 조건을 먼저 정하세요. `workflows-templates/`의 파일은 자동으로 실행되지 않으며, 쓰려면 `.github/workflows/`로 옮기고 경로를 `infra/` 기준으로 고쳐야 합니다.
+이 폴더의 코드는 Vamp-pire/Augment-Chess-Engine-Twist에서 복사한 것입니다. 원본 라이선스는 CC BY-NC-ND 4.0(저작권자 Vamp-pire)이고 적용 범위는 `SOURCE-NOTICE.md`에 있으니, 수정해서 배포하려면 저작권자와 조건을 먼저 정하세요. 클라우드 자동화는 `.github/workflows/`에 있습니다(6번).
