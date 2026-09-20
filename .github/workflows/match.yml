@@ -71,6 +71,9 @@ permissions:
 jobs:
   play:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
     timeout-minutes: 300
     strategy:
       fail-fast: false
@@ -131,7 +134,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: match-shard-${{ matrix.shard }}
-          path: shard-${{ matrix.shard }}.log
+          path: infra/shard-${{ matrix.shard }}.log
           retention-days: 14
 
   summary:

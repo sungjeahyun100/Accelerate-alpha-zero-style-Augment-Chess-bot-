@@ -13,7 +13,7 @@ Accelerate는 증강체스(augmentchess.org) 비공식 엔진 프로젝트를 4�
 
 ## 작업 방식 (제안)
 
-- 사람의 변경은 짧은 브랜치에서 작업하고 PR로 합칩니다. CI(`ci.yml`)가 통과해야 합니다. 자동 파이프라인(자가대국, 학습, 대전)은 데이터 브랜치 `gha-segments-16cards`에만 씁니다. (지금까지의 "master에 바로 푸시" 방식은 1인 작업용이었습니다.)
+- 작업은 git flow를 따릅니다: `feature/*`에서 작업하고 PR로 `develop`에 합치며, 릴리스는 `release/*`, 긴급 수정은 `hotfix/*`입니다. CI(`ci.yml`)가 통과해야 합니다. 자동 파이프라인(자가대국, 학습, 대전)은 데이터 브랜치 `gha-segments-16cards`에만 씁니다. (지금까지의 "master에 바로 푸시" 방식은 1인 작업용이었습니다.)
 - 엔진(`engine-merged.js`)을 고치면 `extension/engine.js`를 맞추고(`tools/ci/engine-sync.js`가 검사) `tools/perf/ab-cards.js`로 이전 엔진과 결과가 같은지 확인합니다. 검증은 컴퓨터가 한가할 때 돌립니다.
 - 평가나 모델 변경은 실험실(`tools/lab/lab.js`)로 대전해서 95% 신뢰구간 하한이 50%를 넘고, 독립 재실행(`seed_offset`)에서도 같은 방향일 때만 반영합니다. 후보가 여럿이면 우연히 통과할 수 있어서 재확인은 필수입니다.
 - 실험 설정과 결과는 `ExperimentNote.md`에 남깁니다.

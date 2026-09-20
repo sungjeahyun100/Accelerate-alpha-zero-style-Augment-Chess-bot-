@@ -1,11 +1,10 @@
-name: NNUE train (encode if needed + train + optional promote)
+name: NNUE train (encode if needed + train)
 
-# One workflow for every NNUE training run. It replaces three older ones:
-#   nnue-encode.yml    (encode only)                 -> the encode step here
-#   nnue-pipeline.yml  (encode + train + auto-merge) -> this, with promote=true
-#   nnue-train-only.yml (TEMP, manual cache key)     -> this, cache found automatically
+# One workflow for every NNUE training run.
+# Team repo version: runs inside infra/. The original project could also auto-commit the trained
+# weights to its main branch (promote=true); that step was removed here on purpose -- copy the
+# artifact or use save_model (stores models/<name>.json on the data branch) and commit by hand.
 #
-# What it does:
 #   1. reads nnue/pipeline-config.json (defaults) and applies the optional
 #      per-run `overrides` JSON, so experiments need no config commit and
 #      several runs can go in parallel
@@ -16,8 +15,6 @@ name: NNUE train (encode if needed + train + optional promote)
 #      new cache on the data branch so later runs skip encoding
 #   4. trains, uploads the weights as an artifact and writes the result
 #      (accuracy, best epoch) to the run summary
-#   5. only when promote=true: commits the result to nnue/model/ on master
-#      (overwrites weights.json; the old one is kept as weights.before-<run>.json)
 #
 # cache modes:
 #   auto   (default) key includes a hash of engine-merged.js + nnue/encode.js,
@@ -52,17 +49,16 @@ on:
         description: "Optional name: also store the trained weights on the data branch as models/<name>.json so match.yml can use them as data:models/<name>.json (no commit to master)"
         required: false
         default: ""
-      promote:
-        description: "Commit the trained weights to master (true/false)"
-        required: false
-        default: "false"
-
 permissions:
   contents: write
 
+defaults:
+  run:
+    working-directory: infra
+
 concurrency:
-  # Only one promote run at a time; experiments (promote=false) never queue.
-  group: nnue-train-${{ inputs.promote == 'true' && 'promote' || github.run_id }}
+  # Every run is independent (nothing is promoted automatically in the team repo version).
+  group: nnue-train-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -167,13 +163,6 @@ jobs:
             echo "cache miss: train.js will encode first"
           fi
 
-      - name: Back up current deployed model
-        if: ${{ inputs.promote == 'true' }}
-        run: |
-          if [ -f nnue/model/weights.json ]; then
-            cp nnue/model/weights.json "nnue/model/weights.before-run-${{ github.run_id }}.json"
-          fi
-
       - name: Train
         env:
           ENCODE_WORKER_COUNT: ${{ steps.cfg.outputs.encodeWorkerCount }}
@@ -181,7 +170,7 @@ jobs:
         shell: bash --noprofile --norc -o pipefail {0}
         run: |
           source train-env.sh
-          if [ -f "$GITHUB_WORKSPACE/selfplay-val.jsonl" ]; then export VAL_DATA_FILE="$GITHUB_WORKSPACE/selfplay-val.jsonl"; fi
+          if [ -f "$GITHUB_WORKSPACE/infra/selfplay-val.jsonl" ]; then export VAL_DATA_FILE="$GITHUB_WORKSPACE/infra/selfplay-val.jsonl"; fi
           cd nnue
           node train.js 2>&1 | tee ../train.log
 
@@ -190,7 +179,6 @@ jobs:
         env:
           OVERRIDES_IN: ${{ inputs.overrides }}
           CACHE_MODE: ${{ inputs.cache }}
-          PROMOTE_IN: ${{ inputs.promote }}
           DATASET_PATH: ${{ steps.cfg.outputs.datasetPath }}
           CACHE_KEY: ${{ steps.key.outputs.key }}
           CACHE_HIT: ${{ steps.cache.outputs.hit }}
@@ -201,7 +189,6 @@ jobs:
             echo "- dataset: \`$DATASET_PATH\`"
             echo "- encode cache: \`$CACHE_KEY\` (hit: $CACHE_HIT, mode: $CACHE_MODE)"
             echo "- overrides: \`$OVERRIDES_IN\`"
-            echo "- promote: $PROMOTE_IN"
             echo ""
             echo '```'
             grep -E "NNUE_VARIANT|train/val split|stopped early|sign-agreement" train.log || echo "(no result lines found)"
@@ -209,11 +196,10 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload weights (artifact)
-        # Runs before any promote step so a lost merge race never loses the model.
         uses: actions/upload-artifact@v7
         with:
           name: nnue-trained-weights
-          path: nnue/model/
+          path: infra/nnue/model/
           retention-days: 14
 
       - name: Push new encode cache to gha-segments-16cards
@@ -276,31 +262,3 @@ jobs:
             sleep 5
           done
           git push -q "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:gha-segments-16cards
-
-      - name: Promote trained weights to master
-        if: ${{ inputs.promote == 'true' }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # Fetch+rebase+retry: a plain push failed once because master had
-        # moved since checkout (2026-09-17).
-        shell: bash --noprofile --norc -uo pipefail {0}
-        run: |
-          git config user.email "actions@github.com"
-          git config user.name "gha-selfplay-bot"
-          git add nnue/model/
-          if git diff --cached --quiet; then
-            echo "no model change to promote"
-          else
-            git commit -q -m "nnue: retrain run ${{ github.run_id }} (promoted)"
-            # npm install can leave incidental drift in tracked files
-            # (package-lock.json) that blocks the rebase; our real change is
-            # already in the commit above, so discard the rest.
-            git checkout -- . || true
-            for i in 1 2 3 4 5; do
-              git fetch origin master -q
-              git rebase origin/master -q && break
-              git rebase --abort 2>/dev/null
-              sleep 10
-            done
-            git push -q "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:master
-          fi
