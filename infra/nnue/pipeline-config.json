@@ -1,0 +1,12 @@
+{
+  "_comment": "Default settings read by .github/workflows/nnue-train.yml at the start of every run (translated into the env vars train.js/encode.js understand). Per-run changes go in that workflow's overrides input (JSON) so no commit is needed; edit this file only to change the defaults. Leave a value empty string to fall back to the script's own default.",
+  "datasetPath": "datasets/round2-full-112981.jsonl.gz",
+  "encodeWorkerCount": "2",
+  "nnueVariant": "new",
+  "ablatePlyFeature": "",
+  "ablateDeepUnits": "",
+  "ablateWarmStart": "",
+  "ablateOversample": "",
+  "ablateBlend": "",
+  "ablateBlunder": ""
+}

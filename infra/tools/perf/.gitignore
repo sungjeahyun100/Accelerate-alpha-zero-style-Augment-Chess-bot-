@@ -1,0 +1,9 @@
+tools/perf/engine-orig.js
+tools/perf/orig-results.json
+*.cpuprofile
+
+*.log
+_b.js
+engine-fe7.js
+engine-orig.js
+orig-results.json

@@ -1,0 +1,64 @@
+name: CI (engine checks)
+
+# Fast guard (about 2-3 min, no npm install needed) that runs on every push to
+# master and on pull requests. It exists because several real bugs were only
+# found late by hand: a stale-cache bug in the evaluation speed-up, the
+# extension losing its search-progress hooks when its engine was swapped, and
+# NNUE encoder/engine drift between training and the extension.
+#
+# Checks:
+#   1. syntax of every engine / extension / pipeline script
+#   2. extension manifest is valid JSON and lists both model files
+#   3. smoke test (search survives special pieces and cards)
+#   4. golden eval: evaluateStateComponents output unchanged (NNUE features)
+#   5. extension NNUE score == training-pipeline NNUE score (both models)
+#   6. site parity (needs network, warning only): move lists vs the live site
+#
+# An intentional evaluation change must update the golden file:
+#   node tools/ci/golden-eval.js --update
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - "**.md"
+      - "logs/**"
+  pull_request:
+  workflow_dispatch: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Syntax check
+        run: |
+          set -e
+          for f in engine-merged.js selfplay-worker-merged.js selfplay-run-merged.js smoke-merged.js nnue/*.js tools/ci/*.js tools/perf/*.js tools/site-parity/*.js; do
+            node --check "$f"
+          done
+          echo "syntax ok"
+
+      - name: Smoke test
+        run: node smoke-merged.js
+
+      - name: Golden evaluation check
+        run: node tools/ci/golden-eval.js
+
+      - name: Site parity (needs network; warning only)
+        continue-on-error: true
+        run: node tools/site-parity/parity-actions.js - 200

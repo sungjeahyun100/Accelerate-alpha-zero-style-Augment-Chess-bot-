@@ -1,0 +1,78 @@
+name: site-watch
+# Daily check whether the live site (augmentchess.org) shipped a new bundle / aiWorker; if so run parity tests.
+# Read-only: never commits, pushes, opens issues, or touches last-seen.json in the repo.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Check live site
+        id: check
+        working-directory: tools/site-parity
+        run: |
+          set +e
+          node check-site-update.js > "$RUNNER_TEMP/check.txt" 2>&1
+          rc=$?
+          cat "$RUNNER_TEMP/check.txt"
+          if [ $rc -eq 2 ]; then
+            echo "status=neterr" >> "$GITHUB_OUTPUT"
+            echo "::warning::site-watch: network/parse error while checking the live site (not a failure)"
+          elif grep -q '^CHANGED' "$RUNNER_TEMP/check.txt"; then
+            echo "status=changed" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=unchanged" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
+      - name: Quiet summary (nothing to do)
+        if: steps.check.outputs.status != 'changed'
+        run: |
+          echo "site-watch: ${{ steps.check.outputs.status }} - $(head -n1 "$RUNNER_TEMP/check.txt")" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Fetch real worker and run parity tests
+        if: steps.check.outputs.status == 'changed'
+        working-directory: tools/site-parity
+        run: |
+          set +e
+          R="$RUNNER_TEMP/site-watch-report.md"
+          {
+            echo "# Site update detected"
+            echo
+            echo '```'; cat "$RUNNER_TEMP/check.txt"; echo '```'
+          } > "$R"
+          node fetch-real-worker.js --force > "$RUNNER_TEMP/fetch.txt" 2>&1
+          frc=$?
+          { echo; echo "## fetch-real-worker (exit $frc)"; echo '```'; tail -n 20 "$RUNNER_TEMP/fetch.txt"; echo '```'; } >> "$R"
+          if [ $frc -ne 0 ]; then
+            echo "::warning::fetch-real-worker failed; parity tests skipped"
+          else
+            for t in "parity-actions.js - 200" "parity-apply.js - 150" "parity-playout.js - 15"; do
+              set -- $t
+              timeout 600 node "$1" "$2" "$3" > "$RUNNER_TEMP/t.txt" 2>&1
+              rc=$?
+              { echo; echo "## $1 (exit $rc)"; echo '```'; tail -n 40 "$RUNNER_TEMP/t.txt"; echo '```'; } >> "$R"
+              [ $rc -ne 0 ] && echo "::warning::$1 exited $rc"
+            done
+          fi
+          echo
+          {
+            echo
+            echo "Next (manual): review, then run \`node tools/site-parity/check-site-update.js --save\` locally and commit last-seen.json."
+          } >> "$R"
+          cat "$R" >> "$GITHUB_STEP_SUMMARY"
+          cp "$R" "$GITHUB_WORKSPACE/site-watch-report.md"
+      - name: Upload report
+        if: steps.check.outputs.status == 'changed'
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-watch-report
+          path: site-watch-report.md
+          retention-days: 30

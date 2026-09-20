@@ -1,0 +1,197 @@
+name: Model match (head to head, parallel)
+
+# Plays A against B with the real self-play game loop
+# (nnue/match-two-models.js): games come in colour-swapped pairs sharing a
+# seed, which cancels card-draw luck and colour advantage. Four shards play
+# disjoint seed ranges in parallel and a final job adds them up.
+#
+# A and B are weight files in the repo (e.g. nnue/model/weights.round2-full-112981.json)
+# or the literal word "handcoded" for the hand-tuned evaluator. Promote an
+# experiment's artifact into nnue/model/ first if you want to match it.
+#
+# Never trust fewer than ~10 decisive games: 2-game results have flipped at 10.
+# Total games = 4 shards x pairs_per_shard x 2.
+on:
+  workflow_dispatch:
+    inputs:
+      model_a:
+        description: "Weights file for A (repo path) or handcoded"
+        required: true
+      model_b:
+        description: "Weights file for B (repo path) or handcoded"
+        required: true
+      pairs_per_shard:
+        description: "Pairs per shard (each pair = 2 games); 4 shards run in parallel"
+        required: false
+        default: "8"
+      depth:
+        description: "Search depth"
+        required: false
+        default: "3"
+      depth_a:
+        description: "Optional depth for A only (empty = depth); e.g. handcoded vs handcoded with 2 vs 4"
+        required: false
+        default: ""
+      depth_b:
+        description: "Optional depth for B only (empty = depth)"
+        required: false
+        default: ""
+      limits_a:
+        description: 'Optional JSON options.limits for A (e.g. {"movetimeMs":1500,"extend":true}); overrides depth/time for A'
+        required: false
+        default: ""
+      limits_b:
+        description: "Optional JSON options.limits for B"
+        required: false
+        default: ""
+      params_a:
+        description: 'Optional JSON search params for A (nullMoveMinDepth, nullMoveReduction, lmrMinDepth, lmrMoveThreshold, quiescenceMaxPlies)'
+        required: false
+        default: ""
+      params_b:
+        description: "Optional JSON search params for B"
+        required: false
+        default: ""
+      seed_offset:
+        description: "Added to every pair index (use a different value for an independent re-run of the same comparison)"
+        required: false
+        default: "0"
+      handicap:
+        description: "Remove N minor/major pieces from a seed-chosen side in every pair (fewer draws; colour-swapped pairs stay fair). 0 = normal"
+        required: false
+        default: "0"
+      ms:
+        description: "Base search time per move in ms"
+        required: false
+        default: "300"
+
+permissions:
+  contents: read
+
+jobs:
+  play:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Play
+        env:
+          MODEL_A: ${{ inputs.model_a }}
+          MODEL_B: ${{ inputs.model_b }}
+          PAIRS: ${{ inputs.pairs_per_shard }}
+          MATCH_SEARCH_DEPTH: ${{ inputs.depth }}
+          MATCH_DEPTH_A: ${{ inputs.depth_a }}
+          MATCH_DEPTH_B: ${{ inputs.depth_b }}
+          MATCH_LIMITS_A: ${{ inputs.limits_a }}
+          MATCH_LIMITS_B: ${{ inputs.limits_b }}
+          MATCH_SEARCH_MS: ${{ inputs.ms }}
+          MATCH_HANDICAP: ${{ inputs.handicap }}
+          SEED_OFFSET: ${{ inputs.seed_offset }}
+          MATCH_PARAMS_A: ${{ inputs.params_a }}
+          MATCH_PARAMS_B: ${{ inputs.params_b }}
+        run: |
+          # A spec is "<weights path | handcoded | data:<path on gha-segments-16cards>>[@<output map>]".
+          # data:models/x.json pulls an experiment model from the data branch, so
+          # experiments never need to be committed to master.
+          resolve() {
+            local spec="$1" base suffix=""
+            base="${spec%%@*}"
+            if [[ "$spec" == *@* ]]; then suffix="@${spec#*@}"; fi
+            if [[ "$base" == data:* ]]; then
+              local p="${base#data:}"
+              mkdir -p .models
+              git fetch --depth=1 -q origin gha-segments-16cards
+              git show "origin/gha-segments-16cards:${p}" > ".models/$(basename "$p")"
+              echo ".models/$(basename "$p")${suffix}"
+            else
+              echo "$spec"
+            fi
+          }
+          MODEL_A="$(resolve "$MODEL_A")"
+          MODEL_B="$(resolve "$MODEL_B")"
+          export MATCH_PAIR_START=$(( ${{ matrix.shard }} * PAIRS + ${SEED_OFFSET:-0} ))
+          node nnue/match-two-models.js "$MODEL_A" "$MODEL_B" "$PAIRS" | tee "shard-${{ matrix.shard }}.log"
+
+      - name: Upload shard log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: match-shard-${{ matrix.shard }}
+          path: shard-${{ matrix.shard }}.log
+          retention-days: 14
+
+  summary:
+    needs: play
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download shard logs
+        uses: actions/download-artifact@v8
+        with:
+          pattern: match-shard-*
+          merge-multiple: true
+
+      - name: Add up results
+        env:
+          MODEL_A: ${{ inputs.model_a }}
+          MODEL_B: ${{ inputs.model_b }}
+        run: |
+          node -e "
+            const fs = require('fs');
+            let a = 0, b = 0, d = 0, u = 0;
+            for (const f of fs.readdirSync('.').filter((n) => /^shard-\d+\.log$/.test(n))) {
+              const m = fs.readFileSync(f, 'utf8').match(/A wins: (\d+) B wins: (\d+) draws: (\d+) unfinished: (\d+)/);
+              if (m) { a += +m[1]; b += +m[2]; d += +m[3]; u += +m[4]; }
+            }
+            const dec = a + b;
+            const rate = dec ? a / dec : 0;
+            const z = dec ? (rate - 0.5) / Math.sqrt(0.25 / dec) : 0;
+            const wilson = (k, n) => { if (!n) return [0, 1]; const p = k / n, zz = 1.96, den = 1 + zz * zz / n, c = p + zz * zz / (2 * n), h = zz * Math.sqrt(p * (1 - p) / n + zz * zz / (4 * n * n)); return [(c - h) / den, (c + h) / den]; };
+            const ci = wilson(a, dec);
+            const total = a + b + d + u;
+            const mde = dec ? 140 / Math.sqrt(dec) : 0; // smallest win-rate gap (in points) detectable with ~80% power
+            const lines = [
+              '## Match result',
+              '',
+              'A = \`' + process.env.MODEL_A + '\`',
+              'B = \`' + process.env.MODEL_B + '\`',
+              '',
+              '| A wins | B wins | draws | unfinished |',
+              '|---|---|---|---|',
+              '| ' + a + ' | ' + b + ' | ' + d + ' | ' + u + ' |',
+              '',
+              dec ? 'A win rate (decisive only): **' + (rate * 100).toFixed(1) + '%** (' + a + '/' + dec + '), z = ' + z.toFixed(2) + (Math.abs(z) >= 1.96 ? ' -> likely real difference' : ' -> within noise') : 'no decisive games',
+              '',
+              dec ? '95% interval (Wilson): **' + (ci[0] * 100).toFixed(1) + '% - ' + (ci[1] * 100).toFixed(1) + '%**; draws ' + (total ? (100 * d / total).toFixed(0) : 0) + '% of ' + total + ' games' : '',
+              dec ? 'With ' + dec + ' decisive games only gaps of about +-' + mde.toFixed(0) + ' points are reliably detectable (80% power); need about ' + Math.ceil(Math.pow(140 / 5, 2)) + ' decisive games to see +-5 points.' : ''
+            ];
+            // Machine-readable verdict (experiment factory / by hand):
+            //   win = 95% interval lower bound > 50% ; lose = upper bound < 50% ; else unproven.
+            const verdict = !dec ? 'unproven' : ci[0] > 0.5 ? 'win' : ci[1] < 0.5 ? 'lose' : 'unproven';
+            const out = { modelA: process.env.MODEL_A, modelB: process.env.MODEL_B, aWins: a, bWins: b, draws: d, unfinished: u, decisive: dec, aWinRate: rate, ci95: ci, drawRate: total ? d / total : 0, detectableGapPoints: mde, verdict, date: new Date().toISOString(), run: process.env.GITHUB_RUN_ID };
+            fs.writeFileSync('verdict.json', JSON.stringify(out, null, 2));
+            lines.push('', 'Verdict: **' + verdict + '**');
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
+            console.log(lines.join('\n'));
+          "
+
+      - name: Upload verdict
+        uses: actions/upload-artifact@v7
+        with:
+          name: match-verdict
+          path: verdict.json
+          retention-days: 60

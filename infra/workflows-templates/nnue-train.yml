@@ -1,0 +1,306 @@
+name: NNUE train (encode if needed + train + optional promote)
+
+# One workflow for every NNUE training run. It replaces three older ones:
+#   nnue-encode.yml    (encode only)                 -> the encode step here
+#   nnue-pipeline.yml  (encode + train + auto-merge) -> this, with promote=true
+#   nnue-train-only.yml (TEMP, manual cache key)     -> this, cache found automatically
+#
+# What it does:
+#   1. reads nnue/pipeline-config.json (defaults) and applies the optional
+#      per-run `overrides` JSON, so experiments need no config commit and
+#      several runs can go in parallel
+#   2. fetches the dataset from the gha-segments-16cards branch
+#   3. finds the encode cache by content hash automatically (the key is the
+#      dataset's sha1 + encode.js mtime + an engine salt); if there is none it
+#      encodes (train.js does that itself) and, when push_cache=true, stores the
+#      new cache on the data branch so later runs skip encoding
+#   4. trains, uploads the weights as an artifact and writes the result
+#      (accuracy, best epoch) to the run summary
+#   5. only when promote=true: commits the result to nnue/model/ on master
+#      (overwrites weights.json; the old one is kept as weights.before-<run>.json)
+#
+# cache modes:
+#   auto   (default) key includes a hash of engine-merged.js + nnue/encode.js,
+#          so features always match the current engine rules
+#   legacy key without the salt -- reuses caches built before 2026-09-19. Use
+#          this ONLY to compare against earlier experiments on identical
+#          features; never to produce a model you intend to ship.
+on:
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: "Dataset path on gha-segments-16cards (empty = datasetPath from nnue/pipeline-config.json)"
+        required: false
+        default: ""
+      overrides:
+        description: 'Optional JSON overriding pipeline-config keys for this run, e.g. {"ablateBlend":"0.7"}'
+        required: false
+        default: ""
+      val_dataset:
+        description: "Optional validation dataset path on gha-segments-16cards. Lets several data mixes be scored on the SAME positions (make it with nnue/mix-datasets.js; its games must not be in the training dataset)"
+        required: false
+        default: ""
+      cache:
+        description: "auto = salted with the engine hash (default), legacy = old unsalted key"
+        required: false
+        default: "auto"
+      push_cache:
+        description: "Store a newly built encode cache on the data branch (true/false)"
+        required: false
+        default: "true"
+      save_model:
+        description: "Optional name: also store the trained weights on the data branch as models/<name>.json so match.yml can use them as data:models/<name>.json (no commit to master)"
+        required: false
+        default: ""
+      promote:
+        description: "Commit the trained weights to master (true/false)"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+concurrency:
+  # Only one promote run at a time; experiments (promote=false) never queue.
+  group: nnue-train-${{ inputs.promote == 'true' && 'promote' || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Read pipeline config
+        id: cfg
+        env:
+          OVERRIDES: ${{ inputs.overrides }}
+          DATASET_INPUT: ${{ inputs.dataset }}
+        run: |
+          node -e "
+            const c = require('./nnue/pipeline-config.json');
+            const fs = require('fs');
+            if (process.env.OVERRIDES) Object.assign(c, JSON.parse(process.env.OVERRIDES));
+            if (process.env.DATASET_INPUT) c.datasetPath = process.env.DATASET_INPUT;
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'datasetPath=' + c.datasetPath + '\n');
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'encodeWorkerCount=' + (c.encodeWorkerCount || '') + '\n');
+            // Only emit an export line for keys that are set: train.js reads
+            // several of these with \`!== undefined\`, so exporting an empty
+            // string would override its default with 0/NaN.
+            const envNames = {
+              nnueVariant: 'NNUE_VARIANT', ablatePlyFeature: 'ABLATE_PLY_FEATURE',
+              ablateDeepUnits: 'ABLATE_DEEP_UNITS', ablateWarmStart: 'ABLATE_WARM_START',
+              ablateOversample: 'ABLATE_OVERSAMPLE', ablateBlend: 'ABLATE_BLEND',
+              ablateBlunder: 'ABLATE_BLUNDER',
+              blendByDepth: 'BLEND_BY_DEPTH', blendDepthMap: 'BLEND_DEPTH_MAP',
+              residual: 'RESIDUAL', residScale: 'RESID_SCALE'
+            };
+            const exportLines = Object.entries(envNames)
+              .filter(([k]) => c[k] !== undefined && c[k] !== null && c[k] !== '')
+              .map(([k, envName]) => 'export ' + envName + '=' + JSON.stringify(String(c[k])));
+            fs.writeFileSync('train-env.sh', exportLines.join('\n') + '\n');
+            fs.writeFileSync('run-config.json', JSON.stringify(c, null, 2));
+            console.log('effective config:', JSON.stringify(c, null, 2));
+          "
+
+      - name: Fetch dataset from gha-segments-16cards
+        run: |
+          git fetch --depth=1 origin gha-segments-16cards
+          git show "origin/gha-segments-16cards:${{ steps.cfg.outputs.datasetPath }}" > selfplay-data.jsonl.gz
+          gunzip -f selfplay-data.jsonl.gz
+          wc -l selfplay-data.jsonl
+
+      - name: Fetch validation dataset (optional)
+        if: ${{ inputs.val_dataset != '' }}
+        env:
+          VAL_PATH: ${{ inputs.val_dataset }}
+        run: |
+          git show "origin/gha-segments-16cards:${VAL_PATH}" > selfplay-val.jsonl.gz
+          gunzip -f selfplay-val.jsonl.gz
+          wc -l selfplay-val.jsonl
+
+      - name: Pin encode.js mtime
+        # Part of the cache key; must equal the mtime the caches were built
+        # with (2026-01-01T00:00:00Z = 1767225600000 ms).
+        run: touch -d "2026-01-01T00:00:00Z" nnue/encode.js
+
+      - name: Compute encode cache key
+        id: key
+        env:
+          CACHE_MODE: ${{ inputs.cache }}
+        run: |
+          DATA_HASH=$(sha1sum selfplay-data.jsonl | cut -c1-16)
+          if [ "$CACHE_MODE" = "legacy" ]; then
+            SALT=""
+            KEY="${DATA_HASH}.1767225600000"
+          else
+            SALT=$(cat engine-merged.js nnue/encode.js | sha1sum | cut -c1-10)
+            KEY="${DATA_HASH}.1767225600000-${SALT}"
+          fi
+          echo "salt=${SALT}" >> "$GITHUB_OUTPUT"
+          echo "key=${KEY}" >> "$GITHUB_OUTPUT"
+          echo "encode cache key: ${KEY}"
+
+      - name: Fetch encode cache (if it exists)
+        id: cache
+        run: |
+          KEY="${{ steps.key.outputs.key }}"
+          mkdir -p nnue/cache
+          if git cat-file -e "origin/gha-segments-16cards:nnue-cache/${KEY}.bin.gz" 2>/dev/null; then
+            git show "origin/gha-segments-16cards:nnue-cache/${KEY}.bin.gz" > "nnue/cache/${KEY}.bin.gz"
+            gunzip -f "nnue/cache/${KEY}.bin.gz"
+            git show "origin/gha-segments-16cards:nnue-cache/${KEY}.meta.json" > "nnue/cache/${KEY}.meta.json"
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+            echo "cache hit: no re-encode"
+          else
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            echo "cache miss: train.js will encode first"
+          fi
+
+      - name: Back up current deployed model
+        if: ${{ inputs.promote == 'true' }}
+        run: |
+          if [ -f nnue/model/weights.json ]; then
+            cp nnue/model/weights.json "nnue/model/weights.before-run-${{ github.run_id }}.json"
+          fi
+
+      - name: Train
+        env:
+          ENCODE_WORKER_COUNT: ${{ steps.cfg.outputs.encodeWorkerCount }}
+          ENCODE_CACHE_SALT: ${{ steps.key.outputs.salt }}
+        shell: bash --noprofile --norc -o pipefail {0}
+        run: |
+          source train-env.sh
+          if [ -f "$GITHUB_WORKSPACE/selfplay-val.jsonl" ]; then export VAL_DATA_FILE="$GITHUB_WORKSPACE/selfplay-val.jsonl"; fi
+          cd nnue
+          node train.js 2>&1 | tee ../train.log
+
+      - name: Run summary
+        if: ${{ always() }}
+        env:
+          OVERRIDES_IN: ${{ inputs.overrides }}
+          CACHE_MODE: ${{ inputs.cache }}
+          PROMOTE_IN: ${{ inputs.promote }}
+          DATASET_PATH: ${{ steps.cfg.outputs.datasetPath }}
+          CACHE_KEY: ${{ steps.key.outputs.key }}
+          CACHE_HIT: ${{ steps.cache.outputs.hit }}
+        run: |
+          {
+            echo "## NNUE train run ${{ github.run_id }}"
+            echo ""
+            echo "- dataset: \`$DATASET_PATH\`"
+            echo "- encode cache: \`$CACHE_KEY\` (hit: $CACHE_HIT, mode: $CACHE_MODE)"
+            echo "- overrides: \`$OVERRIDES_IN\`"
+            echo "- promote: $PROMOTE_IN"
+            echo ""
+            echo '```'
+            grep -E "NNUE_VARIANT|train/val split|stopped early|sign-agreement" train.log || echo "(no result lines found)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload weights (artifact)
+        # Runs before any promote step so a lost merge race never loses the model.
+        uses: actions/upload-artifact@v7
+        with:
+          name: nnue-trained-weights
+          path: nnue/model/
+          retention-days: 14
+
+      - name: Push new encode cache to gha-segments-16cards
+        if: ${{ steps.cache.outputs.hit != 'true' && inputs.push_cache != 'false' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash --noprofile --norc -uo pipefail {0}
+        run: |
+          mkdir -p /tmp/cachestage
+          cd nnue/cache
+          for f in *.bin; do [ -f "$f" ] && gzip -c "$f" > "/tmp/cachestage/${f}.gz"; done
+          for f in *.meta.json; do [ -f "$f" ] && cp "$f" "/tmp/cachestage/$f"; done
+          cd "$GITHUB_WORKSPACE"
+
+          rm -rf /tmp/cwt
+          git fetch origin gha-segments-16cards
+          git worktree add -B gha-segments-16cards /tmp/cwt origin/gha-segments-16cards
+          mkdir -p /tmp/cwt/nnue-cache
+          cp /tmp/cachestage/* /tmp/cwt/nnue-cache/ 2>/dev/null || true
+
+          cd /tmp/cwt
+          git config user.email "actions@github.com"
+          git config user.name "gha-selfplay-bot"
+          git add nnue-cache/
+          if git diff --cached --quiet; then
+            echo "nothing new to push"
+          else
+            git commit -q -m "nnue encode cache from train run ${{ github.run_id }}"
+            for i in 1 2 3; do
+              git fetch origin gha-segments-16cards -q
+              git rebase origin/gha-segments-16cards -q && break
+              git rebase --abort 2>/dev/null
+              sleep 5
+            done
+            git push -q "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:gha-segments-16cards
+          fi
+
+      - name: Save trained model on the data branch (optional)
+        if: ${{ inputs.save_model != '' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODEL_NAME: ${{ inputs.save_model }}
+        shell: bash --noprofile --norc -uo pipefail {0}
+        run: |
+          cp nnue/model/weights.json /tmp/saved-model.json
+          rm -rf /tmp/mwt
+          git fetch origin gha-segments-16cards
+          git worktree add --detach /tmp/mwt origin/gha-segments-16cards
+          mkdir -p /tmp/mwt/models
+          cp /tmp/saved-model.json "/tmp/mwt/models/${MODEL_NAME}.json"
+          cd /tmp/mwt
+          git config user.email "actions@github.com"
+          git config user.name "gha-selfplay-bot"
+          git add models
+          git commit -q -m "model ${MODEL_NAME} from train run ${{ github.run_id }}"
+          for i in 1 2 3; do
+            git fetch origin gha-segments-16cards -q
+            git rebase origin/gha-segments-16cards -q && break
+            git rebase --abort 2>/dev/null
+            sleep 5
+          done
+          git push -q "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:gha-segments-16cards
+
+      - name: Promote trained weights to master
+        if: ${{ inputs.promote == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Fetch+rebase+retry: a plain push failed once because master had
+        # moved since checkout (2026-09-17).
+        shell: bash --noprofile --norc -uo pipefail {0}
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "gha-selfplay-bot"
+          git add nnue/model/
+          if git diff --cached --quiet; then
+            echo "no model change to promote"
+          else
+            git commit -q -m "nnue: retrain run ${{ github.run_id }} (promoted)"
+            # npm install can leave incidental drift in tracked files
+            # (package-lock.json) that blocks the rebase; our real change is
+            # already in the commit above, so discard the rest.
+            git checkout -- . || true
+            for i in 1 2 3 4 5; do
+              git fetch origin master -q
+              git rebase origin/master -q && break
+              git rebase --abort 2>/dev/null
+              sleep 10
+            done
+            git push -q "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:master
+          fi

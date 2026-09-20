@@ -1,0 +1,8 @@
+{
+  "baseline": "handcoded",
+  "defaults": { "pairs_per_shard": "16", "ms": "300", "handicap": "1" },
+  "candidates": [
+    { "name": "resid300", "model": "data:models/resid300-r3b.json@hybrid300" },
+    { "name": "resid150", "model": "data:models/resid150-r3b.json@hybrid150" }
+  ]
+}

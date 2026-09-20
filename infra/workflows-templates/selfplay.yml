@@ -1,0 +1,227 @@
+name: Cloud self-play (16-card engine)
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Every 6 hours -- GitHub-hosted job max runtime is 6h, so this keeps
+    # back-to-back coverage with only a small gap between jobs.
+    - cron: "7 */6 * * *"
+
+permissions:
+  contents: write
+
+# One self-play run at a time: a manual dispatch while the 6-hourly cron run is
+# active waits instead of doubling the load on the data branch.
+concurrency:
+  group: selfplay
+  cancel-in-progress: false
+
+jobs:
+  selfplay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    # Round 3: 4 parallel shards (2026-09-19) so a much deeper search per move
+    # (fewer positions per hour per job) still reaches ~100-200k positions.
+    # Each shard has its own RUN_ID/output file; game seeds are time-based
+    # (selfplay-run-merged.js) so shards never replay the same game.
+    strategy:
+      fail-fast: false
+      matrix:
+        # Settings live in repository variables (Settings > Variables, or
+        # `gh variable set NAME --body VALUE`) so a round can be tuned or
+        # stopped WITHOUT a commit:
+        #   SELFPLAY_SHARDS      JSON list, e.g. [1,2,3,4]   (parallel jobs)
+        #   SELFPLAY_DEPTH       search depth                 (e.g. 6)
+        #   SELFPLAY_MS          base time per move in ms     (e.g. 1500)
+        #   SELFPLAY_CUTOFF_ISO  stop time, UTC ISO           (e.g. 2026-09-22T04:00:00Z)
+        # To STOP self-play now: gh variable set SELFPLAY_CUTOFF_ISO --body 2000-01-01T00:00:00Z
+        # (running jobs finish their current run; cron runs then exit at once).
+        shard: ${{ fromJSON(vars.SELFPLAY_SHARDS || '[1,2,3,4]') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Configure git identity
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "gha-selfplay-bot"
+
+      - name: Run self-play with periodic checkpoints
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Round 2 (2026-09-17, switched per standing authorization from
+          # earlier this session): round 1 (depth 3, ended 2026-09-17T05:30Z)
+          # is aggregated/retrained already -- this collects with deeper
+          # search until the new cutoff below. NOTE: self-play sat
+          # completely idle for ~6h after round 1 ended because this switch
+          # was missed while other work (NNUE pipeline debugging, extension
+          # UX) was in progress -- if a THIRD round is ever planned, update
+          # this promptly when round 2 ends, don't let it slip again.
+          #
+          # Round 3 (2026-09-19): started right after round 2 was aggregated.
+          # Why: (1) site rules changed 9/19 and the engine now matches them,
+          # (2) evaluation is ~3.4x / search ~1.5x faster, (3) the blend
+          # experiments showed search-score labels matter (blend 0.8 gave
+          # 70.6% vs 67.1% on the round-2 val split) but round 2's "depth 5"
+          # was nominal (~90% of moves finished only depth 1 in 200ms). So
+          # this gives each move a real budget for depth ~3-4.
+          # >>> CUTOFF: 2026-09-22T04:00:00Z. If this passes with no round 4
+          # planned, self-play goes idle on its own; if a round 4 IS planned,
+          # update it BEFORE the cutoff (see TODO.md). <<<
+          # Deeper on request (2026-09-19): depth 6, 1500ms/move x 4 shards.
+          # TARGET ~150k positions total; the cutoff below is only a
+          # backstop -- stop earlier (cancel runs + set CUTOFF_ISO to now)
+          # once the data branch has enough.
+          # (values now come from repository variables, defaults below)
+          CUTOFF_ISO: ${{ vars.SELFPLAY_CUTOFF_ISO || '2026-09-22T04:00:00Z' }}
+          SELFPLAY_SEARCH_DEPTH: ${{ vars.SELFPLAY_DEPTH || '6' }}
+          SELFPLAY_SEARCH_MS: ${{ vars.SELFPLAY_MS || '1500' }}
+          # Self-stopping: every 15-min checkpoint, and at start, the job adds up
+          # the positions of this round (runs started at/after ROUND_START, from
+          # the segment file names) and stops once TARGET is reached (0 = off).
+          #   SELFPLAY_ROUND_START  YYYYMMDDTHHMMSSZ of the round's first run
+          #   SELFPLAY_TARGET       positions wanted, e.g. 150000
+          ROUND_START: ${{ vars.SELFPLAY_ROUND_START || '20260919T035300Z' }}
+          TARGET: ${{ vars.SELFPLAY_TARGET || '150000' }}
+        # GitHub Actions' default `bash` shell runs with -e (abort on first
+        # non-zero exit), which silently killed the whole step the moment an
+        # intentionally-allowed-to-fail command (fetching a not-yet-existing
+        # remote branch) returned non-zero. Override to drop -e; we still
+        # want -u/pipefail for real bugs, just not abort-on-any-failure here.
+        shell: bash --noprofile --norc -uo pipefail {0}
+        run: |
+
+          NOW_MS=$(node -e "console.log(Date.now())")
+          CUTOFF_MS=$(node -e "console.log(Date.parse(process.argv[1]))" "$CUTOFF_ISO")
+          REMAINING_MS=$((CUTOFF_MS - NOW_MS))
+          echo "now_ms=$NOW_MS cutoff_ms=$CUTOFF_MS remaining_ms=$REMAINING_MS"
+
+          if [ "$REMAINING_MS" -le 300000 ]; then
+            echo "Cutoff reached (or under 5 min remaining) -- skipping self-play launch."
+            exit 0
+          fi
+
+          # Cap at 5h25m, not 5h50m -- the checkpoint loop below only notices
+          # the self-play process has exited on its next `sleep 900` (15min)
+          # poll, so the real margin needed against the 355min job timeout is
+          # CAP_MS + up to 15min poll delay + final-checkpoint git overhead,
+          # not just CAP_MS itself. 5h50m only left 5min, which the poll delay
+          # alone could eat -- confirmed live 2026-09-16/17: 3 of the last 4
+          # full-length runs got killed by GitHub's own job timeout
+          # (conclusion "cancelled") before their final checkpoint ran, losing
+          # up to one 15min checkpoint's worth of data each time. 5h25m leaves
+          # a real ~30min buffer.
+          CAP_MS=19500000
+          RUN_MS=$REMAINING_MS
+          if [ "$RUN_MS" -gt "$CAP_MS" ]; then RUN_MS=$CAP_MS; fi
+          echo "RUN_MS=$RUN_MS"
+
+          # Stagger shard start so their 15-min checkpoint pushes don't all
+          # collide on the shared data branch at the same second.
+          sleep $(( (${{ matrix.shard }} - 1) * 90 ))
+          RUN_ID="gha-$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_RUN_ID}-s${{ matrix.shard }}"
+          OUT_FILE="${RUN_ID}.jsonl"
+
+          SELFPLAY_OUT_FILE="$OUT_FILE" node selfplay-run-merged.js "$RUN_MS" > "${RUN_ID}.log" 2>&1 &
+          SELFPLAY_PID=$!
+          echo "launched self-play pid=$SELFPLAY_PID out=$OUT_FILE"
+
+          # Prepare (or reuse) the dedicated data branch in a separate worktree
+          # so we never touch this job's own checked-out branch/commit.
+          rm -rf /tmp/segwt
+          git fetch origin gha-segments-16cards 2>/dev/null || true
+          if git show-ref --verify --quiet refs/remotes/origin/gha-segments-16cards; then
+            git worktree add -B gha-segments-16cards /tmp/segwt origin/gha-segments-16cards
+          else
+            git worktree add --orphan -b gha-segments-16cards /tmp/segwt
+          fi
+          if [ ! -d /tmp/segwt/.git ] && [ ! -f /tmp/segwt/.git ]; then
+            echo "FATAL: worktree setup failed, /tmp/segwt is not a git checkout" >&2
+            ls -la /tmp/segwt 2>&1 || true
+            exit 1
+          fi
+          mkdir -p /tmp/segwt/segments
+
+          push_checkpoint() {
+            local remote_url="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+            (
+              cd /tmp/segwt
+              git add -A
+              if git diff --cached --quiet; then
+                echo "checkpoint: nothing new to commit"
+                return 0
+              fi
+              git commit -q -m "$1"
+              for i in 1 2 3; do
+                if git fetch origin gha-segments-16cards -q 2>/dev/null \
+                    && git rev-parse -q --verify origin/gha-segments-16cards >/dev/null 2>&1; then
+                  git rebase origin/gha-segments-16cards -q && break
+                  git rebase --abort 2>/dev/null
+                else
+                  break
+                fi
+                sleep 5
+              done
+              git push -q "$remote_url" HEAD:gha-segments-16cards
+            )
+          }
+
+          # Positions collected this round = per run the highest "lines a-b" end
+          # in its segment names (includes the -final segments), summed.
+          count_round_positions() {
+            ls /tmp/segwt/segments/ 2>/dev/null | grep '^ckpt-gha-' \
+              | sed -E 's#^ckpt-gha-([0-9]{8}T[0-9]{6}Z)-([0-9]+(-s[0-9]+)?)-lines[0-9]+-([0-9]+)(-final)?\.jsonl\.gz$#\1 \2 \4#' \
+              | awk -v since="$ROUND_START" '$1 >= since { if ($3 > m[$1 $2]) m[$1 $2] = $3 } END { t = 0; for (k in m) t += m[k]; print t + 0 }'
+          }
+          target_reached() {
+            [ "$TARGET" -gt 0 ] || return 1
+            local total
+            total=$(count_round_positions)
+            echo "round positions so far: $total / $TARGET"
+            [ "$total" -ge "$TARGET" ]
+          }
+
+          if target_reached; then
+            echo "target already reached -- stopping before collecting more"
+            kill "$SELFPLAY_PID" 2>/dev/null || true
+          fi
+
+          LAST_LINE=0
+          WALL_START=$(date -u +%s)
+          while kill -0 "$SELFPLAY_PID" 2>/dev/null; do
+            sleep 900
+            NOW=$(date -u +%s)
+            N=$(wc -l < "$OUT_FILE" 2>/dev/null || echo 0)
+            if [ "$N" -gt "$LAST_LINE" ]; then
+              CKPT="ckpt-${RUN_ID}-lines$((LAST_LINE+1))-${N}.jsonl"
+              sed -n "$((LAST_LINE+1)),${N}p" "$OUT_FILE" > "/tmp/segwt/segments/${CKPT}"
+              gzip -f "/tmp/segwt/segments/${CKPT}"
+              push_checkpoint "checkpoint ${RUN_ID}: lines $((LAST_LINE+1))-${N}"
+              LAST_LINE=$N
+            fi
+            echo "checkpoint loop: elapsed=$((NOW-WALL_START))s lines_so_far=$LAST_LINE pid_alive=yes"
+            if target_reached; then
+              echo "TARGET REACHED -- stopping self-play (the final partial checkpoint is still saved below)"
+              kill "$SELFPLAY_PID" 2>/dev/null || true
+              break
+            fi
+          done
+
+          wait "$SELFPLAY_PID" || true
+          echo "self-play process exited"
+          cat "${RUN_ID}.log" || true
+
+          N=$(wc -l < "$OUT_FILE" 2>/dev/null || echo 0)
+          if [ "$N" -gt "$LAST_LINE" ]; then
+            CKPT="ckpt-${RUN_ID}-lines$((LAST_LINE+1))-${N}-final.jsonl"
+            sed -n "$((LAST_LINE+1)),${N}p" "$OUT_FILE" > "/tmp/segwt/segments/${CKPT}"
+            gzip -f "/tmp/segwt/segments/${CKPT}"
+            push_checkpoint "checkpoint ${RUN_ID}: final lines $((LAST_LINE+1))-${N}"
+          fi
+
+          echo "Run ${RUN_ID} complete. Total lines: ${N}"
