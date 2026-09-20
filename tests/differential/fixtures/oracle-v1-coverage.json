@@ -1,0 +1,1066 @@
+{
+  "seed": 1,
+  "oracle": "engine",
+  "fixtures": 2072,
+  "perPiece": 10,
+  "perCard": 6,
+  "playouts": 100,
+  "coverage": {
+    "pieces": {
+      "pawn": {
+        "fixtures": 1325
+      },
+      "knight": {
+        "fixtures": 1296
+      },
+      "bishop": {
+        "fixtures": 1282
+      },
+      "rook": {
+        "fixtures": 1277
+      },
+      "queen": {
+        "fixtures": 1257
+      },
+      "king": {
+        "fixtures": 2072
+      },
+      "amazon": {
+        "fixtures": 276
+      },
+      "cardinal": {
+        "fixtures": 228
+      },
+      "pegasus": {
+        "fixtures": 237
+      },
+      "assassin": {
+        "fixtures": 228
+      },
+      "dragon": {
+        "fixtures": 274
+      },
+      "cannon": {
+        "fixtures": 193
+      },
+      "grasshopper": {
+        "fixtures": 285
+      },
+      "hook": {
+        "fixtures": 236
+      },
+      "herald": {
+        "fixtures": 220
+      },
+      "camel": {
+        "fixtures": 209
+      },
+      "alfil": {
+        "fixtures": 205
+      },
+      "ferz": {
+        "fixtures": 200
+      },
+      "eagle": {
+        "fixtures": 265
+      },
+      "berserker": {
+        "fixtures": 227
+      },
+      "magicGirl": {
+        "fixtures": 223
+      },
+      "windmill": {
+        "fixtures": 297
+      },
+      "trickster": {
+        "fixtures": 238
+      },
+      "merchant": {
+        "fixtures": 211
+      },
+      "knightmaster": {
+        "fixtures": 277
+      },
+      "standardBearer": {
+        "fixtures": 234
+      },
+      "idol": {
+        "fixtures": 218
+      },
+      "siren": {
+        "fixtures": 231
+      },
+      "reaper": {
+        "fixtures": 266
+      },
+      "recruiter": {
+        "fixtures": 218
+      },
+      "guard": {
+        "fixtures": 313
+      },
+      "colossus": {
+        "fixtures": 256
+      },
+      "bigRook": {
+        "fixtures": 281
+      },
+      "hedgehog": {
+        "fixtures": 232
+      },
+      "princess": {
+        "fixtures": 207
+      },
+      "campfire": {
+        "fixtures": 248
+      },
+      "paladin": {
+        "fixtures": 282
+      },
+      "octopus": {
+        "fixtures": 291
+      },
+      "clockwork": {
+        "fixtures": 265
+      },
+      "parrot": {
+        "fixtures": 227
+      }
+    },
+    "cards": {
+      "alekhineMachineGun": {
+        "inDeck": 6,
+        "actionGenerated": 1,
+        "applied": 1
+      },
+      "amazon": {
+        "inDeck": 6,
+        "actionGenerated": 3,
+        "applied": 3
+      },
+      "apprenticeKnights": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "armistice": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "babyBear": {
+        "inDeck": 6,
+        "actionGenerated": 5,
+        "applied": 5
+      },
+      "basicTraining": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "bigRook": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "binaMate": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "bishopSnipe": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "blackBox": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "blackMagic": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "blueJeans": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "breakthroughOrder": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "callingCard": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "canceling": {
+        "inDeck": 6,
+        "actionGenerated": 0,
+        "applied": 0
+      },
+      "chain": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "chameleonMutation": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "charge": {
+        "inDeck": 6,
+        "actionGenerated": 4,
+        "applied": 4
+      },
+      "checker": {
+        "inDeck": 6,
+        "actionGenerated": 2,
+        "applied": 2
+      },
+      "chimera": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "cleanupPieces": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "cleanupSacrifice": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "clonePassive": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "conversion": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "cornerKick": {
+        "inDeck": 6,
+        "actionGenerated": 5,
+        "applied": 5
+      },
+      "coronation": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "deathSquad": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "democracy": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "desperado": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "dice": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "disarm": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "dutch": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "eagle": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "emergencyEvacuation": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "emptyLunchbox": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "enPassantBang": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "encouragement": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "evasion": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "exhaustion": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "exile": {
+        "inDeck": 6,
+        "actionGenerated": 0,
+        "applied": 0
+      },
+      "fanaticalRitual": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "feudalContract": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "fianchetto": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "fieldPromotion": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "fileSurge": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "finalWeapon": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "fleetingDream": {
+        "inDeck": 6,
+        "actionGenerated": 0,
+        "applied": 0
+      },
+      "freeCastling": {
+        "inDeck": 6,
+        "actionGenerated": 3,
+        "applied": 3
+      },
+      "freeMove": {
+        "inDeck": 6,
+        "actionGenerated": 0,
+        "applied": 0
+      },
+      "freeze": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "frenzy": {
+        "inDeck": 6,
+        "actionGenerated": 4,
+        "applied": 4
+      },
+      "frontlineResponse": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "gale": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "genevaConvention": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "ghost": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "gomoku": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "guard": {
+        "inDeck": 6,
+        "actionGenerated": 1,
+        "applied": 1
+      },
+      "hallucination": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "holdout": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "homecoming": {
+        "inDeck": 6,
+        "actionGenerated": 0,
+        "applied": 0
+      },
+      "hook": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "horde": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "horseRiding": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "hypocrisy": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "icbm": {
+        "inDeck": 6,
+        "actionGenerated": 4,
+        "applied": 4
+      },
+      "iceSheet": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "idol": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "imperialStudies": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "inertia": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "injury": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "insight": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "ironMonarch": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "joker": {
+        "inDeck": 6,
+        "actionGenerated": 0,
+        "applied": 0
+      },
+      "judgment": {
+        "inDeck": 6,
+        "actionGenerated": 0,
+        "applied": 0
+      },
+      "kingOfTheHill": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "knightmate": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "lastResistance": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "lobster": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "localConscription": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "loyalist": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "madHorse": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "martyrdom": {
+        "inDeck": 6,
+        "actionGenerated": 4,
+        "applied": 4
+      },
+      "merchantGuild": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "missionary": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "mistakeCard": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "mongolianGambit": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "moving": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "ordination": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "othello": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "otherworld": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "overwhelm": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "palace": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "panic": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "parry": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "pawnConversion": {
+        "inDeck": 6,
+        "actionGenerated": 5,
+        "applied": 5
+      },
+      "pawnStorm": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "poisonedPawn": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "portalGun": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "promotionRush": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "prophecy": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "quantumMechanics": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "queenAfterimage": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "queenCavalry": {
+        "inDeck": 6,
+        "actionGenerated": 1,
+        "applied": 1
+      },
+      "queensGambit": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "racingKing": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "randomRoulette": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "reaper": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "reformation": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "relay": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "religiousVictory": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "replayMove": {
+        "inDeck": 6,
+        "actionGenerated": 0,
+        "applied": 0
+      },
+      "reposition": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "retreat": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "reversePawns": {
+        "inDeck": 6,
+        "actionGenerated": 5,
+        "applied": 5
+      },
+      "rookLift": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "royalCommand": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "royalShield": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "ruleTicket": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "sacrifice": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "severance": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "shotgunKing": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "socialism": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "spy": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "stake": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "submerge": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "substitution": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "suicideBomber": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "summonColossus": {
+        "inDeck": 6,
+        "actionGenerated": 0,
+        "applied": 0
+      },
+      "suspiciousPotion": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "switcheroo": {
+        "inDeck": 6,
+        "actionGenerated": 5,
+        "applied": 5
+      },
+      "taunt": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "timeClumsyAttack": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "timeIsMine": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "timePhaseShift": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "traitor": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "trickster": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "trojanHorse": {
+        "inDeck": 6,
+        "actionGenerated": 5,
+        "applied": 5
+      },
+      "trolley": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "twins": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "ultimatum": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "undergroundBunker": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "underpromotion": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "vanish": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "vip": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "vortex": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "whiteBox": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "windmill": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "witchTrial": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "wizard": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "zugzwang": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "qxe1": {
+        "inDeck": 6,
+        "actionGenerated": 4,
+        "applied": 4
+      },
+      "nullification": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "recurrence": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "outpost": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "killerKing": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "majesty": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "overtake": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "leap": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "vanguard": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "infiltration": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "reversal": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "lastStand": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "fastGrowth": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "earlyPromotion": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "bribe": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "conscription": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "barricade": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "collapse": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "highlander": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "thief": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "disassembly": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "falseStart": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "proficiency": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "locustSwarm": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "longEnPassant": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "extinction": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "symmetry": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "brutus": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 5
+      },
+      "clockwork": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "mutation": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "parrot": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "paladin": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "octopus": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      },
+      "metal": {
+        "inDeck": 6,
+        "actionGenerated": 6,
+        "applied": 6
+      }
+    }
+  },
+  "pieceTypesNeverOnBoard": [],
+  "cardsThatNeverProducedACardAction": [
+    "canceling",
+    "exile",
+    "fleetingDream",
+    "freeMove",
+    "homecoming",
+    "joker",
+    "judgment",
+    "replayMove",
+    "summonColossus"
+  ]
+}

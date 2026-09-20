@@ -52,6 +52,7 @@
 | `tools/perf/ab-cards.js`, `ab-time.js` | 이전 엔진 대비 고른 수, 점수, 노드, 컷오프가 동일한지와 속도를 비교(카드 켠 버전과 끈 버전) | 속도 개선이 결과를 안 바꿨는지 증명. MCTS 최적화에도 응용 |
 | `tools/perf/search-equiv.js`, `eq-exotic.js`, `eval-equiv.js`, `prefilter-check.js` | 검색, 특수 기물, 평가, 필터의 동일성과 안전성 검사 | 위와 같음 |
 | `tools/perf/prof-*.js`, `limits-test.js` | CPU 프로파일 수집과 요약, 검색 시간 제한 검증 | 병목 찾기 |
+| `tools/fixtures/generate-fixtures.js` | 오라클 정답지(fixture) 생성기, 재현 검증(`--verify`), 오라클 서버(`--serve`, 줄 단위 JSON). 기물과 카드를 골고루 담고 커버리지 보고서를 냅니다 | 러스트 포팅의 정답지. 위치: `tests/differential/fixtures/` |
 | `tools/site-parity/*` | 실제 사이트 워커와 엔진의 수 목록, 적용 결과, 여러 수 진행을 무작위 판에서 대조하고 사이트 업데이트를 감지 | 규칙 엔진이 사이트와 같은지 확인. 알파제로에도 규칙 정확성이 전제 |
 | `tools/site-parity/README.md`, `TRIAGE.md` | 사용법과 발견된 차이 분류 | 규칙 차이 사례집 |
 | `tools/review-calibration/*` | 검색 점수를 승률로 바꾸는 보정 분석 | 가치 출력을 승률로 보정할 때 참고 |
