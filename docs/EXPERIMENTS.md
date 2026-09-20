@@ -14,4 +14,4 @@
 
 - 95% 구간(윌슨) 하한이 50%를 넘으면 win, 상한이 50% 아래면 lose, 아니면 unproven.
 - 후보를 여러 개 시험하면 우연히 통과할 수 있으므로 독립 재실행(`seed_offset`)으로 반드시 재확인합니다.
-- 참고: 기존 프로젝트의 실험 기록은 [infra/docs/ExperimentNote.md](../infra/docs/ExperimentNote.md)에 있습니다.
+- 참고: 기존 JS oracle/NNUE 인프라의 실험 기록은 [infra/docs/ExperimentNote.md](../infra/docs/ExperimentNote.md)에 있습니다. 이 기록과 도구는 reference 자료이며, 향후 AlphaZero 실험 코드는 `python/`에서 관리합니다.

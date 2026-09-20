@@ -1,6 +1,6 @@
 # 증강체스 규칙 요약
 
-> 틀입니다. 알파제로 팀이 규칙을 잘못 이해해서 생기는 버그를 줄이기 위한 문서입니다. 규칙의 기준은 사이트(augmentchess.org)와 `infra/engine-merged.js`입니다.
+> 알파제로 팀이 규칙을 잘못 이해해서 생기는 버그를 줄이기 위한 문서입니다. 사이트(augmentchess.org)와 `infra/engine-merged.js`의 JS oracle을 현재 규칙 기준으로 삼고, 향후 Rust 엔진은 differential test로 이 동작과의 동등성을 검증합니다.
 
 ## 기본
 
@@ -18,4 +18,5 @@
 
 ## 사이트와 엔진의 일치
 
-- 엔진이 사이트와 같은지 확인하는 도구: `infra/tools/site-parity/`
+- JS oracle이 사이트와 같은지 확인하는 도구: `infra/tools/site-parity/`
+- Rust 엔진과 JS oracle의 동등성 검증 위치(계획): `tests/differential/`

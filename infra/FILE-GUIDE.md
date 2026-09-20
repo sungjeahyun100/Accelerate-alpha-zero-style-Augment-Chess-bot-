@@ -1,28 +1,28 @@
 # 파일 안내 (infra/)
 
-`infra/`는 증강체스 엔진 프로젝트(Vamp-pire/Augment-Chess-Engine-Twist)에서 알파제로 방식 봇을 만들 때 재사용할 수 있는 부분만 모은 것입니다. 각 스크립트는 상대 경로(`../engine-merged.js` 등)로 서로를 부르므로 **`infra/` 폴더 안의 배치를 바꾸지 마세요.** 이 폴더 안에서 `node smoke-merged.js`가 통과하는 것을 확인했습니다.
+`infra/`는 증강체스 엔진 프로젝트(Vamp-pire/Augment-Chess-Engine-Twist)에서 가져온 JavaScript oracle과 기존 검증·실험 도구를 보존하는 영역입니다. 최종 봇이나 AlphaZero self-play의 주 엔진이 아니라, 사이트 규칙 비교와 Rust 엔진 포팅의 correctness 기준으로 사용합니다. 각 스크립트는 상대 경로(`../engine-merged.js` 등)로 서로를 부르므로 **`infra/` 폴더 안의 배치를 바꾸지 마세요.** 이 폴더 안에서 `node smoke-merged.js`가 통과하는 것을 확인했습니다.
 
-"알파제로 활용" 열은 알파제로 방식(신경망이 수 추천 + 국면 점수를 내고, MCTS로 탐색하며, 자가대국으로 학습)에서 어디에 쓰이는지입니다.
+"향후 활용" 열은 기존 코드를 Rust/Python 구현의 검증·참고 자료로 어디에 활용할 수 있는지 설명합니다. 실제 AlphaZero 실행 경로는 `Python AI → bridge → Rust engine`입니다.
 
 ## 1. 규칙 엔진 (환경)
 
-| 파일 | 하는 일 | 알파제로 활용 |
+| 파일 | 하는 일 | 향후 활용 |
 |---|---|---|
-| `engine-merged.js` | 증강체스 규칙 엔진 본체(약 1만 8천 줄). 사이트 AI 워커의 규칙(수 생성, 카드, 특수 기물, 판정)을 옮긴 것이고, 알파-베타 검색과 수제 평가도 들어 있습니다. 내보내는 함수: `generateActions`(가능한 수), `applyAction`(수 적용), `cloneState`(상태 복제), `evaluateState`, `searchBestAction`, `setWorkerBoardDimensions` | MCTS의 "환경". 수 목록과 상태 전이를 여기서 얻습니다 |
+| `engine-merged.js` | 증강체스 규칙 엔진 본체(약 1만 8천 줄). 사이트 AI 워커의 규칙(수 생성, 카드, 특수 기물, 판정)을 옮긴 것이고, 알파-베타 검색과 수제 평가도 들어 있습니다. 내보내는 함수: `generateActions`(가능한 수), `applyAction`(수 적용), `cloneState`(상태 복제), `evaluateState`, `searchBestAction`, `setWorkerBoardDimensions` | Rust 포팅의 oracle/reference implementation. 수 목록과 상태 전이의 expected behavior를 제공합니다 |
 | `smoke-merged.js` | 특수 기물과 카드가 있는 판에서 검색이 죽지 않는지 보는 빠른 테스트 | 엔진을 고친 뒤 최소 확인 |
 
 사용 시 알아 둘 것: 손으로 만든 상태에는 `turnsTaken`, `actionsRemaining`, `moveCount`, `castlingCanceled`를 꼭 채우세요. 빠지면 루트 안전 검사가 모든 후보를 버려서 점수 2.5억, 노드 0으로 끝납니다.
 
 ## 2. 자가대국
 
-| 파일 | 하는 일 | 알파제로 활용 |
+| 파일 | 하는 일 | 향후 활용 |
 |---|---|---|
-| `selfplay-worker-merged.js` | 게임 한 판을 두는 루프(`playOneGame`). 반복 수와 50수 무승부 규칙, 탐색 무작위성(탐색 초반 무작위 수), 색별 깊이/시간/평가 함수 지정, 핸디캡(대전용)을 지원합니다. 각 수의 국면, 검색 점수, 깊이, 승패, 종료까지 남은 수를 기록으로 남깁니다 | 자가대국 데이터 생성. 여기서 검색 결과 대신 MCTS 방문 수 분포를 기록하도록 바꾸면 정책 라벨이 됩니다 |
-| `selfplay-run-merged.js` | 정해진 시간 동안 자가대국을 반복해 `.jsonl`로 저장하는 실행기 | 데이터 수집 실행 |
+| `selfplay-worker-merged.js` | 게임 한 판을 두는 기존 루프(`playOneGame`). 반복 수와 50수 무승부 규칙, 탐색 무작위성(탐색 초반 무작위 수), 색별 깊이/시간/평가 함수 지정, 핸디캡(대전용)을 지원합니다. 각 수의 국면, 검색 점수, 깊이, 승패, 종료까지 남은 수를 기록으로 남깁니다 | 과거 자가대국 형식과 종료 처리의 참고 자료. 새 AlphaZero self-play는 `python/`과 Rust 엔진을 사용합니다 |
+| `selfplay-run-merged.js` | 정해진 시간 동안 기존 자가대국을 반복해 `.jsonl`로 저장하는 실행기 | 기존 데이터 수집 재현과 비교용 |
 
 ## 3. 국면 인코딩과 학습 (`nnue/`)
 
-| 파일 | 하는 일 | 알파제로 활용 |
+| 파일 | 하는 일 | 향후 활용 |
 |---|---|---|
 | `nnue/encode.js` | 국면을 신경망 입력 5509개(기물 40종 x 128칸, 카드 184장 x 2, 평가 특징 21개)로 바꿉니다 | 정책/가치망 입력으로 재사용. 입력 표현을 새로 설계할 때 출발점 |
 | `nnue/encode-worker.js` | 인코딩을 여러 프로세스로 병렬 처리 | 대량 데이터 인코딩 |
@@ -33,7 +33,7 @@
 
 ## 4. 대전과 판정 (알파제로의 "새 모델이 이겨야 교체" 게이트)
 
-| 파일 | 하는 일 | 알파제로 활용 |
+| 파일 | 하는 일 | 향후 활용 |
 |---|---|---|
 | `nnue/match-two-models.js` | 두 평가기를 색 교환 짝으로 대전. 핸디캡, 시드 오프셋, 검색 파라미터, 출력 매핑을 옵션으로 지원 | 새 모델 대 옛 모델의 승격 게이트 |
 | `nnue/match-depth.js` | 깊이만 다른 두 설정 대전 | 검색 예산 비교 |
@@ -46,7 +46,7 @@
 
 ## 5. 검증 도구 (`tools/`)
 
-| 파일 | 하는 일 | 알파제로 활용 |
+| 파일 | 하는 일 | 향후 활용 |
 |---|---|---|
 | `tools/ci/golden-eval.js`, `golden-eval.json` | 평가 함수 출력이 안 바뀌었는지 800개 국면으로 회귀 검사 | 평가와 인코딩을 건드릴 때 안전망 |
 | `tools/perf/ab-cards.js`, `ab-time.js` | 이전 엔진 대비 고른 수, 점수, 노드, 컷오프가 동일한지와 속도를 비교(카드 켠 버전과 끈 버전) | 속도 개선이 결과를 안 바꿨는지 증명. MCTS 최적화에도 응용 |
@@ -84,13 +84,14 @@ GitHub Actions 6개입니다. 모두 `infra/` 폴더 기준으로 동작하도�
 | `docs/CONTRIBUTING.md` | 팀 작업 방식 제안 |
 | `SOURCE-LICENSE`, `SOURCE-NOTICE.md` | 원본 저장소의 라이선스(CC BY-NC-ND 4.0)와 적용 범위 고지 |
 
-## 8. 알파제로를 위해 새로 만들어야 하는 것
+## 8. 후속 영역에서 새로 만들어야 하는 것
 
-- MCTS(신경망 길잡이 탐색)와 상태 복제 비용 줄이기(`cloneState`가 병목)
-- 정책 출력: 카드와 특수 기물이 수백 종이라 "수 하나"를 신경망 출력으로 표현하는 방식이 가장 어려운 설계 과제
-- 정책과 가치를 함께 내는 신경망과 그 학습(탐색 방문 수 분포를 정답으로)
-- 자가대국 기록에 방문 수 분포 저장
-- 위 판정 도구를 이용한 새 모델 승격 루프
+- `bridge/`: 공통 상태·행동·호출 계약
+- `rust-engine/`: 실제 탐색과 self-play에 사용할 규칙 엔진
+- `tests/differential/`: JS oracle과 Rust 엔진의 동등성 검사
+- `python/`: MCTS, 정책/가치망, 자가대국, 학습과 평가
+
+이 항목들은 현재 구조 정리의 범위에 포함되지 않으며 [루트 로드맵](../docs/ROADMAP.md)의 순서에 따라 구현합니다.
 
 ## 9. 알아 둘 것 (실험에서 얻은 교훈)
 
