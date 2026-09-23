@@ -8751,6 +8751,10 @@
     piece.cardNoCaptureUntil = (Number(boardState?.turnsTaken?.[piece.color]) || 0) + 1;
   }
   function isWorkerCardNoCaptureActive(boardState, piece) {
+    // Site parity (2026-09-20): a piece under promotionRush may only move, not capture, that turn
+    // (the site's worker returns true here while the rush is active; without it the engine allowed
+    // capturing queen-ray moves that the real worker never generates).
+    if (isPromotionRushActive(piece, boardState?.turnsTaken?.[piece?.color] || 0)) return true;
     if (!piece?.cardNoCaptureUntil) return false;
     return (Number(boardState?.turnsTaken?.[piece.color]) || 0) < piece.cardNoCaptureUntil;
   }
