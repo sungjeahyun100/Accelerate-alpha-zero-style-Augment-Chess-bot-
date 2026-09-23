@@ -1,0 +1,10 @@
+# Requests review automatically from the area owner when a PR touches these paths.
+# Only accounts that have actually pushed to this repo are listed (checked via GitHub
+# contributors, 2026-09-23) -- add the rest as they start committing under their own
+# GitHub accounts (Discord nickname != GitHub username, don't guess).
+
+/infra/         @Vamp-pire
+/rust-engine/   @sungjeahyun100
+
+# python/, bridge/, tests/ have no committer with a confirmed GitHub account yet --
+# add an owner here once someone starts pushing to those paths.
