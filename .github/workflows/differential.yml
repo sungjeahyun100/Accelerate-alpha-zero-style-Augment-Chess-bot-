@@ -1,0 +1,84 @@
+name: Differential (JS oracle vs Rust engine)
+
+# Runs infra/tools/fixtures/run-differential.js (ported from the Twist project,
+# see its own header comment for the candidate line protocol) against the
+# 2,072 oracle fixtures in tests/differential/fixtures/oracle-v1.jsonl.gz.
+#
+# rust-engine/ has no code yet (README only, 2026-09-23), so there is nothing
+# to differential-test against it for now. Until it exists, this job instead
+# runs the harness against the oracle SERVER itself
+# (`generate-fixtures.js --serve`) as the candidate -- this is not a no-op:
+# it keeps the fixture format and the differential harness itself verified on
+# every push/PR, so nothing is silently broken by the time rust-engine is
+# ready to plug in.
+#
+# When rust-engine gets a real candidate binary, update CANDIDATE_CMD below
+# to point at it (see infra/tools/fixtures/run-differential.js's header for
+# the exact stdin/stdout protocol it must speak) and this job starts doing
+# real cross-language verification with no other changes needed.
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "rust-engine/**"
+      - "infra/tools/fixtures/**"
+      - "tests/differential/**"
+      - ".github/workflows/differential.yml"
+  pull_request:
+    paths:
+      - "rust-engine/**"
+      - "infra/tools/fixtures/**"
+      - "tests/differential/**"
+      - ".github/workflows/differential.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  differential:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Check whether rust-engine has a candidate binary yet
+        id: probe
+        run: |
+          if [ -f rust-engine/Cargo.toml ]; then
+            echo "has_rust=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_rust=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Rust
+        if: steps.probe.outputs.has_rust == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build rust-engine
+        if: steps.probe.outputs.has_rust == 'true'
+        working-directory: rust-engine
+        run: cargo build --release
+
+      - name: Run differential test
+        env:
+          # Placeholder path -- update once rust-engine names its actual binary.
+          CANDIDATE_CMD: ${{ steps.probe.outputs.has_rust == 'true' && './rust-engine/target/release/oracle_bridge' || format('node {0}/infra/tools/fixtures/generate-fixtures.js --serve', github.workspace) }}
+        run: |
+          node infra/tools/fixtures/run-differential.js \
+            --fixtures=tests/differential/fixtures/oracle-v1.jsonl.gz \
+            --candidate="$CANDIDATE_CMD" \
+            --limit=300 \
+            --report=differential-report.json
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: differential-report
+          path: differential-report.json
+          retention-days: 14
