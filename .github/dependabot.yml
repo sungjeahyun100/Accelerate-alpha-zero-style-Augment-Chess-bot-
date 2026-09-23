@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # infra/ npm packages (JS oracle, training pipeline)
+  - package-ecosystem: "npm"
+    directory: "/infra"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 3
+
+  # GitHub Actions used by the workflows (checkout, setup-node, rust-toolchain, artifacts)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 3
+
+  # rust-engine/ crates (once Cargo.toml exists; Dependabot skips silently until then)
+  - package-ecosystem: "cargo"
+    directory: "/rust-engine"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 3
