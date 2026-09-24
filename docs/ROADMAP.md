@@ -8,7 +8,7 @@
 | 1 | Bridge protocol 설계 | `GameState`, `Action`, 요청/응답, 직렬화 규약이 합의되고 문서화됨 | 예정 |
 | 2 | JS oracle 인터페이스 정리 | bridge 규약에 맞춘 oracle 호출 경계와 기준 fixture가 정의됨 | 예정 |
 | 3 | Rust engine 포팅 | 핵심 규칙 API가 Rust에 구현되고 단위 검사를 통과함 | 예정 |
-| 4 | JS ↔ Rust differential test | 주요 상태·행동·종료 결과의 동등성을 자동 검증함 | 예정 |
+| 4 | JS ↔ Rust differential test | 주요 상태·행동·종료 결과의 동등성을 자동 검증함 | 하네스 완료, 실제 검증은 Rust 후보 대기중 |
 | 5 | Python ↔ Rust bridge 연결 | Python에서 Rust 규칙 API를 안정적으로 호출함 | 예정 |
 | 6 | AlphaZero state/action encoding | 상태 입력과 정책 행동 공간이 결정되고 왕복 검증됨 | 예정 |
 | 7 | MCTS | Rust 환경을 사용하는 기본 MCTS가 검증됨 | 예정 |

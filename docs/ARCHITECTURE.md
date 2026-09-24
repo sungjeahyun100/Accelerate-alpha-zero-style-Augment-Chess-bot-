@@ -1,6 +1,6 @@
 # 아키텍처
 
-이 문서는 구현 언어별 책임과 의존성 방향을 정의합니다. 현재 저장소는 구조와 문서만 확정한 Phase 0이며, Rust 엔진·Python AI·bridge·differential test는 아직 구현 전입니다.
+이 문서는 구현 언어별 책임과 의존성 방향을 정의합니다. 현재 저장소는 구조와 문서만 확정한 Phase 0이며, Rust 엔진·Python AI·bridge는 아직 구현 전입니다. **differential test는 하네스(`infra/tools/fixtures/run-differential.js` + `.github/workflows/differential.yml`)가 이미 구현되어 push/PR마다 자동 실행되지만, `rust-engine/`에 아직 후보 코드가 없어 지금은 오라클 서버 자신을 후보로 자체 검증만 함 — 실제 JS↔Rust 교차 검증은 Rust 바이너리가 생긴 뒤 워크플로의 `CANDIDATE_CMD` 한 줄만 바꾸면 시작됨.**
 
 ## 전체 구조
 
