@@ -5,12 +5,14 @@
 #include<vector>
 #include<string>
 #include<utility>
+#include <set>
 #include<algorithm>
 #include<optional>
+#include <variant>
 
 enum class colorType{
     WHITE,
-    BLAKE,
+    BLACK,
     NEUTRAL
 };
 
@@ -43,7 +45,8 @@ enum class moveType{
     CATCH,
     MOVE,
     SHIFT,
-    TAKE
+    TAKE,
+    JUMP //이건 좀 복잡한데 어떻게 주석을 달지
 };
 
 /**
@@ -69,7 +72,7 @@ enum class moveType{
  *
  *    CATCH:
  *      목적지에 포획 가능한 기물이 존재할 때만 유효하다.
- *      빈 칸으로는 이동할 수 없다.
+ *      목적지의 포획 가능한 기물을 제거하고 이동하진 않는 행마이다.
  *
  *    MOVE:
  *      목적지가 비어 있을 때만 이동할 수 있다.
@@ -184,11 +187,16 @@ using actCoord = std::pair<std::optional<int>, std::optional<int>>;
 //둘 중 하나가 std::nullopt 라면, "임의의" 라는 의미로 해석하라. 예를 들자면,
 //actCoord{std::nullopt, 2}는 임의의 파일 좌표를 가진 2랭크 칸 즉, 2랭크를 활성화 칸으로 하라는 의미이다. 
 
+struct PieceTypeAt {
+    pieceType type;
+    Coord position;
+};
+
 struct moveChunk {
     moveType mT;
     Coord direction;
 
-    std::optional<std::vector<actCoord>> activateSquare;
+    std::optional<std::vector<actCoord>> activateSquare; //각 벡터는 논리합(OR)으로 계산한다.
 
     std::vector<moveChunk> next;
 
@@ -457,6 +465,36 @@ struct PieceVolume{
     std::vector<Coord> footprint; // { {dx1, dy1}, {dx2, dy2} ... }
 };
 
+struct MustCapture {
+    int remainingTriggers;
+};
+
+struct NoCapture {
+    int remainingTriggers;
+};
+
+struct RepositionMove {
+    int remainingTriggers;
+};
+
+struct ForcedPiece {
+    PieceTypeAt piece;
+    int remainingTriggers;
+};
+
+// 기물 자체에 붙는 제약
+using PieceConstraint = std::variant<
+    MustCapture,
+    NoCapture,
+    RepositionMove
+>;
+
+// 게임의 현재 행동 흐름에 붙는 제약
+using GameConstraint = std::variant<
+    ForcedPiece
+>;
+
+
 struct Piece {
     colorType cT;
     pieceType pT;
@@ -519,6 +557,9 @@ struct Piece {
     bool isKing = false;
     int moveCount = 0;
 
+    std::vector<PieceConstraint> curr_piece_constraint = {}; //상태이상 처리용 확장필드. 이친구도 런타임에 처리되는 필드가 돼겠네.
+    //얘는 그냥 직접 접근하게 둘까??? 차피 public이고
+
     // 기본 생성자
     Piece() = default;
 
@@ -570,11 +611,44 @@ struct Piece {
     void addNewMovement(moveChunk new_mC){
         additional_mC.push_back(new_mC);
     }
+
+    void removeLastMovement(){
+        additional_mC.pop_back();
+    }
+
+    void removeAllMovement(){
+        additional_mC.clear();
+    }
+
+    void addConstraint(PieceConstraint Constraint){
+        curr_piece_constraint.push_back(Constraint);
+    }
+
+    void removeLastConstraint(){
+        curr_piece_constraint.pop_back();
+    }
+
+    void removeAllConstraint(){
+        curr_piece_constraint.clear();
+    }
 };
 
-struct Square{
+struct Square {
     Piece curr_piece;
     Coord coordinate;
+
+    PieceTypeAt getPieceTypeAt() const {
+        return {
+            curr_piece.pT,
+            coordinate
+        };
+    }
+};
+
+
+struct TurnState {
+    colorType player;
+    int actionsRemaining = 1;
 };
 
 //isTurnUsed 필드는 이 객체로 된 데이터를 엔진에 보내어 엔진이 apply할 때, 이 행위가 턴을 사용하는 지를 판단하는 데 사용된다. 
@@ -622,55 +696,588 @@ struct cardAction {
     {}
 };
 
-//그리고 엔진 본체
+template <typename T>
+bool hasConstraint(const Piece& piece)
+{
+    for (const auto& constraint : piece.curr_piece_constraint) {
+        if (std::holds_alternative<T>(constraint)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// ============================================================================
+// 엔진 본체
+// ============================================================================
 class AugmentChessGameState {
 private:
     std::vector<Square> board;
 
+    std::vector<Card> ruleCard;
     std::vector<Card> whitePlayerCards;
     std::vector<Card> blackPlayerCards;
 
-    colorType turn;
+    std::vector<GameConstraint> constraints;
+
+    TurnState turn;
 
 public:
     bool isValidSquare(Coord pos) const;
-
     bool isOccupied(Coord pos) const;
-
     bool isEmpty(Coord pos) const {
         return isValidSquare(pos) && !isOccupied(pos);
     }
 
-    Piece* getPieceAt(Coord pos);
+    // anchor뿐 아니라 footprint까지 포함하여 해당 칸을 점유한 기물의 Square를 반환한다.
+    Square* getOccupyingSquare(Coord pos);
+    const Square* getOccupyingSquare(Coord pos) const;
 
+    Piece* getPieceAt(Coord pos);
     const Piece* getPieceAt(Coord pos) const;
 
+    // 기물을 newAnchor에 놓았을 때 몸 전체가 보드 안에 있는지 확인한다.
+    bool isPieceInsideBoard(const Square& square, Coord newAnchor) const;
+
+    // 기물을 newAnchor에 놓았을 때 footprint가 충돌하는 다른 기물들을 반환한다.
+    // 같은 기물의 여러 footprint 칸과 겹쳐도 포인터는 한 번만 들어간다.
+    std::vector<const Square*> getPlacementCollisions(
+        const Square& movingSquare,
+        Coord newAnchor
+    ) const;
+
+    // 기본 포획 가능 여부.
+    // 특수 카드/상태/중립 규칙이 생기면 이 함수를 확장한다.
+    bool canCapture(
+        const Piece& attacker,
+        const Piece& target,
+        moveType type
+    ) const;
+
     /**
-    * curr_piece가 가진 기본 moveChunk와 additional_mC를 해석하여
-    * 현재 GameState에서 실제로 실행 가능한 moveAction 목록을 생성한다.
-    *
-    * 처리 순서:
-    *
-    * 1. curr_piece.pT에 해당하는 기본 행마를 가져온다.
-    * 2. curr_piece.additional_mC를 기본 행마에 추가한다.
-    * 3. 각 moveChunk의 activateSquare 조건을 검사한다.
-    * 4. direction과 maxDistance를 이용해 후보 destination들을 생성한다.
-    * 5. moveType에 따라 빈칸/적/아군 여부를 판정한다.
-    * 6. PieceVolume이 있는 경우 전체 footprint에 대해 충돌 및 보드 범위를 검사한다.
-    * 7. next가 존재하면 현재 성공 위치를 기준으로 후속 moveChunk를 재귀적으로 해석한다.
-    * 8. 최종적으로 실행 가능한 결과를 moveAction으로 변환하여 반환한다.
-    *
-    * moveChunk는 정적/런타임 행마 정의이고,
-    * moveAction은 특정 GameState에서 실제로 실행 가능한 구체적인 행동이다.
-    */
-    std::vector<moveAction> interpretedPieceMoveChunk(const Square curr_piece); // 현제 기물이 있는 위치와 기물의 moveChunk를 받고 그에 맞는 moveAction을 계산하여 반환하는 함수.
+     * curr_piece가 가진 기본 moveChunk와 additional_mC를 해석하여
+     * 현재 GameState에서 실제로 실행 가능한 moveAction 목록을 생성한다.
+     *
+     * 아직 미구현:
+     * - moveChunk.next 연쇄 행마
+     * - SHIFT
+     * - JUMP
+     */
+    std::vector<moveAction> interpretedPieceMoveChunk(
+        const Square& curr_piece
+    );
 
     // 기물 이동
     void apply_action(const moveAction& action);
 
     // 카드 사용
     void apply_action(const cardAction& action);
+
+    // 턴 종료
+    void endTurn()
+    {
+        if (turn.actionsRemaining > 0) {
+            return;
+        }
+
+        if (turn.player == colorType::WHITE) {
+            turn.player = colorType::BLACK;
+        }
+        else if (turn.player == colorType::BLACK) {
+            turn.player = colorType::WHITE;
+        }
+        else {
+            std::cerr << "턴 필드에 이상한 값이 들어감\n";
+            return;
+        }
+
+        // 임시 기본값. 나중에는 getActionsPerTurn(turn.player) 등으로 교체.
+        turn.actionsRemaining = 1;
+    }
 };
+
+// ============================================================================
+// 임시 helper 구현부 - 후에 피어리뷰 필요
+// ============================================================================
+
+bool AugmentChessGameState::isValidSquare(Coord pos) const
+{
+    return
+        pos.first >= 1 && pos.first <= 8 &&
+        pos.second >= 1 && pos.second <= 8;
+}
+
+bool AugmentChessGameState::isOccupied(Coord pos) const
+{
+    if (!isValidSquare(pos)) {
+        return false;
+    }
+
+    return getOccupyingSquare(pos) != nullptr;
+}
+
+Square* AugmentChessGameState::getOccupyingSquare(Coord pos)
+{
+    for (auto& sq : board) {
+        // anchor
+        if (sq.coordinate == pos) {
+            return &sq;
+        }
+
+        // footprint
+        for (const Coord& offset : sq.curr_piece.Pv.footprint) {
+            Coord occupiedPos = {
+                sq.coordinate.first + offset.first,
+                sq.coordinate.second + offset.second
+            };
+
+            if (occupiedPos == pos) {
+                return &sq;
+            }
+        }
+    }
+
+    return nullptr;
+}
+
+const Square* AugmentChessGameState::getOccupyingSquare(Coord pos) const
+{
+    for (const auto& sq : board) {
+        if (sq.coordinate == pos) {
+            return &sq;
+        }
+
+        for (const Coord& offset : sq.curr_piece.Pv.footprint) {
+            Coord occupiedPos = {
+                sq.coordinate.first + offset.first,
+                sq.coordinate.second + offset.second
+            };
+
+            if (occupiedPos == pos) {
+                return &sq;
+            }
+        }
+    }
+
+    return nullptr;
+}
+
+Piece* AugmentChessGameState::getPieceAt(Coord pos)
+{
+    Square* sq = getOccupyingSquare(pos);
+
+    if (sq == nullptr) {
+        return nullptr;
+    }
+
+    return &sq->curr_piece;
+}
+
+const Piece* AugmentChessGameState::getPieceAt(Coord pos) const
+{
+    const Square* sq = getOccupyingSquare(pos);
+
+    if (sq == nullptr) {
+        return nullptr;
+    }
+
+    return &sq->curr_piece;
+}
+
+bool AugmentChessGameState::isPieceInsideBoard(
+    const Square& square,
+    Coord newAnchor
+) const
+{
+    if (!isValidSquare(newAnchor)) {
+        return false;
+    }
+
+    for (const Coord& offset : square.curr_piece.Pv.footprint) {
+        Coord pos = {
+            newAnchor.first + offset.first,
+            newAnchor.second + offset.second
+        };
+
+        if (!isValidSquare(pos)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+std::vector<const Square*>
+AugmentChessGameState::getPlacementCollisions(
+    const Square& movingSquare,
+    Coord newAnchor
+) const
+{
+    std::vector<const Square*> collisions;
+
+    auto checkCell = [&](Coord pos) {
+        const Square* target = getOccupyingSquare(pos);
+
+        if (target == nullptr) {
+            return;
+        }
+
+        // 이동 전 자기 자신의 몸과 겹치는 부분은 충돌로 보지 않는다.
+        if (target->coordinate == movingSquare.coordinate) {
+            return;
+        }
+
+        // 같은 기물을 여러 footprint 칸에서 발견해도 한 번만 추가한다.
+        if (
+            std::find(
+                collisions.begin(),
+                collisions.end(),
+                target
+            ) == collisions.end()
+        ) {
+            collisions.push_back(target);
+        }
+    };
+
+    // anchor
+    checkCell(newAnchor);
+
+    // footprint
+    for (const Coord& offset : movingSquare.curr_piece.Pv.footprint) {
+        checkCell({
+            newAnchor.first + offset.first,
+            newAnchor.second + offset.second
+        });
+    }
+
+    return collisions;
+}
+
+bool AugmentChessGameState::canCapture(
+    const Piece& attacker,
+    const Piece& target,
+    moveType type
+) const
+{
+    switch (type) {
+        case moveType::BOTHTAKEMOVE:
+            return true;
+
+        case moveType::TAKE:
+        case moveType::TAKEMOVE:
+        case moveType::CATCH:
+            // 현재 임시 기본 규칙:
+            // 다른 색이면 포획 가능.
+            // 중립/특수 상태/카드 예외는 나중에 여기서 처리한다.
+            return attacker.cT != target.cT;
+
+        default:
+            return false;
+    }
+}
+
+// ============================================================================
+// moveChunk -> legal moveAction 해석
+// ============================================================================
+std::vector<moveAction>
+AugmentChessGameState::interpretedPieceMoveChunk(
+    const Square& curr_square
+) {
+    const Piece& piece = curr_square.curr_piece;
+    const Coord origin = curr_square.coordinate;
+
+    // 기본 행마 + 런타임 추가 행마
+    std::vector<moveChunk> movements =
+        getBaseMovement(piece.pT, piece.cT);
+
+    movements.insert(
+        movements.end(),
+        piece.additional_mC.begin(),
+        piece.additional_mC.end()
+    );
+
+    std::vector<moveAction> result;
+
+    const bool noCapture = hasConstraint<NoCapture>(piece);
+    const bool mustCapture = hasConstraint<MustCapture>(piece);
+
+    // activateSquare의 각 항목은 OR로 계산한다.
+    auto isActivated = [&](const moveChunk& chunk) -> bool {
+        if (!chunk.activateSquare.has_value()) {
+            return true;
+        }
+
+        for (const actCoord& condition : *chunk.activateSquare) {
+            const bool xMatches =
+                !condition.first.has_value() ||
+                condition.first.value() == origin.first;
+
+            const bool yMatches =
+                !condition.second.has_value() ||
+                condition.second.value() == origin.second;
+
+            if (xMatches && yMatches) {
+                return true;
+            }
+        }
+
+        return false;
+    };
+
+    // 현재는 의도적으로 dedup하지 않는다.
+    // 나중에 next/연쇄 행마가 들어오면 같은 종착지라도 다른 action일 수 있다.
+    auto pushAction = [&](moveType type, Coord destination) {
+        result.emplace_back(
+            piece.cT,
+            piece.pT,
+            type,
+            origin,
+            destination
+        );
+    };
+
+    for (const moveChunk& chunk : movements) {
+        if (!isActivated(chunk)) {
+            continue;
+        }
+
+        // 무한 ray에서 {0, 0} direction이면 무한루프가 되므로 방어.
+        if (
+            chunk.direction == Coord{0, 0} &&
+            !chunk.maxDistance.has_value()
+        ) {
+            continue;
+        }
+
+        int distance = 1;
+
+        while (
+            !chunk.maxDistance.has_value() ||
+            distance <= chunk.maxDistance.value()
+        ) {
+            Coord destination = {
+                origin.first + chunk.direction.first * distance,
+                origin.second + chunk.direction.second * distance
+            };
+
+            bool stopRay = false;
+
+            switch (chunk.mT) {
+                // =========================================================
+                // MOVE
+                // 빈 곳으로만 이동한다.
+                // =========================================================
+                case moveType::MOVE:
+                {
+                    if (!isPieceInsideBoard(curr_square, destination)) {
+                        stopRay = true;
+                        break;
+                    }
+
+                    const auto collisions =
+                        getPlacementCollisions(curr_square, destination);
+
+                    if (!collisions.empty()) {
+                        stopRay = true;
+                        break;
+                    }
+
+                    if (!mustCapture) {
+                        pushAction(moveType::MOVE, destination);
+                    }
+
+                    break;
+                }
+
+                // =========================================================
+                // TAKE
+                // 포획 가능한 기물이 있을 때만 그 자리로 이동한다.
+                // 빈칸은 후보가 아니지만 ray 탐색은 계속한다.
+                // =========================================================
+                case moveType::TAKE:
+                {
+                    if (!isPieceInsideBoard(curr_square, destination)) {
+                        stopRay = true;
+                        break;
+                    }
+
+                    const auto collisions =
+                        getPlacementCollisions(curr_square, destination);
+
+                    if (collisions.empty()) {
+                        break;
+                    }
+
+                    // 현재 일반 포획 행마는 한 번에 한 기물만 포획한다고 가정.
+                    if (collisions.size() > 1) {
+                        stopRay = true;
+                        break;
+                    }
+
+                    const Piece& target = collisions.front()->curr_piece;
+
+                    if (
+                        !noCapture &&
+                        canCapture(piece, target, moveType::TAKE)
+                    ) {
+                        pushAction(moveType::TAKE, destination);
+                    }
+
+                    stopRay = true;
+                    break;
+                }
+
+                // =========================================================
+                // CATCH
+                // 목적지의 기물을 제거하지만 자신은 이동하지 않는다.
+                // 따라서 moving piece의 footprint를 destination에 배치하지 않는다.
+                // =========================================================
+                case moveType::CATCH:
+                {
+                    if (!isValidSquare(destination)) {
+                        stopRay = true;
+                        break;
+                    }
+
+                    const Square* targetSquare =
+                        getOccupyingSquare(destination);
+
+                    if (targetSquare == nullptr) {
+                        break;
+                    }
+
+                    const Piece& target = targetSquare->curr_piece;
+
+                    if (
+                        !noCapture &&
+                        canCapture(piece, target, moveType::CATCH)
+                    ) {
+                        pushAction(moveType::CATCH, destination);
+                    }
+
+                    stopRay = true;
+                    break;
+                }
+
+                // =========================================================
+                // TAKEMOVE
+                // 빈칸 -> 이동
+                // 포획 가능한 기물 -> 포획 후 이동
+                // =========================================================
+                case moveType::TAKEMOVE:
+                {
+                    if (!isPieceInsideBoard(curr_square, destination)) {
+                        stopRay = true;
+                        break;
+                    }
+
+                    const auto collisions =
+                        getPlacementCollisions(curr_square, destination);
+
+                    if (collisions.empty()) {
+                        if (!mustCapture) {
+                            pushAction(moveType::TAKEMOVE, destination);
+                        }
+
+                        break;
+                    }
+
+                    if (collisions.size() > 1) {
+                        stopRay = true;
+                        break;
+                    }
+
+                    const Piece& target = collisions.front()->curr_piece;
+
+                    if (
+                        !noCapture &&
+                        canCapture(piece, target, moveType::TAKEMOVE)
+                    ) {
+                        pushAction(moveType::TAKEMOVE, destination);
+                    }
+
+                    stopRay = true;
+                    break;
+                }
+
+                // =========================================================
+                // BOTHTAKEMOVE
+                // 빈칸 -> 이동
+                // 기물 존재 -> 색과 관계없이 포획 후 이동
+                // =========================================================
+                case moveType::BOTHTAKEMOVE:
+                {
+                    if (!isPieceInsideBoard(curr_square, destination)) {
+                        stopRay = true;
+                        break;
+                    }
+
+                    const auto collisions =
+                        getPlacementCollisions(curr_square, destination);
+
+                    if (collisions.empty()) {
+                        if (!mustCapture) {
+                            pushAction(moveType::BOTHTAKEMOVE, destination);
+                        }
+
+                        break;
+                    }
+
+                    if (collisions.size() > 1) {
+                        stopRay = true;
+                        break;
+                    }
+
+                    const Piece& target = collisions.front()->curr_piece;
+
+                    if (
+                        !noCapture &&
+                        canCapture(piece, target, moveType::BOTHTAKEMOVE)
+                    ) {
+                        pushAction(moveType::BOTHTAKEMOVE, destination);
+                    }
+
+                    stopRay = true;
+                    break;
+                }
+
+                // =========================================================
+                // SHIFT
+                // 기물끼리 위치를 교환하는 행마.
+                // 양쪽 footprint의 교환 가능성 검사가 필요하므로 추후 구현.
+                // =========================================================
+                case moveType::SHIFT:
+                {
+                    // TODO
+                    stopRay = true;
+                    break;
+                }
+
+                // =========================================================
+                // JUMP
+                // 적 기물을 처음 만난 뒤부터 활성화되는 행마.
+                // ray 안에 별도 상태값이 필요하므로 추후 구현.
+                // =========================================================
+                case moveType::JUMP:
+                {
+                    // TODO
+                    stopRay = true;
+                    break;
+                }
+            }
+
+            if (stopRay) {
+                break;
+            }
+
+            ++distance;
+        }
+    }
+
+    return result;
+}
+
 
 //api 테스트용 메인함수.
 int main(){
@@ -678,3 +1285,4 @@ int main(){
 }
 
 //g++ engine.cpp -o engine_test
+
