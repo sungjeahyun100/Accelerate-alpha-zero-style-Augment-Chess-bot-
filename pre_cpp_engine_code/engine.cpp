@@ -2233,6 +2233,7 @@ void AugmentChessGameState::apply_action(const moveAction& action)
                 captured.push_back(epWindow->pawn);
             }
 
+            // 포획은 항상 기물 제거다. HP가 2 이상인 기물(colossus 등, docs/GAME-RULES.md §6)의 피해 처리는 아직 없다.
             removeAnchors(captured);
 
             // 제거로 vector가 바뀌었을 수 있으므로 mover를 다시 찾는다.
