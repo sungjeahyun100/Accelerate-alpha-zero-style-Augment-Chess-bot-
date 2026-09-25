@@ -12,3 +12,4 @@
 - JS↔Rust differential test 하네스 추가(`infra/tools/fixtures/run-differential.js`, `.github/workflows/differential.yml`) -- `rust-engine/`에 후보가 생기면 자동으로 실제 교차 검증 시작
 - Dependabot 설정 추가(npm/github-actions/cargo)
 - `pre_cpp_engine_code/`(Rust 포팅용 스케치)에 컴파일 체크 CI 추가
+- rust-engine/src/lib.rs에 pre_cpp_engine_code/engine.cpp 초안 포팅 추가 (Cargo.toml은 의도적으로 보류, 이유는 rust-engine/README.md 참고)
