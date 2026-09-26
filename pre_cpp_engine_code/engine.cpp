@@ -58,7 +58,8 @@ enum class pieceType{
     KNIGHT,
     BISHOP,
     ROOK,
-    PAWN
+    PAWN,
+    TEST //임의의 기물행마를 생성하여 적용을 시험해보기 위한 피스타입
 };
 
 enum class moveType{
@@ -426,6 +427,17 @@ inline const std::vector<moveChunk> BASE_BLACK_PAWN_MOVES = {
     {moveType::TAKE, {-1, -1}}
 };
 
+inline const std::vector<moveChunk> test_pieces = {
+    {
+        moveType::TAKEMOVE, {1, 0},
+        {
+            moveChunk(moveType::TAKEMOVE, {0, 1}, std::nullopt),
+            moveChunk(moveType::TAKEMOVE, {0, -1}, std::nullopt)
+        },
+        std::nullopt
+    }
+};
+
 const std::vector<moveChunk>& getBaseMovement(
     pieceType type,
     colorType color
@@ -452,6 +464,9 @@ const std::vector<moveChunk>& getBaseMovement(
                 return BASE_WHITE_PAWN_MOVES;
 
             return BASE_BLACK_PAWN_MOVES;
+
+        case pieceType::TEST:
+            return test_pieces;
     }
 
     // 실제로는 도달하면 안 됨.
@@ -726,6 +741,64 @@ struct moveAction {
           destination(to),
           isTurnUsed(turnUsed)
     {}
+
+    void print() const
+    {
+        auto colorToString = [](colorType color) -> const char* {
+            switch (color) {
+                case colorType::WHITE:   return "WHITE";
+                case colorType::BLACK:   return "BLACK";
+                case colorType::NEUTRAL: return "NEUTRAL";
+            }
+            return "UNKNOWN";
+        };
+
+        auto pieceToString = [](pieceType piece) -> const char* {
+            switch (piece) {
+                case pieceType::KING:   return "KING";
+                case pieceType::QUEEN:  return "QUEEN";
+                case pieceType::KNIGHT: return "KNIGHT";
+                case pieceType::BISHOP: return "BISHOP";
+                case pieceType::ROOK:   return "ROOK";
+                case pieceType::PAWN:   return "PAWN";
+                case pieceType::TEST: return "TEST";
+            }
+            return "UNKNOWN";
+        };
+
+        auto moveToString = [](moveType move) -> const char* {
+            switch (move) {
+                case moveType::BOTHTAKEMOVE: return "BOTHTAKEMOVE";
+                case moveType::TAKEMOVE:     return "TAKEMOVE";
+                case moveType::CATCH:        return "CATCH";
+                case moveType::MOVE:         return "MOVE";
+                case moveType::SHIFT:        return "SHIFT";
+                case moveType::TAKE:         return "TAKE";
+                case moveType::JUMP:         return "JUMP";
+            }
+            return "UNKNOWN";
+        };
+
+        std::cout
+            << colorToString(cT)
+            << " "
+            << pieceToString(pT)
+            << " "
+            << moveToString(mT)
+            << " "
+            << "(" << start.first << ", " << start.second << ")"
+            << " -> "
+            << "(" << destination.first << ", " << destination.second << ")"
+            << " | turnUsed=" << (isTurnUsed ? "true" : "false");
+
+        if (promotion.has_value()) {
+            std::cout
+                << " | promotion="
+                << pieceToString(*promotion);
+        }
+
+        std::cout << '\n';
+    }
 };
 
 struct cardAction {
@@ -1096,7 +1169,91 @@ public:
         // 임시 기본값. 나중에는 getActionsPerTurn(turn.player) 등으로 교체.
         turn.actionsRemaining = 1;
     }
+
+    // 보드 cli 출력
+    void printBoardCLI() const;
 };
+
+
+//보드 cli 출력
+void AugmentChessGameState::printBoardCLI() const
+{
+    auto pieceSymbol = [](const Piece& piece) -> std::string {
+        std::string symbol;
+
+        switch (piece.pT) {
+            case pieceType::KING:   symbol = "K"; break;
+            case pieceType::QUEEN:  symbol = "Q"; break;
+            case pieceType::ROOK:   symbol = "R"; break;
+            case pieceType::BISHOP: symbol = "B"; break;
+            case pieceType::KNIGHT: symbol = "N"; break;
+            case pieceType::PAWN:   symbol = "P"; break;
+            case pieceType::TEST: symbol = "T"; break;
+        }
+
+        switch (piece.cT) {
+            case colorType::WHITE:
+                return "W" + symbol;
+
+            case colorType::BLACK:
+                return "B" + symbol;
+
+            case colorType::NEUTRAL:
+                return "N" + symbol;
+        }
+
+        return "??";
+    };
+
+    std::cout << "\n";
+    std::cout << "       a    b    c    d    e    f    g    h\n";
+    std::cout << "    +----+----+----+----+----+----+----+----+\n";
+
+    for (int rank = 8; rank >= 1; --rank) {
+        std::cout << " " << rank << "  |";
+
+        for (int file = 1; file <= 8; ++file) {
+            const Square* square =
+                getOccupyingSquare({file, rank});
+
+            if (square == nullptr) {
+                std::cout << "    |";
+            }
+            else {
+                std::cout << " "
+                          << pieceSymbol(square->curr_piece)
+                          << " |";
+            }
+        }
+
+        std::cout << "  " << rank << "\n";
+        std::cout << "    +----+----+----+----+----+----+----+----+\n";
+    }
+
+    std::cout << "       a    b    c    d    e    f    g    h\n";
+
+    std::cout << "\nTurn: ";
+
+    switch (turn.player) {
+        case colorType::WHITE:
+            std::cout << "WHITE";
+            break;
+
+        case colorType::BLACK:
+            std::cout << "BLACK";
+            break;
+
+        case colorType::NEUTRAL:
+            std::cout << "NEUTRAL";
+            break;
+    }
+
+    std::cout << " | Actions: "
+              << turn.actionsRemaining
+              << " | Move: "
+              << moveCount
+              << "\n\n";
+}
 
 // ============================================================================
 // 임시 helper 구현부 - 후에 피어리뷰 필요
@@ -2435,6 +2592,7 @@ bool allStartAt(
 
 } // namespace
 
+/*
 int main(){
     registerAllCardEffects();
 
@@ -3522,6 +3680,45 @@ int main(){
     std::cout << (g_failures == 0 ? "ALL PASSED" : "SOME TESTS FAILED") << "\n";
     return g_failures == 0 ? 0 : 1;
 }
+*/
+
+int main(){
+    AugmentChessGameState testBoard;
+
+    //test_pieces
+
+    Piece knight = makePiece(colorType::WHITE, pieceType::KNIGHT);
+    Piece testPiece = makePiece(colorType::WHITE, pieceType::TEST);
+
+    Coord knight_coord = {4, 5};
+    Coord test_piece_coord = {4, 4};
+
+    testBoard.addPiece(test_piece_coord, testPiece);
+    testBoard.addPiece(knight_coord, knight);
+
+    auto tP_sq = testBoard.getOccupyingSquare(test_piece_coord);
+    auto knight_sq = testBoard.getOccupyingSquare(knight_coord);
+
+    auto tP_action = testBoard.interpretedPieceMoveChunk(*tP_sq);
+    auto knight_action = testBoard.interpretedPieceMoveChunk(*knight_sq);
+
+    testBoard.printBoardCLI();
+
+    for(auto& act : tP_action){
+        act.print();
+    }
+    
+    std::cout << "-----------------------------------------------------------------------------------------------------------------------------" << std::endl;
+
+    for(auto& act : knight_action){
+        act.print();
+    }
+
+    return 0;
+}
 
 //g++ -std=c++20 -Wall -Wextra engine.cpp -o engine_test && ./engine_test
+
+//사람이 직접 api를 써보면서 테스트하는 공간
+//g++ engine.cpp -o engine_test_human && ./engine_test_human
 

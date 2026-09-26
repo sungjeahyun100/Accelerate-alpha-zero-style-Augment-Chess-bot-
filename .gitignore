@@ -27,3 +27,7 @@ python/**/runs/
 Thumbs.db
 .vscode/
 .idea/
+
+# cpp_compile
+pre_cpp_engine_code/engine_test
+pre_cpp_engine_code/engine_test_human
