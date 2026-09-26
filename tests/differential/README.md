@@ -19,3 +19,8 @@
 ## 현재 상태
 
 하네스는 구현됨: `infra/tools/fixtures/run-differential.js` + `.github/workflows/differential.yml`(push/PR마다 자동 실행). `rust-engine/`에 아직 후보 코드가 없어서 지금은 오라클 서버 자신을 후보로 돌려 하네스/정답지 자체만 검증 중이다. `rust-engine/`이 `run-differential.js` 헤더에 적힌 stdin/stdout 프로토콜을 구현한 바이너리를 내놓으면, 워크플로의 `CANDIDATE_CMD` 한 줄만 바꾸면 실제 교차 검증이 시작된다.
+
+## Fixture 종류
+
+- `fixtures/oracle-v1.jsonl.gz`: JS oracle(`engine-merged.js`) 기준 2,072개.
+- `fixtures/site-reference-v1/`: **사이트 규칙 코드 기준** reference fixture 349개(약 5.5 MB). Rust 포팅의 정답지로 쓸 것. 형식은 oracle-v1의 상위 호환이며 생성 방법·커버리지·한계는 그 폴더의 README.md 참고.

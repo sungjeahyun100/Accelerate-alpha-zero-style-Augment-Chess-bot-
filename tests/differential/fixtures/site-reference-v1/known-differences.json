@@ -1,0 +1,55 @@
+{
+  "note": "Hand-collected summary (not produced by the generator). The fixtures always reflect the SITE worker; these numbers only describe how far the Twist engine-merged.js was from the site when the fixtures were made.",
+  "twistCommit": "f2c085b7ee4c69b3303e1264e88969bc18cf55f6",
+  "engine": "Twist engine-merged.js at that commit (not the copy under infra/ of this repo)",
+  "triageDocument": "Twist repo tools/site-parity/TRIAGE.md (classification of every divergence found on 2026-09-19)",
+  "runs": [
+    {
+      "command": "node parity-actions.js - 400 12345",
+      "result": "compared=400 errors=0 differing=11 (2.8%)",
+      "byAction": {
+        "card:recurrence": 32,
+        "card:randomRoulette": 3,
+        "card:trolley": 1
+      }
+    },
+    {
+      "command": "node parity-apply.js - 300 777",
+      "result": "applied=297 errors=0 differing=6",
+      "byAction": {
+        "zugzwang": 1,
+        "blackMagic": 2,
+        "binaMate": 1,
+        "randomRoulette": 1,
+        "falseStart": 1
+      }
+    },
+    {
+      "command": "node parity-playout.js - 60 4242 60",
+      "result": "games=60 plies=1130 (card plies=280) diverged=25",
+      "byCause": {
+        "state-differs after move": 6,
+        "actions-differ after move": 4,
+        "actions-differ after card:locustSwarm": 4,
+        "state-differs after checker": 3,
+        "state-differs after falseStart": 2,
+        "state-differs after zugzwang": 1,
+        "state-differs after randomRoulette": 1,
+        "state-differs after missionary": 1,
+        "state-differs after brutus": 1,
+        "actions-differ after card:royalShield": 1,
+        "actions-differ after card:knightmate": 1
+      }
+    },
+    {
+      "command": "node infra/tools/fixtures/run-differential.js --fixtures=<four files concatenated> --candidate=\"node infra/tools/fixtures/generate-fixtures.js --serve\"  (candidate = infra/engine-merged.js of develop 16cf318)",
+      "result": "349 fixtures: 328 matched, 21 mismatched",
+      "mismatchesBySource": "playout:5=2 piece:king=1 piece:alfil=1 card:blackBox=1 card:blueJeans=1 card:holdout=1 card:missionary=1 card:scarecrow=1 card:zugzwang=1 card:blackMagic=1 card:fieldPromotion=1 card:recurrence=1 (first 12 kinds)"
+    }
+  ],
+  "knownCauses": [
+    "locustSwarm is an OPENING card: the site worker ignores it as an in-game card, engine-merged applies it",
+    "recurrence / randomRoulette / trolley / zugzwang / blackMagic / falseStart / checker: see TRIAGE.md and the run outputs above; not root-caused again in this PR",
+    "Rust port must follow the fixtures (site), never engine-merged.js, when the two disagree"
+  ]
+}
