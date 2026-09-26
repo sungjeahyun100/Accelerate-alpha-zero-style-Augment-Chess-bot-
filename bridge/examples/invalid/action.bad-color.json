@@ -1,0 +1,1 @@
+{ "type": "move", "color": "green", "from": { "row": 6, "col": 0 }, "move": { "row": 5, "col": 0 } }
