@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "response.schema.json",
+  "title": "Responses (DRAFT bridge-draft-0)",
+  "description": "DRAFT. Messages returned by the engine. Every response echoes the request `id`. Failures use ok=false and type=error.",
+  "oneOf": [
+    { "$ref": "#/$defs/NewGameResponse" },
+    { "$ref": "#/$defs/GetLegalActionsResponse" },
+    { "$ref": "#/$defs/ApplyActionResponse" },
+    { "$ref": "#/$defs/GetResultResponse" },
+    { "$ref": "#/$defs/ErrorResponse" }
+  ],
+  "$defs": {
+    "Protocol": { "const": "bridge-draft-0" },
+    "RequestId": { "type": ["string", "integer", "null"] },
+    "NewGameResponse": {
+      "type": "object",
+      "required": ["protocol", "type", "id", "ok", "gameId", "cardCount", "state"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/Protocol" },
+        "type": { "const": "new_game_response" },
+        "id": { "$ref": "#/$defs/RequestId" },
+        "ok": { "const": true },
+        "gameId": { "type": "string", "minLength": 1 },
+        "cardCount": { "type": "integer", "minimum": 0, "description": "Number of card definitions the engine accepted." },
+        "state": { "$ref": "game-state.schema.json", "description": "The starting state (echo of initialState, or the engine's default)." },
+        "encoded": { "$ref": "encoded.schema.json" }
+      },
+      "additionalProperties": false
+    },
+    "GetLegalActionsResponse": {
+      "type": "object",
+      "required": ["protocol", "type", "id", "ok", "actions"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/Protocol" },
+        "type": { "const": "get_legal_actions_response" },
+        "id": { "$ref": "#/$defs/RequestId" },
+        "ok": { "const": true },
+        "actions": { "$ref": "action.schema.json#/$defs/ActionList", "description": "Empty for a finished game (terminal positions in the fixtures have none)." },
+        "encoded": { "$ref": "encoded.schema.json" }
+      },
+      "additionalProperties": false
+    },
+    "ApplyActionResponse": {
+      "type": "object",
+      "required": ["protocol", "type", "id", "ok", "state"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/Protocol" },
+        "type": { "const": "apply_action_response" },
+        "id": { "$ref": "#/$defs/RequestId" },
+        "ok": { "const": true },
+        "state": { "$ref": "game-state.schema.json", "description": "State after the action. In this draft the turn switch and end-of-turn processing are already included." },
+        "encoded": { "$ref": "encoded.schema.json" }
+      },
+      "additionalProperties": false
+    },
+    "GetResultResponse": {
+      "type": "object",
+      "required": ["protocol", "type", "id", "ok", "terminal", "mode", "winner"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/Protocol" },
+        "type": { "const": "get_result_response" },
+        "id": { "$ref": "#/$defs/RequestId" },
+        "ok": { "const": true },
+        "terminal": { "type": "boolean", "description": "True when the game is over (mode is gameover)." },
+        "mode": { "type": "string", "minLength": 1 },
+        "winner": { "$ref": "common.schema.json#/$defs/Winner" }
+      },
+      "additionalProperties": false
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "required": ["protocol", "type", "id", "ok", "error"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/Protocol" },
+        "type": { "const": "error" },
+        "id": { "$ref": "#/$defs/RequestId" },
+        "ok": { "const": false },
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "properties": {
+            "code": { "enum": ["invalid_request", "unknown_game", "action_rejected", "internal_error"], "description": "action_rejected: the action was well formed but the engine's applyAction failed (the fixtures contain 37 such cases even for actions the engine had listed as legal)." },
+            "message": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

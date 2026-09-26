@@ -1,0 +1,1 @@
+{ "protocol": "bridge-draft-0", "type": "error", "id": 8, "ok": false, "error": { "code": "action_rejected", "message": "applyAction failed for the given action (hand-written example, not from the fixtures)" } }

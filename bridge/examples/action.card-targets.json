@@ -1,0 +1,27 @@
+[
+  {"type":"card","color":"black","cardId":"acceleration","cardInstanceId":"black-acceleration-0"},
+  {
+    "type": "card",
+    "color": "black",
+    "cardId": "ruleTicket",
+    "cardInstanceId": "black-ruleTicket-1",
+    "target": {"ruleId":"crown"}
+  },
+  {
+    "type": "card",
+    "color": "black",
+    "cardId": "cleanupPieces",
+    "cardInstanceId": "black-cleanupPieces-2",
+    "target": {"selections":[{"row":4,"col":5}]}
+  },
+  {
+    "type": "card",
+    "color": "white",
+    "cardId": "amazon",
+    "cardInstanceId": "white-amazon-0",
+    "target": {"row":3,"col":3,"knight":{"row":4,"col":6}}
+  },
+  {"type":"card","color":"white","cardId":"slime","cardInstanceId":"white-slime-2","target":{"row":6,"col":2}},
+  {"type":"card","color":"white","cardId":"vanguard","cardInstanceId":"white-vanguard-2","target":null},
+  {"type":"move","color":"white","from":{"row":5,"col":0},"move":{"row":4,"col":0,"sirenMove":true}}
+]

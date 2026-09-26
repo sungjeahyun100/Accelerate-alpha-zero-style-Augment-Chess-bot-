@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "request.schema.json",
+  "title": "Requests (DRAFT bridge-draft-0)",
+  "description": "DRAFT. Messages sent to the engine. Transport (stdio, socket, FFI, ...) is not decided; one message is one JSON value. The engine is stateless per position: every turn-level request carries the full GameState, while card definitions are registered once by new_game (D-003).",
+  "oneOf": [
+    { "$ref": "#/$defs/NewGame" },
+    { "$ref": "#/$defs/GetLegalActions" },
+    { "$ref": "#/$defs/ApplyAction" },
+    { "$ref": "#/$defs/GetResult" }
+  ],
+  "$defs": {
+    "Protocol": { "const": "bridge-draft-0" },
+    "RequestId": { "description": "Echoed back in the response so the caller can match them.", "type": ["string", "integer"] },
+    "GameId": { "type": "string", "minLength": 1, "description": "Handle returned by new_game. It stands for the card definitions registered at that time." },
+    "NewGame": {
+      "type": "object",
+      "required": ["protocol", "type", "id", "cards"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/Protocol" },
+        "type": { "const": "new_game" },
+        "id": { "$ref": "#/$defs/RequestId" },
+        "cards": { "type": "array", "items": { "$ref": "card-definition.schema.json" }, "description": "All card definitions, sent once (D-003)." },
+        "initialState": { "$ref": "game-state.schema.json", "description": "Optional. If absent the engine builds its default starting state. Whether the engine (or the caller) deals decks and runs the draft is an open question." },
+        "seed": { "type": "integer", "description": "Optional. For engines that need randomness. Not all card effects are deterministic." }
+      },
+      "additionalProperties": false
+    },
+    "GetLegalActions": {
+      "type": "object",
+      "required": ["protocol", "type", "id", "gameId", "state"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/Protocol" },
+        "type": { "const": "get_legal_actions" },
+        "id": { "$ref": "#/$defs/RequestId" },
+        "gameId": { "$ref": "#/$defs/GameId" },
+        "state": { "$ref": "game-state.schema.json" },
+        "encode": { "type": "string", "minLength": 1, "description": "OPTIONAL extension point for O-001: ask for an encoded form (name of the encoder format) in the response. Omit for raw only." }
+      },
+      "additionalProperties": false
+    },
+    "ApplyAction": {
+      "type": "object",
+      "required": ["protocol", "type", "id", "gameId", "state", "action"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/Protocol" },
+        "type": { "const": "apply_action" },
+        "id": { "$ref": "#/$defs/RequestId" },
+        "gameId": { "$ref": "#/$defs/GameId" },
+        "state": { "$ref": "game-state.schema.json" },
+        "action": { "$ref": "action.schema.json" },
+        "encode": { "type": "string", "minLength": 1, "description": "OPTIONAL extension point for O-001, same as in get_legal_actions." }
+      },
+      "additionalProperties": false
+    },
+    "GetResult": {
+      "type": "object",
+      "required": ["protocol", "type", "id", "gameId", "state"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/Protocol" },
+        "type": { "const": "get_result" },
+        "id": { "$ref": "#/$defs/RequestId" },
+        "gameId": { "$ref": "#/$defs/GameId" },
+        "state": { "$ref": "game-state.schema.json" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

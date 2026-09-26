@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "card-definition.schema.json",
+  "title": "CardDefinition (DRAFT bridge-draft-0)",
+  "description": "DRAFT. One card definition, sent once per game inside new_game (D-003). Only id and effect are certain: in the fixtures id equals effect for all 239 cards. The star cost is NOT a stable per-card value in the fixtures (the same card id shows up with 1 to 5 stars), so it lives on the slot, and `stars` here is only an optional default. name/phase/description are not in the fixtures (phase exists in docs/GAME-RULES.md); where the full definitions come from is undecided.",
+  "type": "object",
+  "required": ["id", "effect"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "effect": { "type": "string", "minLength": 1 },
+    "stars": { "type": "integer", "minimum": 0 },
+    "phase": { "enum": ["OPENING", "MIDDLE", "END", "PIECE", "RULE"] },
+    "name": { "type": "string" }
+  },
+  "additionalProperties": true
+}
