@@ -1,0 +1,1787 @@
+{
+ "format": "oracle-v1 superset (see README.md)",
+ "seed": 20260926,
+ "params": {
+  "perPiece": 1,
+  "perCard": 1,
+  "playouts": 16,
+  "plies": 120,
+  "maxApplied": 3,
+  "cardApplied": 2,
+  "constructedGameover": 12,
+  "samplePlies": [
+   5,
+   15,
+   31
+  ]
+ },
+ "generator": {
+  "repo": "Vamp-pire/Augment-Chess-Engine-Twist",
+  "path": "tools/site-parity/gen-reference-fixtures.js",
+  "commit": "f2c085b7ee4c69b3303e1264e88969bc18cf55f6"
+ },
+ "site": {
+  "mainBundle": "main-saUeM6OL.js",
+  "mainBundleBytes": 12157993,
+  "aiWorkerSha256": "5f73282964575ff2c63a863b1a2d1c9778d8109900e7f8d5c4e6fb5ec97340ea",
+  "aiWorkerBytes": 968604,
+  "updateLogVersion": "2026-09-19-0310-balance-remakes-v1"
+ },
+ "realWorkerJsSha256": "389343f3ea6876a2aedc9ba242e99aa70dd488b7a13bf65da038ddde083132d0",
+ "files": {
+  "pieces.jsonl": {
+   "sha256": "5d34321710623ec2a718ff6232a5afbabc15aae34faec71209557ff278ba25d8",
+   "bytes": 911410,
+   "fixtures": 45
+  },
+  "cards.jsonl": {
+   "sha256": "bd66ede8b4ec20e38f4d9fafc400c7743e53c827090dc9fc2897f8f936808532",
+   "bytes": 3208353,
+   "fixtures": 241
+  },
+  "playouts.jsonl": {
+   "sha256": "100e6df221de0c8d31d480f0d214930f791c8f0daf21ead215e026eac2d4fc75",
+   "bytes": 797564,
+   "fixtures": 29
+  },
+  "gameover.jsonl": {
+   "sha256": "d7db921a612433bcd2f94b2e151e830e60af4268b3f015100a4b86fba39ccef5",
+   "bytes": 544802,
+   "fixtures": 34
+  }
+ },
+ "fixturesBySource": {
+  "pieces.jsonl": {
+   "piece": 45
+  },
+  "cards.jsonl": {
+   "card": 241
+  },
+  "playouts.jsonl": {
+   "playout": 29
+  },
+  "gameover.jsonl": {
+   "gameover": 17,
+   "terminal": 17
+  }
+ },
+ "stats": {
+  "mathRandomCallsByWorker": 21,
+  "droppedLegalNondeterministic": 0,
+  "appliedTotal": 758,
+  "appliedOk": 721,
+  "appliedNotOk": 37,
+  "nondeterministicTotal": 0,
+  "gameoverStates": 17,
+  "appliedEndingGame": 66,
+  "positions": 349
+ },
+ "terminalWinners": {
+  "white": 8,
+  "black": 9,
+  "other": 0
+ },
+ "coverage": {
+  "pieceTypesInPool": 45,
+  "pieceTypesWithFixture": 45,
+  "pieceTypesWithApplied": 41,
+  "cardIdsInPool": 239,
+  "cardIdsInHand": 239,
+  "cardIdsWithLegalCardAction": 226,
+  "cardIdsWithAppliedDeterministic": 226,
+  "cardIdsWithAppliedNondeterministicOnly": 0,
+  "cardIdsNeverProducingCardAction": [
+   "canceling",
+   "checker",
+   "exile",
+   "guard",
+   "homecoming",
+   "icbm",
+   "joker",
+   "judgment",
+   "freeMove",
+   "queenCavalry",
+   "summonColossus",
+   "fleetingDream",
+   "replayMove"
+  ],
+  "cardIdsNeverApplied": [
+   "canceling",
+   "checker",
+   "exile",
+   "guard",
+   "homecoming",
+   "icbm",
+   "joker",
+   "judgment",
+   "freeMove",
+   "queenCavalry",
+   "summonColossus",
+   "fleetingDream",
+   "replayMove"
+  ],
+  "pieces": {
+   "pawn": {
+    "fixtures": 165,
+    "legalActionsFrom": 421,
+    "applied": 24
+   },
+   "knight": {
+    "fixtures": 151,
+    "legalActionsFrom": 607,
+    "applied": 35
+   },
+   "bishop": {
+    "fixtures": 160,
+    "legalActionsFrom": 543,
+    "applied": 18
+   },
+   "rook": {
+    "fixtures": 163,
+    "legalActionsFrom": 878,
+    "applied": 31
+   },
+   "queen": {
+    "fixtures": 159,
+    "legalActionsFrom": 1496,
+    "applied": 42
+   },
+   "king": {
+    "fixtures": 349,
+    "legalActionsFrom": 1967,
+    "applied": 82
+   },
+   "amazon": {
+    "fixtures": 33,
+    "legalActionsFrom": 382,
+    "applied": 15
+   },
+   "cardinal": {
+    "fixtures": 25,
+    "legalActionsFrom": 200,
+    "applied": 6
+   },
+   "pegasus": {
+    "fixtures": 24,
+    "legalActionsFrom": 662,
+    "applied": 11
+   },
+   "assassin": {
+    "fixtures": 21,
+    "legalActionsFrom": 94,
+    "applied": 6
+   },
+   "dragon": {
+    "fixtures": 40,
+    "legalActionsFrom": 189,
+    "applied": 6
+   },
+   "cannon": {
+    "fixtures": 43,
+    "legalActionsFrom": 90,
+    "applied": 8
+   },
+   "grasshopper": {
+    "fixtures": 23,
+    "legalActionsFrom": 29,
+    "applied": 3
+   },
+   "hook": {
+    "fixtures": 24,
+    "legalActionsFrom": 467,
+    "applied": 13
+   },
+   "herald": {
+    "fixtures": 38,
+    "legalActionsFrom": 154,
+    "applied": 14
+   },
+   "camel": {
+    "fixtures": 40,
+    "legalActionsFrom": 55,
+    "applied": 3
+   },
+   "alfil": {
+    "fixtures": 28,
+    "legalActionsFrom": 18,
+    "applied": 0
+   },
+   "ferz": {
+    "fixtures": 32,
+    "legalActionsFrom": 27,
+    "applied": 1
+   },
+   "eagle": {
+    "fixtures": 22,
+    "legalActionsFrom": 83,
+    "applied": 4
+   },
+   "berserker": {
+    "fixtures": 28,
+    "legalActionsFrom": 225,
+    "applied": 6
+   },
+   "magicGirl": {
+    "fixtures": 44,
+    "legalActionsFrom": 147,
+    "applied": 6
+   },
+   "windmill": {
+    "fixtures": 36,
+    "legalActionsFrom": 119,
+    "applied": 5
+   },
+   "trickster": {
+    "fixtures": 16,
+    "legalActionsFrom": 234,
+    "applied": 11
+   },
+   "merchant": {
+    "fixtures": 29,
+    "legalActionsFrom": 0,
+    "applied": 0
+   },
+   "knightmaster": {
+    "fixtures": 46,
+    "legalActionsFrom": 80,
+    "applied": 8
+   },
+   "standardBearer": {
+    "fixtures": 26,
+    "legalActionsFrom": 28,
+    "applied": 6
+   },
+   "idol": {
+    "fixtures": 33,
+    "legalActionsFrom": 256,
+    "applied": 10
+   },
+   "siren": {
+    "fixtures": 41,
+    "legalActionsFrom": 116,
+    "applied": 7
+   },
+   "reaper": {
+    "fixtures": 35,
+    "legalActionsFrom": 81,
+    "applied": 1
+   },
+   "recruiter": {
+    "fixtures": 28,
+    "legalActionsFrom": 73,
+    "applied": 5
+   },
+   "guard": {
+    "fixtures": 39,
+    "legalActionsFrom": 82,
+    "applied": 8
+   },
+   "colossus": {
+    "fixtures": 25,
+    "legalActionsFrom": 45,
+    "applied": 2
+   },
+   "bigRook": {
+    "fixtures": 32,
+    "legalActionsFrom": 39,
+    "applied": 1
+   },
+   "hedgehog": {
+    "fixtures": 30,
+    "legalActionsFrom": 81,
+    "applied": 9
+   },
+   "princess": {
+    "fixtures": 19,
+    "legalActionsFrom": 89,
+    "applied": 6
+   },
+   "campfire": {
+    "fixtures": 26,
+    "legalActionsFrom": 47,
+    "applied": 4
+   },
+   "paladin": {
+    "fixtures": 28,
+    "legalActionsFrom": 59,
+    "applied": 5
+   },
+   "octopus": {
+    "fixtures": 41,
+    "legalActionsFrom": 162,
+    "applied": 9
+   },
+   "clockwork": {
+    "fixtures": 32,
+    "legalActionsFrom": 38,
+    "applied": 2
+   },
+   "parrot": {
+    "fixtures": 27,
+    "legalActionsFrom": 1,
+    "applied": 0
+   },
+   "thief": {
+    "fixtures": 31,
+    "legalActionsFrom": 79,
+    "applied": 5
+   },
+   "brutus": {
+    "fixtures": 46,
+    "legalActionsFrom": 750,
+    "applied": 12
+   },
+   "checker": {
+    "fixtures": 37,
+    "legalActionsFrom": 21,
+    "applied": 3
+   },
+   "scarecrow": {
+    "fixtures": 28,
+    "legalActionsFrom": 0,
+    "applied": 0
+   },
+   "slime": {
+    "fixtures": 28,
+    "legalActionsFrom": 45,
+    "applied": 5
+   }
+  },
+  "cards": {
+   "acceleration": {
+    "inHand": 7,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "alekhineMachineGun": {
+    "inHand": 11,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "amazon": {
+    "inHand": 15,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "apprenticeKnights": {
+    "inHand": 12,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "armistice": {
+    "inHand": 16,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "assassin": {
+    "inHand": 12,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "babyBear": {
+    "inHand": 10,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "backwardKnight": {
+    "inHand": 6,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "barricade": {
+    "inHand": 9,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "basicTraining": {
+    "inHand": 7,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "bigRook": {
+    "inHand": 6,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "binaMate": {
+    "inHand": 16,
+    "positionsWithCardAction": 7,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "blackBox": {
+    "inHand": 13,
+    "positionsWithCardAction": 6,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "blackHole": {
+    "inHand": 6,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "blueJeans": {
+    "inHand": 12,
+    "positionsWithCardAction": 8,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "breakthroughOrder": {
+    "inHand": 7,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "callingCard": {
+    "inHand": 8,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "camouflageRule": {
+    "inHand": 8,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "canceling": {
+    "inHand": 15,
+    "positionsWithCardAction": 0,
+    "appliedDeterministic": 0,
+    "appliedNondeterministic": 0
+   },
+   "freeCastling": {
+    "inHand": 15,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "chain": {
+    "inHand": 17,
+    "positionsWithCardAction": 6,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "chameleonMutation": {
+    "inHand": 11,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "charge": {
+    "inHand": 12,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "checker": {
+    "inHand": 10,
+    "positionsWithCardAction": 0,
+    "appliedDeterministic": 0,
+    "appliedNondeterministic": 0
+   },
+   "chess344200": {
+    "inHand": 8,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "chess960": {
+    "inHand": 8,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "chimera": {
+    "inHand": 10,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "cleanupSacrifice": {
+    "inHand": 8,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "clonePassive": {
+    "inHand": 10,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "collapse": {
+    "inHand": 9,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "conscription": {
+    "inHand": 12,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "constitutionalMonarchy": {
+    "inHand": 11,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "conversion": {
+    "inHand": 10,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "conveyorRule": {
+    "inHand": 11,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "coolGuy": {
+    "inHand": 4,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "cornerKick": {
+    "inHand": 14,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "coronation": {
+    "inHand": 11,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "crownRule": {
+    "inHand": 7,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "deathSquad": {
+    "inHand": 11,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "democracy": {
+    "inHand": 10,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "desperado": {
+    "inHand": 9,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "diagonalChess": {
+    "inHand": 6,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "dice": {
+    "inHand": 10,
+    "positionsWithCardAction": 7,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "disarm": {
+    "inHand": 12,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "dragon": {
+    "inHand": 10,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "dutch": {
+    "inHand": 6,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "eagle": {
+    "inHand": 11,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "earlyPromotion": {
+    "inHand": 15,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "easternPolicy": {
+    "inHand": 14,
+    "positionsWithCardAction": 6,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "elephantEscape": {
+    "inHand": 6,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "emergencyEvacuation": {
+    "inHand": 7,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "enPassantBang": {
+    "inHand": 8,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "encouragement": {
+    "inHand": 6,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "evasion": {
+    "inHand": 12,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "exhaustion": {
+    "inHand": 4,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "exile": {
+    "inHand": 12,
+    "positionsWithCardAction": 0,
+    "appliedDeterministic": 0,
+    "appliedNondeterministic": 0
+   },
+   "fanaticalRitual": {
+    "inHand": 12,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "fastGrowth": {
+    "inHand": 10,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "feudalContract": {
+    "inHand": 18,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 3,
+    "appliedNondeterministic": 0
+   },
+   "fianchetto": {
+    "inHand": 12,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "fileSurge": {
+    "inHand": 8,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "finalWeapon": {
+    "inHand": 5,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "football": {
+    "inHand": 13,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "freeze": {
+    "inHand": 10,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "frenzy": {
+    "inHand": 13,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 3,
+    "appliedNondeterministic": 0
+   },
+   "gale": {
+    "inHand": 6,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "ghost": {
+    "inHand": 8,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "grasshopper": {
+    "inHand": 7,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "guard": {
+    "inHand": 15,
+    "positionsWithCardAction": 0,
+    "appliedDeterministic": 0,
+    "appliedNondeterministic": 0
+   },
+   "hallucination": {
+    "inHand": 18,
+    "positionsWithCardAction": 7,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "herald": {
+    "inHand": 17,
+    "positionsWithCardAction": 9,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "highGround": {
+    "inHand": 9,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "highway": {
+    "inHand": 11,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "holdout": {
+    "inHand": 6,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "homecoming": {
+    "inHand": 4,
+    "positionsWithCardAction": 0,
+    "appliedDeterministic": 0,
+    "appliedNondeterministic": 0
+   },
+   "hook": {
+    "inHand": 5,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "horde": {
+    "inHand": 9,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "horseRiding": {
+    "inHand": 12,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "icbm": {
+    "inHand": 7,
+    "positionsWithCardAction": 0,
+    "appliedDeterministic": 0,
+    "appliedNondeterministic": 0
+   },
+   "iceSheet": {
+    "inHand": 7,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "idol": {
+    "inHand": 9,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "imperialStudies": {
+    "inHand": 4,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "inertia": {
+    "inHand": 11,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "initiative": {
+    "inHand": 2,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "injury": {
+    "inHand": 4,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "insight": {
+    "inHand": 5,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "ironMonarch": {
+    "inHand": 7,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "jester": {
+    "inHand": 7,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "joker": {
+    "inHand": 13,
+    "positionsWithCardAction": 0,
+    "appliedDeterministic": 0,
+    "appliedNondeterministic": 0
+   },
+   "judgment": {
+    "inHand": 12,
+    "positionsWithCardAction": 0,
+    "appliedDeterministic": 0,
+    "appliedNondeterministic": 0
+   },
+   "knightmaster": {
+    "inHand": 5,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "knightmate": {
+    "inHand": 12,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "lastResistance": {
+    "inHand": 11,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "lastStand": {
+    "inHand": 9,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "pawnLeap": {
+    "inHand": 9,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "lobster": {
+    "inHand": 13,
+    "positionsWithCardAction": 7,
+    "appliedDeterministic": 6,
+    "appliedNondeterministic": 0
+   },
+   "localConscription": {
+    "inHand": 10,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "log": {
+    "inHand": 8,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "londonSystem": {
+    "inHand": 5,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "machoChess": {
+    "inHand": 12,
+    "positionsWithCardAction": 6,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "madHorse": {
+    "inHand": 11,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "martyrdom": {
+    "inHand": 9,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "merchantGuild": {
+    "inHand": 8,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "missionary": {
+    "inHand": 7,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "mistake": {
+    "inHand": 6,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "mistakeCard": {
+    "inHand": 22,
+    "positionsWithCardAction": 7,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "mongolianGambit": {
+    "inHand": 8,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 3,
+    "appliedNondeterministic": 0
+   },
+   "monochromeChess": {
+    "inHand": 11,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "monsterRule": {
+    "inHand": 10,
+    "positionsWithCardAction": 6,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "moving": {
+    "inHand": 9,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 3,
+    "appliedNondeterministic": 0
+   },
+   "necromancy": {
+    "inHand": 4,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "ordination": {
+    "inHand": 7,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "othello": {
+    "inHand": 9,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "otherworld": {
+    "inHand": 9,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "overwhelm": {
+    "inHand": 6,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "palace": {
+    "inHand": 12,
+    "positionsWithCardAction": 6,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "panic": {
+    "inHand": 6,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "pawnConversion": {
+    "inHand": 10,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "pawnStorm": {
+    "inHand": 9,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "pegasus": {
+    "inHand": 13,
+    "positionsWithCardAction": 9,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "periodicCollapse": {
+    "inHand": 8,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "poisonedPawn": {
+    "inHand": 11,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "portal": {
+    "inHand": 8,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "portalGun": {
+    "inHand": 5,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "freeMove": {
+    "inHand": 9,
+    "positionsWithCardAction": 0,
+    "appliedDeterministic": 0,
+    "appliedNondeterministic": 0
+   },
+   "promotionRush": {
+    "inHand": 11,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "prophecy": {
+    "inHand": 11,
+    "positionsWithCardAction": 6,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "quantumMechanics": {
+    "inHand": 13,
+    "positionsWithCardAction": 7,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "queenAfterimage": {
+    "inHand": 12,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "queenCavalry": {
+    "inHand": 13,
+    "positionsWithCardAction": 0,
+    "appliedDeterministic": 0,
+    "appliedNondeterministic": 0
+   },
+   "queensGambit": {
+    "inHand": 9,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "qxe1": {
+    "inHand": 8,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "racingKing": {
+    "inHand": 9,
+    "positionsWithCardAction": 6,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "radicalCharge": {
+    "inHand": 13,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "randomRoulette": {
+    "inHand": 10,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "reaper": {
+    "inHand": 7,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "recycling": {
+    "inHand": 9,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "reformation": {
+    "inHand": 14,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "religiousVictory": {
+    "inHand": 16,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "reposition": {
+    "inHand": 16,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "retreat": {
+    "inHand": 13,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "revelation": {
+    "inHand": 13,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "reversePawns": {
+    "inHand": 18,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "rookLift": {
+    "inHand": 15,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "royalCommand": {
+    "inHand": 6,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "royalShield": {
+    "inHand": 9,
+    "positionsWithCardAction": 6,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "ruleBombs": {
+    "inHand": 9,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "ruleTicket": {
+    "inHand": 21,
+    "positionsWithCardAction": 8,
+    "appliedDeterministic": 4,
+    "appliedNondeterministic": 0
+   },
+   "sacrifice": {
+    "inHand": 6,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "saturation": {
+    "inHand": 6,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "scarecrow": {
+    "inHand": 12,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "schrodingerPawns": {
+    "inHand": 10,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "severance": {
+    "inHand": 7,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "bishopSnipe": {
+    "inHand": 6,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "socialism": {
+    "inHand": 9,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "pawnSprint": {
+    "inHand": 8,
+    "positionsWithCardAction": 6,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "spy": {
+    "inHand": 9,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "stake": {
+    "inHand": 6,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "standardBearer": {
+    "inHand": 7,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "stealth": {
+    "inHand": 11,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "submerge": {
+    "inHand": 16,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "substitution": {
+    "inHand": 11,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "suicideBomber": {
+    "inHand": 16,
+    "positionsWithCardAction": 6,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "summonColossus": {
+    "inHand": 5,
+    "positionsWithCardAction": 0,
+    "appliedDeterministic": 0,
+    "appliedNondeterministic": 0
+   },
+   "switcheroo": {
+    "inHand": 9,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "taunt": {
+    "inHand": 3,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "traitor": {
+    "inHand": 14,
+    "positionsWithCardAction": 8,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "transcendence": {
+    "inHand": 14,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "trojanHorse": {
+    "inHand": 12,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "trolley": {
+    "inHand": 9,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "twins": {
+    "inHand": 2,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "ultimatum": {
+    "inHand": 18,
+    "positionsWithCardAction": 6,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "undergroundBunker": {
+    "inHand": 6,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "underpromotion": {
+    "inHand": 9,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "vanish": {
+    "inHand": 9,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "vip": {
+    "inHand": 8,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "vortex": {
+    "inHand": 10,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "whiteBox": {
+    "inHand": 9,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "windmill": {
+    "inHand": 11,
+    "positionsWithCardAction": 7,
+    "appliedDeterministic": 3,
+    "appliedNondeterministic": 0
+   },
+   "winterKingdom": {
+    "inHand": 16,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "witchTrial": {
+    "inHand": 11,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 3,
+    "appliedNondeterministic": 0
+   },
+   "wizard": {
+    "inHand": 8,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 3,
+    "appliedNondeterministic": 0
+   },
+   "zugzwang": {
+    "inHand": 8,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "kingOfTheHill": {
+    "inHand": 7,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "loyalist": {
+    "inHand": 4,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "blackMagic": {
+    "inHand": 9,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "parry": {
+    "inHand": 8,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 3,
+    "appliedNondeterministic": 0
+   },
+   "fleetingDream": {
+    "inHand": 14,
+    "positionsWithCardAction": 0,
+    "appliedDeterministic": 0,
+    "appliedNondeterministic": 0
+   },
+   "emptyLunchbox": {
+    "inHand": 6,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "genevaConvention": {
+    "inHand": 10,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "platformRule": {
+    "inHand": 7,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "cleanupPieces": {
+    "inHand": 12,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "relay": {
+    "inHand": 17,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "fieldPromotion": {
+    "inHand": 5,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "frontlineResponse": {
+    "inHand": 8,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "hypocrisy": {
+    "inHand": 9,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "siegeRam": {
+    "inHand": 7,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "suspiciousPotion": {
+    "inHand": 7,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "berserker": {
+    "inHand": 17,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "magicGirl": {
+    "inHand": 11,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "replayMove": {
+    "inHand": 8,
+    "positionsWithCardAction": 0,
+    "appliedDeterministic": 0,
+    "appliedNondeterministic": 0
+   },
+   "slime": {
+    "inHand": 8,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "siren": {
+    "inHand": 9,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "trickster": {
+    "inHand": 8,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "gomoku": {
+    "inHand": 6,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "undead": {
+    "inHand": 8,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "majesty": {
+    "inHand": 15,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "infiltration": {
+    "inHand": 9,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "killerKing": {
+    "inHand": 6,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "campfire": {
+    "inHand": 5,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "outpost": {
+    "inHand": 17,
+    "positionsWithCardAction": 6,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "hedgehog": {
+    "inHand": 8,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "nullification": {
+    "inHand": 8,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "recurrence": {
+    "inHand": 11,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "princess": {
+    "inHand": 13,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "resolve": {
+    "inHand": 7,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "vanguard": {
+    "inHand": 13,
+    "positionsWithCardAction": 7,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "reversal": {
+    "inHand": 7,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "miracle": {
+    "inHand": 5,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "bigBishop": {
+    "inHand": 7,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "overtake": {
+    "inHand": 13,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "captureTheFlag": {
+    "inHand": 8,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "highlander": {
+    "inHand": 5,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "thief": {
+    "inHand": 7,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "disassembly": {
+    "inHand": 13,
+    "positionsWithCardAction": 8,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "falseStart": {
+    "inHand": 8,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "proficiency": {
+    "inHand": 11,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "locustSwarm": {
+    "inHand": 9,
+    "positionsWithCardAction": 5,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "longEnPassant": {
+    "inHand": 14,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "extinction": {
+    "inHand": 14,
+    "positionsWithCardAction": 6,
+    "appliedDeterministic": 2,
+    "appliedNondeterministic": 0
+   },
+   "symmetry": {
+    "inHand": 7,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "brutus": {
+    "inHand": 18,
+    "positionsWithCardAction": 7,
+    "appliedDeterministic": 5,
+    "appliedNondeterministic": 0
+   },
+   "clockwork": {
+    "inHand": 9,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "mutation": {
+    "inHand": 13,
+    "positionsWithCardAction": 8,
+    "appliedDeterministic": 3,
+    "appliedNondeterministic": 0
+   },
+   "parrot": {
+    "inHand": 8,
+    "positionsWithCardAction": 3,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "paladin": {
+    "inHand": 3,
+    "positionsWithCardAction": 1,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "octopus": {
+    "inHand": 7,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "metal": {
+    "inHand": 10,
+    "positionsWithCardAction": 4,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   },
+   "chessNPow30": {
+    "inHand": 4,
+    "positionsWithCardAction": 2,
+    "appliedDeterministic": 1,
+    "appliedNondeterministic": 0
+   }
+  }
+ }
+}
