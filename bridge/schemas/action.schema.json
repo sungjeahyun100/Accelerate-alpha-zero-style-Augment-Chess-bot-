@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "action.schema.json",
+  "title": "Action (DRAFT bridge-draft-0)",
+  "description": "DRAFT. A player action: a union keyed by `type`. `move` and `card` are the only kinds that appear in the site-reference-v1 fixtures (11,259 move and 1,203 card action listings). promotion / shotgunReload / wizardSpell / fileSurgeSkip come from docs/GAME-RULES.md and infra/engine-merged.js and were NOT seen in the fixtures, so their fields are unverified against the site.",
+  "$ref": "#/$defs/Action",
+  "$defs": {
+    "Move": {
+      "type": "object",
+      "required": ["type", "color", "from", "move"],
+      "properties": {
+        "type": { "const": "move" },
+        "color": { "$ref": "common.schema.json#/$defs/Color" },
+        "from": { "$ref": "common.schema.json#/$defs/Coord" },
+        "move": {
+          "description": "Destination plus optional per-move flags. Observed extras: bent, tricksterMove, sirenMove, dragonSwap, standardPawnDoubleStep, bigRookMove, colossusMove, slimeMove, jumpCapture, checkerCapture, highlightCells, and more. They change what the move does, so they are part of the action identity and must be sent back unchanged.",
+          "type": "object",
+          "required": ["row", "col"],
+          "properties": {
+            "row": { "type": "integer", "minimum": 0 },
+            "col": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "Card": {
+      "type": "object",
+      "required": ["type", "color", "cardId", "cardInstanceId"],
+      "properties": {
+        "type": { "const": "card" },
+        "color": { "$ref": "common.schema.json#/$defs/Color" },
+        "cardId": { "type": "string", "minLength": 1 },
+        "cardInstanceId": { "type": "string", "minLength": 1 },
+        "target": { "$ref": "#/$defs/CardTarget" }
+      },
+      "additionalProperties": false
+    },
+    "CardTarget": {
+      "description": "Absent or null when the card needs no target. Observed shapes: {row,col}; {row,col,knight:{row,col}} (amazon); {selections:[{row,col},...]} (cleanupPieces); {ruleId} (ruleTicket). Kept open (any object) because card-specific shapes are not fully enumerated.",
+      "oneOf": [{ "type": "null" }, { "type": "object" }]
+    },
+    "Promotion": {
+      "type": "object",
+      "required": ["type", "color", "from"],
+      "properties": {
+        "type": { "const": "promotion" },
+        "color": { "$ref": "common.schema.json#/$defs/Color" },
+        "from": { "$ref": "common.schema.json#/$defs/Coord" }
+      },
+      "additionalProperties": true
+    },
+    "ShotgunReload": {
+      "type": "object",
+      "required": ["type", "color", "from"],
+      "properties": {
+        "type": { "const": "shotgunReload" },
+        "color": { "$ref": "common.schema.json#/$defs/Color" },
+        "from": { "$ref": "common.schema.json#/$defs/Coord" }
+      },
+      "additionalProperties": true
+    },
+    "WizardSpell": {
+      "type": "object",
+      "required": ["type", "color", "from", "spellId"],
+      "properties": {
+        "type": { "const": "wizardSpell" },
+        "color": { "$ref": "common.schema.json#/$defs/Color" },
+        "from": { "$ref": "common.schema.json#/$defs/Coord" },
+        "spellId": { "type": "string" },
+        "target": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/Coord" }] }
+      },
+      "additionalProperties": true
+    },
+    "FileSurgeSkip": {
+      "type": "object",
+      "required": ["type", "color", "from"],
+      "properties": {
+        "type": { "const": "fileSurgeSkip" },
+        "color": { "$ref": "common.schema.json#/$defs/Color" },
+        "from": { "$ref": "common.schema.json#/$defs/Coord" }
+      },
+      "additionalProperties": true
+    },
+    "Action": {
+      "oneOf": [
+        { "$ref": "#/$defs/Move" },
+        { "$ref": "#/$defs/Card" },
+        { "$ref": "#/$defs/Promotion" },
+        { "$ref": "#/$defs/ShotgunReload" },
+        { "$ref": "#/$defs/WizardSpell" },
+        { "$ref": "#/$defs/FileSurgeSkip" }
+      ]
+    },
+    "ActionList": { "type": "array", "items": { "$ref": "#/$defs/Action" } }
+  }
+}

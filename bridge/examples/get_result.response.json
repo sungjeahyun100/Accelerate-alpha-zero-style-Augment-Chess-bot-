@@ -1,0 +1,9 @@
+{
+  "protocol": "bridge-draft-0",
+  "type": "get_result_response",
+  "id": 7,
+  "ok": true,
+  "terminal": true,
+  "mode": "gameover",
+  "winner": "white"
+}

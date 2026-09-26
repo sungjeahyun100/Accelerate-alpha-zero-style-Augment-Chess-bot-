@@ -1,0 +1,1 @@
+{ "protocol": "bridge-draft-0", "type": "error", "id": 1, "ok": false, "error": { "code": "oops", "message": "x" } }

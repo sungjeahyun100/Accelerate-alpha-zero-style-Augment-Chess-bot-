@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "encoded.schema.json",
+  "title": "EncodedState extension point (DRAFT bridge-draft-0)",
+  "description": "DRAFT, OPTIONAL. Placeholder for O-001 (encoding in Rust or Python is undecided). If the team picks Rust encoding, an engine may attach this next to `state` in responses. If Python encodes, it is never sent. The sparse index+value shape follows the suggestion in docs/ENCODING-EVIDENCE.md but is only an example, not a decision; `format` names whatever encoder version is in use.",
+  "type": "object",
+  "required": ["format", "size", "indices", "values"],
+  "properties": {
+    "format": { "type": "string", "minLength": 1, "description": "Encoder name and version, e.g. sparse-v0. Its meaning is defined by the encoder, not by the bridge." },
+    "size": { "type": "integer", "minimum": 1, "description": "Length of the dense vector this sparse form stands for." },
+    "indices": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+    "values": { "type": "array", "items": { "type": "number" } }
+  },
+  "additionalProperties": false
+}

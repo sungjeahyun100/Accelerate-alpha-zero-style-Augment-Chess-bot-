@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "game-state.schema.json",
+  "title": "GameState (DRAFT bridge-draft-0)",
+  "description": "DRAFT. Normalized game state sent every turn (D-003: board, card/slot state, other game info). The site worker's internal state has 156 top-level keys across the fixtures; this schema promotes a small core to named fields and carries EVERY other site key untouched in `extra`, so nothing is lost and the mapping is reversible (site state = extra + core fields, with winner null <-> empty string). Which `extra` keys a Rust engine must really model is an open question.",
+  "type": "object",
+  "required": ["turn", "mode", "winner", "actionsRemaining", "board", "deckSlots"],
+  "properties": {
+    "turn": { "$ref": "common.schema.json#/$defs/Color", "description": "Side to move." },
+    "mode": { "type": "string", "minLength": 1, "description": "Observed: \"play\" and \"gameover\". Other site modes were not in the fixtures, so this is not an enum." },
+    "winner": { "$ref": "common.schema.json#/$defs/Winner" },
+    "actionsRemaining": { "type": "integer", "minimum": 0, "description": "Actions left in the current turn (free moves, extra moves). It is 1 in every fixture, so its real behaviour is unverified." },
+    "moveCount": { "type": "integer", "minimum": 0 },
+    "fullMove": { "type": "integer", "minimum": 0 },
+    "turnsTaken": { "$ref": "common.schema.json#/$defs/PerColor" },
+    "cardsUsedThisTurn": { "$ref": "common.schema.json#/$defs/PerColor" },
+    "board": {
+      "description": "8x8, board[row][col], null = empty. All 349 fixtures were 8x8.",
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": { "type": "array", "minItems": 8, "maxItems": 8, "items": { "$ref": "common.schema.json#/$defs/Cell" } }
+    },
+    "deckSlots": {
+      "type": "object",
+      "required": ["white", "black"],
+      "properties": {
+        "white": { "type": "array", "items": { "$ref": "#/$defs/CardSlot" } },
+        "black": { "type": "array", "items": { "$ref": "#/$defs/CardSlot" } }
+      },
+      "additionalProperties": false
+    },
+    "captures": {
+      "description": "Captured pieces per side. Which side the key refers to (captor or victim) was not checked; verify before relying on it.",
+      "type": "object",
+      "required": ["white", "black"],
+      "properties": {
+        "white": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/Piece" } },
+        "black": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/Piece" } }
+      },
+      "additionalProperties": false
+    },
+    "enPassant": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["row", "col", "capturedRow", "capturedCol", "color"],
+          "properties": {
+            "row": { "type": "integer" },
+            "col": { "type": "integer" },
+            "capturedRow": { "type": "integer" },
+            "capturedCol": { "type": "integer" },
+            "color": { "$ref": "common.schema.json#/$defs/Color" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "extra": {
+      "description": "All remaining site state keys, verbatim (rule flags, pending effects, per-card bookkeeping, recentMoves, ...). Opaque to the bridge.",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "CardSlot": {
+      "description": "A card in a side's deck slots. instanceId is unique per copy. `used` and `recovering` decide whether it can be played. Extra keys are allowed.",
+      "type": "object",
+      "required": ["id", "instanceId", "effect", "used"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "instanceId": { "type": "string", "minLength": 1 },
+        "effect": { "type": "string", "minLength": 1 },
+        "stars": { "type": "integer", "minimum": 0 },
+        "used": { "type": "boolean" },
+        "recovering": { "type": "boolean", "description": "Missing on one card (submerge) in the fixtures, so optional." }
+      },
+      "additionalProperties": true
+    }
+  }
+}

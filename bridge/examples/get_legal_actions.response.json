@@ -1,0 +1,62 @@
+{
+  "protocol": "bridge-draft-0",
+  "type": "get_legal_actions_response",
+  "id": 2,
+  "ok": true,
+  "actions": [
+    {"type":"card","color":"white","cardId":"hallucination","cardInstanceId":"white-hallucination-2"},
+    {"type":"move","color":"white","from":{"row":5,"col":0},"move":{"row":4,"col":0,"sirenMove":true}},
+    {"type":"move","color":"white","from":{"row":5,"col":0},"move":{"row":4,"col":1,"sirenMove":true}},
+    {"type":"move","color":"white","from":{"row":5,"col":0},"move":{"row":5,"col":1,"sirenMove":true}},
+    {"type":"move","color":"white","from":{"row":5,"col":2},"move":{"row":3,"col":1}},
+    {"type":"move","color":"white","from":{"row":5,"col":2},"move":{"row":3,"col":3}},
+    {"type":"move","color":"white","from":{"row":5,"col":2},"move":{"row":4,"col":0}},
+    {"type":"move","color":"white","from":{"row":5,"col":2},"move":{"row":4,"col":4}},
+    {"type":"move","color":"white","from":{"row":5,"col":2},"move":{"row":7,"col":1}},
+    {
+      "type": "move",
+      "color": "white",
+      "from": {"row":6,"col":1},
+      "move": {"row":4,"col":1,"standardPawnDoubleStep":true}
+    },
+    {"type":"move","color":"white","from":{"row":6,"col":1},"move":{"row":5,"col":1}},
+    {
+      "type": "move",
+      "color": "white",
+      "from": {"row":6,"col":3},
+      "move": {"row":4,"col":3,"standardPawnDoubleStep":true}
+    },
+    {"type":"move","color":"white","from":{"row":6,"col":3},"move":{"row":5,"col":3}},
+    {
+      "type": "move",
+      "color": "white",
+      "from": {"row":6,"col":4},
+      "move": {"row":4,"col":4,"standardPawnDoubleStep":true}
+    },
+    {"type":"move","color":"white","from":{"row":6,"col":4},"move":{"row":5,"col":4}},
+    {
+      "type": "move",
+      "color": "white",
+      "from": {"row":6,"col":5},
+      "move": {"row":4,"col":5,"standardPawnDoubleStep":true}
+    },
+    {"type":"move","color":"white","from":{"row":6,"col":5},"move":{"row":5,"col":5}},
+    {
+      "type": "move",
+      "color": "white",
+      "from": {"row":6,"col":6},
+      "move": {"row":4,"col":6,"standardPawnDoubleStep":true}
+    },
+    {"type":"move","color":"white","from":{"row":6,"col":6},"move":{"row":5,"col":6}},
+    {
+      "type": "move",
+      "color": "white",
+      "from": {"row":6,"col":7},
+      "move": {"row":4,"col":7,"standardPawnDoubleStep":true}
+    },
+    {"type":"move","color":"white","from":{"row":6,"col":7},"move":{"row":5,"col":7}},
+    {"type":"move","color":"white","from":{"row":7,"col":0},"move":{"row":7,"col":1}},
+    {"type":"move","color":"white","from":{"row":7,"col":6},"move":{"row":5,"col":5}},
+    {"type":"move","color":"white","from":{"row":7,"col":6},"move":{"row":5,"col":7}}
+  ]
+}

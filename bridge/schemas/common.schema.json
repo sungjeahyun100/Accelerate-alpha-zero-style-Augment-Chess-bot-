@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "common.schema.json",
+  "title": "Common definitions (DRAFT bridge-draft-0)",
+  "description": "DRAFT. Shared building blocks. Shapes were read off the site-reference-v1 fixtures (PR #19); anything not observed there is marked in bridge/protocol/open-questions.md.",
+  "$defs": {
+    "Color": { "enum": ["white", "black"] },
+    "Coord": {
+      "description": "Board cell, used as board[row][col]. Observed: row 0 is black's back rank, white pawns start on row 6.",
+      "type": "object",
+      "required": ["row", "col"],
+      "properties": {
+        "row": { "type": "integer", "minimum": 0 },
+        "col": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "PerColor": {
+      "description": "An integer kept per side, e.g. turnsTaken.",
+      "type": "object",
+      "required": ["white", "black"],
+      "properties": {
+        "white": { "type": "integer", "minimum": 0 },
+        "black": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "Piece": {
+      "description": "A piece on the board. type/color/moved were present on every piece in all 349 fixtures. Many other per-piece flags exist (hp, maxHp, shielded, frozen, mana, ...); a few are listed as optional known fields and any other key is allowed and must be passed through untouched (additionalProperties: true) until the team fixes the full list.",
+      "type": "object",
+      "required": ["type", "color", "moved"],
+      "properties": {
+        "type": { "type": "string", "minLength": 1, "description": "Piece kind, e.g. pawn, king, amazon. 50 different kinds were seen in the fixtures; deliberately not enumerated here." },
+        "color": { "$ref": "#/$defs/Color" },
+        "moved": { "type": "boolean" },
+        "id": { "type": "string" },
+        "shielded": { "type": "boolean" },
+        "frozen": { "type": "boolean" },
+        "hp": { "type": "integer" },
+        "maxHp": { "type": "integer" },
+        "mana": { "type": "integer" },
+        "maxMana": { "type": "integer" },
+        "capturesMade": { "type": "integer" },
+        "totalCaptures": { "type": "integer" },
+        "freshNoCaptureUntil": { "type": "integer" }
+      },
+      "additionalProperties": true
+    },
+    "Cell": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/Piece" }] },
+    "Winner": {
+      "description": "null = not decided yet. \"draw\" comes from docs/GAME-RULES.md (some card effects end the game in a draw); it was not observed in the fixtures.",
+      "oneOf": [{ "type": "null" }, { "enum": ["white", "black", "draw"] }]
+    }
+  }
+}
