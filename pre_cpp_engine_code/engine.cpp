@@ -30,6 +30,7 @@
 #include <functional>
 #include <unordered_map>
 #include <cstdlib>
+#include <cassert>
 
 enum class colorType{
     WHITE,
@@ -130,16 +131,9 @@ enum class moveType{
  *    - std::nullopt이면 위치에 상관없이 활성화된다.
  *
  * 5. next
- *    - 현재 moveChunk가 성공적으로 적용된 이후 이어서 해석할
- *      후속 moveChunk들을 저장한다.
- *
- *    예:
- *
- *      A.then(B)
- *
- *      A -> B
- *
- *    이 경우 B의 시작 위치는 A가 성공한 결과 위치가 된다.
+ *    - 이 chunk(부모)가 어떤 칸을 유효하게 활성화했을 때, 그 칸을 기준으로 이어서 해석할
+ *      자식 moveChunk들을 저장한다. Chessembly의 { } 블록처럼 부모-자식 관계를 가진
+ *      "활성화 트리"다. (하나의 완성된 chain을 만드는 구조가 아니다.)
  *
  *    예:
  *
@@ -147,29 +141,36 @@ enum class moveType{
  *      root.next.push_back(A);
  *      root.next.push_back(B);
  *
- *    는 다음과 같은 분기 구조를 의미한다.
+ *    는 다음과 같은 트리를 의미한다. A와 B는 서로 독립인 자식이다.
  *
  *          root
  *         /    \
  *        A      B
  *
- * 6. 연쇄 행마의 해석
+ *    Chessembly로는:
+ *      do take-move(0,1) { take-move(1,0) repeat(1) } { take-move(-1,0) repeat(1) } while;
+ *      = 바깥이 root, 각 { ... }가 A, B.
  *
- *    예:
+ * 6. 활성화 트리의 해석 (구현: walkChunk, 자세한 규칙은 구현부의 [moveChunk 활성화 트리] 주석)
  *
- *      TAKE_MOVE {0, 1}
- *          ->
- *      CATCH {1, 0}
+ *    - originalOrigin: 기물의 원래 위치. 모든 moveAction의 start이며 트리 전체에서 고정이다.
+ *    - currentOrigin: 지금 노드를 해석하는 기준점. 루트는 originalOrigin, 자식은 부모가
+ *      활성화한 칸이다.
+ *    - 노드가 칸을 유효하게 활성화하는 순간 originalOrigin -> 그 칸의 moveAction을 바로
+ *      추가하고, 그 칸을 currentOrigin으로 자식들을 각각 해석한다.
+ *    - 부모가 활성화에 실패하거나 종료되면 자식은 해석하지 않는다. 자식이 실패해도 부모의
+ *      action은 남는다. 형제끼리는 서로 영향을 주지 않으며 repeat 거리/ray 상태를 공유하지
+ *      않는다.
+ *    - 중간 칸에서 포획이 일어나도 그 노드는 성공한 것이고, 자식은 그 칸을 기준으로 계속
+ *      해석된다. 중간 action은 GameState에 적용하지 않는다(기준 좌표로만 쓴다).
  *
- *    시작 위치가 {3, 2}라면:
+ *    예: TAKEMOVE {0, 1} -> (자식) CATCH {1, 0}, 시작 위치가 {3, 2}이고 {3, 3}은 비어 있고
+ *    {4, 3}에 적이 있다면:
  *
- *      첫 번째 chunk:
- *          {3, 2} -> {3, 3}
+ *      {3, 2} -> {3, 3}  (TAKEMOVE, 부모가 활성화한 칸)
+ *      {3, 2} -> {4, 3}  (CATCH, 자식이 {3, 3}을 기준으로 활성화한 칸. start는 여전히 {3, 2})
  *
- *      두 번째 chunk:
- *          {3, 3} -> {4, 3}
- *
- *    즉 next의 direction은 항상 직전 chunk의 성공 위치를 기준으로 적용한다.
+ *    두 개가 각각 독립적인 moveAction이다.
  *
  * 7. moveAction 생성
  *
@@ -588,9 +589,11 @@ struct Piece {
     PieceVolume Pv;
 
     int HP = 1;
-    bool isKing = false;
+    // 승패 판정에 쓰이는 왕족 속성 (필드는 이것 하나뿐이다).
     // 킹 외에도 승패를 가르는 왕족 표식 기물(royalKnight, vip, crownRoyal 등)이 있다.
-    // docs/GAME-RULES.md §3 참고. 왕족 여부는 isRoyalPiece()로 판정한다.
+    // docs/GAME-RULES.md §3 참고.
+    // "이 기물이 KING 종류인가"는 이 필드가 아니라 pT == pieceType::KING으로 판단한다.
+    // 아래 생성자들은 pT가 KING이면 isRoyal을 true로 설정한다. (기본 킹 = 왕족)
     bool isRoyal = false;
     int moveCount = 0;
 
@@ -598,10 +601,6 @@ struct Piece {
     //얘는 그냥 직접 접근하게 둘까??? 차피 public이고
 
     PieceStatusFlags status; // frozen, shielded 등. 지금은 그릇만 (PieceStatusFlags 주석 참고)
-
-    bool isRoyalPiece() const {
-        return isKing || isRoyal;
-    }
 
     // 기본 생성자
     Piece() = default;
@@ -614,7 +613,8 @@ struct Piece {
     )
         : cT(color),
           pT(type),
-          Pv(volume)
+          Pv(volume),
+          isRoyal(type == pieceType::KING)
     {}
 
     // 프로모션 풀까지 지정
@@ -627,7 +627,8 @@ struct Piece {
         : cT(color),
           pT(type),
           promotion_pool(std::move(promotionPool)),
-          Pv(volume)
+          Pv(volume),
+          isRoyal(type == pieceType::KING)
     {}
 
     // 전체 설정용 생성자
@@ -638,7 +639,7 @@ struct Piece {
         std::vector<pieceType> promotionPool,
         std::vector<moveChunk> additionalMoves,
         int hp = 1,
-        bool king = false,
+        std::optional<bool> royal = std::nullopt, // nullopt이면 pT == KING 여부를 따른다
         int moveCnt = 0
     )
         : cT(color),
@@ -647,7 +648,7 @@ struct Piece {
           additional_mC(std::move(additionalMoves)),
           Pv(volume),
           HP(hp),
-          isKing(king),
+          isRoyal(royal.value_or(type == pieceType::KING)),
           moveCount(moveCnt)
     {}
 
@@ -756,6 +757,7 @@ using CardEffectFn = std::function<void(AugmentChessGameState&, const cardAction
  * 카드는 수백 장이고 각 효과가 보드/턴/제약을 서로 다르게 건드린다.
  * 효과 목록을 이 파일에서 다 정의하는 것은 범위 밖이므로, 여기에는 "카드 id로 효과 함수를
  * 찾아 호출하는 통로"만 둔다. 실제 효과는 나중에 registerCardEffect()로 하나씩 추가한다.
+ * (추가 절차는 registerCardEffect 바로 아래 [임의의 카드를 추가하는 절차] 참고)
  * (docs/GAME-RULES.md §5, §9: 카드 효과는 추측으로 추가하지 말고 oracle과 대조해 채운다.)
  */
 inline std::unordered_map<std::string, CardEffectFn>& cardEffectRegistry()
@@ -767,6 +769,40 @@ inline std::unordered_map<std::string, CardEffectFn>& cardEffectRegistry()
 inline void registerCardEffect(const std::string& cardId, CardEffectFn effect)
 {
     cardEffectRegistry()[cardId] = std::move(effect);
+}
+
+/**
+ * [임의의 카드를 추가하는 절차] (카드 하나당 아래 5단계. 짧게 순서대로 한다.)
+ *
+ * 1. 효과를 확인한다. cardId(카드 데이터/oracle의 id 문자열)와 정확한 효과를 oracle에서
+ *    읽는다. 추측해서 쓰지 않는다. (docs/GAME-RULES.md §5, §9)
+ *
+ * 2. 효과 함수를 만들어 등록한다. 시그니처는 CardEffectFn:
+ *        void effectXxx(AugmentChessGameState& state, const cardAction& action)
+ *    등록은 registerAllCardEffects() 안에 한 줄씩 추가한다:
+ *        registerCardEffect("xxx", effectXxx);
+ *    효과 함수는 AugmentChessGameState의 public 함수(addPiece, addConstraint, setTurn 등)만
+ *    쓴다. 필요한 변경에 맞는 public 함수가 없으면 필드를 public으로 열지 말고 그 함수를
+ *    새로 추가한다.
+ *
+ * 3. 사용 조건을 넣는다. "이 카드를 지금 쓸 수 있는가"(phase, 상태 이상 등)는 효과 함수가 아니라
+ *    validateExternalAction(const cardAction&)에서 확인한다. apply_action은 검증된
+ *    카드만 받는 내부용 경로이기 때문이다. 기본 조건(현재 턴 플레이어, 패에 있고 안 쓴 카드,
+ *    효과가 등록됨)은 이미 들어 있다.
+ *
+ * 4. 턴 소비 여부(isTurnUsed)를 정한다. 효과 함수가 아니라 cardAction을 만드는 쪽이 정한다.
+ *    docs §2, §5: 카드 사용은 보통 턴을 넘기지 않는 무료 행동이라 false, 행동 횟수를 쓰는
+ *    카드만 true. cardAction의 기본값이 true이므로 무료 카드는 false를 명시해야 한다.
+ *    apply_action은 이 값을 그대로 따른다. used 표시는 apply_action이 대신 해 준다.
+ *
+ * 5. 테스트를 추가한다. main()의 "Phase D: apply_action(cardAction)" 검사를 본떠서:
+ *    카드를 패에 넣고 -> 효과를 등록하고 -> validateExternalAction이 true인지 확인하고 ->
+ *    apply_action으로 적용한 뒤 (효과가 바꿔야 하는 상태, isCardUsed, 턴/actionsRemaining)을
+ *    check()로 확인한다.
+ */
+inline void registerAllCardEffects()
+{
+    // 여기에 카드 효과를 registerCardEffect("cardId", 효과 함수)로 한 줄씩 추가한다. (아직 없음)
 }
 
 template <typename T>
@@ -782,7 +818,7 @@ bool hasConstraint(const Piece& piece)
 }
 
 // ============================================================================
-// 종료 판정 / 연쇄 행마 / 앙파상 보조 타입
+// 종료 판정 / 활성화 트리 보조 함수 / 앙파상 보조 타입
 // ============================================================================
 
 // 게임 결과. docs/GAME-RULES.md §3: 승패는 체크메이트가 아니라 왕족 기물의 실제 제거로 갈린다.
@@ -793,19 +829,6 @@ enum class GameResult {
     DRAW // 양쪽 왕족이 동시에 사라진 경우 (§3)
 };
 
-// moveChunk 하나를 특정 origin에서 해석했을 때 나오는 유효 step 한 건.
-struct ChunkStep {
-    Coord destination;
-    moveType type;  // 실제로 적용된 moveType
-    bool captures;  // 목적지의 기물을 제거하는 step인가
-};
-
-// moveChunk.next를 끝까지 따라간 완결 경로 하나. steps.front()가 root chunk의 step이고
-// steps.back()이 마지막 chunk의 step(= 최종 목적지)이다.
-struct ChunkChain {
-    std::vector<ChunkStep> steps;
-};
-
 // 직전 상대 수가 폰 두 칸 전진이었을 때 남는 앙파상 정보.
 struct EnPassantTarget {
     Coord square;      // 폰이 지나간 칸 (앙파상으로 도착하는 칸)
@@ -813,8 +836,8 @@ struct EnPassantTarget {
     colorType pawnColor;
 };
 
-// activateSquare 조건을 임의 위치 기준으로 검사한다. (interpretedPieceMoveChunk 안의
-// isActivated 람다와 같은 규칙이지만, 연쇄 행마의 next는 "직전 성공 위치"가 기준이라 따로 둔다.)
+// activateSquare 조건을 pos 기준으로 검사한다. 루트 chunk는 기물의 원래 위치가, 자식 chunk는
+// 부모가 활성화한 칸(currentOrigin)이 pos다. 각 항목은 OR로 계산한다.
 inline bool isChunkActivatedAt(const moveChunk& chunk, Coord pos)
 {
     if (!chunk.activateSquare.has_value()) {
@@ -882,6 +905,28 @@ private:
     std::vector<moveAction> enPassantActions(const Square& pawnSquare) const;
     std::vector<moveAction> castlingActions(const Square& kingSquare) const;
 
+    // moveChunk 활성화 트리를 걷는 동안 한 기물에 대해 트리 전체가 공유하는 읽기 전용 정보.
+    // (노드마다 달라지는 상태는 여기 두지 않는다. 형제 노드 상태 분리는 walkChunk의 지역 변수로 보장한다.)
+    struct ChunkWalkContext {
+        const Square& movingSquare; // 움직이는 기물. 자기 몸은 충돌 검사에서 무시된다.
+        Coord originalOrigin;       // 기물의 원래 위치. 모든 action의 start (트리 전체에서 고정)
+        bool noCapture;             // NoCapture 제약: 포획하는 활성화는 무효
+        bool mustCapture;           // MustCapture 제약: 포획이 아닌 action은 내보내지 않는다
+    };
+
+    /**
+     * moveChunk 활성화 트리의 노드 하나를 currentOrigin 기준으로 해석한다. (재귀)
+     * 노드가 칸을 유효하게 활성화하는 순간 originalOrigin -> 그 칸의 action을 out에 추가하고,
+     * 그 칸을 currentOrigin으로 chunk.next의 각 자식을 독립적으로 재귀 해석한다.
+     * 규칙 전체는 구현부의 [moveChunk 활성화 트리] 주석을 볼 것.
+     */
+    void walkChunk(
+        const ChunkWalkContext& ctx,
+        Coord currentOrigin,
+        const moveChunk& chunk,
+        std::vector<moveAction>& out
+    ) const;
+
 public:
     bool isValidSquare(Coord pos) const;
     bool isOccupied(Coord pos) const;
@@ -918,46 +963,49 @@ public:
      * curr_piece가 가진 기본 moveChunk와 additional_mC를 해석하여
      * 현재 GameState에서 실제로 실행 가능한 moveAction 목록을 생성한다.
      *
+     * moveChunk.next는 활성화 트리로 해석한다(구현부 주석 참고): 유효하게 활성화되는 칸마다
+     * 기물의 원래 위치를 start로 하는 독립 moveAction이 하나씩 나온다.
+     *
      * 판단 코드(주석 처리, 파일 상단의 [판단 코드 표기 규칙] 참고)로만 들어 있는 부분:
-     * - moveChunk.next 연쇄 행마의 action 변환 (B-chain)
-     * - SHIFT (C-shift)
-     * - JUMP (C-jump)
+     * - SHIFT (C-shift, 보류)
      */
     std::vector<moveAction> interpretedPieceMoveChunk(
         const Square& curr_piece
     );
 
     /**
-     * chunk 하나를 origin 기준으로 해석해 유효한 step 목록을 반환한다.
-     * interpretedPieceMoveChunk의 단일 chunk 판이며, next 연쇄에서 "직전 성공 위치"를
-     * origin으로 넘겨 재사용한다. allowCapture=false면 포획하는 step은 만들지 않는다(NoCapture).
-     * 연쇄 안의 SHIFT/JUMP step은 아직 지원하지 않는다(step을 만들지 않는다).
+     * 기물 이동 적용. 내부용 빠른 경로다.
+     *
+     * [사전 조건] 이미 검증된 합법 action만 받는다. allLegalActions()가 생성한 action이거나
+     * validateExternalAction()을 통과한 action이어야 한다. 이 함수는 합법성을 검사하지 않으며
+     * (합법수를 다시 생성해 대조하지도 않는다), 조건을 어긴 입력의 결과는 정의되지 않는다.
+     * MCTS 같은 내부 호출자는 생성한 action을 그대로 넘긴다.
+     * 여기서는 출발 칸에 같은 색/종류의 기물이 있는지 정도의 저비용 불변식만 assert한다.
      */
-    std::vector<ChunkStep> resolveChunkSteps(
-        const Square& movingSquare,
-        Coord origin,
-        const moveChunk& chunk,
-        bool allowCapture
-    ) const;
-
-    /**
-     * chunk와 그 next를 재귀로 끝까지 따라가 완결된 경로를 모두 반환한다.
-     * chunk가 유효 목적지를 만들면 그 목적지를 새 origin으로 삼아 chunk.next 각각을 다시
-     * 해석한다. CATCH step은 기물이 이동하지 않으므로 다음 origin이 그대로 유지된다.
-     * 이 함수는 경로 전체를 돌려줄 뿐이고, moveAction으로 어떻게 줄일지는 호출 쪽 판단이다.
-     */
-    std::vector<ChunkChain> resolveChunkChains(
-        const Square& movingSquare,
-        Coord origin,
-        const moveChunk& chunk,
-        bool allowCapture
-    ) const;
-
-    // 기물 이동
     void apply_action(const moveAction& action);
 
-    // 카드 사용
+    /**
+     * 카드 사용 적용. 위 moveAction 버전과 같은 내부용 경로이며 사전 조건도 같다.
+     * (validateExternalAction(cardAction)을 통과했거나 내부에서 만든 action만 넘긴다.)
+     */
     void apply_action(const cardAction& action);
+
+    /**
+     * 외부 입력(bridge 등)용 검증 경계. apply_action 앞에서 한 번만 거친다.
+     * 느려도 되므로 allLegalActions()를 다시 생성해 멤버십을 확인한다.
+     *  - 행동하는 플레이어가 현재 턴 플레이어인가
+     *  - (color, 기물 종류, moveType, start, destination)이 생성된 합법 action 중에 있는가
+     *  - promotion이 지정돼 있다면 출발 기물의 promotion_pool에 있는가
+     * isTurnUsed는 호출자가 정하는 값이라 검증하지 않는다(무료 행동 여부는 별도 규칙).
+     * 통과하면 true. 상태는 바꾸지 않는다. (allLegalActions가 non-const라 이 함수도 non-const)
+     */
+    bool validateExternalAction(const moveAction& action);
+
+    /**
+     * 카드 사용의 외부 입력 검증: 현재 턴 플레이어의 패에 아직 안 쓴 그 카드가 있고,
+     * 효과가 등록돼 있는가. 카드 사용 시점 조건(phase, recovering 등)은 아직 여기에 없다.
+     */
+    bool validateExternalAction(const cardAction& action) const;
 
     // color 플레이어가 지금 둘 수 있는 모든 기물 이동 행동.
     // docs/GAME-RULES.md §3: 킹 세이프티(자기 왕을 체크에 노출하는 수 금지)는 넣지 않는다.
@@ -1231,14 +1279,44 @@ bool AugmentChessGameState::canCapture(
 }
 
 // ============================================================================
-// moveChunk -> legal moveAction 해석
+// moveChunk 활성화 트리 -> legal moveAction 해석
+//
+// moveChunk.next는 Chessembly의 { } 블록처럼 부모-자식 관계를 가진 "활성화 트리"다.
+// (PR #17 리뷰에서 구독좋아요님이 확정한 의도. 하나의 완성된 chain을 만들고 마지막 step만
+//  action으로 줄이는 방식이 아니다.)
+//
+//   do take-move(0,1) { take-move(1,0) repeat(1) } { take-move(-1,0) repeat(1) } while;
+//   = 바깥 chunk가 부모, 각 { ... }가 서로 독립인 자식.
+//
+// 해석 규칙 (walkChunk가 그대로 구현한다):
+//   1. 노드(chunk)가 어떤 칸을 유효하게 활성화하면, 그 칸 자체가 "기물의 원래 위치
+//      (originalOrigin)를 start로 하는" 독립적인 moveAction이 된다.
+//   2. 그 활성화된 칸을 currentOrigin으로 삼아 자식 chunk를 각각 따로 해석한다.
+//      originalOrigin은 트리 전체에서 고정이고, 바뀌는 것은 currentOrigin뿐이다.
+//   3. 종료 전파: 부모 -> 자식은 있다(부모가 활성화에 실패하거나 종료되면 자식은 해석하지
+//      않는다). 자식 -> 부모는 없다(자식이 실패해도 이미 만든 부모 action은 그대로다).
+//      형제 <-> 형제도 없다(한 형제의 실패/종료는 다른 형제에 영향을 주지 않는다).
+//   4. 같은 세대의 형제는 상태를 공유하지 않는다. repeat 거리, ray 종료 플래그, JUMP의
+//      jumpedOver 같은 상태는 모두 walkChunk 호출의 지역 변수라서 자식마다 새로 시작한다.
+//   5. 중간 칸에 적 기물이 있고 그 노드가 포획 action을 만들었다면 그 노드는 성공한 것이다.
+//      포획 때문에 "그 chunk 자신의 ray"가 멈추는 것과 "자식을 해석하는 것"은 별개라서,
+//      자식은 그 활성화된 칸을 기준으로 계속 해석한다. 중간 action은 GameState에 적용하지
+//      않는다. 직전 노드가 활성화한 좌표는 다음 노드의 기준점으로만 쓰인다.
+//      (그래서 자식은 "중간 포획이 일어난 뒤의 보드"가 아니라 현재 보드를 본다.)
+//   6. 모든 단계에서 유효하게 활성화된 칸은 각각 별개의 moveAction이다. maxDistance > 1인
+//      chunk가 여러 칸을 활성화하면 칸마다 action이고, 각 칸에서 이어지는 자식 결과도 각각
+//      별도 action이다. 서로 다른 경로에서 나온 (start, destination, type)이 같은 action은
+//      규칙에 충실하게 그대로 둔다(dedup하지 않는다). 중복 처리 방침은 리뷰어 판단 대기.
+//
+// 제약 처리: NoCapture는 포획하는 활성화를 유효하지 않은 것으로 본다(노드가 그 칸을
+// 활성화하지 못한다). MustCapture는 "포획이 아닌 action을 내보내지 않는다"는 action 필터라서,
+// 포획이 아닌 칸도 활성화 자체는 되고(자식은 계속 해석된다) 그 칸의 action만 나오지 않는다.
 // ============================================================================
 std::vector<moveAction>
 AugmentChessGameState::interpretedPieceMoveChunk(
     const Square& curr_square
 ) {
     const Piece& piece = curr_square.curr_piece;
-    const Coord origin = curr_square.coordinate;
 
     // 기본 행마 + 런타임 추가 행마
     std::vector<moveChunk> movements =
@@ -1250,452 +1328,71 @@ AugmentChessGameState::interpretedPieceMoveChunk(
         piece.additional_mC.end()
     );
 
+    const ChunkWalkContext ctx{
+        curr_square,
+        curr_square.coordinate,
+        hasConstraint<NoCapture>(piece),
+        hasConstraint<MustCapture>(piece)
+    };
+
     std::vector<moveAction> result;
 
-    const bool noCapture = hasConstraint<NoCapture>(piece);
-    const bool mustCapture = hasConstraint<MustCapture>(piece);
-
-    // activateSquare의 각 항목은 OR로 계산한다.
-    auto isActivated = [&](const moveChunk& chunk) -> bool {
-        if (!chunk.activateSquare.has_value()) {
-            return true;
-        }
-
-        for (const actCoord& condition : *chunk.activateSquare) {
-            const bool xMatches =
-                !condition.first.has_value() ||
-                condition.first.value() == origin.first;
-
-            const bool yMatches =
-                !condition.second.has_value() ||
-                condition.second.value() == origin.second;
-
-            if (xMatches && yMatches) {
-                return true;
-            }
-        }
-
-        return false;
-    };
-
-    // 현재는 의도적으로 dedup하지 않는다.
-    // 나중에 next/연쇄 행마가 들어오면 같은 종착지라도 다른 action일 수 있다.
-    auto pushAction = [&](moveType type, Coord destination) {
-        result.emplace_back(
-            piece.cT,
-            piece.pT,
-            type,
-            origin,
-            destination
-        );
-    };
-
+    // 최상위 chunk 하나하나가 트리의 루트이고, 루트끼리도 서로 독립이다.
+    // 루트의 currentOrigin은 기물의 원래 위치다.
     for (const moveChunk& chunk : movements) {
-        if (!isActivated(chunk)) {
-            continue;
-        }
-
-        // 무한 ray에서 {0, 0} direction이면 무한루프가 되므로 방어.
-        if (
-            chunk.direction == Coord{0, 0} &&
-            !chunk.maxDistance.has_value()
-        ) {
-            continue;
-        }
-
-        int distance = 1;
-
-        // 판단(C-jump): JUMP case에 딸린 조각 - "적 기물을 이미 뛰어넘었는가"를 ray마다 들고 다니는 플래그 선언.
-        // [JUDGMENT-BEGIN C-jump]
-        //     bool jumpedOver = false;
-        // [JUDGMENT-END C-jump]
-
-        while (
-            !chunk.maxDistance.has_value() ||
-            distance <= chunk.maxDistance.value()
-        ) {
-            Coord destination = {
-                origin.first + chunk.direction.first * distance,
-                origin.second + chunk.direction.second * distance
-            };
-
-            bool stopRay = false;
-
-            switch (chunk.mT) {
-                // =========================================================
-                // MOVE
-                // 빈 곳으로만 이동한다.
-                // =========================================================
-                case moveType::MOVE:
-                {
-                    if (!isPieceInsideBoard(curr_square, destination)) {
-                        stopRay = true;
-                        break;
-                    }
-
-                    const auto collisions =
-                        getPlacementCollisions(curr_square, destination);
-
-                    if (!collisions.empty()) {
-                        stopRay = true;
-                        break;
-                    }
-
-                    if (!mustCapture) {
-                        pushAction(moveType::MOVE, destination);
-                    }
-
-                    break;
-                }
-
-                // =========================================================
-                // TAKE
-                // 포획 가능한 기물이 있을 때만 그 자리로 이동한다.
-                // 빈칸은 후보가 아니지만 ray 탐색은 계속한다.
-                // =========================================================
-                case moveType::TAKE:
-                {
-                    if (!isPieceInsideBoard(curr_square, destination)) {
-                        stopRay = true;
-                        break;
-                    }
-
-                    const auto collisions =
-                        getPlacementCollisions(curr_square, destination);
-
-                    if (collisions.empty()) {
-                        break;
-                    }
-
-                    // 현재 일반 포획 행마는 한 번에 한 기물만 포획한다고 가정.
-                    if (collisions.size() > 1) {
-                        stopRay = true;
-                        break;
-                    }
-
-                    const Piece& target = collisions.front()->curr_piece;
-
-                    if (
-                        !noCapture &&
-                        canCapture(piece, target, moveType::TAKE)
-                    ) {
-                        pushAction(moveType::TAKE, destination);
-                    }
-
-                    stopRay = true;
-                    break;
-                }
-
-                // =========================================================
-                // CATCH
-                // 목적지의 기물을 제거하지만 자신은 이동하지 않는다.
-                // 따라서 moving piece의 footprint를 destination에 배치하지 않는다.
-                // =========================================================
-                case moveType::CATCH:
-                {
-                    if (!isValidSquare(destination)) {
-                        stopRay = true;
-                        break;
-                    }
-
-                    const Square* targetSquare =
-                        getOccupyingSquare(destination);
-
-                    if (targetSquare == nullptr) {
-                        break;
-                    }
-
-                    const Piece& target = targetSquare->curr_piece;
-
-                    if (
-                        !noCapture &&
-                        canCapture(piece, target, moveType::CATCH)
-                    ) {
-                        pushAction(moveType::CATCH, destination);
-                    }
-
-                    stopRay = true;
-                    break;
-                }
-
-                // =========================================================
-                // TAKEMOVE
-                // 빈칸 -> 이동
-                // 포획 가능한 기물 -> 포획 후 이동
-                // =========================================================
-                case moveType::TAKEMOVE:
-                {
-                    if (!isPieceInsideBoard(curr_square, destination)) {
-                        stopRay = true;
-                        break;
-                    }
-
-                    const auto collisions =
-                        getPlacementCollisions(curr_square, destination);
-
-                    if (collisions.empty()) {
-                        if (!mustCapture) {
-                            pushAction(moveType::TAKEMOVE, destination);
-                        }
-
-                        break;
-                    }
-
-                    if (collisions.size() > 1) {
-                        stopRay = true;
-                        break;
-                    }
-
-                    const Piece& target = collisions.front()->curr_piece;
-
-                    if (
-                        !noCapture &&
-                        canCapture(piece, target, moveType::TAKEMOVE)
-                    ) {
-                        pushAction(moveType::TAKEMOVE, destination);
-                    }
-
-                    stopRay = true;
-                    break;
-                }
-
-                // =========================================================
-                // BOTHTAKEMOVE
-                // 빈칸 -> 이동
-                // 기물 존재 -> 색과 관계없이 포획 후 이동
-                // =========================================================
-                case moveType::BOTHTAKEMOVE:
-                {
-                    if (!isPieceInsideBoard(curr_square, destination)) {
-                        stopRay = true;
-                        break;
-                    }
-
-                    const auto collisions =
-                        getPlacementCollisions(curr_square, destination);
-
-                    if (collisions.empty()) {
-                        if (!mustCapture) {
-                            pushAction(moveType::BOTHTAKEMOVE, destination);
-                        }
-
-                        break;
-                    }
-
-                    if (collisions.size() > 1) {
-                        stopRay = true;
-                        break;
-                    }
-
-                    const Piece& target = collisions.front()->curr_piece;
-
-                    if (
-                        !noCapture &&
-                        canCapture(piece, target, moveType::BOTHTAKEMOVE)
-                    ) {
-                        pushAction(moveType::BOTHTAKEMOVE, destination);
-                    }
-
-                    stopRay = true;
-                    break;
-                }
-
-                // =========================================================
-                // SHIFT
-                // 기물끼리 위치를 교환하는 행마.
-                // 양쪽 footprint의 교환 가능성 검사가 필요하므로 추후 구현.
-                // =========================================================
-                case moveType::SHIFT:
-                {
-                    // 판단(C-shift): SHIFT는 두 기물이 서로 자리(anchor)를 바꾸는 것으로 보고, 양쪽이 새 자리에서 몸 전체가 보드 안이고 제3의 기물과 안 겹치는지 상호 검사한다(교환은 포획이 아니므로 MustCapture면 제외).
-                    // [JUDGMENT-BEGIN C-shift]
-                    //     if (!isValidSquare(destination)) {
-                    //         stopRay = true;
-                    //         break;
-                    //     }
-                    //
-                    //     const Square* other = getOccupyingSquare(destination);
-                    //
-                    //     // 빈칸에는 교환할 상대가 없다. 후보가 아니지만 ray 탐색은 계속한다.
-                    //     if (other == nullptr) {
-                    //         break;
-                    //     }
-                    //
-                    //     // 기물의 몸(anchor + footprint)이 차지하는 칸 목록.
-                    //     auto bodyCells = [](const Piece& body, Coord anchor) {
-                    //         std::vector<Coord> cells = {anchor};
-                    //         for (const Coord& offset : body.Pv.footprint) {
-                    //             cells.push_back({
-                    //                 anchor.first + offset.first,
-                    //                 anchor.second + offset.second
-                    //             });
-                    //         }
-                    //         return cells;
-                    //     };
-                    //
-                    //     // 교환 후 자리: 움직이는 기물은 상대의 anchor로, 상대는 움직이는 기물의 원래 anchor로 간다.
-                    //     const Coord moverNewAnchor = other->coordinate;
-                    //     const Coord otherNewAnchor = curr_square.coordinate;
-                    //
-                    //     bool swappable =
-                    //         isPieceInsideBoard(curr_square, moverNewAnchor) &&
-                    //         isPieceInsideBoard(*other, otherNewAnchor);
-                    //
-                    //     // 새 자리에 두 기물 말고 다른 기물이 있으면 안 된다.
-                    //     if (swappable) {
-                    //         for (const Square* hit : getPlacementCollisions(curr_square, moverNewAnchor)) {
-                    //             if (hit->coordinate != other->coordinate) {
-                    //                 swappable = false;
-                    //             }
-                    //         }
-                    //         for (const Square* hit : getPlacementCollisions(*other, otherNewAnchor)) {
-                    //             if (hit->coordinate != curr_square.coordinate) {
-                    //                 swappable = false;
-                    //             }
-                    //         }
-                    //     }
-                    //
-                    //     // 교환 후 두 몸이 서로 겹쳐도 안 된다.
-                    //     if (swappable) {
-                    //         const std::vector<Coord> moverCells = bodyCells(piece, moverNewAnchor);
-                    //         const std::vector<Coord> otherCells = bodyCells(other->curr_piece, otherNewAnchor);
-                    //         for (const Coord& cell : moverCells) {
-                    //             if (std::find(otherCells.begin(), otherCells.end(), cell) != otherCells.end()) {
-                    //                 swappable = false;
-                    //             }
-                    //         }
-                    //     }
-                    //
-                    //     if (swappable && !mustCapture) {
-                    //         pushAction(moveType::SHIFT, destination);
-                    //     }
-                    //
-                    //     // 처음 만난 기물이 교환 대상이든 아니든 ray는 거기서 막힌다.
-                    //     stopRay = true;
-                    //     break;
-                    // [JUDGMENT-END C-shift]
-
-                    // 판단 코드가 살아나기 전까지는 SHIFT 행마를 만들지 않는다. (위 블록을 살리면 여기는 도달하지 않는다.)
-                    stopRay = true;
-                    break;
-                }
-
-                // =========================================================
-                // JUMP
-                // 적 기물을 처음 만난 뒤부터 활성화되는 행마.
-                // ray 안에 별도 상태값이 필요하므로 추후 구현.
-                // =========================================================
-                case moveType::JUMP:
-                {
-                    // 판단(C-jump): 처음 만나는 적 기물을 뛰어넘은 뒤의 빈칸부터만 착지 가능하고 포획은 하지 않으며, 뛰어넘기 전에 아군/중립 기물을 만나거나 뛰어넘은 뒤 또 기물을 만나면 ray가 막힌다.
-                    // [JUDGMENT-BEGIN C-jump]
-                    //     if (!isPieceInsideBoard(curr_square, destination)) {
-                    //         stopRay = true;
-                    //         break;
-                    //     }
-                    //
-                    //     const auto collisions =
-                    //         getPlacementCollisions(curr_square, destination);
-                    //
-                    //     if (collisions.empty()) {
-                    //         // 이미 적 기물을 넘었다면 여기가 착지 후보, 아니면 아직 비활성 구간이다.
-                    //         if (jumpedOver && !mustCapture) {
-                    //             pushAction(moveType::JUMP, destination);
-                    //         }
-                    //
-                    //         break;
-                    //     }
-                    //
-                    //     // 한 번 넘은 뒤에 또 기물이 있으면 착지도, 재도약도 불가 (포획도 안 한다).
-                    //     if (jumpedOver) {
-                    //         stopRay = true;
-                    //         break;
-                    //     }
-                    //
-                    //     // 아직 넘기 전: 부딪힌 기물이 전부 적이어야 뛰어넘을 수 있다.
-                    //     bool allEnemies = true;
-                    //     for (const Square* hit : collisions) {
-                    //         if (!canCapture(piece, hit->curr_piece, moveType::TAKE)) {
-                    //             allEnemies = false;
-                    //         }
-                    //     }
-                    //
-                    //     if (!allEnemies) {
-                    //         stopRay = true;
-                    //         break;
-                    //     }
-                    //
-                    //     jumpedOver = true;
-                    //     break;
-                    // [JUDGMENT-END C-jump]
-
-                    // 판단 코드가 살아나기 전까지는 JUMP 행마를 만들지 않는다.
-                    stopRay = true;
-                    break;
-                }
-            }
-
-            if (stopRay) {
-                break;
-            }
-
-            ++distance;
-        }
-
-        // 판단(B-chain): moveAction은 start/destination 하나뿐이라 연쇄 결과를 "최종 목적지만" 담고(중간 경유지는 버림), 중간에 포획이 있거나 CATCH로 끝나는 연쇄는 최종 목적지만으로 재현할 수 없어 제외하며, chunk 자체의 단독 이동은 그대로 두고 연쇄 결과를 추가한다.
-        // [JUDGMENT-BEGIN B-chain]
-        //     if (!chunk.next.empty()) {
-        //         for (const ChunkChain& chain : resolveChunkChains(curr_square, origin, chunk, !noCapture)) {
-        //             const ChunkStep& last = chain.steps.back();
-        //
-        //             // CATCH로 끝나면 기물이 마지막에 어디 서 있는지 moveAction으로 표현할 수 없다.
-        //             bool representable = last.type != moveType::CATCH;
-        //
-        //             // 마지막 전 단계에서 포획이 있었다면 최종 목적지만으로는 그 제거를 재현할 수 없다.
-        //             for (std::size_t i = 0; i + 1 < chain.steps.size(); ++i) {
-        //                 if (chain.steps[i].captures) {
-        //                     representable = false;
-        //                 }
-        //             }
-        //
-        //             // MustCapture는 결과적으로 포획이 있는 연쇄만 허용한다.
-        //             if (mustCapture && !last.captures) {
-        //                 representable = false;
-        //             }
-        //
-        //             if (representable) {
-        //                 pushAction(last.type, last.destination);
-        //             }
-        //         }
-        //     }
-        // [JUDGMENT-END B-chain]
+        walkChunk(ctx, ctx.originalOrigin, chunk, result);
     }
 
     return result;
 }
 
-// ============================================================================
-// moveChunk.next 연쇄 해석 (Phase B)
-// ============================================================================
-
-std::vector<ChunkStep>
-AugmentChessGameState::resolveChunkSteps(
-    const Square& movingSquare,
-    Coord origin,
+void AugmentChessGameState::walkChunk(
+    const ChunkWalkContext& ctx,
+    Coord currentOrigin,
     const moveChunk& chunk,
-    bool allowCapture
+    std::vector<moveAction>& out
 ) const {
+    const Square& movingSquare = ctx.movingSquare;
     const Piece& piece = movingSquare.curr_piece;
 
-    std::vector<ChunkStep> steps;
+    // 이 노드의 활성화 조건은 부모가 활성화한 칸(루트는 원래 위치)을 기준으로 본다.
+    // 실패하면 이 노드의 자식도 해석하지 않는다. (부모 -> 자식 종료 전파)
+    if (!isChunkActivatedAt(chunk, currentOrigin)) {
+        return;
+    }
 
     // 무한 ray에서 {0, 0} direction이면 무한루프가 되므로 방어.
     if (
         chunk.direction == Coord{0, 0} &&
         !chunk.maxDistance.has_value()
     ) {
-        return steps;
+        return;
     }
+
+    // C-jump(승인됨): "적 기물을 이미 뛰어넘었는가". 이 노드의 ray만 쓰는 지역 상태라서
+    // 형제/자식 노드와 공유되지 않는다. (규칙 4)
+    bool jumpedOver = false;
+
+    // 이 노드가 destination을 유효하게 활성화했다.
+    //  - 원래 위치를 start로 하는 독립 action을 즉시 추가한다. (규칙 1, 6)
+    //  - 그 칸을 currentOrigin으로 자식 chunk를 각각 새로 해석한다. (규칙 2, 4)
+    //  - 이 노드의 ray가 여기서 멈추는지(포획 등)는 자식 해석과 무관하다. (규칙 5)
+    // captures: 이 활성화가 destination의 기물을 제거하는가. MustCapture 필터에 쓴다.
+    auto activate = [&](moveType type, Coord destination, bool captures) {
+        if (!(ctx.mustCapture && !captures)) {
+            out.emplace_back(
+                piece.cT,
+                piece.pT,
+                type,
+                ctx.originalOrigin,
+                destination
+            );
+        }
+
+        for (const moveChunk& child : chunk.next) {
+            walkChunk(ctx, destination, child, out);
+        }
+    };
 
     int distance = 1;
 
@@ -1704,13 +1401,17 @@ AugmentChessGameState::resolveChunkSteps(
         distance <= chunk.maxDistance.value()
     ) {
         const Coord destination = {
-            origin.first + chunk.direction.first * distance,
-            origin.second + chunk.direction.second * distance
+            currentOrigin.first + chunk.direction.first * distance,
+            currentOrigin.second + chunk.direction.second * distance
         };
 
         bool stopRay = false;
 
         switch (chunk.mT) {
+            // =========================================================
+            // MOVE
+            // 빈 곳으로만 이동한다.
+            // =========================================================
             case moveType::MOVE:
             {
                 if (!isPieceInsideBoard(movingSquare, destination)) {
@@ -1723,10 +1424,15 @@ AugmentChessGameState::resolveChunkSteps(
                     break;
                 }
 
-                steps.push_back({destination, moveType::MOVE, false});
+                activate(moveType::MOVE, destination, false);
                 break;
             }
 
+            // =========================================================
+            // TAKE
+            // 포획 가능한 기물이 있을 때만 그 자리로 이동한다.
+            // 빈칸은 후보가 아니지만 ray 탐색은 계속한다.
+            // =========================================================
             case moveType::TAKE:
             {
                 if (!isPieceInsideBoard(movingSquare, destination)) {
@@ -1741,18 +1447,25 @@ AugmentChessGameState::resolveChunkSteps(
                     break;
                 }
 
+                // 현재 일반 포획 행마는 한 번에 한 기물만 포획한다고 가정.
                 if (
                     collisions.size() == 1 &&
-                    allowCapture &&
+                    !ctx.noCapture &&
                     canCapture(piece, collisions.front()->curr_piece, moveType::TAKE)
                 ) {
-                    steps.push_back({destination, moveType::TAKE, true});
+                    activate(moveType::TAKE, destination, true);
                 }
 
                 stopRay = true;
                 break;
             }
 
+            // =========================================================
+            // CATCH
+            // 목적지의 기물을 제거하지만 자신은 이동하지 않는다.
+            // 따라서 moving piece의 footprint를 destination에 배치하지 않는다.
+            // (자식의 기준점은 규칙 2에 따라 활성화된 칸 = 잡은 칸이다.)
+            // =========================================================
             case moveType::CATCH:
             {
                 if (!isValidSquare(destination)) {
@@ -1767,16 +1480,22 @@ AugmentChessGameState::resolveChunkSteps(
                 }
 
                 if (
-                    allowCapture &&
+                    !ctx.noCapture &&
                     canCapture(piece, targetSquare->curr_piece, moveType::CATCH)
                 ) {
-                    steps.push_back({destination, moveType::CATCH, true});
+                    activate(moveType::CATCH, destination, true);
                 }
 
                 stopRay = true;
                 break;
             }
 
+            // =========================================================
+            // TAKEMOVE / BOTHTAKEMOVE
+            // 빈칸 -> 이동
+            // 포획 가능한 기물 -> 포획 후 이동
+            // (BOTHTAKEMOVE는 canCapture가 색과 관계없이 참이다.)
+            // =========================================================
             case moveType::TAKEMOVE:
             case moveType::BOTHTAKEMOVE:
             {
@@ -1789,27 +1508,152 @@ AugmentChessGameState::resolveChunkSteps(
                     getPlacementCollisions(movingSquare, destination);
 
                 if (collisions.empty()) {
-                    steps.push_back({destination, chunk.mT, false});
+                    activate(chunk.mT, destination, false);
+                    break;
+                }
+
+                if (collisions.size() > 1) {
+                    stopRay = true;
                     break;
                 }
 
                 if (
-                    collisions.size() == 1 &&
-                    allowCapture &&
+                    !ctx.noCapture &&
                     canCapture(piece, collisions.front()->curr_piece, chunk.mT)
                 ) {
-                    steps.push_back({destination, chunk.mT, true});
+                    activate(chunk.mT, destination, true);
                 }
 
                 stopRay = true;
                 break;
             }
 
-            // 연쇄 안의 SHIFT/JUMP는 아직 지원하지 않는다. (step을 만들지 않고 ray를 끝낸다.)
+            // =========================================================
+            // SHIFT
+            // 기물끼리 위치를 교환하는 행마.
+            // 양쪽 footprint의 교환 가능성 검사가 필요하다. (보류: 실제 게임에서 큰 기물과의
+            // 상호작용을 먼저 확인한 뒤 재논의. 아래 판단 블록은 주석 상태로 둔다.)
+            // =========================================================
             case moveType::SHIFT:
+            {
+                // 판단(C-shift): SHIFT는 두 기물이 서로 자리(anchor)를 바꾸는 것으로 보고, 양쪽이 새 자리에서 몸 전체가 보드 안이고 제3의 기물과 안 겹치는지 상호 검사한다(교환은 포획이 아니므로 MustCapture면 제외).
+                // [JUDGMENT-BEGIN C-shift]
+                //     if (!isValidSquare(destination)) {
+                //         stopRay = true;
+                //         break;
+                //     }
+                //
+                //     const Square* other = getOccupyingSquare(destination);
+                //
+                //     // 빈칸에는 교환할 상대가 없다. 후보가 아니지만 ray 탐색은 계속한다.
+                //     if (other == nullptr) {
+                //         break;
+                //     }
+                //
+                //     // 기물의 몸(anchor + footprint)이 차지하는 칸 목록.
+                //     auto bodyCells = [](const Piece& body, Coord anchor) {
+                //         std::vector<Coord> cells = {anchor};
+                //         for (const Coord& offset : body.Pv.footprint) {
+                //             cells.push_back({
+                //                 anchor.first + offset.first,
+                //                 anchor.second + offset.second
+                //             });
+                //         }
+                //         return cells;
+                //     };
+                //
+                //     // 교환 후 자리: 움직이는 기물은 상대의 anchor로, 상대는 움직이는 기물의 원래 anchor로 간다.
+                //     // (action의 start는 항상 originalOrigin이므로 교환 상대 자리는 원래 anchor다.)
+                //     const Coord moverNewAnchor = other->coordinate;
+                //     const Coord otherNewAnchor = movingSquare.coordinate;
+                //
+                //     bool swappable =
+                //         isPieceInsideBoard(movingSquare, moverNewAnchor) &&
+                //         isPieceInsideBoard(*other, otherNewAnchor);
+                //
+                //     // 새 자리에 두 기물 말고 다른 기물이 있으면 안 된다.
+                //     if (swappable) {
+                //         for (const Square* hit : getPlacementCollisions(movingSquare, moverNewAnchor)) {
+                //             if (hit->coordinate != other->coordinate) {
+                //                 swappable = false;
+                //             }
+                //         }
+                //         for (const Square* hit : getPlacementCollisions(*other, otherNewAnchor)) {
+                //             if (hit->coordinate != movingSquare.coordinate) {
+                //                 swappable = false;
+                //             }
+                //         }
+                //     }
+                //
+                //     // 교환 후 두 몸이 서로 겹쳐도 안 된다.
+                //     if (swappable) {
+                //         const std::vector<Coord> moverCells = bodyCells(piece, moverNewAnchor);
+                //         const std::vector<Coord> otherCells = bodyCells(other->curr_piece, otherNewAnchor);
+                //         for (const Coord& cell : moverCells) {
+                //             if (std::find(otherCells.begin(), otherCells.end(), cell) != otherCells.end()) {
+                //                 swappable = false;
+                //             }
+                //         }
+                //     }
+                //
+                //     if (swappable) {
+                //         activate(moveType::SHIFT, destination, false);
+                //     }
+                //
+                //     // 처음 만난 기물이 교환 대상이든 아니든 ray는 거기서 막힌다.
+                //     stopRay = true;
+                //     break;
+                // [JUDGMENT-END C-shift]
+
+                // 판단 코드가 살아나기 전까지는 SHIFT 행마를 만들지 않는다. (위 블록을 살리면 여기는 도달하지 않는다.)
+                stopRay = true;
+                break;
+            }
+
+            // =========================================================
+            // JUMP (C-jump: 구독좋아요님 리뷰에서 승인되어 활성 코드가 됨)
+            // 처음 만나는 적 기물을 뛰어넘은 뒤의 빈칸부터만 착지 가능하고 포획은 하지 않는다.
+            // 뛰어넘기 전에 아군/중립 기물을 만나거나 뛰어넘은 뒤 또 기물을 만나면 ray가 막힌다.
+            // =========================================================
             case moveType::JUMP:
             {
-                stopRay = true;
+                if (!isPieceInsideBoard(movingSquare, destination)) {
+                    stopRay = true;
+                    break;
+                }
+
+                const auto collisions =
+                    getPlacementCollisions(movingSquare, destination);
+
+                if (collisions.empty()) {
+                    // 이미 적 기물을 넘었다면 여기가 착지 후보, 아니면 아직 비활성 구간이다.
+                    if (jumpedOver) {
+                        activate(moveType::JUMP, destination, false);
+                    }
+
+                    break;
+                }
+
+                // 한 번 넘은 뒤에 또 기물이 있으면 착지도, 재도약도 불가 (포획도 안 한다).
+                if (jumpedOver) {
+                    stopRay = true;
+                    break;
+                }
+
+                // 아직 넘기 전: 부딪힌 기물이 전부 적이어야 뛰어넘을 수 있다.
+                bool allEnemies = true;
+                for (const Square* hit : collisions) {
+                    if (!canCapture(piece, hit->curr_piece, moveType::TAKE)) {
+                        allEnemies = false;
+                    }
+                }
+
+                if (!allEnemies) {
+                    stopRay = true;
+                    break;
+                }
+
+                jumpedOver = true;
                 break;
             }
         }
@@ -1820,43 +1664,6 @@ AugmentChessGameState::resolveChunkSteps(
 
         ++distance;
     }
-
-    return steps;
-}
-
-std::vector<ChunkChain>
-AugmentChessGameState::resolveChunkChains(
-    const Square& movingSquare,
-    Coord origin,
-    const moveChunk& chunk,
-    bool allowCapture
-) const {
-    std::vector<ChunkChain> chains;
-
-    for (const ChunkStep& step : resolveChunkSteps(movingSquare, origin, chunk, allowCapture)) {
-        // 더 이어질 chunk가 없으면 이 step으로 끝나는 경로다.
-        if (chunk.next.empty()) {
-            chains.push_back(ChunkChain{{step}});
-            continue;
-        }
-
-        // 직전 chunk가 성공한 위치가 다음 chunk의 origin이다. CATCH는 이동하지 않는다.
-        const Coord nextOrigin =
-            step.type == moveType::CATCH ? origin : step.destination;
-
-        for (const moveChunk& nextChunk : chunk.next) {
-            if (!isChunkActivatedAt(nextChunk, nextOrigin)) {
-                continue;
-            }
-
-            for (ChunkChain tail : resolveChunkChains(movingSquare, nextOrigin, nextChunk, allowCapture)) {
-                tail.steps.insert(tail.steps.begin(), step);
-                chains.push_back(std::move(tail));
-            }
-        }
-    }
-
-    return chains;
 }
 
 // ============================================================================
@@ -1897,7 +1704,7 @@ int AugmentChessGameState::countRoyals(colorType color) const
     int count = 0;
 
     for (const Square& sq : board) {
-        if (sq.curr_piece.cT == color && sq.curr_piece.isRoyalPiece()) {
+        if (sq.curr_piece.cT == color && sq.curr_piece.isRoyal) {
             ++count;
         }
     }
@@ -2171,7 +1978,14 @@ AugmentChessGameState::allLegalActions(colorType color)
 
 // docs/GAME-RULES.md §2, §4: 기물 이동은 행동 횟수를 소모하고 기본 상태에서는 상대에게 턴을 넘긴다.
 // isTurnUsed=false인 행동(무료 행동)은 행동 횟수를 소모하지 않아 턴이 유지된다.
-// 이 함수는 합법 행동이 들어온다고 가정한다. 합법성 검사는 하지 않는다.
+//
+// [사전 조건] 이 함수는 "이미 검증된 합법 action만 받는 내부용 빠른 경로"다.
+//  - allLegalActions()가 생성한 action(MCTS 등 내부 호출자) 또는 validateExternalAction()을
+//    통과한 action(bridge 등 외부 입력)만 넘긴다. 합법성 판정은 이 함수의 책임이 아니다.
+//  - 그래서 목적지가 비었는지, 대상이 있는지 같은 이동 종류별 방어 검사는 두지 않는다.
+//    합법수를 다시 생성해 대조하는 assert도 넣지 않는다. (느리고, 검증 책임이 섞인다.)
+//  - 조건을 어긴 action의 결과는 정의되지 않는다. assert는 출발 기물 존재 같은
+//    저비용 불변식만 확인한다.
 void AugmentChessGameState::apply_action(const moveAction& action)
 {
     Square* mover = nullptr;
@@ -2187,10 +2001,7 @@ void AugmentChessGameState::apply_action(const moveAction& action)
         }
     }
 
-    if (mover == nullptr) {
-        std::cerr << "apply_action: 출발 칸에 해당 기물이 없음\n";
-        return;
-    }
+    assert(mover != nullptr && "apply_action: 출발 칸에 같은 색/종류의 기물이 있어야 한다");
 
     // 앙파상 기회는 "직후 한 행동"에만 유효하다. 이번 행동을 처리하는 동안만 쓰고 비운다.
     const std::optional<EnPassantTarget> epWindow = enPassant;
@@ -2213,12 +2024,6 @@ void AugmentChessGameState::apply_action(const moveAction& action)
 
             for (const Square* hit : getPlacementCollisions(*mover, action.destination)) {
                 captured.push_back(hit->coordinate);
-            }
-
-            if (action.mT == moveType::MOVE && !captured.empty()) {
-                std::cerr << "apply_action: MOVE 목적지가 비어 있지 않음\n";
-                enPassant = epWindow; // 아무 일도 없었던 것으로 되돌린다.
-                return;
             }
 
             // 앙파상: 폰이 빈 앙파상 칸으로 대각선 포획 이동을 하면 지나간 폰을 제거한다.
@@ -2250,11 +2055,7 @@ void AugmentChessGameState::apply_action(const moveAction& action)
             // 목적지의 기물만 제거하고 자신은 이동하지 않는다.
             const Square* target = getOccupyingSquare(action.destination);
 
-            if (target == nullptr) {
-                std::cerr << "apply_action: CATCH 목적지에 기물이 없음\n";
-                enPassant = epWindow;
-                return;
-            }
+            assert(target != nullptr && "apply_action: CATCH 목적지에 기물이 있어야 한다");
 
             removeAnchors({target->coordinate});
             mover = findSquareAtAnchor(start);
@@ -2267,11 +2068,7 @@ void AugmentChessGameState::apply_action(const moveAction& action)
         //     {
         //         Square* other = getOccupyingSquare(action.destination);
         //
-        //         if (other == nullptr || other == mover) {
-        //             std::cerr << "apply_action: SHIFT 상대 기물이 없음\n";
-        //             enPassant = epWindow;
-        //             return;
-        //         }
+        //         assert(other != nullptr && other != mover && "apply_action: SHIFT 상대 기물이 있어야 한다");
         //
         //         std::swap(mover->coordinate, other->coordinate);
         //         ++other->curr_piece.moveCount;
@@ -2282,28 +2079,20 @@ void AugmentChessGameState::apply_action(const moveAction& action)
         //     }
         // [JUDGMENT-END C-shift]
 
-        // 판단(C-jump): 위 JUMP 판단(포획 없이 빈 착지 칸으로만 이동)을 적용하는 쪽 조각.
-        // [JUDGMENT-BEGIN C-jump]
-        //     case moveType::JUMP:
-        //     {
-        //         if (!getPlacementCollisions(*mover, action.destination).empty()) {
-        //             std::cerr << "apply_action: JUMP 목적지가 비어 있지 않음\n";
-        //             enPassant = epWindow;
-        //             return;
-        //         }
-        //
-        //         mover->coordinate = action.destination;
-        //
-        //         relocated = true;
-        //         landing = action.destination;
-        //         break;
-        //     }
-        // [JUDGMENT-END C-jump]
+        // JUMP (C-jump, 승인됨): 포획 없이 빈 착지 칸으로만 이동한다.
+        case moveType::JUMP:
+        {
+            mover->coordinate = action.destination;
+
+            relocated = true;
+            landing = action.destination;
+            break;
+        }
 
         default:
         {
-            std::cerr << "apply_action: 지원하지 않는 moveType\n";
-            enPassant = epWindow;
+            // 생성기가 만들지 않는 moveType(예: 보류 중인 SHIFT)은 들어오면 안 된다.
+            assert(false && "apply_action: 지원하지 않는 moveType");
             return;
         }
     }
@@ -2420,13 +2209,17 @@ void AugmentChessGameState::apply_action(const moveAction& action)
 
 // docs/GAME-RULES.md §5: 카드는 사용 즉시 used=true가 되고, 카드 사용은 일반적으로 턴을 넘기지 않는 무료 행동이다.
 // (§2) 그래서 턴 소비 여부는 action.isTurnUsed를 그대로 따른다. 카드 효과 자체는 cardEffectRegistry()에서 찾는다.
-// 효과가 등록되지 않은 카드는 아무것도 바꾸지 않는다.
+//
+// [사전 조건] moveAction 버전과 같은 내부용 경로다. 사용자가 백/흑이고 그 패에 아직 안 쓴 카드가
+// 있다는 것은 호출 전에 확인돼 있어야 한다(외부 입력은 validateExternalAction, 내부는 생성 단계).
+// 여기서는 그 불변식만 assert한다. 카드 효과 골격은 비어 있어서, 효과가 아직 등록되지 않은 카드는
+// 합법성 문제가 아니라 "미구현"이므로 아무것도 바꾸지 않고 돌아온다.
 void AugmentChessGameState::apply_action(const cardAction& action)
 {
-    if (action.cT != colorType::WHITE && action.cT != colorType::BLACK) {
-        std::cerr << "apply_action: 카드 사용자가 백/흑이 아님\n";
-        return;
-    }
+    assert(
+        (action.cT == colorType::WHITE || action.cT == colorType::BLACK) &&
+        "apply_action: 카드 사용자는 백/흑이어야 한다"
+    );
 
     std::vector<Card>& hand =
         action.cT == colorType::WHITE ? whitePlayerCards : blackPlayerCards;
@@ -2440,17 +2233,13 @@ void AugmentChessGameState::apply_action(const cardAction& action)
         }
     }
 
-    if (inHand == nullptr) {
-        std::cerr << "apply_action: 패에 없거나 이미 사용한 카드\n";
-        return;
-    }
+    assert(inHand != nullptr && "apply_action: 패에 있고 아직 안 쓴 카드여야 한다");
 
     const auto& registry = cardEffectRegistry();
     const auto effect = registry.find(action.card.cardId);
 
     if (effect == registry.end()) {
-        std::cerr << "apply_action: 효과가 등록되지 않은 카드\n";
-        return;
+        return; // 효과 미구현 카드 (골격 단계)
     }
 
     inHand->isUsed = true;
@@ -2461,6 +2250,77 @@ void AugmentChessGameState::apply_action(const cardAction& action)
     }
 
     endTurn();
+}
+
+// ============================================================================
+// 외부 입력 검증 경계 (bridge 등)
+//
+// apply_action은 검증된 action만 받는 내부 빠른 경로이므로, 외부(사람/사이트/bridge)에서
+// 들어온 action은 반드시 여기를 먼저 통과시킨다. 느려도 되는 자리라서 합법 action을 다시
+// 생성해 멤버십을 확인한다. MCTS 내부 호출자는 이 함수를 거치지 않고 생성된 action을
+// 그대로 apply_action에 넘긴다.
+// ============================================================================
+bool AugmentChessGameState::validateExternalAction(const moveAction& action)
+{
+    if (action.cT != turn.player) {
+        return false;
+    }
+
+    // 승격 기물이 지정돼 있으면 출발 기물의 promotion_pool 안에 있어야 한다.
+    if (action.promotion.has_value()) {
+        const Piece* mover = getPieceAt(action.start);
+
+        if (
+            mover == nullptr ||
+            std::find(
+                mover->promotion_pool.begin(),
+                mover->promotion_pool.end(),
+                *action.promotion
+            ) == mover->promotion_pool.end()
+        ) {
+            return false;
+        }
+    }
+
+    for (const moveAction& legal : allLegalActions(action.cT)) {
+        if (
+            legal.cT == action.cT &&
+            legal.pT == action.pT &&
+            legal.mT == action.mT &&
+            legal.start == action.start &&
+            legal.destination == action.destination
+        ) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool AugmentChessGameState::validateExternalAction(const cardAction& action) const
+{
+    if (action.cT != turn.player) {
+        return false;
+    }
+
+    const std::vector<Card>& hand =
+        action.cT == colorType::WHITE ? whitePlayerCards : blackPlayerCards;
+
+    bool inHand = false;
+
+    for (const Card& card : hand) {
+        if (card.cardId == action.card.cardId && !card.isUsed) {
+            inHand = true;
+            break;
+        }
+    }
+
+    if (!inHand) {
+        return false;
+    }
+
+    // 효과가 등록되지 않은 카드는 아직 사용할 수 없다.
+    return cardEffectRegistry().count(action.card.cardId) > 0;
 }
 
 // ============================================================================
@@ -2493,9 +2353,8 @@ Piece makePiece(colorType color, pieceType type)
 
 Piece makeKing(colorType color)
 {
-    Piece king = makePiece(color, pieceType::KING);
-    king.isKing = true;
-    return king;
+    // 기본 KING 생성자가 isRoyal = true로 만든다. (별도 isKing 필드는 없다.)
+    return makePiece(color, pieceType::KING);
 }
 
 bool hasAction(
@@ -2517,7 +2376,7 @@ bool hasAction(
     return false;
 }
 
-[[maybe_unused]] int countType(
+int countType(
     const std::vector<moveAction>& actions,
     moveType type
 ) {
@@ -2532,8 +2391,36 @@ bool hasAction(
     return count;
 }
 
+// (start, destination, type)이 모두 같은 action의 개수. 중복 여부 확인용이다.
+int countAction(
+    const std::vector<moveAction>& actions,
+    Coord start,
+    Coord destination,
+    moveType type
+) {
+    int count = 0;
+
+    for (const moveAction& action : actions) {
+        if (
+            action.start == start &&
+            action.destination == destination &&
+            action.mT == type
+        ) {
+            ++count;
+        }
+    }
+
+    return count;
+}
+
+// at에 있는 기물 하나만의 행마를 해석한다. (다른 기물의 행마, 앙파상, 캐슬링이 섞이지 않는다.)
+std::vector<moveAction> actionsOf(AugmentChessGameState& state, Coord at)
+{
+    return state.interpretedPieceMoveChunk(*state.getOccupyingSquare(at));
+}
+
 // 모든 행동의 출발 칸이 start인가.
-[[maybe_unused]] bool allStartAt(
+bool allStartAt(
     const std::vector<moveAction>& actions,
     Coord start
 ) {
@@ -2549,6 +2436,8 @@ bool hasAction(
 } // namespace
 
 int main(){
+    registerAllCardEffects();
+
     // ---- Phase A: Piece 상태 필드 그릇 ----
     {
         Piece pawn = makePiece(colorType::WHITE, pieceType::PAWN);
@@ -2558,139 +2447,449 @@ int main(){
         check(pawn.status.frozen, "A: status.frozen 쓰기");
     }
 
-    // ---- Phase B: moveChunk.next 연쇄 해석 (resolveChunkChains) ----
+    // ---- isRoyal: 왕족 속성 필드는 하나뿐이다. KING 종류는 pT로 판단한다. ----
     {
-        AugmentChessGameState s;
-        const Piece knight = makePiece(colorType::WHITE, pieceType::KNIGHT);
-        const Square knightSquare{knight, Coord{3, 2}};
+        const Piece king = makePiece(colorType::WHITE, pieceType::KING);
+        check(king.pT == pieceType::KING && king.isRoyal, "A: 기본 KING 생성은 isRoyal = true");
 
-        s.addPiece({3, 2}, knight);
-        s.addPiece({4, 3}, makePiece(colorType::BLACK, pieceType::PAWN));
+        const Piece kingWithPool(colorType::WHITE, pieceType::KING, PieceVolume{}, std::vector<pieceType>{});
+        check(kingWithPool.isRoyal, "A: 승격 풀을 받는 생성자로 만든 KING도 isRoyal = true");
 
-        // {3,2} -> MOVE {0,1} -> {3,3} -> CATCH {1,0} -> {4,3}의 적 기물
-        moveChunk root(moveType::MOVE, Coord{0, 1});
-        root.then(moveChunk(moveType::CATCH, Coord{1, 0}));
-
-        const auto chains = s.resolveChunkChains(knightSquare, {3, 2}, root, true);
+        const Piece fullKing(colorType::BLACK, pieceType::KING, PieceVolume{}, {}, {});
+        check(fullKing.isRoyal, "A: 전체 설정 생성자의 기본값도 KING이면 isRoyal = true");
 
         check(
-            chains.size() == 1 &&
-            chains[0].steps.size() == 2 &&
-            chains[0].steps[0].destination == Coord{3, 3} &&
-            chains[0].steps[0].type == moveType::MOVE &&
-            chains[0].steps[1].destination == Coord{4, 3} &&
-            chains[0].steps[1].type == moveType::CATCH &&
-            chains[0].steps[1].captures,
-            "B: next는 직전 성공 위치를 origin으로 해석된다"
+            !makePiece(colorType::WHITE, pieceType::PAWN).isRoyal &&
+            !makePiece(colorType::BLACK, pieceType::KNIGHT).isRoyal,
+            "A: KING이 아닌 기물의 기본값은 isRoyal = false"
         );
 
+        const Piece plainKing(colorType::WHITE, pieceType::KING, PieceVolume{}, {}, {}, 1, false);
         check(
-            s.resolveChunkChains(knightSquare, {3, 2}, root, false).empty(),
-            "B: NoCapture면 포획 step이 든 연쇄는 없다"
+            plainKing.pT == pieceType::KING && !plainKing.isRoyal,
+            "A: 전체 설정 생성자에서 명시하면 왕족이 아닌 KING도 만들 수 있다"
         );
 
-        // next의 activateSquare는 직전 성공 위치(3,3) 기준으로 검사한다.
-        moveChunk gated(moveType::MOVE, Coord{0, 1});
-        gated.then(moveChunk(
-            moveType::CATCH,
-            Coord{1, 0},
-            1,
-            std::vector<actCoord>{{std::nullopt, 5}}
-        ));
-
+        const Piece royalKnight(colorType::WHITE, pieceType::KNIGHT, PieceVolume{}, {}, {}, 1, true);
         check(
-            s.resolveChunkChains(knightSquare, {3, 2}, gated, true).empty(),
-            "B: next의 activateSquare가 맞지 않으면 연쇄가 끊긴다"
-        );
-
-        // 분기: root -> A, root -> B
-        moveChunk branch(moveType::MOVE, Coord{0, 1});
-        branch.then(moveChunk(moveType::MOVE, Coord{-1, 0}));
-        branch.then(moveChunk(moveType::MOVE, Coord{0, 1}));
-
-        check(
-            s.resolveChunkChains(knightSquare, {3, 2}, branch, true).size() == 2,
-            "B: next가 여러 개면 분기 수만큼 경로가 나온다"
-        );
-
-        // 3단 연쇄
-        moveChunk triple(moveType::MOVE, Coord{0, 1});
-        triple.then(moveChunk(moveType::MOVE, Coord{0, 1}))
-              .then(moveChunk(moveType::MOVE, Coord{1, 0}));
-
-        const auto tripleChains = s.resolveChunkChains(knightSquare, {3, 2}, triple, true);
-
-        check(
-            tripleChains.size() == 1 &&
-            tripleChains[0].steps.size() == 3 &&
-            tripleChains[0].steps[2].destination == Coord{4, 4},
-            "B: 3단 연쇄를 재귀로 끝까지 따라간다"
-        );
-
-        // 첫 chunk가 막히면 연쇄 전체가 성립하지 않는다.
-        AugmentChessGameState blocked;
-        blocked.addPiece({3, 2}, knight);
-        blocked.addPiece({3, 3}, makePiece(colorType::WHITE, pieceType::PAWN));
-
-        check(
-            blocked.resolveChunkChains(knightSquare, {3, 2}, root, true).empty(),
-            "B: 첫 chunk가 막히면 next는 해석되지 않는다"
+            royalKnight.pT != pieceType::KING && royalKnight.isRoyal,
+            "A: KING이 아니어도 isRoyal 표식을 줄 수 있다"
         );
     }
 
-    // 판단(B-chain)을 살렸을 때만 의미가 있는 검사: 연쇄의 최종 목적지가 moveAction으로 나온다.
-    // [JUDGMENT-BEGIN B-chain]
-    //     {
-    //         AugmentChessGameState s;
-    //         Piece knight = makePiece(colorType::WHITE, pieceType::KNIGHT);
-    //
-    //         moveChunk root(moveType::MOVE, Coord{0, 1});
-    //         root.then(moveChunk(moveType::TAKEMOVE, Coord{1, 0}));
-    //         knight.addNewMovement(root);
-    //
-    //         s.addPiece({3, 2}, knight);
-    //         s.addPiece({4, 3}, makePiece(colorType::BLACK, pieceType::PAWN));
-    //
-    //         const auto actions = s.allLegalActions(colorType::WHITE);
-    //
-    //         check(
-    //             hasAction(actions, {3, 2}, {4, 3}, moveType::TAKEMOVE),
-    //             "B-chain: 연쇄 결과는 최종 목적지만 담은 action이 된다"
-    //         );
-    //         check(
-    //             hasAction(actions, {3, 2}, {3, 3}, moveType::MOVE),
-    //             "B-chain: chunk 자체의 단독 이동은 그대로 남는다"
-    //         );
-    //
-    //         s.apply_action(moveAction(
-    //             colorType::WHITE, pieceType::KNIGHT, moveType::TAKEMOVE, {3, 2}, {4, 3}
-    //         ));
-    //
-    //         const Piece* landed = s.getPieceAt({4, 3});
-    //         check(
-    //             landed != nullptr && landed->cT == colorType::WHITE && s.pieceCount() == 1,
-    //             "B-chain: 연쇄 action 적용 결과(최종 칸 도착 + 포획)"
-    //         );
-    //     }
-    //
-    //     {
-    //         // CATCH로 끝나는 연쇄는 최종 목적지만으로 표현할 수 없어 action이 되지 않는다.
-    //         AugmentChessGameState s;
-    //         Piece knight = makePiece(colorType::WHITE, pieceType::KNIGHT);
-    //
-    //         moveChunk root(moveType::MOVE, Coord{0, 1});
-    //         root.then(moveChunk(moveType::CATCH, Coord{1, 0}));
-    //         knight.addNewMovement(root);
-    //
-    //         s.addPiece({3, 2}, knight);
-    //         s.addPiece({4, 3}, makePiece(colorType::BLACK, pieceType::PAWN));
-    //
-    //         check(
-    //             !hasAction(s.allLegalActions(colorType::WHITE), {3, 2}, {4, 3}, moveType::CATCH),
-    //             "B-chain: CATCH로 끝나는 연쇄는 action으로 만들지 않는다"
-    //         );
-    //     }
-    // [JUDGMENT-END B-chain]
+    // ---- Phase B: moveChunk.next = 활성화 트리 (walkChunk) ----
+    // 아래 검사의 움직이는 기물은 나이트다. 나이트의 기본 행마는 전부 TAKEMOVE라서
+    // MOVE/TAKE/CATCH/JUMP로 만든 트리 action과 섞이지 않는다. 다른 기물의 행마가 섞이지 않도록
+    // 보드에서 그 기물 하나만 골라 interpretedPieceMoveChunk로 해석한다.
+    {
+        // 부모 하나에 독립 자식 둘: 부모 칸 1개 + 자식 칸 2개가 각각 독립 action이다.
+        AugmentChessGameState s;
+        Piece knight = makePiece(colorType::WHITE, pieceType::KNIGHT);
+
+        moveChunk root(moveType::MOVE, Coord{0, 1});
+        root.then(moveChunk(moveType::MOVE, Coord{1, 0}));
+        root.then(moveChunk(moveType::MOVE, Coord{-1, 0}));
+        knight.addNewMovement(root);
+
+        s.addPiece({4, 4}, knight);
+        const auto actions = actionsOf(s, {4, 4});
+
+        check(
+            countType(actions, moveType::MOVE) == 3 &&
+            hasAction(actions, {4, 4}, {4, 5}, moveType::MOVE) &&
+            hasAction(actions, {4, 4}, {5, 5}, moveType::MOVE) &&
+            hasAction(actions, {4, 4}, {3, 5}, moveType::MOVE),
+            "B: 부모가 활성화한 칸과 두 자식이 활성화한 칸이 각각 독립 action이다"
+        );
+        check(
+            allStartAt(actions, {4, 4}),
+            "B: 모든 action의 start는 원래 위치다(originalOrigin 고정)"
+        );
+    }
+
+    {
+        // Chessembly: do take-move(0,1) { take-move(1,0) repeat(1) } { take-move(-1,0) repeat(1) } while
+        // 부모 ray가 칸 4개((4,5)~(4,8))를 활성화하고, 칸마다 자식 둘이 새로 해석된다.
+        AugmentChessGameState s;
+        Piece knight = makePiece(colorType::WHITE, pieceType::KNIGHT);
+
+        moveChunk root(moveType::MOVE, Coord{0, 1}, std::nullopt);
+        root.then(moveChunk(moveType::MOVE, Coord{1, 0}));
+        root.then(moveChunk(moveType::MOVE, Coord{-1, 0}));
+        knight.addNewMovement(root);
+
+        s.addPiece({4, 4}, knight);
+        const auto actions = actionsOf(s, {4, 4});
+
+        bool everySquare = true;
+        for (int rank = 5; rank <= 8; ++rank) {
+            everySquare = everySquare &&
+                hasAction(actions, {4, 4}, {4, rank}, moveType::MOVE) &&
+                hasAction(actions, {4, 4}, {5, rank}, moveType::MOVE) &&
+                hasAction(actions, {4, 4}, {3, rank}, moveType::MOVE);
+        }
+
+        check(
+            countType(actions, moveType::MOVE) == 12 && everySquare && allStartAt(actions, {4, 4}),
+            "B: 부모 ray의 칸마다 자식이 따로 해석된다(4칸 x (부모 + 자식 2) = 12 action)"
+        );
+    }
+
+    {
+        // 3세대: 원래 위치는 끝까지 고정이고 currentOrigin만 세대마다 바뀐다.
+        AugmentChessGameState s;
+        Piece knight = makePiece(colorType::WHITE, pieceType::KNIGHT);
+
+        moveChunk root(moveType::MOVE, Coord{0, 1});
+        root.then(moveChunk(moveType::MOVE, Coord{1, 0}))
+            .then(moveChunk(moveType::MOVE, Coord{0, 1}));
+        knight.addNewMovement(root);
+
+        s.addPiece({4, 4}, knight);
+        const auto actions = actionsOf(s, {4, 4});
+
+        check(
+            countType(actions, moveType::MOVE) == 3 &&
+            hasAction(actions, {4, 4}, {4, 5}, moveType::MOVE) &&
+            hasAction(actions, {4, 4}, {5, 5}, moveType::MOVE) &&
+            hasAction(actions, {4, 4}, {5, 6}, moveType::MOVE) &&
+            allStartAt(actions, {4, 4}),
+            "B: 3세대까지 이어져도 모든 action의 start는 원래 위치다"
+        );
+    }
+
+    {
+        // 부모가 여러 칸을 활성화(maxDistance 2)하면 칸마다 action이고 각 칸의 자식 결과도 각각 별도 action이다.
+        AugmentChessGameState s;
+        Piece knight = makePiece(colorType::WHITE, pieceType::KNIGHT);
+
+        moveChunk root(moveType::MOVE, Coord{0, 1}, 2);
+        root.then(moveChunk(moveType::MOVE, Coord{1, 0}));
+        knight.addNewMovement(root);
+
+        s.addPiece({4, 4}, knight);
+        const auto actions = actionsOf(s, {4, 4});
+
+        check(
+            countType(actions, moveType::MOVE) == 4 &&
+            hasAction(actions, {4, 4}, {4, 5}, moveType::MOVE) &&
+            hasAction(actions, {4, 4}, {4, 6}, moveType::MOVE) &&
+            hasAction(actions, {4, 4}, {5, 5}, moveType::MOVE) &&
+            hasAction(actions, {4, 4}, {5, 6}, moveType::MOVE),
+            "B: 여러 칸을 활성화하는 부모는 칸마다 action이고 각 칸에서 자식이 따로 해석된다"
+        );
+    }
+
+    {
+        // 형제 독립 (종료): 자식 A가 (6,5)의 기물에 막혀 끝나도 자식 B는 영향받지 않는다.
+        // 순서를 바꿔도 같은 결과여야 한다.
+        for (const bool blockedSiblingFirst : {true, false}) {
+            AugmentChessGameState s;
+            Piece knight = makePiece(colorType::WHITE, pieceType::KNIGHT);
+
+            moveChunk root(moveType::MOVE, Coord{0, 1});
+            moveChunk blocked(moveType::MOVE, Coord{1, 0}, std::nullopt);
+            moveChunk openSide(moveType::MOVE, Coord{-1, 0}, std::nullopt);
+
+            if (blockedSiblingFirst) {
+                root.then(blocked);
+                root.then(openSide);
+            }
+            else {
+                root.then(openSide);
+                root.then(blocked);
+            }
+
+            knight.addNewMovement(root);
+
+            s.addPiece({4, 4}, knight);
+            s.addPiece({6, 5}, makePiece(colorType::WHITE, pieceType::PAWN));
+            const auto actions = actionsOf(s, {4, 4});
+
+            check(
+                countType(actions, moveType::MOVE) == 5 &&
+                hasAction(actions, {4, 4}, {5, 5}, moveType::MOVE) &&
+                !hasAction(actions, {4, 4}, {6, 5}, moveType::MOVE) &&
+                !hasAction(actions, {4, 4}, {7, 5}, moveType::MOVE) &&
+                hasAction(actions, {4, 4}, {3, 5}, moveType::MOVE) &&
+                hasAction(actions, {4, 4}, {2, 5}, moveType::MOVE) &&
+                hasAction(actions, {4, 4}, {1, 5}, moveType::MOVE),
+                blockedSiblingFirst
+                    ? "B: 한 형제가 막혀 끝나도 다른 형제는 영향받지 않는다(막힌 형제가 먼저)"
+                    : "B: 한 형제가 막혀 끝나도 다른 형제는 영향받지 않는다(막힌 형제가 나중)"
+            );
+        }
+    }
+
+    {
+        // 형제 독립 (상태 비공유): 두 자식 모두 JUMP다. JUMP의 "이미 뛰어넘었는가" 상태가 형제 사이에서
+        // 새어 나가면 두 번째 자식이 잘못 막히거나 잘못 착지한다.
+        // (1,4) -> 부모 MOVE {0,1} -> (1,5). 자식 A: 오른쪽으로 (2,5)의 적을 넘어 (3,5)~(8,5) 착지 6곳,
+        // 자식 B: 위로 (1,6)의 적을 넘어 (1,7),(1,8) 착지 2곳.
+        AugmentChessGameState s;
+        Piece knight = makePiece(colorType::WHITE, pieceType::KNIGHT);
+
+        moveChunk root(moveType::MOVE, Coord{0, 1});
+        root.then(moveChunk(moveType::JUMP, Coord{1, 0}, std::nullopt));
+        root.then(moveChunk(moveType::JUMP, Coord{0, 1}, std::nullopt));
+        knight.addNewMovement(root);
+
+        s.addPiece({1, 4}, knight);
+        s.addPiece({2, 5}, makePiece(colorType::BLACK, pieceType::PAWN));
+        s.addPiece({1, 6}, makePiece(colorType::BLACK, pieceType::PAWN));
+        const auto actions = actionsOf(s, {1, 4});
+
+        bool jumpsRight = true;
+        for (int file = 3; file <= 8; ++file) {
+            jumpsRight = jumpsRight && hasAction(actions, {1, 4}, {file, 5}, moveType::JUMP);
+        }
+
+        check(
+            countType(actions, moveType::MOVE) == 1 &&
+            countType(actions, moveType::JUMP) == 8 &&
+            jumpsRight &&
+            hasAction(actions, {1, 4}, {1, 7}, moveType::JUMP) &&
+            hasAction(actions, {1, 4}, {1, 8}, moveType::JUMP) &&
+            allStartAt(actions, {1, 4}),
+            "B: 형제 JUMP 자식은 jumpedOver 같은 상태를 공유하지 않는다"
+        );
+    }
+
+    {
+        // 부모 실패 -> 자식 해석 안 함 (부모 -> 자식 종료 전파)
+        AugmentChessGameState blocked;
+        Piece knight = makePiece(colorType::WHITE, pieceType::KNIGHT);
+
+        moveChunk root(moveType::MOVE, Coord{0, 1});
+        root.then(moveChunk(moveType::MOVE, Coord{1, 0}));
+        knight.addNewMovement(root);
+
+        blocked.addPiece({4, 4}, knight);
+        blocked.addPiece({4, 5}, makePiece(colorType::WHITE, pieceType::PAWN));
+
+        check(
+            countType(actionsOf(blocked, {4, 4}), moveType::MOVE) == 0,
+            "B: 부모가 막혀 활성화하지 못하면 자식은 해석되지 않는다"
+        );
+
+        // 루트의 activateSquare가 원래 위치와 맞지 않아도 마찬가지다.
+        AugmentChessGameState gated;
+        Piece gatedKnight = makePiece(colorType::WHITE, pieceType::KNIGHT);
+
+        moveChunk gatedRoot(
+            moveType::MOVE,
+            Coord{0, 1},
+            1,
+            std::vector<actCoord>{{std::nullopt, 2}}
+        );
+        gatedRoot.then(moveChunk(moveType::MOVE, Coord{1, 0}));
+        gatedKnight.addNewMovement(gatedRoot);
+
+        gated.addPiece({4, 4}, gatedKnight);
+
+        check(
+            countType(actionsOf(gated, {4, 4}), moveType::MOVE) == 0,
+            "B: 루트의 activateSquare가 맞지 않으면 자식도 해석되지 않는다"
+        );
+
+        // TAKE 부모가 빈 칸만 만나면 활성화하지 못하므로 자식도 없다.
+        AugmentChessGameState emptyTake;
+        Piece takeKnight = makePiece(colorType::WHITE, pieceType::KNIGHT);
+
+        moveChunk takeRoot(moveType::TAKE, Coord{0, 1});
+        takeRoot.then(moveChunk(moveType::MOVE, Coord{1, 0}));
+        takeKnight.addNewMovement(takeRoot);
+
+        emptyTake.addPiece({4, 4}, takeKnight);
+
+        check(
+            countType(actionsOf(emptyTake, {4, 4}), moveType::MOVE) == 0 &&
+            countType(actionsOf(emptyTake, {4, 4}), moveType::TAKE) == 0,
+            "B: 활성화하지 못한 TAKE 부모의 자식은 해석되지 않는다"
+        );
+    }
+
+    {
+        // 자식 실패 -> 부모 action은 그대로 (자식 -> 부모 전파 없음)
+        AugmentChessGameState s;
+        Piece knight = makePiece(colorType::WHITE, pieceType::KNIGHT);
+
+        moveChunk root(moveType::MOVE, Coord{0, 1});
+        root.then(moveChunk(moveType::MOVE, Coord{0, 1}));
+        knight.addNewMovement(root);
+
+        s.addPiece({4, 4}, knight);
+        s.addPiece({4, 6}, makePiece(colorType::BLACK, pieceType::PAWN));
+        const auto actions = actionsOf(s, {4, 4});
+
+        check(
+            countType(actions, moveType::MOVE) == 1 &&
+            hasAction(actions, {4, 4}, {4, 5}, moveType::MOVE),
+            "B: 자식이 막혀 실패해도 이미 성공한 부모 action은 남는다"
+        );
+    }
+
+    {
+        // 자식의 activateSquare는 부모가 활성화한 칸((4,5)) 기준으로 검사한다.
+        AugmentChessGameState s;
+        Piece knight = makePiece(colorType::WHITE, pieceType::KNIGHT);
+
+        moveChunk root(moveType::MOVE, Coord{0, 1});
+        root.then(moveChunk(
+            moveType::MOVE, Coord{1, 0}, 1,
+            std::vector<actCoord>{{std::nullopt, 5}}
+        ));
+        root.then(moveChunk(
+            moveType::MOVE, Coord{-1, 0}, 1,
+            std::vector<actCoord>{{std::nullopt, 9}}
+        ));
+        knight.addNewMovement(root);
+
+        s.addPiece({4, 4}, knight);
+        const auto actions = actionsOf(s, {4, 4});
+
+        check(
+            countType(actions, moveType::MOVE) == 2 &&
+            hasAction(actions, {4, 4}, {5, 5}, moveType::MOVE) &&
+            !hasAction(actions, {4, 4}, {3, 5}, moveType::MOVE),
+            "B: 자식의 activateSquare는 부모가 활성화한 칸 기준이며, 맞지 않는 자식만 빠진다"
+        );
+    }
+
+    {
+        // 중간 칸의 포획: 그 노드는 성공이고(자기 ray는 포획으로 멈춘다), 자식은 그 칸에서 계속된다.
+        // 관련 없는 기물(5,4)은 부모 ray가 이미 멈췄으므로 닿지 않는다.
+        AugmentChessGameState s;
+        Piece knight = makePiece(colorType::WHITE, pieceType::KNIGHT);
+
+        moveChunk root(moveType::TAKE, Coord{1, 0}, std::nullopt);
+        root.then(moveChunk(moveType::MOVE, Coord{0, 1}));
+        knight.addNewMovement(root);
+
+        s.addPiece({1, 4}, knight);
+        s.addPiece({3, 4}, makePiece(colorType::BLACK, pieceType::PAWN));
+        s.addPiece({5, 4}, makePiece(colorType::BLACK, pieceType::PAWN));
+        const auto actions = actionsOf(s, {1, 4});
+
+        check(
+            countType(actions, moveType::TAKE) == 1 &&
+            hasAction(actions, {1, 4}, {3, 4}, moveType::TAKE) &&
+            !hasAction(actions, {1, 4}, {5, 4}, moveType::TAKE),
+            "B: 포획한 노드의 ray는 거기서 멈춘다"
+        );
+        check(
+            countType(actions, moveType::MOVE) == 1 &&
+            hasAction(actions, {1, 4}, {3, 5}, moveType::MOVE),
+            "B: 포획으로 ray가 멈춰도 그 칸을 기준으로 자식은 계속 해석된다"
+        );
+    }
+
+    {
+        // 중간 action은 GameState에 적용하지 않는다: CATCH {1,0} -> MOVE {0,1} -> MOVE {0,-1} 무제한.
+        // 적이 (5,4)에서 제거된 상태라고 가정했다면 세 번째 노드가 (5,4), (5,3)...으로 내려왔을 것이다.
+        // 실제로는 (5,4)에 기물이 그대로 있어 막힌다.
+        AugmentChessGameState s;
+        Piece knight = makePiece(colorType::WHITE, pieceType::KNIGHT);
+
+        moveChunk root(moveType::CATCH, Coord{1, 0});
+        root.then(moveChunk(moveType::MOVE, Coord{0, 1}))
+            .then(moveChunk(moveType::MOVE, Coord{0, -1}, std::nullopt));
+        knight.addNewMovement(root);
+
+        s.addPiece({4, 4}, knight);
+        s.addPiece({5, 4}, makePiece(colorType::BLACK, pieceType::PAWN));
+        const auto actions = actionsOf(s, {4, 4});
+
+        check(
+            countType(actions, moveType::CATCH) == 1 &&
+            hasAction(actions, {4, 4}, {5, 4}, moveType::CATCH) &&
+            countType(actions, moveType::MOVE) == 1 &&
+            hasAction(actions, {4, 4}, {5, 5}, moveType::MOVE),
+            "B: CATCH 노드가 성공하면 그 칸 기준으로 자식이 이어지고, 이후 노드는 포획이 적용되지 않은 보드를 본다"
+        );
+        check(
+            s.pieceCount() == 2 && s.getPieceAt({5, 4}) != nullptr,
+            "B: action을 생성해도 GameState는 바뀌지 않는다"
+        );
+
+        // 자식 action(원래 위치 -> (5,5))을 적용하면 그 이동만 일어나고 중간 포획은 일어나지 않는다.
+        s.apply_action(moveAction(
+            colorType::WHITE, pieceType::KNIGHT, moveType::MOVE, {4, 4}, {5, 5}
+        ));
+
+        check(
+            s.getPieceAt({5, 5}) != nullptr && s.getPieceAt({4, 4}) == nullptr &&
+            s.getPieceAt({5, 4}) != nullptr && s.pieceCount() == 2,
+            "B: 자식 action을 적용해도 중간 단계의 포획은 적용되지 않는다"
+        );
+    }
+
+    {
+        // 제약: NoCapture는 포획하는 활성화를 무효로 만들고, MustCapture는 포획이 아닌 action만 내보내지 않는다.
+        moveChunk root(moveType::MOVE, Coord{0, 1});
+        root.then(moveChunk(moveType::TAKE, Coord{1, 0}));
+
+        AugmentChessGameState noCapture;
+        Piece peaceful = makePiece(colorType::WHITE, pieceType::KNIGHT);
+        peaceful.addNewMovement(root);
+        peaceful.addConstraint(NoCapture{1});
+        noCapture.addPiece({4, 4}, peaceful);
+        noCapture.addPiece({5, 5}, makePiece(colorType::BLACK, pieceType::PAWN));
+        const auto peacefulActions = actionsOf(noCapture, {4, 4});
+
+        check(
+            countType(peacefulActions, moveType::TAKE) == 0 &&
+            hasAction(peacefulActions, {4, 4}, {4, 5}, moveType::MOVE),
+            "B: NoCapture면 자식의 포획 활성화는 없고 부모 이동은 남는다"
+        );
+
+        AugmentChessGameState mustCapture;
+        Piece hungry = makePiece(colorType::WHITE, pieceType::KNIGHT);
+        hungry.addNewMovement(root);
+        hungry.addConstraint(MustCapture{1});
+        mustCapture.addPiece({4, 4}, hungry);
+        mustCapture.addPiece({5, 5}, makePiece(colorType::BLACK, pieceType::PAWN));
+        const auto hungryActions = actionsOf(mustCapture, {4, 4});
+
+        check(
+            countType(hungryActions, moveType::MOVE) == 0 &&
+            hasAction(hungryActions, {4, 4}, {5, 5}, moveType::TAKE),
+            "B: MustCapture면 포획이 아닌 부모 action은 나오지 않지만 그 칸의 자식(포획)은 해석된다"
+        );
+    }
+
+    {
+        // 열린 질문(리뷰어 판단 대기)을 문서화하는 검사 두 가지. 방침이 정해지면 기대값을 바꾼다.
+        AugmentChessGameState dup;
+        Piece knight = makePiece(colorType::WHITE, pieceType::KNIGHT);
+
+        moveChunk root(moveType::MOVE, Coord{0, 1}, 2);
+        root.then(moveChunk(moveType::MOVE, Coord{0, 1}));
+        knight.addNewMovement(root);
+
+        dup.addPiece({4, 4}, knight);
+        const auto dupActions = actionsOf(dup, {4, 4});
+
+        check(
+            countAction(dupActions, {4, 4}, {4, 6}, moveType::MOVE) == 2 &&
+            countType(dupActions, moveType::MOVE) == 4,
+            "B(열린 질문): 서로 다른 경로가 만든 같은 (start,destination,type)은 dedup하지 않고 그대로 둔다"
+        );
+
+        AugmentChessGameState back;
+        Piece walker = makePiece(colorType::WHITE, pieceType::KNIGHT);
+
+        moveChunk out(moveType::MOVE, Coord{0, 1});
+        out.then(moveChunk(moveType::MOVE, Coord{0, -1}));
+        walker.addNewMovement(out);
+
+        back.addPiece({4, 4}, walker);
+
+        check(
+            hasAction(actionsOf(back, {4, 4}), {4, 4}, {4, 4}, moveType::MOVE),
+            "B(열린 질문): 자식이 원래 위치로 되돌아오면 start와 destination이 같은 action이 생긴다"
+        );
+    }
 
     // 판단(C-shift)을 살렸을 때만 의미가 있는 검사: 두 기물 교환과 양쪽 footprint 상호 검사.
     // [JUDGMENT-BEGIN C-shift]
@@ -2759,59 +2958,57 @@ int main(){
     //     }
     // [JUDGMENT-END C-shift]
 
-    // 판단(C-jump)을 살렸을 때만 의미가 있는 검사: 처음 만나는 적 기물을 넘은 뒤 빈칸에만 착지.
-    // [JUDGMENT-BEGIN C-jump]
-    //     {
-    //         AugmentChessGameState s;
-    //         Piece bishop = makePiece(colorType::WHITE, pieceType::BISHOP);
-    //         bishop.addNewMovement(moveChunk(moveType::JUMP, Coord{1, 0}, std::nullopt));
-    //
-    //         s.addPiece({1, 1}, bishop);
-    //         s.addPiece({3, 1}, makePiece(colorType::BLACK, pieceType::PAWN));
-    //         s.addPiece({6, 1}, makePiece(colorType::WHITE, pieceType::KNIGHT));
-    //
-    //         const auto actions = s.allLegalActions(colorType::WHITE);
-    //
-    //         check(
-    //             countType(actions, moveType::JUMP) == 2 &&
-    //             hasAction(actions, {1, 1}, {4, 1}, moveType::JUMP) &&
-    //             hasAction(actions, {1, 1}, {5, 1}, moveType::JUMP),
-    //             "C-jump: 적을 넘은 뒤 첫 빈칸부터 다음 기물 앞까지만 착지한다"
-    //         );
-    //         check(
-    //             !hasAction(actions, {1, 1}, {2, 1}, moveType::JUMP) &&
-    //             !hasAction(actions, {1, 1}, {3, 1}, moveType::JUMP),
-    //             "C-jump: 적을 넘기 전 칸이나 적 기물 자리로는 착지하지 않는다(포획 없음)"
-    //         );
-    //
-    //         s.apply_action(moveAction(
-    //             colorType::WHITE, pieceType::BISHOP, moveType::JUMP, {1, 1}, {5, 1}
-    //         ));
-    //
-    //         const Piece* landed = s.getPieceAt({5, 1});
-    //         check(
-    //             landed != nullptr && landed->pT == pieceType::BISHOP &&
-    //             s.getPieceAt({3, 1}) != nullptr && s.pieceCount() == 3,
-    //             "C-jump: 적용하면 이동만 하고 뛰어넘은 적 기물은 그대로다"
-    //         );
-    //     }
-    //
-    //     {
-    //         // 넘기 전에 아군을 만나면 ray가 막힌다.
-    //         AugmentChessGameState s;
-    //         Piece bishop = makePiece(colorType::WHITE, pieceType::BISHOP);
-    //         bishop.addNewMovement(moveChunk(moveType::JUMP, Coord{1, 0}, std::nullopt));
-    //
-    //         s.addPiece({1, 1}, bishop);
-    //         s.addPiece({3, 1}, makePiece(colorType::WHITE, pieceType::KNIGHT));
-    //         s.addPiece({5, 1}, makePiece(colorType::BLACK, pieceType::PAWN));
-    //
-    //         check(
-    //             countType(s.allLegalActions(colorType::WHITE), moveType::JUMP) == 0,
-    //             "C-jump: 넘기 전에 아군을 만나면 뛰어넘을 수 없다"
-    //         );
-    //     }
-    // [JUDGMENT-END C-jump]
+    // ---- C-jump (승인됨): 처음 만나는 적 기물을 넘은 뒤 빈칸에만 착지 ----
+    {
+        AugmentChessGameState s;
+        Piece bishop = makePiece(colorType::WHITE, pieceType::BISHOP);
+        bishop.addNewMovement(moveChunk(moveType::JUMP, Coord{1, 0}, std::nullopt));
+
+        s.addPiece({1, 1}, bishop);
+        s.addPiece({3, 1}, makePiece(colorType::BLACK, pieceType::PAWN));
+        s.addPiece({6, 1}, makePiece(colorType::WHITE, pieceType::KNIGHT));
+
+        const auto actions = s.allLegalActions(colorType::WHITE);
+
+        check(
+            countType(actions, moveType::JUMP) == 2 &&
+            hasAction(actions, {1, 1}, {4, 1}, moveType::JUMP) &&
+            hasAction(actions, {1, 1}, {5, 1}, moveType::JUMP),
+            "C-jump: 적을 넘은 뒤 첫 빈칸부터 다음 기물 앞까지만 착지한다"
+        );
+        check(
+            !hasAction(actions, {1, 1}, {2, 1}, moveType::JUMP) &&
+            !hasAction(actions, {1, 1}, {3, 1}, moveType::JUMP),
+            "C-jump: 적을 넘기 전 칸이나 적 기물 자리로는 착지하지 않는다(포획 없음)"
+        );
+
+        s.apply_action(moveAction(
+            colorType::WHITE, pieceType::BISHOP, moveType::JUMP, {1, 1}, {5, 1}
+        ));
+
+        const Piece* landed = s.getPieceAt({5, 1});
+        check(
+            landed != nullptr && landed->pT == pieceType::BISHOP &&
+            s.getPieceAt({3, 1}) != nullptr && s.pieceCount() == 3,
+            "C-jump: 적용하면 이동만 하고 뛰어넘은 적 기물은 그대로다"
+        );
+    }
+
+    {
+        // 넘기 전에 아군을 만나면 ray가 막힌다.
+        AugmentChessGameState s;
+        Piece bishop = makePiece(colorType::WHITE, pieceType::BISHOP);
+        bishop.addNewMovement(moveChunk(moveType::JUMP, Coord{1, 0}, std::nullopt));
+
+        s.addPiece({1, 1}, bishop);
+        s.addPiece({3, 1}, makePiece(colorType::WHITE, pieceType::KNIGHT));
+        s.addPiece({5, 1}, makePiece(colorType::BLACK, pieceType::PAWN));
+
+        check(
+            countType(s.allLegalActions(colorType::WHITE), moveType::JUMP) == 0,
+            "C-jump: 넘기 전에 아군을 만나면 뛰어넘을 수 없다"
+        );
+    }
 
     // ---- Phase D: apply_action(moveAction) - 이동 / 포획 / CATCH / 턴 소비 ----
     {
@@ -2933,6 +3130,8 @@ int main(){
 
         const cardAction use(colorType::WHITE, card, false);
 
+        check(!s.validateExternalAction(use), "D-card: 효과가 등록되지 않은 카드는 외부 입력 검증을 통과하지 못한다");
+
         s.apply_action(use);
         check(!s.isCardUsed(colorType::WHITE, "test-card"), "D-card: 효과가 등록되지 않은 카드는 상태를 바꾸지 않는다");
 
@@ -2941,6 +3140,8 @@ int main(){
             "test-card",
             [&calls](AugmentChessGameState&, const cardAction&) { ++calls; }
         );
+
+        check(s.validateExternalAction(use), "D-card: 패에 있고 효과가 등록된 카드는 외부 입력 검증을 통과한다");
 
         s.apply_action(use);
         check(
@@ -2952,8 +3153,11 @@ int main(){
             "D-card: 무료 카드 사용은 턴을 넘기지 않는다"
         );
 
-        s.apply_action(use);
-        check(calls == 1, "D-card: 이미 사용한 카드는 다시 쓸 수 없다");
+        check(!s.validateExternalAction(use), "D-card: 이미 사용한 카드는 외부 입력 검증에서 걸러진다");
+        check(
+            !s.validateExternalAction(cardAction(colorType::BLACK, card, false)),
+            "D-card: 현재 턴 플레이어가 아닌 쪽의 카드 사용은 외부 입력 검증에서 걸러진다"
+        );
 
         // 턴을 소비하는 카드
         const Card costly{CardActType::ACTIVE, CardType::MIDDLE, "costly-card", false};
@@ -2962,6 +3166,58 @@ int main(){
 
         s.apply_action(cardAction(colorType::WHITE, costly, true));
         check(s.getTurn().player == colorType::BLACK, "D-card: isTurnUsed=true인 카드는 턴을 소비한다");
+    }
+
+    // ---- Phase D: 외부 입력 검증 경계 (validateExternalAction) ----
+    {
+        AugmentChessGameState s;
+        s.addPiece({5, 1}, makeKing(colorType::WHITE));
+        s.addPiece({5, 8}, makeKing(colorType::BLACK));
+        s.addPiece({1, 2}, makePiece(colorType::WHITE, pieceType::ROOK));
+        s.addPiece({1, 5}, makePiece(colorType::BLACK, pieceType::PAWN));
+
+        const moveAction legal(colorType::WHITE, pieceType::ROOK, moveType::TAKEMOVE, {1, 2}, {1, 5});
+        check(s.validateExternalAction(legal), "D-boundary: 생성될 수 있는 합법 action은 통과한다");
+
+        check(
+            !s.validateExternalAction(moveAction(
+                colorType::WHITE, pieceType::ROOK, moveType::TAKEMOVE, {1, 2}, {2, 3}
+            )),
+            "D-boundary: 룩이 갈 수 없는 칸은 걸러진다"
+        );
+        check(
+            !s.validateExternalAction(moveAction(
+                colorType::WHITE, pieceType::ROOK, moveType::TAKEMOVE, {1, 2}, {1, 8}
+            )),
+            "D-boundary: 기물을 건너뛰는 이동은 걸러진다"
+        );
+        check(
+            !s.validateExternalAction(moveAction(
+                colorType::BLACK, pieceType::PAWN, moveType::MOVE, {1, 5}, {1, 4}
+            )),
+            "D-boundary: 현재 턴 플레이어가 아닌 쪽의 action은 걸러진다"
+        );
+        check(
+            !s.validateExternalAction(moveAction(
+                colorType::WHITE, pieceType::QUEEN, moveType::TAKEMOVE, {1, 2}, {1, 5}
+            )),
+            "D-boundary: 출발 칸의 기물 종류가 다르면 걸러진다"
+        );
+
+        moveAction badPromotion = legal;
+        badPromotion.promotion = pieceType::QUEEN;
+        check(
+            !s.validateExternalAction(badPromotion),
+            "D-boundary: 출발 기물의 승격 풀에 없는 승격 지정은 걸러진다"
+        );
+
+        // 검증을 통과한 action은 검사 없이 apply_action으로 그대로 적용된다.
+        s.apply_action(legal);
+        check(
+            s.getPieceAt({1, 5}) != nullptr && s.getPieceAt({1, 5})->cT == colorType::WHITE &&
+            s.pieceCount() == 3,
+            "D-boundary: 검증된 action은 그대로 apply_action에 넘긴다"
+        );
     }
 
     // ---- Phase E: 왕족 제거 기반 종료 판정 ----
