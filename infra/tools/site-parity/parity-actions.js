@@ -1,6 +1,6 @@
 // generateActions parity on random sparse boards. Usage: node parity-actions.js [engine|-] [N=400] [seed=12345]
 const C = require("./common"); const { real } = C; const args = C.parseArgs(); const eng = require(args.engine);
-const N = args.N || 400, rng = C.rngMaker(args.seed || 12345);
+const N = args.N || 400, rng = C.rngMaker(args.seed || C.defaultSeed(1));
 const TYPES = ["pawn","knight","bishop","rook","queen","amazon","cardinal","pegasus","assassin","dragon","cannon","grasshopper","hook","herald","camel","alfil","ferz","eagle","berserker","magicGirl","thief","paladin","octopus","clockwork","brutus","checker","campfire","princess","hedgehog","undead","siren","trickster","slime","scarecrow","merchant"];
 function makeBoard() {
   const b = Array.from({ length: 8 }, () => Array(8).fill(null));

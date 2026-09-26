@@ -3,7 +3,9 @@ const os = require("os");
 const path = require("path");
 const fs = require("fs");
 
-const WORKER_COUNT = Math.max(1, os.cpus().length - 1);
+// SELFPLAY_WORKERS caps the worker threads (default: all cores but one). On a shared/desktop machine set it low
+// (e.g. 2) -- 7 workers use every core and ~1.4 GB and can freeze the computer.
+const WORKER_COUNT = Math.max(1, Math.min(os.cpus().length - 1, Number(process.env.SELFPLAY_WORKERS) || Infinity));
 const RUN_MS = Number(process.argv[2] || 600000); // default 10 minutes
 // SELFPLAY_SEARCH_DEPTH env override (2026-09-13): for the NNUE-bootstrap
 // deep-search quality test -- deeper search than the usual bulk-throughput
