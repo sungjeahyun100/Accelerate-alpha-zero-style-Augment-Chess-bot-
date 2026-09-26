@@ -5,9 +5,31 @@
 #
 # 사용법:
 #   ./uncomment_judgment.sh engine.cpp > engine_all.cpp            # 모든 판단 블록을 살림
-#   ./uncomment_judgment.sh engine.cpp C-shift C-jump > part.cpp   # 이름을 준 블록만 살림
+#   ./uncomment_judgment.sh engine.cpp C-shift F-promo-choice > part.cpp   # 이름을 준 블록만 살림
+#   ./uncomment_judgment.sh --list engine.cpp                      # 남아 있는 블록 이름을 한 줄에 하나씩 출력
 #
 # 블록 안에 "//"로 시작하지 않는 줄이 있으면 표기 규칙 위반이므로 오류로 끝낸다.
+# (B-chain은 리뷰에서 반려되어 제거했고, C-jump는 승인되어 활성 코드가 되었으므로 남아 있는 이름이 아니다.)
+
+if [ "$1" = "--list" ]; then
+    if [ $# -ne 2 ]; then
+        echo "usage: $0 --list engine.cpp" >&2
+        exit 2
+    fi
+
+    awk '
+    /^[ \t]*\/\/ \[JUDGMENT-BEGIN [^ \]]+\]/ {
+        name = $0
+        sub(/^.*\[JUDGMENT-BEGIN +/, "", name)
+        sub(/\].*/, "", name)
+        if (!(name in seen)) {
+            seen[name] = 1
+            print name
+        }
+    }
+    ' "$2"
+    exit 0
+fi
 
 if [ $# -lt 1 ]; then
     echo "usage: $0 engine.cpp [block-name ...]" >&2
