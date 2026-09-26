@@ -131,7 +131,12 @@ enum class moveType{
  *
  *    - std::nullopt이면 위치에 상관없이 활성화된다.
  *
- * 5. next
+ * 5. activateAtParentDistance
+ *    - 해당 chunk의 직접 부모가 현재 활성화한 ray distance를 기준으로 한다.
+ *    - std::nullopt이면 부모의 모든 distance에서 활성화된다.
+ *    - 루트 chunk에는 부모가 없으므로 이 값은 의미가 없다.
+ *
+ * 6. next
  *    - 이 chunk(부모)가 어떤 칸을 유효하게 활성화했을 때, 그 칸을 기준으로 이어서 해석할
  *      자식 moveChunk들을 저장한다. Chessembly의 { } 블록처럼 부모-자식 관계를 가진
  *      "활성화 트리"다. (하나의 완성된 chain을 만드는 구조가 아니다.)
@@ -152,7 +157,7 @@ enum class moveType{
  *      do take-move(0,1) { take-move(1,0) repeat(1) } { take-move(-1,0) repeat(1) } while;
  *      = 바깥이 root, 각 { ... }가 A, B.
  *
- * 6. 활성화 트리의 해석 (구현: walkChunk, 자세한 규칙은 구현부의 [moveChunk 활성화 트리] 주석)
+ * 7. 활성화 트리의 해석 (구현: walkChunk, 자세한 규칙은 구현부의 [moveChunk 활성화 트리] 주석)
  *
  *    - originalOrigin: 기물의 원래 위치. 모든 moveAction의 start이며 트리 전체에서 고정이다.
  *    - currentOrigin: 지금 노드를 해석하는 기준점. 루트는 originalOrigin, 자식은 부모가
@@ -173,7 +178,7 @@ enum class moveType{
  *
  *    두 개가 각각 독립적인 moveAction이다.
  *
- * 7. moveAction 생성
+ * 8. moveAction 생성
  *
  *    moveChunk 자체는 "행마 정의"일 뿐이며 실제 착수를 의미하지 않는다.
  *
@@ -189,7 +194,7 @@ enum class moveType{
  *          ↓
  *      legal moveAction
  *
- * 8. PieceVolume
+ * 9. PieceVolume
  *
  *    다중 칸을 점유하는 기물의 경우 destination 하나만 확인해서는 안 된다.
  *
@@ -199,7 +204,7 @@ enum class moveType{
  *      - 현재 보드에서 유효하고
  *      - 해당 moveType의 충돌 규칙을 만족해야 한다.
  *
- * 9. direction은 "행마 정의용 상대 벡터"이고,
+ * 10. direction은 "행마 정의용 상대 벡터"이고,
  *    실제 start/destination 좌표는 moveChunk에 저장하지 않는다.
  *
  *    실제 좌표는 GameState에서 해석할 때 계산한다.
@@ -225,17 +230,20 @@ struct moveChunk {
 
     // nullopt = 거리 제한 없음
     std::optional<int> maxDistance = 1;
+    std::optional<int> activateAtParentDistance;
 
     moveChunk(
         moveType type,
         Coord dir,
         std::optional<int> maxDist = 1,
-        std::optional<std::vector<actCoord>> actSq = {}
+        std::optional<std::vector<actCoord>> actSq = {},
+        std::optional<int> parentDistance = std::nullopt
     )
         : mT(type),
           direction(dir),
+          activateSquare(actSq),
           maxDistance(maxDist),
-          activateSquare(actSq)
+          activateAtParentDistance(parentDistance)
     {}
 
     moveChunk(
@@ -243,13 +251,15 @@ struct moveChunk {
         Coord dir,
         std::vector<moveChunk> nextChunks,
         std::optional<int> maxDist = 1,
-        std::optional<std::vector<actCoord>> actSq = {}
+        std::optional<std::vector<actCoord>> actSq = {},
+        std::optional<int> parentDistance = std::nullopt
     )
         : mT(type),
           direction(dir),
+          activateSquare(actSq),
           next(std::move(nextChunks)),
           maxDistance(maxDist),
-          activateSquare(actSq)
+          activateAtParentDistance(parentDistance)
     {}
 
     moveChunk& then(moveChunk nextChunk) {
@@ -1450,6 +1460,9 @@ bool AugmentChessGameState::canCapture(
 //      (originalOrigin)를 start로 하는" 독립적인 moveAction이 된다.
 //   2. 그 활성화된 칸을 currentOrigin으로 삼아 자식 chunk를 각각 따로 해석한다.
 //      originalOrigin은 트리 전체에서 고정이고, 바뀌는 것은 currentOrigin뿐이다.
+//      activateAtParentDistance는 해당 chunk의 직접 부모가 현재 활성화한 ray distance를
+//      기준으로 한다. nullopt이면 부모의 모든 distance에서 활성화된다. 루트 chunk에서는
+//      부모가 없으므로 이 값은 의미가 없다.
 //   3. 종료 전파: 부모 -> 자식은 있다(부모가 활성화에 실패하거나 종료되면 자식은 해석하지
 //      않는다). 자식 -> 부모는 없다(자식이 실패해도 이미 만든 부모 action은 그대로다).
 //      형제 <-> 형제도 없다(한 형제의 실패/종료는 다른 형제에 영향을 주지 않는다).
@@ -1529,6 +1542,7 @@ void AugmentChessGameState::walkChunk(
     // C-jump(승인됨): "적 기물을 이미 뛰어넘었는가". 이 노드의 ray만 쓰는 지역 상태라서
     // 형제/자식 노드와 공유되지 않는다. (규칙 4)
     bool jumpedOver = false;
+    int distance = 1;
 
     // 이 노드가 destination을 유효하게 활성화했다.
     //  - 원래 위치를 start로 하는 독립 action을 즉시 추가한다. (규칙 1, 6)
@@ -1547,11 +1561,13 @@ void AugmentChessGameState::walkChunk(
         }
 
         for (const moveChunk& child : chunk.next) {
+            if (child.activateAtParentDistance.has_value() &&
+                child.activateAtParentDistance.value() != distance) {
+                continue;
+            }
             walkChunk(ctx, destination, child, out);
         }
     };
-
-    int distance = 1;
 
     while (
         !chunk.maxDistance.has_value() ||
@@ -2592,7 +2608,7 @@ bool allStartAt(
 
 } // namespace
 
-/*
+
 int main(){
     registerAllCardEffects();
 
@@ -2735,6 +2751,123 @@ int main(){
             hasAction(actions, {4, 4}, {5, 5}, moveType::MOVE) &&
             hasAction(actions, {4, 4}, {5, 6}, moveType::MOVE),
             "B: 여러 칸을 활성화하는 부모는 칸마다 action이고 각 칸에서 자식이 따로 해석된다"
+        );
+    }
+
+    {
+        // 자식은 직접 부모의 distance 3에서만 실행된다. 루트에 설정된 값은 무시한다.
+        AugmentChessGameState s;
+        Piece knight = makePiece(colorType::WHITE, pieceType::KNIGHT);
+
+        moveChunk root(moveType::MOVE, Coord{0, 1}, 4, std::nullopt, 2);
+        root.then(moveChunk(moveType::MOVE, Coord{1, 0}, 1, std::nullopt, 3));
+        knight.addNewMovement(root);
+
+        s.addPiece({4, 2}, knight);
+        const auto actions = actionsOf(s, {4, 2});
+
+        bool everyParent = true;
+        for (int rank = 3; rank <= 6; ++rank) {
+            everyParent = everyParent &&
+                hasAction(actions, {4, 2}, {4, rank}, moveType::MOVE);
+        }
+        check(
+            countType(actions, moveType::MOVE) == 5 && everyParent &&
+            hasAction(actions, {4, 2}, {5, 5}, moveType::MOVE) &&
+            !hasAction(actions, {4, 2}, {5, 3}, moveType::MOVE) &&
+            !hasAction(actions, {4, 2}, {5, 4}, moveType::MOVE) &&
+            !hasAction(actions, {4, 2}, {5, 6}, moveType::MOVE) &&
+            allStartAt(actions, {4, 2}),
+            "B: 자식은 지정된 부모 distance에서만 실행되고 루트의 조건은 무시된다"
+        );
+    }
+
+    {
+        // nullopt 자식은 부모가 활성화한 모든 distance에서 실행된다.
+        AugmentChessGameState s;
+        Piece knight = makePiece(colorType::WHITE, pieceType::KNIGHT);
+
+        moveChunk root(moveType::MOVE, Coord{0, 1}, 4);
+        root.then(moveChunk(moveType::MOVE, Coord{1, 0}, 1, std::nullopt, std::nullopt));
+        knight.addNewMovement(root);
+
+        s.addPiece({4, 2}, knight);
+        const auto actions = actionsOf(s, {4, 2});
+
+        bool everyDistance = true;
+        for (int rank = 3; rank <= 6; ++rank) {
+            everyDistance = everyDistance &&
+                hasAction(actions, {4, 2}, {4, rank}, moveType::MOVE) &&
+                hasAction(actions, {4, 2}, {5, rank}, moveType::MOVE);
+        }
+        check(
+            countType(actions, moveType::MOVE) == 8 && everyDistance,
+            "B: nullopt 자식은 부모의 모든 distance에서 실행된다"
+        );
+    }
+
+    {
+        // 조건이 맞지 않는 형제를 건너뛰어도 다른 형제의 활성화에는 영향이 없다.
+        for (const bool distanceTwoFirst : {true, false}) {
+            AugmentChessGameState s;
+            Piece knight = makePiece(colorType::WHITE, pieceType::KNIGHT);
+
+            moveChunk root(moveType::MOVE, Coord{0, 1}, 4);
+            moveChunk childA(moveType::MOVE, Coord{1, 0}, 1, std::nullopt, 2);
+            moveChunk childB(moveType::MOVE, Coord{-1, 0}, 1, std::nullopt, 4);
+            if (distanceTwoFirst) {
+                root.then(childA);
+                root.then(childB);
+            } else {
+                root.then(childB);
+                root.then(childA);
+            }
+            knight.addNewMovement(root);
+
+            s.addPiece({4, 2}, knight);
+            const auto actions = actionsOf(s, {4, 2});
+
+            check(
+                countType(actions, moveType::MOVE) == 6 &&
+                hasAction(actions, {4, 2}, {5, 4}, moveType::MOVE) &&
+                hasAction(actions, {4, 2}, {3, 6}, moveType::MOVE) &&
+                !hasAction(actions, {4, 2}, {5, 3}, moveType::MOVE) &&
+                !hasAction(actions, {4, 2}, {5, 5}, moveType::MOVE) &&
+                !hasAction(actions, {4, 2}, {5, 6}, moveType::MOVE) &&
+                !hasAction(actions, {4, 2}, {3, 3}, moveType::MOVE) &&
+                !hasAction(actions, {4, 2}, {3, 4}, moveType::MOVE) &&
+                !hasAction(actions, {4, 2}, {3, 5}, moveType::MOVE),
+                distanceTwoFirst
+                    ? "B: 부모 distance 조건은 형제별로 독립이다(A 먼저)"
+                    : "B: 부모 distance 조건은 형제별로 독립이다(B 먼저)"
+            );
+        }
+    }
+
+    {
+        // 손자는 직계 부모인 child의 distance를 본다. root의 distance와 혼동하지 않는다.
+        AugmentChessGameState s;
+        Piece knight = makePiece(colorType::WHITE, pieceType::KNIGHT);
+
+        moveChunk root(moveType::MOVE, Coord{0, 1}, 3);
+        root.then(moveChunk(moveType::MOVE, Coord{1, 0}, 2, std::nullopt, 3))
+            .then(moveChunk(moveType::MOVE, Coord{0, 1}, 1, std::nullopt, 2));
+        knight.addNewMovement(root);
+
+        s.addPiece({4, 2}, knight);
+        const auto actions = actionsOf(s, {4, 2});
+
+        check(
+            countType(actions, moveType::MOVE) == 6 &&
+            hasAction(actions, {4, 2}, {4, 3}, moveType::MOVE) &&
+            hasAction(actions, {4, 2}, {4, 4}, moveType::MOVE) &&
+            hasAction(actions, {4, 2}, {4, 5}, moveType::MOVE) &&
+            hasAction(actions, {4, 2}, {5, 5}, moveType::MOVE) &&
+            hasAction(actions, {4, 2}, {6, 5}, moveType::MOVE) &&
+            hasAction(actions, {4, 2}, {6, 6}, moveType::MOVE) &&
+            !hasAction(actions, {4, 2}, {5, 6}, moveType::MOVE) &&
+            allStartAt(actions, {4, 2}),
+            "B: 손자는 직접 부모의 distance를 기준으로 실행된다"
         );
     }
 
@@ -3680,8 +3813,9 @@ int main(){
     std::cout << (g_failures == 0 ? "ALL PASSED" : "SOME TESTS FAILED") << "\n";
     return g_failures == 0 ? 0 : 1;
 }
-*/
 
+
+/*
 int main(){
     AugmentChessGameState testBoard;
 
@@ -3716,9 +3850,9 @@ int main(){
 
     return 0;
 }
+*/
 
 //g++ -std=c++20 -Wall -Wextra engine.cpp -o engine_test && ./engine_test
 
 //사람이 직접 api를 써보면서 테스트하는 공간
 //g++ engine.cpp -o engine_test_human && ./engine_test_human
-
