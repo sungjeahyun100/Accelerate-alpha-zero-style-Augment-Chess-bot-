@@ -111,3 +111,11 @@ node tools/ci/golden-eval.js   # 평가 함수 회귀 검사
 ```
 
 이 폴더의 코드는 Vamp-pire/Augment-Chess-Engine-Twist에서 복사한 것입니다. 원본 라이선스는 CC BY-NC-ND 4.0(저작권자 Vamp-pire)이고 적용 범위는 `SOURCE-NOTICE.md`에 있으니, 수정해서 배포하려면 저작권자와 조건을 먼저 정하세요. 클라우드 자동화는 `.github/workflows/`에 있습니다(6번).
+
+## 11. 원본 동기화 기록
+
+`infra/`의 원본 복사본을 Vamp-pire/Augment-Chess-Engine-Twist와 맞춘 기록입니다. 원본 커밋은 해당 저장소 `master`의 커밋 해시입니다.
+
+| 날짜 | 원본 커밋 | 동기화한 파일 | 동기화하지 않은 것 |
+|---|---|---|---|
+| 2026-09-26 | `b297ab3f975cabc837bfc74961374b97cae879c9` (2026-09-26 10:52 KST) | `engine-merged.js`(scarecrow 9월 22일 사이트 패치 수정, `orderActions` 캐시, 도구용 export), `selfplay-run-merged.js`(`SELFPLAY_WORKERS`), `tools/site-parity/common.js`(카드 풀 240장, 날짜 기반 시드), `tools/site-parity/parity-actions.js`, `parity-apply.js`, `parity-playout.js` | `nnue/encode.js`, `nnue/train.js`, `nnue/encode-worker.js`, `nnue/match-two-models.js`, `nnue/pipeline-config.json`, `selfplay-worker-merged.js`, `package.json`, `package-lock.json`(원본에서 `nnue/sparse.js`, `tools/site-rules/`, `tools/mcts/`, `tools/tune/` 등 이 저장소에 없는 파일과 묶여 있음), `tools/site-parity/last-seen.json`(감시 상태 파일), `tools/site-parity/README.md`, 원본에만 있는 새 파일(`make-fast-worker.js`, `diff-fast-worker.js` 등), 모델 가중치와 데이터 |

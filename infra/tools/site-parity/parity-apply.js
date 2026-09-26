@@ -2,7 +2,7 @@
 // The action is taken from the real list and re-found in the engine list by normalized content.
 // Usage: node parity-apply.js [engine|-] [N=300] [seed=777]
 const C = require("./common"); const { real } = C; const args = C.parseArgs(); const eng = require(args.engine);
-const N = args.N || 300, rng = C.rngMaker(args.seed || 777);
+const N = args.N || 300, rng = C.rngMaker(args.seed || C.defaultSeed(2));
 const TYPES = ["pawn","knight","bishop","rook","queen","amazon","cardinal","grasshopper","hook","camel","alfil","berserker","thief","paladin","octopus","clockwork","brutus","checker","campfire","princess","hedgehog","undead","siren","trickster","slime","scarecrow","merchant"];
 function makeBoard() {
   const b = Array.from({ length: 8 }, () => Array(8).fill(null));

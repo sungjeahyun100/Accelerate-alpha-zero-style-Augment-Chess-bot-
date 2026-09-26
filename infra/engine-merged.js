@@ -72,6 +72,19 @@
   function usesSeptember18Balance(state) {
     return state?.september18Balance !== false;
   }
+  // 2026-09-24 site patch (September 22 rules): scarecrow now places an
+  // actual (reserved, uncapturable-the-normal-way) piece on the captured
+  // square immediately, instead of leaving it empty until the 3-own-turn
+  // countdown resolves. Hash-gated on the real site (catalogHash ===
+  // PRE_SEPTEMBER22_BALANCE_HASH keeps the old behavior); ground-truth
+  // default ported here (hash absent -> enabled), same convention as
+  // usesSeptember18Balance above. Found via site-watch.yml's parity re-check
+  // on 2026-09-24 (9/150 scarecrow apply mismatches, 3/15 playout games
+  // diverging) -- this state's board was missing the reserved scarecrow
+  // piece the real site keeps.
+  function usesScarecrowPieceReservation(state) {
+    return state?.scarecrowPieceReservation !== false;
+  }
   function usesParrotBasicMovement(state) {
     return state?.parrotBasicMovement !== false;
   }
@@ -3834,9 +3847,14 @@
         ? Math.min(HARD_TIME_LIMIT_MS, boundedTimeLimitMs * FLEXIBLE_BUDGET_MULTIPLIER)
         : boundedTimeLimitMs;
     const evalFn = typeof options.evalFn === "function" ? options.evalFn : null;
+    // Track B3 (PLAN.md): optional learned move-scoring function to use in place of
+    // actionOrderingScore, same opt-in pattern as evalFn above -- nothing sets this by
+    // default, so default search behaviour (and speed) is unchanged.
+    const orderScoreFn = typeof options.orderScoreFn === "function" ? options.orderScoreFn : null;
     const context = {
       aiColor,
       evalFn,
+      orderScoreFn,
       nodes: 0,
       cutoffs: 0,
       startedAt,
@@ -3854,7 +3872,7 @@
       killers: {},
       tt: /* @__PURE__ */ new Map()
     };
-    let orderedRoot = orderActions(rootActions.map(cloneAction), boardState, aiColor);
+    let orderedRoot = orderActions(rootActions.map(cloneAction), boardState, aiColor, orderScoreFn);
     const forcedRoyalCapture = findForcedRoyalCaptureSequence(boardState, orderedRoot, aiColor, context);
     if (forcedRoyalCapture) {
       return { action: forcedRoyalCapture, score: INF / 2, nodes: 0, cutoffs: 0, completedDepth: 0, forced: true };
@@ -4905,7 +4923,7 @@
           return alpha;
         }
       }
-      const actions = reorderWithKillers(boardState, orderActions(generateActions(boardState, color), boardState, color), context.killers?.[depth]);
+      const actions = reorderWithKillers(boardState, orderActions(generateActions(boardState, color), boardState, color, context.orderScoreFn), context.killers?.[depth]);
       if (!actions.length) return (context.evalFn || evaluateState)(boardState, context.aiColor) + (color === context.aiColor ? -2500 : 2500);
       if (isMaximizingPlayer) {
         let value2 = -INF;
@@ -5059,8 +5077,25 @@
     context.timedOut = true;
     return true;
   }
-  function orderActions(actions, boardState, perspectiveColor) {
-    return actions.map((action, index) => ({ action, index, score: actionOrderingScore(action, boardState, perspectiveColor) })).sort((a, b) => b.score - a.score || a.index - b.index).map((entry) => entry.action);
+  // Perf (2026-09-23, measured via --cpu-prof: attacksSquare was the single largest
+  // self-time function at 14.4%, ahead of cloneState's known 13.2%): orderActions runs at
+  // EVERY node and scores every candidate action against the SAME pre-move boardState, but
+  // ATTACK_MEMO (see workerBestCaptureThreat/hangingMaterialRisk/evaluateStateComponents
+  // above) was only ever set up inside those functions, never around this scoring loop --
+  // so e.g. workerBestCaptureThreat's sorted-attackers-by-color list got rebuilt from
+  // scratch for every single candidate instead of once per node. Wrapping the loop in the
+  // same memo lets repeated attacksSquare/attacker-list queries for this node's board reuse
+  // results across candidates. Re-entrant-safe: if a memo for this exact boardState is
+  // already active (nested call), reuse it instead of clobbering it.
+  function orderActions(actions, boardState, perspectiveColor, scoreFn) {
+    const score = typeof scoreFn === "function" ? scoreFn : actionOrderingScore;
+    const reuse = ATTACK_MEMO !== null && ATTACK_MEMO.board === boardState;
+    if (!reuse) ATTACK_MEMO = { board: boardState, map: /* @__PURE__ */ new Map(), pieces: null, cols: -1, encouraged: /* @__PURE__ */ new Map(), ranged: /* @__PURE__ */ new Map(), attackers: /* @__PURE__ */ new Map() };
+    try {
+      return actions.map((action, index) => ({ action, index, score: score(action, boardState, perspectiveColor) })).sort((a, b) => b.score - a.score || a.index - b.index).map((entry) => entry.action);
+    } finally {
+      if (!reuse) ATTACK_MEMO = null;
+    }
   }
   function actionOrderingScore(action, boardState, perspectiveColor) {
     const color = action.color || boardState.turn || perspectiveColor;
@@ -5525,7 +5560,7 @@
     if (boardState.zugzwang?.[piece.color] && isWorkerZugzwangTargetKing(boardState, piece)) {
       moves = moves.filter(isWorkerZugzwangKingMove);
     }
-    moves = moves.filter((move) => !crossesReservedScarecrow({ row, col }, move, [...boardState.pendingScarecrows || [], ...usesSeptember18Balance(boardState) ? piecesMatching(boardState, (p) => p.type === "scarecrow").map(({ row: row2, col: col2 }) => ({ row: row2, col: col2, solid: true })) : []]));
+    moves = moves.filter((move) => !crossesReservedScarecrow({ row, col }, move, [...boardState.pendingScarecrows || [], ...usesSeptember18Balance(boardState) ? piecesMatching(boardState, (p) => p.type === "scarecrow" && !p.scarecrowReserved).map(({ row: row2, col: col2 }) => ({ row: row2, col: col2, solid: true })) : []]));
     moves = moves.filter((move) => !workerMoveLandingCellsForQuantum(move).some((cell) => isWorkerPortalMovementReservedSquare(boardState, cell.row, cell.col) || isWorkerPendingSpawnReservedSquare(boardState, cell.row, cell.col)));
     moves = moves.filter((move) => thiefMoveAllowed(piece, move, boardState, { row, col }));
     moves = moves.filter((move) => threeMoveAllowed(boardState.board, piece, row, col, move, { allSquaresRadiance: usesSeptember18Balance(boardState), enemyOnlyRadiance: usesEnemyOnlyRadiance(boardState), movementType: pieceHasAbility(piece, "parrot") ? boardState.parrotMovement?.[piece.color]?.type : pieceAbilityType(piece) }));
@@ -5541,7 +5576,7 @@
     if (!piece?.color || piece.type === "log") return false;
     return workerMoveCaptureCells(move).some(({ row, col }) => {
       const target = get(boardState, row, col);
-      return target?.type === "scarecrow" && target.color !== piece.color && canWorkerCaptureTarget(piece.color, target, piece, boardState, {
+      return target?.type === "scarecrow" && !target.scarecrowReserved && target.color !== piece.color && canWorkerCaptureTarget(piece.color, target, piece, boardState, {
         allowBasicTrainingCapture: Boolean(move?.basicTrainingCapture)
       });
     });
@@ -13970,6 +14005,13 @@
       const decisive = isWorkerDecisiveCaptureTarget(boardState, target);
       clearPieceCells(boardState, target);
       recordWorkerCapturedPieces(boardState, opponent(color), [target]);
+      if (usesScarecrowPieceReservation(boardState)) {
+        const reserved = workerCreatePiece(color, "scarecrow", boardState, action.target.row, action.target.col);
+        reserved.moved = true;
+        reserved.scarecrowReserved = true;
+        set(boardState, action.target.row, action.target.col, reserved);
+        Object.assign(boardState.pendingScarecrows.at(-1), { pieceId: reserved.id, reserved: false });
+      }
       if (decisive) {
         boardState.mode = "gameover";
         boardState.winner = opponent(color);
@@ -18343,6 +18385,7 @@
     }
     return { ok: true, after: augmentBaseParityProjection(clientState, termination) };
   }
-  globalThis.__engineMerged = { searchBestAction, generateActions, applyAction, evaluateState, evaluateStateComponents, cloneState, setWorkerBoardDimensions };
+  // orderActions..isCaptureAction are exported for tools (learned move ordering, MCTS prototype); not used by the extension.
+  globalThis.__engineMerged = { searchBestAction, generateActions, applyAction, evaluateState, evaluateStateComponents, cloneState, setWorkerBoardDimensions, orderActions, actionOrderingScore, actionDecisivelyWins, rootCandidateAllowsImmediateDecisiveReply, isCaptureAction };
   if (typeof module !== "undefined") module.exports = globalThis.__engineMerged;
 })();

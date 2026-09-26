@@ -1,7 +1,7 @@
 // Multi-ply playouts: same random action (matched by normalized content) in both; stop at first divergence and classify.
 // Usage: node parity-playout.js [engine|-] [GAMES=30] [seed=4242] [PLIES=40]
 const C = require("./common"); const { real } = C; const args = C.parseArgs(); const eng = require(args.engine);
-const GAMES = args.N || 30, PLIES = args.plies, rng = C.rngMaker(args.seed || 4242);
+const GAMES = args.N || 30, PLIES = args.plies, rng = C.rngMaker(args.seed || C.defaultSeed(3));
 const SPECIAL = ["amazon","cardinal","grasshopper","hook","camel","berserker","thief","paladin","octopus","clockwork","brutus","checker","campfire","princess","scarecrow","slime","trickster"];
 function startBoard() {
   const back = ["rook","knight","bishop","queen","king","bishop","knight","rook"];
