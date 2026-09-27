@@ -115,7 +115,12 @@ enum Mutation {
     Necromancy,
     Exile,
     Judgment,
-    Pending(&'static str),
+    Evacuation,
+    Desperado,
+    Bribe,
+    Windmill,
+    QueensGambit,
+    Chain,
 }
 #[derive(Clone, Copy)]
 struct Plan {
@@ -212,8 +217,16 @@ fn source_matches(state: &GameState, piece: &Piece, source: Source) -> bool {
     piece.color == state.turn
         && match source {
             Source::Exact(kind) => piece.kind == kind,
-            Source::NonRoyal(kind) => piece.kind == kind && !state.royal_identity(piece),
-            Source::QueenIdentity => piece.kind == "queen" && !piece.flag("regencyHeir"),
+            Source::NonRoyal(kind) => {
+                piece.kind == kind
+                    && !state.royal_identity(piece)
+                    && (kind != "queen"
+                        || !matches!(piece.extra.get("regencyHeir"), Some(Value::Bool(true))))
+            }
+            Source::QueenIdentity => {
+                piece.kind == "queen"
+                    && !matches!(piece.extra.get("regencyHeir"), Some(Value::Bool(true)))
+            }
             Source::Minor => minor(state, piece) && !state.royal_identity(piece),
             Source::MinorExcept(kind) => {
                 minor(state, piece) && piece.kind != kind && !state.royal_identity(piece)
@@ -265,11 +278,15 @@ fn plan(state: &GameState, card: &CardSlot) -> Option<Plan> {
             "promotionRush" => (Exact(""), Grant("promotionRushUntil")),
             "chameleonMutation" => (Exact(""), Selection("chameleon")),
             "panic" => (Exact(""), Selection("panic")),
-            "desperado" => (Exact(""), Pending("desperado")),
+            "desperado" => (Exact(""), Desperado),
             "judgment" => (Exact(""), Judgment),
             "exile" => (Exact(""), Exile),
-            "emergencyEvacuation" => (Exact(""), Pending("emergency evacuation")),
+            "emergencyEvacuation" => (Exact(""), Evacuation),
             "necromancy" => (Exact("pawn"), Necromancy),
+            "bribe" => (Exact("knight"), Bribe),
+            "windmill" => (Exact("bishop"), Windmill),
+            "queensGambit" => (NonRoyal("queen"), QueensGambit),
+            "chain" => (Exact(""), Chain),
             "wizard" => (QueenIdentity, Transform("wizard")),
             "constitutionalMonarchy" => (QueenIdentity, Transform("primeMinister")),
             "jester" => (QueenIdentity, Transform("jester")),
@@ -594,17 +611,36 @@ fn evacuation_candidate(state: &GameState, piece: &Piece, square: Square) -> Res
     if truthy(
         state
             .extra
-            .get("fianchetto")
-            .and_then(|sides| sides.get(state.turn.opponent().as_str())),
-    ) || truthy(
-        state
-            .extra
             .get("majesty")
             .and_then(|sides| sides.get(state.turn.opponent().as_str())),
     ) {
         return Err(EngineError::UnsupportedFeature(
-            "evacuation fianchetto/majesty movement restriction".into(),
+            "evacuation majesty movement restriction".into(),
         ));
+    }
+    let blocked = |item: &Piece, origin: Square| {
+        !crate::movement::fianchetto_destination_allowed(state, item, origin, &[destination])
+    };
+    if blocked(piece, square) {
+        return Ok(false);
+    }
+    if truthy(piece.extra.get("twinBondId"))
+        && let Some(partner_id) = piece
+            .extra
+            .get("twinPartnerId")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+        && let Some((partner, origin)) = (0..8)
+            .flat_map(|row| (0..8).map(move |col| Square { row, col }))
+            .find_map(|origin| {
+                state
+                    .at(origin)
+                    .filter(|other| other.id == partner_id && other.color == piece.color)
+                    .map(|other| (other, origin))
+            })
+        && blocked(partner, origin)
+    {
+        return Ok(false);
     }
     Ok(true)
 }
@@ -729,8 +765,12 @@ fn matches_plan(state: &GameState, piece: &Piece, square: Square, plan: Plan) ->
         Mutation::Submerge => submerge_matches(state, piece, square),
         Mutation::Exile => grant_matches(state, piece, square, "exile"),
         Mutation::Judgment => judgment_matches(state, piece),
-        Mutation::Pending("desperado") => desperado_candidate(state, piece),
-        Mutation::Pending("emergency evacuation") => {
+        Mutation::Desperado => desperado_candidate(state, piece),
+        Mutation::QueensGambit => {
+            source_matches(state, piece, plan.source) && !state.flag("regency", state.turn)
+        }
+        Mutation::Chain => chain_target(state, piece),
+        Mutation::Evacuation => {
             return evacuation_candidate(state, piece, square);
         }
         Mutation::Necromancy => {
@@ -763,7 +803,12 @@ fn all_targets(state: &GameState, plan: Plan, unique: bool) -> Result<Vec<Square
                         normalize_square(state, square),
                         "outpostProtected",
                     ))
-                && (!unique || seen.insert(piece.id.clone()))
+                && (!unique
+                    || seen.insert(if piece.id.is_empty() {
+                        format!("square:{row}:{col}")
+                    } else {
+                        format!("piece:{}", piece.id)
+                    }))
             {
                 targets.push(square);
             }
@@ -786,6 +831,25 @@ fn ui_targets(state: &GameState, plan: Plan, unique: bool) -> Result<Vec<Square>
         })
         .collect::<Vec<_>>();
     if !matches!(plan.mutation, Mutation::Exile) {
+        if matches!(plan.mutation, Mutation::Chain) {
+            let pairs = chain_pairs(state, &all_targets(state, plan, true)?)?;
+            return Ok(targets
+                .into_iter()
+                .filter(|square| {
+                    state.at(*square).is_some_and(|piece| {
+                        pairs.iter().flatten().any(|candidate| {
+                            state.at(*candidate).is_some_and(|other| {
+                                if piece.id.is_empty() {
+                                    square == candidate
+                                } else {
+                                    piece.id == other.id
+                                }
+                            })
+                        })
+                    })
+                })
+                .collect());
+        }
         return Ok(targets);
     }
     let mut legal = Vec::with_capacity(targets.len());
@@ -847,13 +911,37 @@ pub(crate) fn actions(state: &GameState, card: &CardSlot) -> Result<Option<Vec<A
         plan,
         matches!(
             plan.mutation,
-            Mutation::Selection(_) | Mutation::Judgment | Mutation::Pending("emergency evacuation")
+            Mutation::Selection(_) | Mutation::Judgment | Mutation::Evacuation | Mutation::Chain
         ),
     )?;
     let actions = match plan.mutation {
         Mutation::Selection(field) => selection_actions(state, card, &targets, field == "panic"),
-        Mutation::Pending("emergency evacuation") => {
-            selection_actions(state, card, &targets, false)
+        Mutation::Evacuation => selection_actions(state, card, &targets, false),
+        Mutation::Chain => chain_pairs(state, &targets)?
+            .into_iter()
+            .map(|pair| Action::card(state.turn, card, Some(json!({"selections":pair}))))
+            .collect(),
+        Mutation::Windmill => {
+            let rooks = all_targets(
+                state,
+                Plan {
+                    source: Source::Exact("rook"),
+                    mutation: Mutation::Transform(""),
+                },
+                false,
+            )?;
+            targets
+                .into_iter()
+                .flat_map(|bishop| {
+                    rooks.iter().map(move |rook| {
+                        Action::card(
+                            state.turn,
+                            card,
+                            Some(json!({"row":rook.row,"col":rook.col,"bishop":bishop})),
+                        )
+                    })
+                })
+                .collect()
         }
         Mutation::RandomThief
         | Mutation::RandomBrutus
@@ -958,6 +1046,284 @@ fn selection_actions(
         }
     }
     result
+}
+
+// main:96796-96850 and shared source normalizeChainBonds. The UI is
+// exhaustive; collectAiCardTargets' value-sort/cap12 is only AI sampling.
+fn chain_target(state: &GameState, piece: &Piece) -> bool {
+    piece.color == state.turn.opponent()
+        && !piece.is_large()
+        && !["wall", "football", "blackHole"].contains(&piece.kind.as_str())
+}
+fn chain_range(first: Square, second: Square) -> bool {
+    first
+        .row
+        .abs_diff(second.row)
+        .max(first.col.abs_diff(second.col))
+        <= 2
+}
+fn chain_key(first: &str, second: &str) -> String {
+    if first.encode_utf16().cmp(second.encode_utf16()).is_gt() {
+        format!("{second}\0{first}")
+    } else {
+        format!("{first}\0{second}")
+    }
+}
+fn chain_text(value: &str) -> Result<String> {
+    let units = value.encode_utf16().take(160).collect::<Vec<_>>();
+    String::from_utf16(&units).map_err(|_| {
+        EngineError::UnsupportedFeature("chain identifier truncated inside UTF-16 surrogate".into())
+    })
+}
+pub(crate) fn normalize_chain_bonds(value: Option<&Value>) -> Result<Vec<Value>> {
+    let Some(entries) = value.and_then(Value::as_array) else {
+        return Ok(Vec::new());
+    };
+    let mut result = Vec::with_capacity(entries.len().min(64));
+    let mut seen = BTreeSet::new();
+    for (index, entry) in entries.iter().take(64).enumerate() {
+        let first = chain_text(entry.get("aId").and_then(Value::as_str).unwrap_or(""))?;
+        let second = chain_text(entry.get("bId").and_then(Value::as_str).unwrap_or(""))?;
+        if first.is_empty()
+            || second.is_empty()
+            || first == second
+            || !seen.insert(chain_key(&first, &second))
+        {
+            continue;
+        }
+        let id = match entry
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+        {
+            Some(id) => chain_text(id)?,
+            None => chain_text(&format!("chain-{index}-{first}-{second}"))?,
+        };
+        result.push(json!({"id":id,"aId":first,"bId":second,"by":if entry.get("by").and_then(Value::as_str)==Some("black"){Color::Black}else{Color::White}}));
+    }
+    Ok(result)
+}
+fn chain_pairs(state: &GameState, targets: &[Square]) -> Result<Vec<[Square; 2]>> {
+    let bound = normalize_chain_bonds(state.extra.get("chainBonds"))?
+        .into_iter()
+        .map(|bond| {
+            chain_key(
+                bond["aId"].as_str().unwrap_or(""),
+                bond["bId"].as_str().unwrap_or(""),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    let mut pairs = Vec::new();
+    for (index, first) in targets.iter().enumerate() {
+        for second in targets.iter().skip(index + 1) {
+            let first_piece = state.at(*first).ok_or(EngineError::IllegalAction)?;
+            let second_piece = state.at(*second).ok_or(EngineError::IllegalAction)?;
+            if chain_range(*first, *second)
+                && (first_piece.id.is_empty() || first_piece.id != second_piece.id)
+                && (first_piece.id.is_empty()
+                    || second_piece.id.is_empty()
+                    || !bound.contains(&chain_key(&first_piece.id, &second_piece.id)))
+            {
+                pairs.push([*first, *second]);
+            }
+        }
+    }
+    Ok(pairs)
+}
+
+fn apply_windmill(state: &mut GameState, action: &Action) -> Result<()> {
+    let target = action.target.as_ref().ok_or(EngineError::IllegalAction)?;
+    let bishop_square = square_value(target.get("bishop").ok_or(EngineError::IllegalAction)?)?;
+    let rook_square = square_value(&json!({"row":target.get("row"),"col":target.get("col")}))?;
+    let mut bishop = state
+        .at(bishop_square)
+        .filter(|piece| piece.color == state.turn && piece.kind == "bishop")
+        .cloned()
+        .ok_or(EngineError::IllegalAction)?;
+    let mut rook = state
+        .at(rook_square)
+        .filter(|piece| piece.color == state.turn && piece.kind == "rook")
+        .cloned()
+        .ok_or(EngineError::IllegalAction)?;
+    for piece in [&mut bishop, &mut rook] {
+        piece.kind = "windmill".into();
+        piece.extra.insert("windmillMode".into(), json!("bishop"));
+        piece.moved = true;
+        mark_animation(state, piece)?;
+    }
+    mark_transformed_origin(state, &mut bishop, bishop_square)?;
+    mark_transformed_origin(state, &mut rook, rook_square)?;
+    write_piece(state, &bishop);
+    write_piece(state, &rook);
+    Ok(())
+}
+
+fn apply_queens_gambit(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
+    let square = normalize_square(state, target_square(action)?);
+    let queen = state
+        .at(square)
+        .filter(|piece| {
+            source_matches(state, piece, Source::NonRoyal("queen"))
+                && !state.flag("regency", state.turn)
+        })
+        .cloned()
+        .ok_or(EngineError::IllegalAction)?;
+    if state
+        .extra
+        .get("campaign")
+        .is_some_and(|campaign| !campaign.is_null())
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "Queen's Gambit campaign sacrifice objectives".into(),
+        ));
+    }
+    let pawns = (0..8)
+        .flat_map(|row| (0..8).map(move |col| Square { row, col }))
+        .filter(|cell| {
+            state
+                .at(*cell)
+                .is_some_and(|piece| piece.color == state.turn && piece.kind == "pawn")
+        })
+        .collect::<Vec<_>>();
+    let mut files = (0_u8..8)
+        .filter(|col| col.abs_diff(square.col) > 1)
+        .collect::<Vec<_>>();
+    let occupied = files
+        .iter()
+        .copied()
+        .filter(|col| pawns.iter().any(|pawn| pawn.col == *col))
+        .collect::<Vec<_>>();
+    if !occupied.is_empty() {
+        files = occupied;
+    }
+    let random_col = files[(state.rng.sample()? * files.len() as f64).floor() as usize];
+    mark_vanish_animation(state, &queen, square)?;
+    let removed = crate::transition::sacrifice(state, square, state.turn.opponent())?
+        .ok_or(EngineError::IllegalAction)?;
+    if !truthy(state.extra.get("queensGambitFiles")) {
+        state.extra.insert(
+            "queensGambitFiles".into(),
+            json!({"white":null,"black":null}),
+        );
+    }
+    state
+        .extra
+        .get_mut("queensGambitFiles")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| {
+            EngineError::InvalidState("Queen's Gambit file state must be an object".into())
+        })?
+        .insert(
+            state.turn.as_str().into(),
+            json!({"queenCol":square.col,"randomCol":random_col}),
+        );
+    for pawn_square in pawns
+        .into_iter()
+        .filter(|pawn| pawn.col == square.col || pawn.col == random_col)
+    {
+        let mut pawn = state
+            .at(pawn_square)
+            .cloned()
+            .ok_or(EngineError::IllegalAction)?;
+        pawn.extra.insert(
+            "queensGambitPreviousProtected".into(),
+            json!(truthy(pawn.extra.get("protected"))),
+        );
+        pawn.extra.insert("protected".into(), json!(true));
+        pawn.extra
+            .insert("queensGambitProtection".into(), json!(true));
+        mark_animation(state, &pawn)?;
+        write_piece(state, &pawn);
+    }
+    crate::flow::mark_progress(state);
+    Ok(vec![removed])
+}
+
+fn apply_chain(state: &mut GameState, action: &Action) -> Result<()> {
+    let selections = action
+        .target
+        .as_ref()
+        .and_then(|target| target.get("selections"))
+        .and_then(Value::as_array)
+        .ok_or(EngineError::IllegalAction)?;
+    let mut entries = Vec::with_capacity(2);
+    let mut seen = BTreeSet::new();
+    for cell in selections {
+        let Some(square) = loose_square(cell) else {
+            if ["row", "col"].into_iter().all(|key| {
+                cell.get(key)
+                    .and_then(Value::as_f64)
+                    .is_some_and(|value| value.is_finite() && value.fract() == 0.0)
+            }) {
+                return Err(EngineError::IllegalAction);
+            }
+            continue;
+        };
+        let square = normalize_square(state, square);
+        let Some(piece) = state.at(square) else {
+            return Err(EngineError::IllegalAction);
+        };
+        let key = if piece.id.is_empty() {
+            format!("square:{}:{}", square.row, square.col)
+        } else {
+            format!("piece:{}", piece.id)
+        };
+        if seen.insert(key) {
+            if entries.len() == 2 {
+                return Err(EngineError::IllegalAction);
+            }
+            entries.push((square, piece.clone()));
+        }
+    }
+    if entries.len() != 2
+        || !chain_range(entries[0].0, entries[1].0)
+        || entries.iter().any(|(_, piece)| !chain_target(state, piece))
+    {
+        return Err(EngineError::IllegalAction);
+    }
+    for (square, piece) in &mut entries {
+        if piece.id.is_empty() {
+            piece.id = format!(
+                "{}-{}-chain-{}",
+                piece.color.as_str(),
+                piece.kind,
+                crate::draft::random_suffix(state.rng.sample()?)?
+            );
+            state.board[square.row as usize][square.col as usize] = Some(piece.clone());
+        }
+    }
+    let expected = chain_key(&entries[0].1.id, &entries[1].1.id);
+    if normalize_chain_bonds(state.extra.get("chainBonds"))?
+        .iter()
+        .any(|bond| {
+            chain_key(
+                bond["aId"].as_str().unwrap_or(""),
+                bond["bId"].as_str().unwrap_or(""),
+            ) == expected
+        })
+    {
+        return Err(EngineError::IllegalAction);
+    }
+    let suffix = crate::draft::random_suffix(state.rng.sample()?)?;
+    let id = format!("chain-{}-{suffix}", crate::draft::frozen_timestamp()?);
+    let new_bond = json!({"id":id,"aId":entries[0].1.id,"bId":entries[1].1.id,"by":state.turn});
+    let mut bonds = match state.extra.get("chainBonds") {
+        Some(Value::Array(entries)) => entries.iter().take(64).cloned().collect::<Vec<_>>(),
+        value if !truthy(value) => Vec::new(),
+        _ => {
+            return Err(EngineError::UnsupportedFeature(
+                "non-array chainBonds source spread".into(),
+            ));
+        }
+    };
+    if bonds.len() < 64 {
+        bonds.push(new_bond);
+    }
+    state.extra.insert(
+        "chainBonds".into(),
+        json!(normalize_chain_bonds(Some(&json!(bonds)))?),
+    );
+    Ok(())
 }
 fn loose_square(value: &Value) -> Option<Square> {
     let coordinate = |key| {
@@ -1206,29 +1572,531 @@ fn write_piece(state: &mut GameState, piece: &Piece) {
         }
     }
 }
+// main:15872-15899. Remember the base movement, including the site's legacy
+// state and canonical-effect fallback. This is also the general move kernel.
+pub(crate) fn current_base_movement(state: &GameState, piece: &Piece) -> Option<Value> {
+    fn movement_name(kind: &str) -> String {
+        let mut name = String::with_capacity(kind.len());
+        for character in kind.chars() {
+            if character.is_ascii_uppercase() {
+                name.push('-');
+                name.push(character.to_ascii_lowercase());
+            } else {
+                name.push(character);
+            }
+        }
+        name
+    }
+    let kind = movement_name(piece.ability_kind());
+    let canonical = state
+        .extra
+        .get("cardState")
+        .filter(|value| truthy(Some(value)));
+    let effects =
+        canonical.map_or_else(|| state.extra.get("effects"), |value| value.get("effects"));
+    let find = |entries: Option<&Value>, kind: &str| {
+        entries
+            .and_then(Value::as_array)
+            .and_then(|entries| {
+                entries
+                    .iter()
+                    .find(|effect| effect.get("kind").and_then(Value::as_str) == Some(kind))
+            })
+            .and_then(|effect| effect.get("attributes"))
+            .and_then(|attributes| attributes.get("movement"))
+            .filter(|movement| truthy(Some(movement)))
+            .cloned()
+    };
+    if kind == "medium" {
+        return state
+            .extra
+            .get("mediumMovement")
+            .filter(|value| truthy(Some(value)))
+            .cloned()
+            .or_else(|| {
+                find(
+                    effects.and_then(|effects| effects.get("global")),
+                    "medium-last-capture",
+                )
+            });
+    }
+    if kind == "parrot" {
+        return state
+            .extra
+            .get("parrotMovement")
+            .and_then(|sides| sides.get(piece.color.as_str()))
+            .filter(|value| truthy(Some(value)))
+            .cloned()
+            .or_else(|| {
+                find(
+                    effects
+                        .and_then(|effects| effects.get("colors"))
+                        .and_then(|sides| sides.get(piece.color.as_str())),
+                    "internal-last-movement",
+                )
+            });
+    }
+    let mut memory = json!({"type":kind});
+    for field in ["logDirection", "windmillMode"] {
+        if let Some(value) = piece.extra.get(field).filter(|value| truthy(Some(value))) {
+            memory[field] = value.clone();
+        }
+    }
+    if kind == "trickster"
+        && let Some(copy) = piece
+            .extra
+            .get("tricksterMoveType")
+            .filter(|value| truthy(Some(value)))
+    {
+        let copied = copy
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| copy.to_string());
+        memory["type"] = json!(movement_name(&copied));
+    }
+    Some(memory)
+}
+pub(crate) fn remember_local_movement(state: &mut GameState, piece: &Piece) -> Result<()> {
+    if piece.color.owner().is_none() || !truthy(state.extra.get("parrotMovement")) {
+        return Ok(());
+    }
+    let memory = current_base_movement(state, piece).unwrap_or(Value::Null);
+    state
+        .extra
+        .get_mut("parrotMovement")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| EngineError::InvalidState("parrot movement color map missing".into()))?
+        .insert(piece.color.as_str().into(), memory);
+    Ok(())
+}
+// main:94557-94572. Movement changes the twin counter before recording the
+// ultimatum identity. The source intentionally retains at most 96 identities.
+pub(crate) fn note_ultimatum_movement(state: &mut GameState, piece: &mut Piece) -> Result<()> {
+    if truthy(piece.extra.get("twinBondId")) {
+        let pending = js_number(piece.extra.get("twinSwapPending"), 0)
+            .unwrap_or(0.0)
+            .max(0.0)
+            + 1.0;
+        piece.extra.insert("twinSwapPending".into(), json!(pending));
+    }
+    if !truthy(state.extra.get("ultimatum"))
+        || piece.id.is_empty()
+        || piece.color.owner().is_none()
+        || state.royal_identity(piece)
+        || ["merchant", "wall", "football"].contains(&piece.kind.as_str())
+    {
+        return Ok(());
+    }
+    let ultimatum = state
+        .extra
+        .get_mut("ultimatum")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| EngineError::InvalidState("ultimatum state must be an object".into()))?;
+    if !ultimatum.get("movedIds").is_some_and(Value::is_array) {
+        ultimatum.insert("movedIds".into(), json!([]));
+    }
+    let identities = ultimatum
+        .get_mut("movedIds")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| EngineError::InvalidState("ultimatum identity array missing".into()))?;
+    if !identities
+        .iter()
+        .any(|value| value.as_str() == Some(&piece.id))
+    {
+        identities.push(json!(piece.id));
+    }
+    if identities.len() > 96 {
+        identities.drain(..identities.len() - 96);
+    }
+    Ok(())
+}
+fn piece_hidden_from(state: &GameState, piece: &Piece, square: Square) -> Value {
+    if let Some(hidden) = piece
+        .extra
+        .get("hiddenFrom")
+        .filter(|value| truthy(Some(value)))
+    {
+        return hidden.clone();
+    }
+    if !truthy(state.extra.get("camouflageRule")) || state.royal_identity(piece) {
+        return json!("");
+    }
+    let Some(owner) = piece.color.owner() else {
+        return json!("");
+    };
+    let row = piece
+        .extra
+        .get("anchorRow")
+        .and_then(Value::as_u64)
+        .unwrap_or(u64::from(square.row));
+    let col = piece
+        .extra
+        .get("anchorCol")
+        .and_then(Value::as_u64)
+        .unwrap_or(u64::from(square.col));
+    let matching = (row.wrapping_add(col)).is_multiple_of(2) == (owner == Color::White);
+    json!(if matching {
+        owner.opponent().as_str()
+    } else {
+        ""
+    })
+}
+// main:72314-72342. An earlier moved piece's origin may now contain a later
+// piece; the source chooses that origin identity but remembers the destination.
+pub(crate) fn set_last_move(
+    state: &mut GameState,
+    from: Square,
+    to: Square,
+    sound_name: &str,
+    sound_color: Color,
+    hidden_from: &str,
+    moved_override: Option<&Piece>,
+) -> Result<()> {
+    let moved = moved_override
+        .or_else(|| state.at(from))
+        .or_else(|| state.at(to))
+        .cloned();
+    if from != to
+        && let Some(remembered) = moved_override
+            .or_else(|| state.at(to))
+            .or(moved.as_ref())
+            .cloned()
+    {
+        if state
+            .extra
+            .get("activeMetalMove")
+            .is_some_and(|value| !value.is_null())
+        {
+            return Err(EngineError::UnsupportedFeature(
+                "active metal movement memory".into(),
+            ));
+        }
+        remember_local_movement(state, &remembered)?;
+    }
+    let old = state.extra.get("lastMove");
+    let remembered = old
+        .filter(|value| {
+            truthy(value.get("idolEncoreEligible"))
+                && !truthy(value.get("idolEncoreConsumed"))
+                && moved.as_ref().is_some_and(|piece| {
+                    value.get("soundColor").and_then(Value::as_str) == Some(piece.color.as_str())
+                })
+        })
+        .and_then(|value| value.get("idolEncoreId"))
+        .filter(|value| truthy(Some(value)))
+        .cloned()
+        .unwrap_or(json!(""));
+    if !truthy(Some(&remembered))
+        && from != to
+        && let Some(piece) = moved.as_ref()
+        && piece.ability_kind() != "idol"
+        && piece.color.owner().is_some()
+        && crate::movement::KING
+            .iter()
+            .filter_map(|&(dr, dc)| from.offset(dr, dc))
+            .any(|square| {
+                state.at(square).is_some_and(|other| {
+                    other.color == piece.color
+                        && other.id != piece.id
+                        && other.ability_kind() == "idol"
+                })
+            })
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "friendly idol aura movement callback".into(),
+        ));
+    }
+    let encore_piece = if truthy(Some(&remembered)) {
+        old.and_then(|value| value.get("idolEncorePieceId"))
+            .filter(|value| truthy(Some(value)))
+            .or_else(|| {
+                old.and_then(|value| value.get("pieceId"))
+                    .filter(|value| truthy(Some(value)))
+            })
+            .cloned()
+            .unwrap_or(json!(""))
+    } else {
+        json!("")
+    };
+    let hidden = if hidden_from.is_empty() {
+        moved
+            .as_ref()
+            .map_or_else(|| json!(""), |piece| piece_hidden_from(state, piece, to))
+    } else {
+        json!(hidden_from)
+    };
+    if truthy(Some(&hidden)) {
+        state.extra.insert("accelerationTrail".into(), Value::Null);
+    }
+    state.extra.insert(
+        "lastMove".into(),
+        json!({
+            "from":from,"to":to,"pieceId":moved.as_ref().map_or("",|piece| piece.id.as_str()),
+            "pieceType":moved.as_ref().map_or("",|piece| piece.kind.as_str()),
+            "soundName":sound_name,"soundColor":sound_color,"hiddenFrom":hidden,
+            "idolEncoreEligible":truthy(Some(&remembered)),"idolEncoreId":remembered,
+            "idolEncorePieceId":encore_piece,"idolEncoreConsumed":false
+        }),
+    );
+    Ok(())
+}
+pub(crate) fn track_acceleration_trail(
+    state: &mut GameState,
+    color: Color,
+    cells: &[Square],
+    force: bool,
+    hidden_from: &str,
+) -> Result<()> {
+    if !truthy(state.extra.get("acceleration")) && !force {
+        return Ok(());
+    }
+    let hidden = if ["white", "black"].contains(&hidden_from) {
+        hidden_from
+    } else {
+        ""
+    };
+    let current = state.extra.get("accelerationTrail");
+    let append = current.is_some_and(|value| {
+        value.get("color").and_then(Value::as_str) == Some(color.as_str())
+            && !truthy(value.get("clearOnTurnStart"))
+            && value
+                .get("hiddenFrom")
+                .filter(|value| truthy(Some(value)))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                == hidden
+    });
+    let mut trail = if append {
+        current.cloned().unwrap_or(Value::Null)
+    } else {
+        json!({"color":color,"cells":[],"hiddenFrom":hidden})
+    };
+    let mut seen = BTreeSet::new();
+    let mut combined = Vec::with_capacity(64);
+    for cell in trail
+        .get("cells")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .cloned()
+        .chain(cells.iter().map(|square| json!(square)))
+    {
+        if let Some(square) = loose_square(&cell)
+            && seen.insert(square)
+        {
+            combined.push(cell);
+        }
+    }
+    trail["cells"] = json!(combined);
+    state.extra.insert(
+        "accelerationTrail".into(),
+        if seen.is_empty() { Value::Null } else { trail },
+    );
+    Ok(())
+}
+// main:104763-104801. Selection deduplication and truncation happen before
+// eligibility, and each relocation sees changes made by earlier selections.
+fn apply_evacuation(state: &mut GameState, action: &Action) -> Result<()> {
+    if state
+        .extra
+        .get("campaign")
+        .and_then(|value| value.get("setup"))
+        .and_then(Value::as_str)
+        == Some("fogWar")
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "campaign fog relocation privacy".into(),
+        ));
+    }
+    let selections = action
+        .target
+        .as_ref()
+        .and_then(|target| target.get("selections"))
+        .and_then(Value::as_array)
+        .ok_or(EngineError::IllegalAction)?;
+    let mut seen = BTreeSet::new();
+    let mut selected = Vec::with_capacity(3);
+    for cell in selections {
+        let Some((row, col)) = cell
+            .get("row")
+            .and_then(Value::as_f64)
+            .zip(cell.get("col").and_then(Value::as_f64))
+            .filter(|(row, col)| {
+                row.is_finite() && col.is_finite() && row.fract() == 0.0 && col.fract() == 0.0
+            })
+        else {
+            continue;
+        };
+        let square = loose_square(cell);
+        let key = square
+            .and_then(|square| state.at(square))
+            .filter(|piece| !piece.id.is_empty())
+            .map_or_else(
+                || format!("square:{row}:{col}"),
+                |piece| format!("piece:{}", piece.id),
+            );
+        if seen.insert(key) {
+            selected.push(square);
+        }
+        if selected.len() == 3 {
+            break;
+        }
+    }
+    let mut moved = Vec::with_capacity(3);
+    for origin in selected.into_iter().flatten() {
+        let Some(mut piece) = state.at(origin).cloned() else {
+            continue;
+        };
+        if !evacuation_candidate(state, &piece, origin)? {
+            continue;
+        }
+        let destination = origin
+            .offset(-state.turn.pawn_dir(), 0)
+            .ok_or(EngineError::IllegalAction)?;
+        let viewer = state.turn.opponent();
+        let visible_origin = state.piece_visible(&piece, origin, viewer);
+        state.board[destination.row as usize][destination.col as usize] = Some(piece.clone());
+        state.board[origin.row as usize][origin.col as usize] = None;
+        piece.moved = true;
+        crate::transition::mark_card_no_capture(state, &mut piece)?;
+        note_ultimatum_movement(state, &mut piece)?;
+        mark_animation(state, &piece)?;
+        write_piece(state, &piece);
+        let hidden = if !visible_origin || !state.piece_visible(&piece, destination, viewer) {
+            viewer.as_str()
+        } else {
+            ""
+        };
+        moved.push((origin, destination, hidden));
+    }
+    let Some(&(first, destination, _)) = moved.first() else {
+        return Err(EngineError::IllegalAction);
+    };
+    let hidden = moved
+        .iter()
+        .find_map(|(_, _, hidden)| (!hidden.is_empty()).then_some(*hidden))
+        .unwrap_or("");
+    let sound = if state.turn == Color::White {
+        "moveSelf"
+    } else {
+        "moveOpponent"
+    };
+    set_last_move(state, first, destination, sound, state.turn, hidden, None)?;
+    let trail: Vec<_> = moved
+        .iter()
+        .flat_map(|(from, to, _)| [*from, *to])
+        .collect();
+    let effective_hidden = state
+        .extra
+        .get("lastMove")
+        .and_then(|value| value.get("hiddenFrom"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    track_acceleration_trail(state, state.turn, &trail, true, &effective_hidden)?;
+    if let Some(trail) = state
+        .extra
+        .get_mut("accelerationTrail")
+        .and_then(Value::as_object_mut)
+        && trail.get("color").and_then(Value::as_str) == Some(state.turn.as_str())
+    {
+        trail.insert("clearOnTurnStart".into(), json!(state.turn));
+    }
+    crate::threat::play_move_sound(state, sound, state.turn)?;
+    Ok(())
+}
 pub(crate) fn mark_animation(state: &mut GameState, piece: &Piece) -> Result<()> {
     if piece.id.is_empty() {
         return Ok(());
     }
-    if !truthy(state.extra.get("forceAnimatedPieceIds")) {
-        state.extra.insert(
-            "forceAnimatedPieceIds".into(),
-            json!({"__simType":"Set","values":[]}),
-        );
+    let values = animation_set(state, "forceAnimatedPieceIds", true)?;
+    if !values.iter().any(|value| value.as_str() == Some(&piece.id)) {
+        values.push(json!(piece.id));
+    }
+    Ok(())
+}
+
+fn animation_set<'a>(
+    state: &'a mut GameState,
+    field: &str,
+    initialize: bool,
+) -> Result<&'a mut Vec<Value>> {
+    if initialize && !truthy(state.extra.get(field)) {
+        state
+            .extra
+            .insert(field.into(), json!({"__simType":"Set","values":[]}));
     }
     let set = state
         .extra
-        .entry("forceAnimatedPieceIds")
-        .or_insert_with(|| json!({"__simType":"Set","values":[]}));
+        .get_mut(field)
+        .ok_or_else(|| EngineError::InvalidState(format!("{field} Set missing")))?;
     if set.get("__simType").and_then(Value::as_str) != Some("Set") {
-        return Err(EngineError::InvalidState(
-            "forceAnimatedPieceIds must encode a Set".into(),
-        ));
+        return Err(EngineError::InvalidState(format!(
+            "{field} must encode a Set"
+        )));
     }
-    let values = set
-        .get_mut("values")
+    set.get_mut("values")
         .and_then(Value::as_array_mut)
-        .ok_or_else(|| EngineError::InvalidState("animation Set values missing".into()))?;
+        .ok_or_else(|| EngineError::InvalidState(format!("{field} Set values missing")))
+}
+
+/// Source playPieceVanishLocalEffect (94098), createPieceElement (75203),
+/// and shouldAnimatePieceElement (75806), with the oracle's cold renderer
+/// context at admission. Repeated ghosts only change DOM classes after the
+/// first entry; the serialized Sets have already received the same mutation.
+pub(crate) fn mark_vanish_animation(
+    state: &mut GameState,
+    piece: &Piece,
+    square: Square,
+) -> Result<()> {
+    if piece.id.is_empty() || piece.kind == "wall" {
+        return Ok(());
+    }
+    if state.mode != "gameover" && piece.color != state.turn {
+        let reference = state
+            .board
+            .iter()
+            .enumerate()
+            .find_map(|(row, cells)| {
+                cells.iter().enumerate().find_map(|(col, cell)| {
+                    cell.as_ref()
+                        .is_some_and(|occupant| occupant.id == piece.id)
+                        .then_some(Square {
+                            row: row as u8,
+                            col: col as u8,
+                        })
+                })
+            })
+            .unwrap_or(square);
+        if piece_hidden_from(state, piece, reference).as_str() == Some(state.turn.as_str()) {
+            return Ok(());
+        }
+        if state
+            .extra
+            .get("campaign")
+            .and_then(|campaign| campaign.get("setup"))
+            .and_then(Value::as_str)
+            == Some("fogWar")
+        {
+            return Err(EngineError::UnsupportedFeature(
+                "vanish ghost campaign fog visibility".into(),
+            ));
+        }
+    }
+    if state
+        .extra
+        .get("forceAnimatedPieceIds")
+        .is_some_and(|value| !value.is_null())
+    {
+        let forced = animation_set(state, "forceAnimatedPieceIds", false)?;
+        if let Some(index) = forced
+            .iter()
+            .position(|value| value.as_str() == Some(&piece.id))
+        {
+            forced.remove(index);
+        }
+    }
+    let values = animation_set(state, "animatedPieceIds", true)?;
     if !values.iter().any(|value| value.as_str() == Some(&piece.id)) {
         values.push(json!(piece.id));
     }
@@ -1632,11 +2500,6 @@ pub(crate) fn apply(
     {
         return Err(EngineError::IllegalAction);
     }
-    if let Mutation::Pending(effect) = plan.mutation {
-        return Err(EngineError::UnsupportedFeature(format!(
-            "targeted {effect} settlement"
-        )));
-    }
     match plan.mutation {
         Mutation::SideFlag(field, enemy) => {
             if action.target.is_some() {
@@ -1664,6 +2527,19 @@ pub(crate) fn apply(
             apply_selection(state, action, field)?;
             return Ok(Some(Vec::new()));
         }
+        Mutation::Evacuation => {
+            apply_evacuation(state, action)?;
+            return Ok(Some(Vec::new()));
+        }
+        Mutation::Windmill => {
+            apply_windmill(state, action)?;
+            return Ok(Some(Vec::new()));
+        }
+        Mutation::Chain => {
+            apply_chain(state, action)?;
+            return Ok(Some(Vec::new()));
+        }
+        Mutation::QueensGambit => return apply_queens_gambit(state, action).map(Some),
         _ => {}
     }
     let mut captures = Vec::new();
@@ -1761,6 +2637,33 @@ pub(crate) fn apply(
         .cloned()
         .ok_or(EngineError::IllegalAction)?;
     match plan.mutation {
+        Mutation::Bribe => {
+            piece.kind = "amazon".into();
+            mark_transformed_origin(state, &mut piece, selected)?;
+            piece.extra.insert("bribed".into(), json!(true));
+            piece.extra.insert("bribedRemaining".into(), json!(3));
+            let created = state.move_count;
+            state
+                .extra
+                .get_mut("temporaryQueens")
+                .and_then(Value::as_array_mut)
+                .ok_or_else(|| {
+                    EngineError::InvalidState("temporaryQueens must be an array".into())
+                })?
+                .push(json!({"id":piece.id,"color":piece.color,"remaining":3,"createdAt":created}));
+        }
+        Mutation::Desperado => {
+            piece
+                .extra
+                .insert("desperado".into(), json!({"remaining":2}));
+            write_piece(state, &piece);
+            mark_animation(state, &piece)?;
+            if !crate::movement::desperado_has_legal_move(state, &piece, selected)? {
+                piece.extra.shift_remove("desperado");
+                write_piece(state, &piece);
+                return Err(EngineError::IllegalAction);
+            }
+        }
         Mutation::Judgment => {
             let return_phase = if truthy(state.extra.get("draftDelete"))
                 || state.extra.get("gameStyle").and_then(Value::as_str) == Some("grand")
@@ -1774,9 +2677,9 @@ pub(crate) fn apply(
                 None
             };
             let Some(return_phase) = return_phase else {
-                return Err(EngineError::UnsupportedFeature(
-                    "permanent judgment vigilance and environmental removal".into(),
-                ));
+                let removed = crate::transition::judgment_remove(state, selected, state.turn)?
+                    .ok_or(EngineError::IllegalAction)?;
+                return Ok(Some(vec![removed]));
             };
             if !state
                 .extra
@@ -1799,6 +2702,7 @@ pub(crate) fn apply(
                 .and_then(Value::as_array_mut)
                 .ok_or_else(|| EngineError::InvalidState("judgment exile array missing".into()))?
                 .push(entry);
+            mark_vanish_animation(state, &piece, selected)?;
             crate::flow::mark_progress(state);
             crate::replay::add_log(
                 state,
@@ -1845,6 +2749,7 @@ pub(crate) fn apply(
                     "campaign sacrifice objectives".into(),
                 ));
             }
+            mark_vanish_animation(state, &piece, selected)?;
             captures.push(
                 crate::transition::sacrifice(state, selected, state.turn.opponent())?
                     .ok_or(EngineError::IllegalAction)?,
@@ -2249,6 +3154,29 @@ mod tests {
             Some(false)
         );
         assert_eq!(state, before);
+
+        // Sequential retreat can put the second piece in the first origin.
+        // Source lastMove uses that identity; parrot memory uses the first to.
+        let mut state = empty();
+        let from = Square { row: 4, col: 3 };
+        let following = Square { row: 3, col: 3 };
+        put(&mut state, "bishop", Color::White, from);
+        let following_id = put(&mut state, "knight", Color::White, following);
+        state
+            .extra
+            .insert("parrotMovement".into(), json!({"white":null,"black":null}));
+        let evacuation = card("emergency-evacuation");
+        let action = Action::card(
+            Color::White,
+            &evacuation,
+            Some(json!({"selections":[from,following]})),
+        );
+        let before = state.clone();
+        assert_eq!(validate(&state, &evacuation, &action).unwrap(), Some(true));
+        assert_eq!(state, before);
+        apply(&mut state, &evacuation, &action).unwrap();
+        assert_eq!(state.extra["lastMove"]["pieceId"], following_id);
+        assert_eq!(state.extra["parrotMovement"]["white"]["type"], "bishop");
     }
 
     #[test]
@@ -2365,7 +3293,7 @@ mod tests {
             ("ordination", "bishop", "bishop", "cardinal", ""),
         ] {
             let mut state = empty();
-            put(&mut state, from, Color::White, queen);
+            let transformed_id = put(&mut state, from, Color::White, queen);
             let sacrificed_id = put(&mut state, secondary, Color::White, knight);
             state
                 .at_mut(knight)
@@ -2377,6 +3305,12 @@ mod tests {
                 .unwrap()
                 .extra
                 .insert("shielded".into(), json!(true));
+            if id == "grappler" {
+                state.extra.insert(
+                    "forceAnimatedPieceIds".into(),
+                    json!({"__simType":"Set","values":["keep",sacrificed_id]}),
+                );
+            }
             let card = card(id);
             let mut target = json!(queen);
             if !field.is_empty() {
@@ -2400,6 +3334,77 @@ mod tests {
                 Color::Black
             };
             assert_eq!(state.captures.get(owner).last().unwrap().id, sacrificed_id);
+            if id == "grappler" {
+                assert_eq!(
+                    state.extra["forceAnimatedPieceIds"]["values"],
+                    json!(["keep", transformed_id])
+                );
+                assert_eq!(
+                    state.extra["animatedPieceIds"]["values"],
+                    json!([sacrificed_id])
+                );
+                let removed = captures[0].clone();
+                mark_vanish_animation(&mut state, &removed, knight).unwrap();
+                assert_eq!(
+                    state.extra["animatedPieceIds"]["values"],
+                    json!([sacrificed_id])
+                );
+            }
         }
+        let mut state = empty();
+        let sacrificed_id = put(&mut state, "queen", Color::White, queen);
+        let original_pawn = Square {
+            row: 6,
+            col: queen.col,
+        };
+        let other_pawn = Square { row: 6, col: 5 };
+        let protected_pawn = Square { row: 6, col: 7 };
+        for square in [original_pawn, other_pawn, protected_pawn] {
+            put(&mut state, "pawn", Color::White, square);
+        }
+        state.rng = RngState {
+            tape: vec![0.75],
+            ..RngState::seeded(0)
+        };
+        let gambit = card("queens-gambit");
+        state
+            .at_mut(queen)
+            .unwrap()
+            .extra
+            .insert("regencyHeir".into(), json!(true));
+        let before = state.clone();
+        assert_eq!(
+            validate(&state, &gambit, &action(&gambit, queen)).unwrap(),
+            Some(false)
+        );
+        assert_eq!(state, before);
+        state
+            .at_mut(queen)
+            .unwrap()
+            .extra
+            .shift_remove("regencyHeir");
+        let captures = apply(&mut state, &gambit, &action(&gambit, queen))
+            .unwrap()
+            .unwrap();
+        assert_eq!(captures[0].id, sacrificed_id);
+        assert_eq!(
+            state.extra["queensGambitFiles"]["white"],
+            json!({"queenCol":3,"randomCol":7})
+        );
+        assert_eq!(state.rng.cursor, 1);
+        assert!(state.at(queen).is_none());
+        assert!(
+            state
+                .at(original_pawn)
+                .unwrap()
+                .flag("queensGambitProtection")
+        );
+        assert!(
+            state
+                .at(protected_pawn)
+                .unwrap()
+                .flag("queensGambitProtection")
+        );
+        assert!(!state.at(other_pawn).unwrap().flag("queensGambitProtection"));
     }
 }

@@ -9,7 +9,8 @@ const { installEnumerationSource } = require("./client-enumeration");
 // rule cleanup, and queued replay settlement consumes the same source RNG stream.
 // This profile cannot establish future RNG equality with a populated browser DOM.
 const HEADLESS_PROFILE = Object.freeze({
-  version: "accelerate-headless-semantic-v1",
+  version: contract.ORACLE_PROFILE_VERSION,
+  rendererContext: "cold-activePieceAnimationUntil-at-admission",
   retained: Object.freeze(["source-transitions", "draft-availability-predicates", "potion-cleanup", "terminal-rule-ticket-cleanup", "queued-replay-settlement", "history-notation-rng"]),
   excluded: Object.freeze(["dom-card-animation-rng", "dom-update-log-rng", "dom-render-probes-and-ui-state", "network-persistence", "editor-ui", "timers"]),
   queryRng: "restored-position-probe-only",
@@ -282,7 +283,10 @@ class OfflineOracle {
       // the prepared state separate until both operations succeed, including
       // the existing RNG and callbacks owned by the currently live position.
       this.main.context.__restoredState = this.evaluate("(()=>{const candidate=__decode(__position);__relinkSnapshotBoards(candidate);return candidate;})()");
-      this.evaluate("state=__restoredState;__microtasks.length=0;scheduledGameOverReplayState=null;selectedGameStyle=state.gameStyle||'normal';localPlayMode='local';playMode='local';");
+      // Source75801 keeps this animation deadline Map outside its snapshots.
+      // Profile v2 admits each immutable position with a cold render cache;
+      // source Set fields and cache activity within the action stay intact.
+      this.evaluate("state=__restoredState;activePieceAnimationUntil.clear();__microtasks.length=0;scheduledGameOverReplayState=null;selectedGameStyle=state.gameStyle||'normal';localPlayMode='local';playMode='local';");
       this.random = random;
     } finally {
       delete this.main.context.__position;
@@ -304,7 +308,7 @@ class OfflineOracle {
     this.main.context.__config = { ...config, gameStyle: style };
     for (const key of ["draftDelete", "deathmatchEnabled"]) if (config[key] !== undefined && typeof config[key] !== "boolean") throw new TypeError(`Invalid ${key}.`);
     for (const key of ["starWinLimit", "deathmatchLimitTurns"]) if (config[key] !== undefined && (!Number.isSafeInteger(config[key]) || config[key] < 1)) throw new TypeError(`Invalid ${key}.`);
-    this.evaluate("selectedGameStyle=__config.gameStyle; localPlayMode='local'; playMode='local'; resetGame(false,[]); state.draftDelete=__config.draftDelete===true; if(__config.deathmatchEnabled!==undefined)state.deathmatchEnabled=__config.deathmatchEnabled; if(__config.deathmatchLimitTurns!==undefined)state.deathmatchLimitTurns=__config.deathmatchLimitTurns; if(__config.starWinLimit!==undefined)state.starWinLimit=__config.starWinLimit; if(__config.ruleCardIds?.length){state.ruleOpeningEnabled=true;state.ruleSelectionEnabled=true;state.selectedRuleCardIds=[...__config.ruleCardIds];maybeApplyOpeningRuleEvent();finishRuleOpeningEvent();}beginInitialGameFlow();");
+    this.evaluate("activePieceAnimationUntil.clear();selectedGameStyle=__config.gameStyle; localPlayMode='local'; playMode='local'; resetGame(false,[]); state.draftDelete=__config.draftDelete===true; if(__config.deathmatchEnabled!==undefined)state.deathmatchEnabled=__config.deathmatchEnabled; if(__config.deathmatchLimitTurns!==undefined)state.deathmatchLimitTurns=__config.deathmatchLimitTurns; if(__config.starWinLimit!==undefined)state.starWinLimit=__config.starWinLimit; if(__config.ruleCardIds?.length){state.ruleOpeningEnabled=true;state.ruleSelectionEnabled=true;state.selectedRuleCardIds=[...__config.ruleCardIds];maybeApplyOpeningRuleEvent();finishRuleOpeningEvent();}beginInitialGameFlow();");
     return this.snapshot();
   }
   result(position) {

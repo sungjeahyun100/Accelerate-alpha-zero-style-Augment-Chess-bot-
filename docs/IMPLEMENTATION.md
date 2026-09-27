@@ -31,14 +31,14 @@ Hypernetwork는 향후 extension의 생성·적용·병합 가능 여부만 준�
 | 영역 | 실제 구현/관측 | 코드 완성·의미 coverage의 남은 조건 |
 |---|---|---|
 | 사이트·계약 | 동결 loader, v1 schema/JSON validators, 실제 client 초기/draft/전이/종료 adapter 구현 | 전체 256 효과·선택 순서·특수 phase·관측 분류·lazy action 경계 미완료 |
-| Oracle 검사 | depth0 passive settlement·potion 정리·bounded terminal microtask·lazy premove·client 전용 loader 포함 Node 계약/통합 16개 통과 | 명시 headless profile의 검사이며 전체 catalog 및 populated browser의 future RNG 동등성은 별도 조건 |
+| Oracle 검사 | depth0 settlement·potion 정리·bounded terminal microtask·lazy premove·client 전용 loader 및 cold renderer admission 포함 Node 계약/통합 17개 통과 | headless semantic v2의 검사이며 전체 catalog 및 populated browser의 future RNG 동등성은 별도 조건 |
 | 과거 fixture | 349개, 757 sampled action을 최신 worker에 비교 | worker hash 불일치; 최신 client 전체 정답을 대신할 수 없음 |
-| Rust 규칙 | Rust 1.96 단위 22개와 bounded JSON CLI 1개·strict lint 통과; normal/chaos 초기 추첨 12개와 regular draft 선택의 source 비교 일치 | 전체 획득·효과와 catalog legal/reject/full-next-state/result/RNG 비교 미완료 |
-| PyO3/maturin | f41e45d의 Windows/Linux CI에서 실제 sdist→wheel 설치와 native 경계 검사 성공 | 최종 규칙·탐색과 공통 history/관측의 배포 검증 필요 |
-| Python 모델·encoding | f41e45d의 관측 v1 EncoderSpec 15개 필드, root Windows 모델 7개 검사 통과 | 관측 v2·16개 spec 필드·최종 공개 관측 정책과 실제 탐색 입력 통합 필요 |
-| ort/tract | Windows/Linux CI에서 각각 실제 두 backend의 FP32 base/adapter 48개 수치 비교 통과 | 최종 source 규칙·탐색과의 통합 실행을 확인해야 함 |
-| ISMCTS·replay·CLI | 공개 trace/particle filter/availability PUCT와 최대 4 leaf batch 연결; 두 OS의 설치 wheel에서 native/model/runtime/search/session 34개 검사 통과 | 세 default mode의 전체 draft→play·카드 효과·공개 posterior·최종 source 연결을 확인해야 함 |
-| CI | f41e45d의 구조·기존 engine·historical JS와 Windows/Linux native workflow 전체 성공; Rust 1.96 lint/test·실제 배포 wheel·동결 client/parser oracle 통과 | 이후 전체 규칙·관측을 완성한 최종 공통 commit 검증 필요 |
+| Rust 규칙 | ba8a1ad의 36 library + CLI 1개와 후속 weighted/cold20 캡처의 37+1·strict lint 통과; 초기·regular draft와 범위를 명시한 이동·카드 source 비교 | 전체 획득·효과와 catalog legal/reject/full-next-state/result/RNG 비교 미완료 |
+| PyO3/maturin | ba8a1ad의 Windows/Linux CI에서 실제 sdist→wheel 설치·native 경계·Python/native/정책 배포 일치 성공; 후속 weighted API의 별도 Linux 설치 검사 | 최종 규칙·탐색의 두 OS 배포 검증 필요 |
+| Python 모델·encoding | 관측 v2·16개 EncoderSpec 필드·네 surface 정책 고정, source 관측 130개 전체 JCS/key 일치 | visibility pending 52개 audit와 최종 규칙·탐색 입력 통합 필요 |
+| ort/tract | ba8a1ad의 Windows/Linux에서 각각 실제 두 backend·두 history 계약·full 8x128 base/adapter 48개 수치 비교 통과 | 최종 규칙 전체와 세 모드의 실제 탐색 실행을 확인해야 함 |
+| ISMCTS·replay·CLI | weighted v3의 최초 설치 search/session 13개 통과·2개 실패, 확률 metadata 수정본은 12개 통과·3개 실패; 실제 Rust ort 선택과 미완료 replay 연결 | normal의 숨은 Card 후보 posterior, chaos density, grand 최종 획득 효과와 전체 카드 연결 미완료 |
+| CI | ba8a1ad의 구조·기존 engine·historical JS와 Windows/Linux native workflow 전체 성공; 실제 설치 검사 각 34/34·skip 0 | 이후 후속 weighted/cold-profile 소스와 전체 규칙을 완성한 최종 공통 commit 검증 필요 |
 
 다른 영역의 작은 test count나 compile 성공은 해당 checkpoint이며 전체 GO로 승격하지 않는다.
 CI 요청/관측한 성공, Windows/Linux 확인, 모델 export 수치, 실제 semantic coverage를 따로 기록한다.
@@ -143,6 +143,15 @@ wheel SHA는 `6650a8b5ae3e0413c89cdec9135e417ce973068153a842d981c3b965c7f04c7c`�
 로컬 offline ONNX 링크 실패와 Python 개발용 링크 누락은 성공과 분리해 남겼고, 잠금된
 의존성과 소유 빌드 캐시의 기존 Python runtime 링크로 같은 source 검사를 완료했다.
 
+이 source를 공유한 ba8a1ad94edbe774358734e5d1bd16fcfcec2f96의
+[원격 native CI 36346564006](https://github.com/sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-/actions/runs/36346564006)은
+Windows 2025·Ubuntu 24.04 모두 전체 성공했다. 각 OS의 설치 wheel 검사는 34/34·skip 0이고
+Linux 58.548초, Windows 63.691초였다. 각 OS에서 두 history 계약의 full ResNet·ort/tract
+48개 비교가 통과했고 최대 절대 오차는 Linux 1.043081283569336e-6,
+Windows 1.2218952178955078e-6이다. installed Python 모듈 10개·native 바이너리·관측 v2
+정책의 배포 일치와 동결 client/parser 단계까지 통과했다. 구조 정책·기존 engine CI와
+historical JS harness도 성공했으며, 이 증거는 아래 후속 conditioned-search 소스와 구분한다.
+
 이 checkpoint의 targeted 카드 primitive 승인 143개는 reused-oracle의 renderer cache가
 남아 있는 비교 환경에서 전체 상태·RNG·history가 일치했다. 원문의 activePieceAnimationUntil
 module Map은 serialized snapshot에 없으며, 동일 snapshot·RNG로도 fresh realm과 재사용한
@@ -154,6 +163,71 @@ judgment 계열 6개가 이 한계를 보였고 RNG는 12개 모두 일치했다
 1개를 미완료로 유지한다. colossus·활성 monochrome의 Unsupported도 통과와 구분한다.
 최종 공개 관측 정책의 52개 audit 항목, 전체 256 효과·27 RULE·variant 실행·기본 세 모드의
 전체 흐름은 아직 미완료다. 설치 검사의 성공을 전체 코드 GO로 확대하지 않는다.
+
+후속 conditioned-search의 별도 Linux sdist→설치 wheel은 최소 Rust 1.96 fmt·strict clippy·
+workspace 36+1, installed provenance와 기존 native 6개(새 stale/seed/conversion 경계 포함)를
+통과했다. 실제 search/session 15개는 12개 통과·3개 실패·skip 0이었다. session 4개와
+draftDelete 3개는 통과했고 default normal은 두 선택 후 play 관측까지 도달했으나 다음
+선택자의 hidden offer 조건화가 미지원이었다. chaos는 첫 묶음의 source proposal 밀도가
+미지원이고 grand는 11개 선택·양측 posterior를 통과한 뒤 마지막 선택의 democracy 획득
+효과에서 멈췄다. 예산·skip/xfail로 완료 조건을 낮추지 않는다.
+초기 hidden White offer의 source/proposal 확률 보정과 새로운 공개 Black draw의 likelihood는
+별도 경계다. StepResult만 반환하는 조건부 draw 복원은 public compatibility 증거이며,
+latent별 draw 분포의 차이를 보정하는 완전한 posterior의 증거로 사용하지 않는다.
+명시적인 weighted conditional-step metadata와 source trace 밀도 구현을 이어서 검증한다.
+
+후속 cold20 캡처는 성공한 oracle admission에서 원문의 renderer Map만 비우는
+headless semantic v2를 기준으로 한다. 원래 224개 생성 사례 중 source 승인 187개에서
+지원한 161개는 전체 state·RNG·history가 일치했고 26개 emergency 경로는 Unsupported로
+남았다. 정상 거부 36개와 원문 예외 1개는 별도로 기록했다. global modifier를 비활성화한
+20개 확장 효과의 production wrapper 23개와 독립 fresh/reused 대표 12개도 전체 상태와
+RNG를 맞췄다. 74개 local effect ID가 구현되어 있으나 전체 lifecycle·RULE 지원 수는 아니다.
+immutable 원본과 일회성 비교 데이터는 `reports/full-stack-implementation/card-effects-checkpoint/cold20`에 있다.
+
+그 core와 weighted filter v3·네 native 조건화 helper를 고정한 별도 Linux sdist→설치 wheel은
+Rust 1.96 fmt·strict clippy·workspace 37+1과 native 6개를 통과했다. installed Python 모듈 10개·
+native 바이너리·정책 JCS의 원본 일치도 확인했다. wheel SHA는
+`661e5e9badd4676dbb99702eac5cd112dad237f7813bca1a1aa0c0e71aadcac3`이다.
+실제 search/session 검사 15개는 13개 통과·2개 실패·skip 0, 41.895초였다.
+기본 normal의 두 획득·양측 posterior·첫 play와 session 4개는 통과했고, chaos hidden-offer
+density와 grand의 두 번째 White→Black shared-pool 조건화에서 실패했다. 기존 예산을 유지했다.
+
+같은 설치 wheel에서 고정된 관측 v2 summary 계약의 full 8x128 ONNX를 실제 Rust ort로
+실행했다. normal의 두 draft 선택 뒤 4 iteration·depth 1·최대 64 후보·5초 예산으로 첫 play
+intent를 선택하고, 실제 bind/apply·양측 공개 posterior·미완료 replay 왕복을 2.86초에 확인했다.
+학습 label은 만들지 않았으며, 이는 한 제한된 normal 흐름의 증거다. chaos/grand의 미지원
+전파와 미완료 replay 보존은 별도 확인했지만 두 모드의 NN play 완료로 세지 않는다.
+이후 실제 무관찰 normal draw의 p=q<1 metadata와 grand shared-pool guard를 고정 source에서
+수정한 별도 wheel도 fmt·strict clippy·workspace 37+1·native 6개·배포 일치를 통과했다.
+wheel SHA는 `f1cfdbf1c33b62c54009eb1b26f2b47a6161d0afaa4cb8bef308bb75f2a37089`다.
+같은 예산의 search/session은 12개 통과·3개 실패·skip 0, 27.723초였다. grand guard는
+해소되어 마지막 선택의 democracy 효과까지 진행했다. normal은 NN의 a2→a4 Move 선택과
+실제 적용까지 성공했으나 후속 posterior가 숨은 Card 후보의 미지원 밀도에서 실패했다.
+chaos는 처음 선택한 묶음 이후 새 Black offer를 White viewer에게 조건화하는 밀도가 미지원이다.
+이 설치본의 normal 완료로 이전 wheel의 성공을 재사용하지 않는다. 원본 wheel과 실패
+보고서는 덮어쓰지 않고, 정확한 행동과 공개 경계를 규칙 담당자가 계속 검증한다.
+이 증거는 finite LCG seed posterior나 브라우저 future RNG의 정확한 재현을 뜻하지 않는다.
+
+원격 공유용 `cold-card-native-checkpoint`는 검증된 cold profile·core·native API를
+유지하면서 windmill·bribe·queens-gambit·chain 네 local handler를 함께 캡처했다.
+네 효과의 별도 source 35개 중 승인 21개의 전체 state·RNG·history와 정상 거부 14개의
+불변 상태, UI/첫 클릭/검증 35개가 일치했다. local effect ID는 78개이며 새 네 효과의
+wrapper·expiry·이동 제한 lifecycle은 완료 수에 포함하지 않는다. 해당 모듈만 고정 core에
+교체해도 같은 비교가 통과했고 다른 미완료 규칙 코드에 의존하지 않았다.
+Python search와 test_search는 원격 ba8a1ad의 기존 구현·검사를 그대로 유지한다.
+실패 중인 후속 weighted v3 소스와 완료 gate는 live 작업 및 immutable 캡처에 보존했으며
+삭제·완화하지 않는다. 이 두 탐색 버전의 검증 범위는 서로 대체할 수 없다.
+
+이 공유 단위의 최소 Rust 1.96 workspace fmt·strict clippy·37+1 검사와 실제
+sdist→설치 wheel의 기존 CI helper 검사 34/34가 통과했다(skip/error/failure 0,
+46.824초). full ResNet·두 history·ort/tract 비교 48개 최대 절대 오차는
+1.2218952178955078e-6이다. sdist SHA는
+`6b7e48ee73521569d2718a99631da7d4e81777c850cbea56252f00049474f96c`,
+wheel SHA는 `da408dc25476c647863abde52337cfa0c98109ab5dd9ab05959a0cac851b542d`다.
+보고서는 Git 밖 `reports/full-stack-implementation/cold-card-native-checkpoint`에 둔다.
+root runner가 없는 test_session_pipeline.py 경로를 지정해 pytest 시작 전에 실패한 기록도
+보존했다. 실제 캡처한 CI helper가 기존 test_session.py를 포함해 검사했고 빌드는 재실행하지 않았다.
+이 로컬 결과의 원격 CI는 공유 후 확인하며 전체 코드 판정은 계속 NO-GO다.
 
 ## 구현 연결 순서와 완료 기준
 
@@ -231,7 +305,12 @@ index와 worker는 최초 발견 시점의 provenance를 보존하고 현재 has
 기존 전체 `site-baseline` cache를 덮어쓰지 않으며, 전체 baseline 검사와 `loadWorker`는
 원래 worker가 있어야 통과한다. client 전용 cache에서 worker 비교를 요청하면 명시적으로 실패한다.
 
-오라클의 실행 profile은 `accelerate-headless-semantic-v1`이다. 원래 `renderAll`이 수행하는
+오라클의 현재 실행 profile은 `accelerate-headless-semantic-v2`다. 성공한 restore/newGame
+admission에서 snapshot 밖의 activePieceAnimationUntil renderer Map만 cold 초기화한다.
+action 내부·queued settlement 중에는 cache를 유지하며 복원 실패는 state·RNG·cache와
+callback을 보존한다. 기존 v1의 warm-cache 결과는 historical scope로 유지하고 새 profile의
+fresh 전체 상태 비교와 구분한다. 정책의 renderer88 당시 v1 evidence도 덮어쓰지 않는다.
+원래 `renderAll`이 수행하는
 `pruneBoardPotionEffects`를 실행하고 render-local simulation depth를 즉시 복구한다.
 종료 rule ticket 정리와 원래 queued replay settlement를 보존하며 snapshot 전에 최대 256개
 microtask를 FIFO로 처리한다. 이전 position을 복원하면 그 position의 미실행 callback을 버린다.

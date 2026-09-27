@@ -45,6 +45,33 @@ explicit engine errors; these helpers do not implement filtering or search.
 Initial weighted normal/chaos conditioning is checked alongside grand and
 explicit `draftDelete` modes. This initial-state boundary does not establish
 support for every later acquisition, effect or hidden-information transition.
+
+`condition_hidden_opening_draft(expected_next_public, independent_seed)` delegates
+a source-valid proposal for a supported, previously hidden normal opening offer.
+It returns exactly `position`, `importance_weight`, `source_probability`, and
+`proposal_probability`. The position owns its state; the probabilities are finite
+and positive. A weighted filter must check the source/proposal density correction
+and preservation of the entire previous public frame. Unsupported conditional
+families keep their explicit errors. `public_transition_compatible(action,
+expected_observation)` rejects only source-proven public incompatibility before
+effects execute; it does not change the total public-intent prior denominator.
+`apply_conditioned_public(action, expected_observation, independent_seed)`
+delegates a supported transition and independently reconstructs its next public
+draw. It returns the same owned `StepResult` shape as `apply`. Both action methods
+enforce the stale-position guard, and the seed is a bounded independent `u32`.
+That reconstruction call currently returns no observed-draw likelihood. It
+establishes public compatibility and cannot by itself complete posterior density
+correction when the draw distribution varies between latent positions.
+The separate `apply_weighted_conditioned_public(action, expected_observation,
+independent_seed)` returns exactly `step`, `importance_weight`,
+`source_probability`, and `proposal_probability`. The binding validates finite
+positive probabilities in (0, 1] and a weight equal to their source/proposal
+ratio, using relative tolerance 1e-10. The filter must combine this conditional
+transition correction with its hidden-offer proposal correction and public-intent
+prior. Unproved conditional chance families remain explicit engine errors.
+These thin calls expose engine behavior; they do not implement a particle filter
+or claim completion of the default modes' entire draft-to-play flow.
+
 `site_catalog()` returns an owned mapping of the compiled frozen catalog, so an
 installed wheel can construct its encoder specification without a source checkout.
 `site_observation_policy()` returns a separate owned mapping of the public projection

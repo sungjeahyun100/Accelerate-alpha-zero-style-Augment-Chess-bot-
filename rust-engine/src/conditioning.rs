@@ -55,6 +55,7 @@ fn checked_observation(value: Value) -> Result<Observation> {
             "invalid public observation protocol or board".into(),
         ));
     }
+    crate::observation::validate_projection(&observation)?;
     let supplied = observation.information_state_key.clone();
     observation.refresh_key();
     if observation.information_state_key != supplied {
@@ -121,6 +122,388 @@ pub(crate) fn sample_initial(config: GameConfig, expected: Value, seed: u32) -> 
         ));
     }
     Ok(conditioned)
+}
+
+/// A caller-owned particle executes one source action. Only a genuinely new
+/// public OPENING offer can change its draw outcome here; existing public
+/// cards/offers and ordinary action effects remain exact. Full public-frame
+/// comparison still decides acceptance, and future randomness is independent.
+pub(crate) fn apply_conditioned(
+    position: &Position,
+    action: &Action,
+    expected: Value,
+    seed: u32,
+) -> Result<StepResult> {
+    let expected = checked_observation(expected)?;
+    let expected_value = serde_json::to_value(&expected).map_err(EngineError::serialization)?;
+    let mut step = position.apply(action)?;
+    let conditioned = match condition_identities(&step.position, expected_value.clone()) {
+        Ok(position) => position,
+        Err(EngineError::ConditioningMismatch(_)) => {
+            let old_draft = position.state().extra.get("draft");
+            let new_draft = step.position.state().extra.get("draft");
+            let visible_draft = expected.public_state.get("draft");
+            let new_opening = matches!(
+                action.kind,
+                ActionKind::DraftPick | ActionKind::DraftBundlePick
+            ) && position.state().mode == "draft"
+                && step.position.state().mode == "draft"
+                && old_draft
+                    .and_then(|draft| draft.get("color"))
+                    .and_then(Value::as_str)
+                    == Some("white")
+                && new_draft
+                    .and_then(|draft| draft.get("color"))
+                    .and_then(Value::as_str)
+                    == Some("black")
+                && new_draft
+                    .and_then(|draft| draft.get("phase"))
+                    .and_then(Value::as_str)
+                    == Some("OPENING")
+                && visible_draft
+                    .and_then(|draft| draft.get("color"))
+                    .and_then(Value::as_str)
+                    == Some(expected.viewer.as_str())
+                && expected.viewer == Color::Black;
+            if !new_opening {
+                return Err(EngineError::ConditioningMismatch(
+                    "past public transition differs beyond supported identities/new OPENING draw"
+                        .into(),
+                ));
+            }
+            let choices = visible_draft
+                .and_then(|draft| draft.get("choices"))
+                .and_then(Value::as_array)
+                .ok_or_else(|| {
+                    EngineError::InvalidState("public opening choices missing".into())
+                })?;
+            let mut state = step.position.state().clone();
+            crate::draft::condition_opening_offer(&mut state, choices, Color::Black)?;
+            let proposed = step.position.with_state(state)?;
+            condition_identities(&proposed, expected_value)?
+        }
+        Err(error) => return Err(error),
+    };
+    let mut state = conditioned.state().clone();
+    state.rng = RngState::seeded(u64::from(seed));
+    step.position = conditioned.with_state(state)?;
+    Ok(step)
+}
+
+/// The weighted boundary never substitutes a compatibility-only forced draw
+/// for a density. Ordinary supported transitions are sampled from the source
+/// kernel, so their trace p/q is one. The observed normal Black initial offer
+/// uses an explicit latent balancing-trace mixture with source probabilities.
+pub(crate) fn apply_weighted_conditioned(
+    position: &Position,
+    action: &Action,
+    expected: Value,
+    seed: u32,
+) -> Result<ConditionedStepProposal> {
+    let expected = checked_observation(expected)?;
+    let expected_value = serde_json::to_value(&expected).map_err(EngineError::serialization)?;
+    if action.kind == ActionKind::Card {
+        position.validate_action(action)?;
+        return Err(EngineError::UnsupportedFeature(
+            "weighted card chance trace".into(),
+        ));
+    }
+    let mut step = position.apply(action)?;
+    let old_draft = position.state().extra.get("draft");
+    let new_draft = step.position.state().extra.get("draft");
+    let visible_draft = expected.public_state.get("draft");
+    let new_offer = matches!(
+        action.kind,
+        ActionKind::DraftPick | ActionKind::DraftBundlePick
+    ) && position.state().mode == "draft"
+        && step.position.state().mode == "draft"
+        && old_draft
+            .and_then(|draft| draft.get("kind"))
+            .and_then(Value::as_str)
+            != Some("grand")
+        && new_draft
+            .and_then(|draft| draft.get("kind"))
+            .and_then(Value::as_str)
+            != Some("grand")
+        && old_draft
+            .and_then(|draft| draft.get("color"))
+            .and_then(Value::as_str)
+            == Some("white")
+        && new_draft
+            .and_then(|draft| draft.get("color"))
+            .and_then(Value::as_str)
+            == Some("black");
+    let (conditioned, source_probability, proposal_probability) = if new_offer {
+        if new_draft
+            .and_then(|draft| draft.get("phase"))
+            .and_then(Value::as_str)
+            != Some("OPENING")
+            || position.state().move_count != 0
+        {
+            return Err(EngineError::UnsupportedFeature(
+                "weighted noninitial draft trace".into(),
+            ));
+        }
+        if step
+            .position
+            .state()
+            .extra
+            .get("gameStyle")
+            .and_then(Value::as_str)
+            == Some("chaos")
+        {
+            return Err(EngineError::UnsupportedFeature(
+                "chaos observed-offer importance density".into(),
+            ));
+        }
+        check_standard_opening_board(step.position.state())?;
+        let mut state = step.position.state().clone();
+        state.rng = RngState::seeded(u64::from(seed));
+        let (p, q) = if expected.viewer == Color::Black {
+            let choices = visible_draft
+                .filter(|draft| draft["color"] == "black")
+                .and_then(|draft| draft.get("choices"))
+                .and_then(Value::as_array)
+                .ok_or_else(|| {
+                    EngineError::ConditioningMismatch("new own opening offer must be public".into())
+                })?;
+            crate::draft::propose_observed_normal_offer(&mut state, choices, Color::Black)?
+        } else {
+            crate::draft::propose_unobserved_normal_offer(&mut state, Color::Black)?
+        };
+        let proposed = step.position.with_state(state)?;
+        // This compares every public field and every viewer-scoped history
+        // event, so a forced component selecting a different best attempt is
+        // rejected rather than changing the source's balance decision.
+        (condition_identities(&proposed, expected_value)?, p, q)
+    } else {
+        // Current supported move/promotion and non-drawing acquisition kernels
+        // have only ancillary identity randomness. Card chance traces are
+        // rejected above until their canonical effect supplies full densities.
+        (
+            condition_identities(&step.position, expected_value)?,
+            1.0,
+            1.0,
+        )
+    };
+    let importance_weight = checked_density(source_probability, proposal_probability)?;
+    let mut state = conditioned.state().clone();
+    state.rng = RngState::seeded(u64::from(seed));
+    step.position = conditioned.with_state(state)?;
+    Ok(ConditionedStepProposal {
+        step,
+        importance_weight,
+        source_probability,
+        proposal_probability,
+    })
+}
+
+fn checked_density(p: f64, q: f64) -> Result<f64> {
+    let weight = p / q;
+    if !p.is_finite()
+        || !q.is_finite()
+        || p <= 0.0
+        || q <= 0.0
+        || p > 1.0
+        || q > 1.0
+        || !weight.is_finite()
+        || weight <= 0.0
+    {
+        return Err(EngineError::InvalidState(
+            "invalid source/proposal trace density".into(),
+        ));
+    }
+    Ok(weight)
+}
+
+fn check_standard_opening_board(state: &GameState) -> Result<()> {
+    // Initial standard pieces make source's stochastic trolley/black-box pool
+    // eligibility tests outcome-invariant. Edited or progressed boards require
+    // their additional latent predicate trace and are not given guessed p/q.
+    for row in 0..8 {
+        for col in 0..8 {
+            let kind = match row {
+                0 | 7 => Some(
+                    [
+                        "rook", "knight", "bishop", "queen", "king", "bishop", "knight", "rook",
+                    ][col],
+                ),
+                1 | 6 => Some("pawn"),
+                _ => None,
+            };
+            match (
+                state.at(Square {
+                    row: row as u8,
+                    col: col as u8,
+                }),
+                kind,
+            ) {
+                (None, None) => {}
+                (Some(piece), Some(kind))
+                    if piece.kind == kind
+                        && piece.color
+                            == if row < 2 {
+                                PieceColor::Black
+                            } else {
+                                PieceColor::White
+                            }
+                        && !piece.moved => {}
+                _ => {
+                    return Err(EngineError::UnsupportedFeature(
+                        "initial-offer density on a modified board".into(),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn cards_for_actor(observation: &Observation, actor: Color) -> Result<&[Value]> {
+    if observation.viewer == actor {
+        Ok(&observation.own_cards)
+    } else {
+        observation
+            .public_state
+            .get("revealedOpponentCards")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .ok_or_else(|| EngineError::InvalidState("public opposing cards missing".into()))
+    }
+}
+
+/// A source-proven acquisition constraint, evaluated before any effect. It
+/// eliminates unrelated hidden picks without swallowing errors from possibly
+/// compatible, still unsupported branches. Other action families are unknown
+/// to this predicate and remain candidates.
+pub(crate) fn transition_compatible(
+    position: &Position,
+    action: &Action,
+    expected: Value,
+) -> Result<bool> {
+    let expected = checked_observation(expected)?;
+    position.validate_action(action)?;
+    if !matches!(
+        action.kind,
+        ActionKind::DraftPick | ActionKind::DraftBundlePick
+    ) {
+        return Ok(true);
+    }
+    let selected = crate::draft::selected_draft_cards(position.state(), action)?;
+    let before = position.state().deck_slots.get(action.color);
+    let after = cards_for_actor(&expected, action.color)?;
+    let slots = before
+        .iter()
+        .enumerate()
+        .filter(|(_, card)| card.vacant)
+        .map(|(index, _)| index)
+        .take(selected.len())
+        .collect::<Vec<_>>();
+    if slots.len() != selected.len()
+        || after.len() != before.iter().filter(|card| !card.vacant).count() + selected.len()
+    {
+        return Ok(false);
+    }
+    let grand = position
+        .state()
+        .extra
+        .get("draft")
+        .and_then(|v| v.get("kind"))
+        .and_then(Value::as_str)
+        == Some("grand");
+    for (definition, slot) in selected.iter().zip(slots) {
+        let Some(public) = after
+            .iter()
+            .find(|card| crate::observation::number(card.get("slot")) == Some(slot as f64))
+        else {
+            return Ok(false);
+        };
+        if public["id"] != definition["id"]
+            || grand && public["instanceId"] != definition["instanceId"]
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Propose a source-compatible latent initial offer for the opposing viewer.
+/// Only the not-yet-public offer, its private notice and independent chance
+/// stream may change. The complete previous public frame must remain equal.
+pub(crate) fn hidden_opening(
+    position: &Position,
+    expected: Value,
+    seed: u32,
+) -> Result<HiddenDraftProposal> {
+    let expected = checked_observation(expected)?;
+    let state = position.state();
+    let actor = state.decision_actor();
+    let draft = state.extra.get("draft").ok_or(EngineError::IllegalAction)?;
+    let chaos = state.extra.get("gameStyle").and_then(Value::as_str) == Some("chaos");
+    if chaos {
+        return Err(EngineError::UnsupportedFeature(
+            "chaos hidden-offer importance density".into(),
+        ));
+    }
+    if state.mode != "draft"
+        || draft["phase"] != "OPENING"
+        || draft["kind"] == "grand"
+        || expected.viewer != actor.opponent()
+        || state.move_count != 0
+        || state.turns_taken.white != 0
+        || state.turns_taken.black != 0
+        || state.deck_slots.get(actor).iter().any(|card| !card.vacant)
+        || if actor == Color::White {
+            !state.history.is_empty() || state.deck_slots.black.iter().any(|card| !card.vacant)
+        } else {
+            state.history.len() != 1
+                || state
+                    .deck_slots
+                    .white
+                    .iter()
+                    .filter(|card| !card.vacant)
+                    .count()
+                    != 1
+        }
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "hidden offer conditioning requires a normal initial OPENING decision".into(),
+        ));
+    }
+    check_standard_opening_board(state)?;
+    let before = position.try_observe(expected.viewer)?;
+    if before.public_state.contains_key("draft") {
+        return Err(EngineError::ConditioningMismatch(
+            "already-public draft may not be proposed again".into(),
+        ));
+    }
+    let acquired = cards_for_actor(&expected, actor)?;
+    if acquired.len() != 1 || crate::observation::number(acquired[0].get("slot")) != Some(0.0) {
+        return Err(EngineError::ConditioningMismatch(
+            "normal initial acquisition requires exactly one new public opponent slot".into(),
+        ));
+    }
+    let required = acquired[0]
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| EngineError::InvalidState("acquired definition missing".into()))?;
+    let mut proposed = state.clone();
+    proposed.rng = RngState::seeded(u64::from(seed));
+    let (source_probability, proposal_probability) =
+        crate::draft::propose_hidden_normal_offer(&mut proposed, required, actor)?;
+    let importance_weight = checked_density(source_probability, proposal_probability)?;
+    let position = position.with_state(proposed)?;
+    if !same_content(&position.try_observe(expected.viewer)?, &before)? {
+        return Err(EngineError::ConditioningMismatch(
+            "hidden proposal altered previously public information".into(),
+        ));
+    }
+    Ok(HiddenDraftProposal {
+        position,
+        importance_weight,
+        source_probability,
+        proposal_probability,
+    })
 }
 
 fn card_identity_map(

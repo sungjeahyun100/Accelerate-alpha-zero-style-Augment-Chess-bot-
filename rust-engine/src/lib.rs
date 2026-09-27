@@ -11,6 +11,7 @@ mod replay;
 mod state;
 #[cfg(test)]
 mod tests;
+mod threat;
 mod transition;
 mod variant_movement;
 
@@ -28,6 +29,27 @@ struct SnapshotShape {
 
 #[derive(Clone, Debug)]
 pub struct Position(Arc<GameState>, Option<Arc<SnapshotShape>>);
+
+/// Importance proposal for a previously hidden source OPENING offer.
+/// Probabilities refer to the ordered weighted-choice chance kernel; opaque
+/// identity draws are unchanged ancillary draws in both distributions.
+#[derive(Clone, Debug)]
+pub struct HiddenDraftProposal {
+    pub position: Position,
+    pub importance_weight: f64,
+    pub source_probability: f64,
+    pub proposal_probability: f64,
+}
+
+/// An importance proposal for a realized semantic chance trace. This metadata
+/// is separate from the executed game's result and from opaque identity draws.
+#[derive(Clone, Debug)]
+pub struct ConditionedStepProposal {
+    pub step: StepResult,
+    pub importance_weight: f64,
+    pub source_probability: f64,
+    pub proposal_probability: f64,
+}
 
 impl Position {
     pub(crate) fn with_state(&self, mut state: GameState) -> Result<Self> {
@@ -58,6 +80,37 @@ impl Position {
     }
     pub fn condition_public_identities(&self, observation: Value) -> Result<Self> {
         conditioning::condition_identities(self, observation)
+    }
+    pub fn apply_conditioned_public(
+        &self,
+        action: &Action,
+        expected_public_observation: Value,
+        independent_seed: u32,
+    ) -> Result<StepResult> {
+        conditioning::apply_conditioned(self, action, expected_public_observation, independent_seed)
+    }
+    pub fn apply_weighted_conditioned_public(
+        &self,
+        action: &Action,
+        expected_public_observation: Value,
+        independent_seed: u32,
+    ) -> Result<ConditionedStepProposal> {
+        conditioning::apply_weighted_conditioned(
+            self,
+            action,
+            expected_public_observation,
+            independent_seed,
+        )
+    }
+    pub fn public_transition_compatible(&self, action: &Action, expected: Value) -> Result<bool> {
+        conditioning::transition_compatible(self, action, expected)
+    }
+    pub fn condition_hidden_opening_draft(
+        &self,
+        expected_next_public: Value,
+        independent_seed: u32,
+    ) -> Result<HiddenDraftProposal> {
+        conditioning::hidden_opening(self, expected_next_public, independent_seed)
     }
     pub fn public_intent(&self, action: &Action) -> Result<Value> {
         self.validate_action(action)?;

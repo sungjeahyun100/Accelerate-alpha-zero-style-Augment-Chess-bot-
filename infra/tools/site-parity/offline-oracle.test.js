@@ -69,7 +69,7 @@ test("snapshot restore preserves exact RNG, public hints and 20 initial moves", 
   const rejected = oracle.apply(p, wrong);
   assert.equal(rejected.ok, false); assert.equal(rejected.position.positionId, p.positionId);
   oracle.restore(p);
-  oracle.evaluate("queueMicrotask(()=>{state.restoreCallbackProbe=true;});scheduledGameOverReplayState={pending:'prior-position'};");
+  oracle.evaluate("queueMicrotask(()=>{state.restoreCallbackProbe=true;});scheduledGameOverReplayState={pending:'prior-position'};activePieceAnimationUntil.set('prior-animation',Date.now()+240);");
   const beforeState = oracle.state(), beforeRandom = contract.jsonCopy(oracle.random);
   for (const [field, malformed] of [["values", { __simType: "Set", values: 12 }], ["entries", { __simType: "Map", entries: 12 }]]) {
     const state = contract.jsonCopy(p.state);
@@ -80,10 +80,13 @@ test("snapshot restore preserves exact RNG, public hints and 20 initial moves", 
     assert.deepEqual(oracle.random, beforeRandom, "failed decoding preserves the live RNG");
     assert.equal(oracle.evaluate("__microtasks.length"), 1);
     assert.equal(oracle.evaluate("scheduledGameOverReplayState.pending"), "prior-position");
+    assert.equal(oracle.evaluate("activePieceAnimationUntil.has('prior-animation')"), true, "failed decoding preserves the live renderer cache");
     assert.equal(Object.hasOwn(oracle.main.context, "__restoredState"), false);
   }
   assert.equal(oracle.snapshot().state.restoreCallbackProbe, true, "the original callback still executes");
+  assert.equal(oracle.evaluate("activePieceAnimationUntil.has('prior-animation')"), true, "snapshot settlement retains this invocation's renderer cache");
   oracle.restore(p);
+  assert.equal(oracle.evaluate("activePieceAnimationUntil.size"), 0, "successful restoration starts a cold renderer invocation");
 });
 
 test("large-piece snapshot restoration retains source aliases within independent board frames", () => {
@@ -182,6 +185,27 @@ test("headless render retains source potion cleanup without inventing DOM RNG", 
   oracle.restore(input);
   oracle.evaluate("pruneBoardPotionEffects(state.board)");
   assert.deepEqual(oracle.snapshot().state, cleaned.state);
+  assert.equal(HEADLESS_PROFILE.version, contract.ORACLE_PROFILE_VERSION);
+  assert.equal(HEADLESS_PROFILE.rendererContext, "cold-activePieceAnimationUntil-at-admission");
+  // Source94100's vanish ghost calls createPieceElement75203, whose external
+  // deadline Map75801 otherwise changes the serialized animation Set75820
+  // when the same immutable snapshot is admitted a second time.
+  const ghost = "playPieceVanishLocalEffect([{item:clonePlain(state.board[6][0]),row:6,col:0}])";
+  const fresh = new OfflineOracle(); fresh.restore(initial); fresh.evaluate(ghost);
+  const expected = fresh.snapshot();
+  assert.equal(expected.state.animatedPieceIds.values.includes(initial.state.board[6][0].id), true);
+  assert.deepEqual(expected.rng, initial.rng, "the actual source ghost performs no RNG draw");
+  for (let repeat = 0; repeat < 2; repeat++) {
+    oracle.restore(initial); oracle.evaluate(ghost);
+    assert.deepEqual(oracle.snapshot(), expected, "fresh and repeated admitted source queries preserve the complete state and RNG");
+    assert.equal(oracle.evaluate("activePieceAnimationUntil.size"), 1);
+    oracle.evaluate(ghost);
+    assert.equal(oracle.evaluate("activePieceAnimationUntil.size"), 1, "cache activity survives within one invocation");
+    assert.deepEqual(oracle.snapshot(), expected);
+  }
+  oracle.evaluate("activePieceAnimationUntil.set('prior-game',Date.now()+240)");
+  oracle.newGame({ draftDelete: true }, 41);
+  assert.equal(oracle.evaluate("activePieceAnimationUntil.size"), 0, "a valid new game starts with a cold renderer cache");
 });
 test("terminal microtasks retain source replay, chain cleanup and conditional notation RNG", () => {
   const initial = oracle.newGame({ draftDelete: true }, 45), state = contract.jsonCopy(initial.state);

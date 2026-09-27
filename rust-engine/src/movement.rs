@@ -136,6 +136,20 @@ pub(crate) fn legal_actions(state: &GameState) -> Result<Vec<Action>> {
             state.mode
         )));
     }
+    let mut actions = legal_move_actions(state)?;
+    if !has_checker_capture(state)? && forced_piece_id(state).is_none() {
+        for card in state.deck_slots.get(state.turn) {
+            if usable_card(card) {
+                actions.extend(crate::transition::card_actions(state, card)?);
+            }
+        }
+    }
+    Ok(actions)
+}
+
+/// Source collectValidAiActions(includeCards:false) has a separate movement
+/// surface. Unrelated unknown card families must not poison royal threat probes.
+pub(crate) fn legal_move_actions(state: &GameState) -> Result<Vec<Action>> {
     ensure_supported(state)?;
     let mut actions = Vec::new();
     let mut seen = BTreeSet::new();
@@ -185,22 +199,6 @@ pub(crate) fn legal_actions(state: &GameState) -> Result<Vec<Action>> {
                 .and_then(|square| state.at(square))
                 .is_some_and(|piece| piece.id == forced_id)
         });
-    }
-    if !has_checker_capture && forced_piece_id(state).is_none() {
-        for card in state.deck_slots.get(state.turn) {
-            if card.vacant
-                || card.used
-                || card.recovering
-                || card
-                    .extra
-                    .get("nextTurnPending")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-            {
-                continue;
-            }
-            actions.extend(crate::transition::card_actions(state, card)?);
-        }
     }
     Ok(actions)
 }
@@ -605,6 +603,9 @@ pub(crate) fn resolve_move_intent(state: &GameState, value: &Value) -> Result<Ac
 }
 
 fn ensure_supported(state: &GameState) -> Result<()> {
+    ensure_supported_interactions(state, true)
+}
+fn ensure_supported_interactions(state: &GameState, require_execution_support: bool) -> Result<()> {
     // Preserving an unknown JSON field does not prove that its rules are executed.
     // Active effects outside the implemented set are explicit errors during porting.
     const PENDING: &[&str] = &[
@@ -648,7 +649,6 @@ fn ensure_supported(state: &GameState) -> Result<()> {
         "magicGirlSurge",
         "vanishing",
         "knightInjury",
-        "fianchetto",
         "pawnConversion",
         "pawnLeap",
         "fileSurge",
@@ -703,7 +703,7 @@ fn ensure_supported(state: &GameState) -> Result<()> {
         }
     }
     for piece in state.board.iter().flatten().flatten() {
-        if !implemented_piece_types().contains(&piece.kind.as_str()) {
+        if require_execution_support && !implemented_piece_types().contains(&piece.kind.as_str()) {
             return Err(EngineError::UnsupportedFeature(format!(
                 "piece {}",
                 piece.kind
@@ -892,7 +892,169 @@ fn forced_piece_id(state: &GameState) -> Option<&str> {
         .map(|piece| piece.id.as_str())
 }
 
+fn desperado_royal_capture_blocked(attacker: &Piece, target: &Piece) -> bool {
+    crate::observation::truth(attacker.extra.get("desperado"))
+        && (crate::observation::truth(target.extra.get("regencyHeir"))
+            || crate::observation::truth(target.extra.get("crownRoyal"))
+            || matches!(
+                target.kind.as_str(),
+                "king" | "royalKnight" | "shotgunKing" | "darkWizard"
+            ))
+}
+
+/// The card temporarily sets desperado before calling source getLegalMoves.
+/// Its movement stays unchanged. This owned probe applies the ordinary kernel
+/// and source forced-piece/royal-capture guards without changing the caller.
+pub(crate) fn desperado_has_legal_move(
+    state: &GameState,
+    piece: &Piece,
+    square: Square,
+) -> Result<bool> {
+    let Some(actor) = piece.color.owner() else {
+        return Ok(false);
+    };
+    let socialism = crate::observation::number(
+        state
+            .extra
+            .get("socialism")
+            .and_then(|value| value.get(actor.as_str())),
+    )
+    .unwrap_or(0.0)
+        > 0.0;
+    if frozen(piece)
+        || crate::observation::number(piece.extra.get("staked").and_then(|v| v.get("remaining")))
+            .unwrap_or(0.0)
+            > 0.0
+        || crate::observation::number(piece.extra.get("poisonStunTurns"))
+            .unwrap_or(0.0)
+            .floor()
+            > 0.0
+        || (matches!(piece.kind.as_str(), "hedgehog" | "bear")
+            || piece.ability_kind() == "hedgehog")
+            && crate::observation::number(piece.extra.get("bearMoveLockedUntilTurn")).unwrap_or(0.0)
+                > f64::from(*state.turns_taken.get(actor))
+        || piece.kind == "babyBear" && !socialism
+        || piece.kind == "medium"
+            && state
+                .extra
+                .get("mediumMovement")
+                .and_then(|v| v.get("type"))
+                .is_none_or(|v| !crate::observation::truth(Some(v)))
+            && !socialism
+    {
+        return Ok(false);
+    }
+    let mut trial = state.clone();
+    let mut candidate = piece.clone();
+    candidate
+        .extra
+        .insert("desperado".into(), serde_json::json!({"remaining":2}));
+    if state.at(square).is_none_or(|at| at.id != piece.id) {
+        return Err(EngineError::IllegalAction);
+    }
+    for cell in trial.board.iter_mut().flatten().flatten() {
+        if cell.id == piece.id {
+            *cell = candidate.clone();
+        }
+    }
+    let reposition = trial.board.iter().flatten().flatten().find(|at| {
+        at.color == actor && crate::observation::truth(at.extra.get("repositionSecondMove"))
+    });
+    let forced = reposition.or_else(|| {
+        trial.board.iter().flatten().flatten().find(|at| {
+            at.color == actor
+                && [
+                    "thiefSecondMove",
+                    "frenzyExtraMove",
+                    "fileSurgeSecondMove",
+                    "rookLiftSecondMove",
+                    "ironMonarchExtraMove",
+                    "underpromotionSecondMove",
+                    "checkerChainCapture",
+                    "madHorseSecondMove",
+                    "platformExtraMove",
+                    "desperado",
+                ]
+                .iter()
+                .any(|key| crate::observation::truth(at.extra.get(*key)))
+        })
+    });
+    if forced.is_some_and(|forced| forced.id != candidate.id) {
+        return Ok(false);
+    }
+    // The temporary marker is the only newly implemented trial effect. All
+    // other global interactions still pass the common support guard.
+    let mut checked = trial.clone();
+    for cell in checked.board.iter_mut().flatten().flatten() {
+        cell.extra.shift_remove("desperado");
+    }
+    // Basic movement can be proven before that piece's execution/capture
+    // reactions are complete. The ordinary support registry is unchanged.
+    ensure_supported_interactions(&checked, false)?;
+    let moves = piece_moves(&trial, &candidate, square)?;
+    for target in moves {
+        if target.flag("setLogDirection") {
+            return Ok(true);
+        }
+        let mut cells = vec![target.square()];
+        if target.flag("enPassant")
+            && let (Some(row), Some(col)) = (
+                target.flags.get("capturedRow").and_then(Value::as_u64),
+                target.flags.get("capturedCol").and_then(Value::as_u64),
+            )
+            && row < 8
+            && col < 8
+        {
+            cells.push(Square {
+                row: row as u8,
+                col: col as u8,
+            });
+        }
+        for key in ["jumpCapture"] {
+            if let Some(value) = target.flags.get(key) {
+                cells.push(
+                    serde_json::from_value(value.clone()).map_err(EngineError::serialization)?,
+                );
+            }
+        }
+        for key in [
+            "sectorCells",
+            "colossusLandingCaptures",
+            "bigRookLandingCaptures",
+        ] {
+            if let Some(value) = target.flags.get(key) {
+                cells.extend(
+                    serde_json::from_value::<Vec<Square>>(value.clone())
+                        .map_err(EngineError::serialization)?,
+                );
+            }
+        }
+        if (target.flag("shotgunBlast")
+            || target.flag("colossusAttack")
+            || target.flag("siegeRamMove"))
+            && let Some(value) = target.flags.get("highlightCells")
+        {
+            cells.extend(
+                serde_json::from_value::<Vec<Square>>(value.clone())
+                    .map_err(EngineError::serialization)?,
+            );
+        }
+        if !cells.into_iter().any(|cell| {
+            trial.at(cell).is_some_and(|victim| {
+                victim.color != candidate.color
+                    && desperado_royal_capture_blocked(&candidate, victim)
+            })
+        }) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 pub(crate) fn can_capture(state: &GameState, attacker: &Piece, target: &Piece) -> bool {
+    if desperado_royal_capture_blocked(attacker, target) {
+        return false;
+    }
     let ability = attacker.ability_kind();
     let Some(actor) = attacker.color.owner() else {
         return false;
@@ -1187,6 +1349,7 @@ pub(crate) fn piece_moves(
     let mut allowed = Vec::new();
     for target in moves {
         if expansion_move_allowed(state, piece, from, &target)?
+            && fianchetto_move_allowed(state, piece, from, &target)?
             && seen.insert(serde_json::to_string(&target).expect("move serializes"))
         {
             allowed.push(target);
@@ -1194,6 +1357,121 @@ pub(crate) fn piece_moves(
     }
     let moves = allowed;
     Ok(moves)
+}
+
+fn diagonal_key(square: Square) -> Option<bool> {
+    if square.row == square.col {
+        Some(false)
+    } else if square.row + square.col == 7 {
+        Some(true)
+    } else {
+        None
+    }
+}
+
+/// Current catalog restricts pawns entering a new main diagonal guarded by an
+/// opposing physical bishop. Existing diagonal occupancy, swaps and twins use
+/// the source origin of each moving piece separately.
+pub(crate) fn fianchetto_destination_allowed(
+    state: &GameState,
+    piece: &Piece,
+    from: Square,
+    destinations: &[Square],
+) -> bool {
+    let Some(owner) = piece.color.owner() else {
+        return true;
+    };
+    if piece.kind != "pawn" || !state.flag("fianchetto", owner.opponent()) {
+        return true;
+    }
+    let origin = diagonal_key(from);
+    !destinations.iter().any(|destination| {
+        let Some(key) = diagonal_key(*destination).filter(|key| Some(*key) != origin) else {
+            return false;
+        };
+        (0..8).any(|row| {
+            (0..8).any(|col| {
+                let square = Square { row, col };
+                diagonal_key(square) == Some(key)
+                    && state.at(square).is_some_and(|bishop| {
+                        bishop.color == owner.opponent() && bishop.kind == "bishop"
+                    })
+            })
+        })
+    })
+}
+
+fn fianchetto_move_allowed(
+    state: &GameState,
+    piece: &Piece,
+    from: Square,
+    target: &MoveTarget,
+) -> Result<bool> {
+    if [
+        "colossusAttack",
+        "shotgunBlast",
+        "shotgunSnipe",
+        "setLogDirection",
+    ]
+    .into_iter()
+    .any(|flag| target.flag(flag))
+    {
+        return Ok(true);
+    }
+    let destination = if target.flag("portalLanding") || target.flag("portalThrough") {
+        target
+            .flags
+            .get("portalExit")
+            .map(|value| serde_json::from_value(value.clone()).map_err(EngineError::serialization))
+            .transpose()?
+            .unwrap_or(target.square())
+    } else {
+        target.square()
+    };
+    let cells = if target.flag("colossusMove") || target.flag("bigRookMove") {
+        target
+            .flags
+            .get("highlightCells")
+            .map(|value| {
+                serde_json::from_value::<Vec<Square>>(value.clone())
+                    .map_err(EngineError::serialization)
+            })
+            .transpose()?
+            .unwrap_or_else(|| vec![destination])
+    } else {
+        vec![destination]
+    };
+    if !fianchetto_destination_allowed(state, piece, from, &cells) {
+        return Ok(false);
+    }
+    let swapped = ["dragonSwap", "substitutionSwap", "relaySwap"]
+        .into_iter()
+        .any(|flag| target.flag(flag))
+        .then(|| state.at(target.square()))
+        .flatten();
+    if let Some(swapped) = swapped
+        && !fianchetto_destination_allowed(state, swapped, target.square(), &[from])
+    {
+        return Ok(false);
+    }
+    if crate::observation::truth(piece.extra.get("twinBondId"))
+        && let Some(id) = piece.extra.get("twinPartnerId").and_then(Value::as_str)
+    {
+        for row in 0..8 {
+            for col in 0..8 {
+                let square = Square { row, col };
+                if let Some(partner) = state
+                    .at(square)
+                    .filter(|partner| partner.id == id && partner.color == piece.color)
+                    && swapped.is_none_or(|swapped| swapped.id != partner.id)
+                    && !fianchetto_destination_allowed(state, partner, square, &cells)
+                {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    Ok(true)
 }
 
 pub(crate) fn expansion_destination_allowed(
@@ -1483,13 +1761,7 @@ pub(crate) fn missionary(state: &GameState, piece: &Piece, from: Square) -> Vec<
                             target.kind.as_str(),
                             "wall" | "football" | "monster" | "blackHole"
                         )
-                        && !(piece.flag("desperado")
-                            && (target.flag("regencyHeir")
-                                || target.flag("crownRoyal")
-                                || matches!(
-                                    target.kind.as_str(),
-                                    "king" | "royalKnight" | "shotgunKing" | "darkWizard"
-                                )))
+                        && !desperado_royal_capture_blocked(piece, target)
                 })
         })
         .map(|to| {

@@ -132,6 +132,37 @@ winner:null|'white'|'black', outcome:null|'white'|'black'|'draw', reason:string}
 bounded rollout 종료는 unfinished이며 실제 gameover와 구분한다. terminal draw는 winner=null이다.
 reason은 사이트 결과 이유이며 1024자 한도를 검사한다.
 
+## 공개 trace의 조건부 제안 확률
+
+belief 재구성은 실제 환경의 private Position·RNG를 받지 않는다. 공개 frame 이력과
+독립 seed로 source-valid particle을 생성하고, 공개 전이와 일치하는 조건부 제안의 밀도를
+보정한다. 현재 chance prior는 독립적인 source 추첨이다. 유한 LCG seed의 posterior나
+브라우저의 미래 RNG와 정확히 같은 분포라는 주장은 이 계약에 포함하지 않는다.
+
+native의 `condition_hidden_opening_draft(expected_next_public, independent_seed)`는
+`{position, importance_weight, source_probability, proposal_probability}`를 반환한다.
+`apply_weighted_conditioned_public(action, expected_observation, independent_seed)`는
+`{step, importance_weight, source_probability, proposal_probability}`를 반환한다.
+두 반환 mapping에는 이 네 key만 존재한다. Position과 StepResult는 별도로 소유하며,
+확률은 유한한 (0, 1] 값이고 weight는 양수인 유한 `source_probability / proposal_probability`다.
+binding은 상대 허용 오차 1e-10으로 그 비율을 검사한다. seed는 독립적인 `u32`이고
+기존 action의 stale guard와 입력 변환 한도를 그대로 적용한다.
+
+Python filter는 hidden-offer 제안과 관찰된 후속 draw의 weight를 함께 반영한다.
+조건화 전 공개 frame 전체를 보존하고, 조건화 후 공개 frame 전체를 관찰값과 비교한다.
+숨은 상대 intent를 열거할 때 source-proven 공개 불일치 후보를 먼저 제외해도 원래 intent
+개수의 prior 분모는 유지한다. 확률 metadata나 실행 전용 ID를 신경망 특징으로 복사하지 않는다.
+후속 weighted Python filter 캡처는 `source-importance-filter-v2`·`public-particle-summary-v3`·
+`availability-puct-v3`로 이를 구분한다. 이 캡처의 기본 세 모드 검증은 아직 미완료이며,
+native API를 공유하는 중간 checkpoint에서는 기존 원격 Python 탐색을 유지한다.
+관측 v2, Position/Action/공개 trace v1의 직렬화 형식은 유지한다.
+
+`apply_conditioned_public`의 StepResult만으로는 제안의 likelihood를 알 수 없다.
+weighted filter가 이 호출이나 raw child를 확률 1의 제안으로 대체하지 않는다.
+입증하지 못한 chance family는 명시적인 Unsupported 오류로 남긴다. deterministic trace의
+p=q=1, 실제 source 추첨에서 p=q<1인 무보정 trace, 관찰값에 조건화해 p와 q가 달라지는
+trace를 구분한다. 구현·관측한 범위와 남은 default-mode 흐름은 IMPLEMENTATION에 기록한다.
+
 ## 비교와 지원 범위
 
 규칙 정답은 2026-09-27 최초 동결 client 본체다. 카드 catalog 256개, CARD_DEFS 257개 중

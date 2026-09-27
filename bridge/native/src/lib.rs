@@ -4,7 +4,7 @@ mod conversion;
 mod inference;
 use accelerate_engine::{
     Action as EngineAction, ActionStream as EngineActionStream, Color, EngineError, GameConfig,
-    GameResult, Position as EnginePosition, RngState,
+    GameResult, Position as EnginePosition, RngState, StepResult as EngineStepResult,
 };
 use numpy::PyArray2;
 use pyo3::{
@@ -48,6 +48,21 @@ fn error(error: EngineError) -> PyErr {
         }
         _ => NativeError::new_err(error.to_string()),
     }
+}
+fn proposal_probabilities(weight: f64, source: f64, proposal: f64) -> PyResult<()> {
+    let probability = |value: f64| value.is_finite() && value > 0. && value <= 1.;
+    if !(weight.is_finite() && weight > 0. && probability(source) && probability(proposal)) {
+        return Err(NativeError::new_err(
+            "invalid source proposal probabilities",
+        ));
+    }
+    let correction = source / proposal;
+    if !correction.is_finite() || (weight - correction).abs() > 1e-10 * weight.max(correction) {
+        return Err(NativeError::new_err(
+            "source proposal weight does not equal the density correction",
+        ));
+    }
+    Ok(())
 }
 fn value<T: Serialize>(value: &T) -> PyResult<Value> {
     serde_json::to_value(value).map_err(|e| NativeError::new_err(e.to_string()))
@@ -457,13 +472,103 @@ impl Position {
         let inner = self.inner.clone();
         let action = action.inner.clone();
         let step = py.detach(move || inner.apply(&action)).map_err(error)?;
-        Ok(StepResult {
-            position: Self::wrap(step.position)?,
-            actor: step.actor.as_str().into(),
-            turn_changed: step.turn_changed,
-            captures: Arc::new(value(&step.captures)?),
-            result: result(step.result).map(str::to_owned),
-        })
+        StepResult::wrap(step)
+    }
+    /// Reconstruct a supported public draw using an independent particle seed.
+    fn apply_conditioned_public(
+        &self,
+        py: Python<'_>,
+        action: &Action,
+        expected_observation: &Bound<'_, PyAny>,
+        independent_seed: u32,
+    ) -> PyResult<StepResult> {
+        if action.position_id != self.position_id {
+            return Err(StaleActionError::new_err(
+                "action belongs to another position",
+            ));
+        }
+        let observation = conversion::from_python(expected_observation)?;
+        let inner = self.inner.clone();
+        let action = action.inner.clone();
+        let step = py
+            .detach(move || inner.apply_conditioned_public(&action, observation, independent_seed))
+            .map_err(error)?;
+        StepResult::wrap(step)
+    }
+    /// Filter only source-proven public incompatibility before applying effects.
+    fn public_transition_compatible(
+        &self,
+        py: Python<'_>,
+        action: &Action,
+        expected_observation: &Bound<'_, PyAny>,
+    ) -> PyResult<bool> {
+        if action.position_id != self.position_id {
+            return Err(StaleActionError::new_err(
+                "action belongs to another position",
+            ));
+        }
+        let observation = conversion::from_python(expected_observation)?;
+        let inner = self.inner.clone();
+        let action = action.inner.clone();
+        py.detach(move || inner.public_transition_compatible(&action, observation))
+            .map_err(error)
+    }
+    /// Reconstruct a supported public transition with its source density correction.
+    fn apply_weighted_conditioned_public<'py>(
+        &self,
+        py: Python<'py>,
+        action: &Action,
+        expected_observation: &Bound<'_, PyAny>,
+        independent_seed: u32,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        if action.position_id != self.position_id {
+            return Err(StaleActionError::new_err(
+                "action belongs to another position",
+            ));
+        }
+        let observation = conversion::from_python(expected_observation)?;
+        let inner = self.inner.clone();
+        let action = action.inner.clone();
+        let proposal = py
+            .detach(move || {
+                inner.apply_weighted_conditioned_public(&action, observation, independent_seed)
+            })
+            .map_err(error)?;
+        proposal_probabilities(
+            proposal.importance_weight,
+            proposal.source_probability,
+            proposal.proposal_probability,
+        )?;
+        let result = PyDict::new(py);
+        result.set_item("step", Py::new(py, StepResult::wrap(proposal.step)?)?)?;
+        result.set_item("importance_weight", proposal.importance_weight)?;
+        result.set_item("source_probability", proposal.source_probability)?;
+        result.set_item("proposal_probability", proposal.proposal_probability)?;
+        Ok(result)
+    }
+    /// Propose a source-valid hidden offer with an explicit importance correction.
+    fn condition_hidden_opening_draft<'py>(
+        &self,
+        py: Python<'py>,
+        expected_next_public: &Bound<'_, PyAny>,
+        independent_seed: u32,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let observation = conversion::from_python(expected_next_public)?;
+        let inner = self.inner.clone();
+        let proposal = py
+            .detach(move || inner.condition_hidden_opening_draft(observation, independent_seed))
+            .map_err(error)?;
+        proposal_probabilities(
+            proposal.importance_weight,
+            proposal.source_probability,
+            proposal.proposal_probability,
+        )?;
+        let result = PyDict::new(py);
+        result.set_item("position", Py::new(py, Self::wrap(proposal.position)?)?)?;
+        result.set_item("importance_weight", proposal.importance_weight)?;
+        result.set_item("source_probability", proposal.source_probability)?;
+        result.set_item("proposal_probability", proposal.proposal_probability)?;
+        Ok(result)
     }
     fn observe(&self, py: Python<'_>, viewer: &str) -> PyResult<Py<PyAny>> {
         let viewer = color(viewer)?;
@@ -511,6 +616,17 @@ pub struct StepResult {
     turn_changed: bool,
     captures: Arc<Value>,
     result: Option<String>,
+}
+impl StepResult {
+    fn wrap(step: EngineStepResult) -> PyResult<Self> {
+        Ok(Self {
+            position: Position::wrap(step.position)?,
+            actor: step.actor.as_str().into(),
+            turn_changed: step.turn_changed,
+            captures: Arc::new(value(&step.captures)?),
+            result: result(step.result).map(str::to_owned),
+        })
+    }
 }
 #[pymethods]
 impl StepResult {

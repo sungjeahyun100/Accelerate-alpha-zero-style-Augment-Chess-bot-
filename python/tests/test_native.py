@@ -97,6 +97,24 @@ def test_lifetime_branching_and_stale_actions_are_immutable():
     assert position.snapshot() == before
     with pytest.raises(StaleActionError):
         branch.apply(action)
+    expected_public = branch.observe("white")
+    with pytest.raises(StaleActionError):
+        branch.apply_conditioned_public(action, expected_public, 71)
+    with pytest.raises(StaleActionError):
+        branch.public_transition_compatible(action, expected_public)
+    with pytest.raises(StaleActionError):
+        branch.apply_weighted_conditioned_public(action, expected_public, 71)
+    with pytest.raises(OverflowError):
+        position.apply_conditioned_public(action, expected_public, 2**32)
+    with pytest.raises(OverflowError):
+        position.condition_hidden_opening_draft(expected_public, 2**32)
+    with pytest.raises(OverflowError):
+        position.apply_weighted_conditioned_public(action, expected_public, 2**32)
+    # Public-frame conversion must fail before detached native work starts.
+    with pytest.raises(TypeError):
+        position.public_transition_compatible(action, {object(): 1})
+    with pytest.raises(TypeError):
+        position.condition_hidden_opening_draft({"board": object()}, 71)
     assert position.snapshot() == before
     payload = action.as_payload()
     payload["move"]["magicCapture"] = True

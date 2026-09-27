@@ -75,7 +75,7 @@ private action과 색별 `public` 전이를 함께 저장하고 관측에는 vie
 인 normal·chaos·grand의 32개 초기 piece identity와 RNG 순서, grand의 28개 offer identity·
 정렬 순서는 실제 본체와 비교했다. grand의 초기 선택과 공개 카드 slot 전이도 구현했다.
 카드 획득 표기 ID에 쓰이는 난수도 이후 게임 난수 순서에 영향을 주므로 소비 순서를
-보존한다. 비교는 `accelerate-headless-semantic-v1`에서 수행한다. 이 profile은 potion
+보존한다. 기존 초기화 비교는 `accelerate-headless-semantic-v1`에서 수행했다. 이 profile은 potion
 정리와 terminal replay microtask·이력 난수를 유지하며 DOM 애니메이션과 update-log
 난수는 제외한다. 실제 브라우저 전체 실행의 future RNG equality 근거로 쓰지 않는다.
 normal·chaos의 초기 weighted draw는 카드 draw predicate의 trolley·black-box shuffle,
@@ -90,14 +90,36 @@ black 카드 target hint까지의 전체 정산은 별도 미완료다. reaper �
 54개 카드와 추가 17개 카드 및 Judgment 임시 추방 분기의 primitive effect·화면
 target·거부 경계는 실제 source 167개 경우로 검사했다. 승인된 143개 경우의 전체
 primitive 상태·RNG·이력과 167개 UI 행동·첫 선택 좌표·불변 검증 결과가 일치했다.
+이 초기 primitive 근거는 oracle의 renderer Map을 재사용한 컨텍스트에 한정된다.
+이후 fresh source 실행에서 BabyBear·Grappler·Judgment의 ghost 렌더가 serialized
+animation Set을 변경하는 차이를 확인했으므로 독립 cold 실행의 완료 근거로 사용하지 않는다.
 정상 거부 23개와 원문 예외 1개를 구분한다. 이 검사는
 공통 finishCard·hazard·종료 정산이나 변환 후 모든 기물 이동의 완료를 뜻하지 않는다.
+새 `accelerate-headless-semantic-v2`는 성공한 immutable snapshot admission 때
+외부 `activePieceAnimationUntil` Map만 초기화하고 한 전이·microtask 정산 중에는
+유지한다. serialized animation Set을 제외하거나 정규화하지 않는다. canonical cold
+ghost helper와 실제 체크 경보의 lastMove 변경을 포팅했고, monochrome·explosive를
+명시적으로 끈 source 변형 23개에서는 전체 production wrapper의 상태·RNG·공개 이력·
+결과와 private 승인·공개 UI 선택 경계가 일치했다. 원래 224개 입력의 활성 상호작용
+미지원 범위는 그대로 남으며 이 23개 변형을 전체 카드 완료로 합산하지 않는다.
 초기 public conditioning은 세 mode
 각 viewer에서 독립 future RNG를 유지하고 JCS 숫자 표현을 포함해 공개 frame 전체를
 검증한다. 전체 자동 패시브, grand의 최종 정산, 전체 카드·RULE·특수 이동·예약 전이
 및 큰 조합 행동의 lazy 열거는 진행 중이다. 초기 draw 지원은 그 카드의 효과 지원을
 뜻하지 않으며 기본 normal 설정을 표준 play로 임의 대체하지 않는다. 선택·효과·활성
 상태의 미구현 의미는 명확한 오류이며 전체 256개 지원의 GO 근거로 사용하지 않는다.
+
+공개 조건화는 실제 private Position이나 실제 seed를 받지 않는다. normal 초기
+white·black의 숨은 OPENING offer 제안은 원문 pool·weight·배타성 및 black의 최대
+3회 balancing/조기 종료를 유지하고 `HiddenDraftProposal`로 source/proposal 확률과
+비율을 반환한다. 새로 공개되는 normal black offer의 조건화는 별도
+`ConditionedStepProposal`로 전체 realized draw trace의 p/q를 반환한다. 관측된
+ordered offer를 강제하는 latent attempt의 모든 mixture component를 계산하며,
+원문 best candidate가 관측과 다르면 제안을 거부한다. 기존 compatibility-only
+`apply_conditioned_public`의 성공을 이 확률 근거로 대체하지 않는다. probability는
+독립 source weighted-draw prior에 관한 것으로 유한 LCG seed의 정확한 posterior
+주장이 아니다. 수정된 board·후기 phase·chaos bundle/replacement 밀도는 미완료이며
+추정 확률로 통과시키지 않는다. Python이 filtering·weighted resampling을 소유한다.
 
 동결 metadata는 `bridge/catalog/`에서 compile time에 공유한다. 이 데이터는 초기값,
 카탈로그·공개 정책의 단일 근거이며 실행 결과를 fixture에서 찾아 반환하지 않는다.
@@ -123,7 +145,7 @@ name/text/art만 제외한 동일 비교를 통과했다. 원시 로그와 중�
 정보 상태 SHA-256이 일치했다. 초기 play의 공개 이동 강조도 이 비교에 포함하며,
 대부분의 추가 상태 조합은 draft 단계의 renderer 표면 비교다. 실제 DOM 표시 88개
 경우의 별도 검증 근거와 구분한다. 모든 활성 RULE의 fog·특수 강조·의사결정 전환이
-완료되었다는 의미로 사용하지 않는다. Rust 1.96에서 36개 커널 검사와 1개 입력 한도
+완료되었다는 의미로 사용하지 않는다. Rust 1.96에서 37개 커널 검사와 1개 입력 한도
 검사, 전체 target의 엄격 clippy 및 format 검사를 통과한 중간 checkpoint다.
 
 Linux 검사는 저장소 밖 고정 빌드 슬롯을 사용한다.
@@ -138,9 +160,3 @@ Windows에서는 `%APPDATA%\Accelerate\build\windows\full-stack-implementation\c
 OS 설치 검사 34개는 skip 없이 통과했다. 이후 진행 중인 replay·카드·관측 v2 변경의
 검증과 전체 catalog differential 완료는 그 CI 결과와 구분한다. 원시 실행 로그와
 일회성 비교 결과는 Git 밖 reports에 둔다.
-
-이 167개 비교는 UI 후보를 먼저 실행한 reused oracle의 renderer cache가 남아 있는 환경이다.
-후속 fresh-source probe에서 babyBear·grappler·Judgment의 animatedPieceIds가 snapshot 밖
-activePieceAnimationUntil module Map에 따라 달라졌다. 기존 전체 상태 일치는 이 context에
-한정하며 독립 snapshot 전이의 완전한 증거로 사용하지 않는다. 명시적인 실행 context와
-profile version을 정한 뒤 전체 상태·RNG를 다시 검증해야 한다. 상태 field는 비교에서 제외하지 않는다.

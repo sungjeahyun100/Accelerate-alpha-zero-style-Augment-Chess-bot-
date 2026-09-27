@@ -275,7 +275,7 @@ pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>
         white_first: true,
     };
     let captures = match action.kind {
-        ActionKind::Move => apply_move(state, action)?,
+        ActionKind::Move => apply_move(state, action, false)?,
         ActionKind::Card => apply_card(state, action)?,
         ActionKind::PromotionChoice => apply_promotion(state, action)?,
         ActionKind::DraftPick | ActionKind::DraftBundlePick => {
@@ -343,7 +343,11 @@ pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>
     Ok(captures)
 }
 
-fn apply_move(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
+pub(crate) fn execute_threat_move(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
+    apply_move(state, action, true)
+}
+
+fn apply_move(state: &mut GameState, action: &Action, threat_probe: bool) -> Result<Vec<Piece>> {
     let from = action.from.ok_or(EngineError::IllegalAction)?;
     let target = action
         .destination
@@ -541,6 +545,20 @@ fn apply_move(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
         target,
         !captures.is_empty(),
     )?;
+    if !threat_probe {
+        let sound = if target.flag("castle") {
+            "castle"
+        } else if captures.is_empty() {
+            if actor == Color::White {
+                "moveSelf"
+            } else {
+                "moveOpponent"
+            }
+        } else {
+            "capture"
+        };
+        crate::threat::play_move_sound(state, sound, actor)?;
+    }
     crate::replay::add_log(
         state,
         format!(
@@ -638,6 +656,134 @@ pub(crate) fn clear_piece(state: &mut GameState, id: &str) {
         }
     }
 }
+
+/// Permanent Judgment uses direct environmental removal rather than an
+/// ordinary attack or sacrifice: shields/HP do not block it, and vigilance
+/// belongs to the removed piece's side. Recurrence and royal-system callbacks
+/// retain explicit support guards until their shared kernels are ported.
+pub(crate) fn judgment_remove(
+    state: &mut GameState,
+    square: Square,
+    actor: Color,
+) -> Result<Option<Piece>> {
+    let Some(piece) = state.at(square).cloned() else {
+        return Ok(None);
+    };
+    let owner = piece.color.owner().ok_or(EngineError::IllegalAction)?;
+    if state.royal_identity(&piece)
+        || piece.is_large()
+        || matches!(piece.kind.as_str(), "wall" | "football" | "blackHole")
+    {
+        return Err(EngineError::IllegalAction);
+    }
+    for key in ["crownRule", "campaignScenarioId"] {
+        if crate::observation::truth(state.extra.get(key)) {
+            return Err(EngineError::UnsupportedFeature(format!(
+                "Judgment environmental {key} reconciliation"
+            )));
+        }
+    }
+    if crate::observation::truth(piece.extra.get("recurrence"))
+        || state
+            .extra
+            .get("pendingRecurrences")
+            .and_then(Value::as_array)
+            .is_some_and(|v| !v.is_empty())
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "Judgment recurrence revival".into(),
+        ));
+    }
+    if [Color::White, Color::Black]
+        .into_iter()
+        .any(|color| state.flag("democracy", color) || state.flag("regency", color))
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "Judgment democracy/regency environmental defeat".into(),
+        ));
+    }
+    if state.board.iter().enumerate().any(|(row, cells)| {
+        cells.iter().enumerate().any(|(col, cell)| {
+            cell.as_ref().is_some_and(|candidate| {
+                candidate.kind == "reaper"
+                    && candidate.id != piece.id
+                    && row.abs_diff(usize::from(square.row)) <= 1
+                    && col.abs_diff(usize::from(square.col)) <= 1
+            })
+        })
+    }) {
+        return Err(EngineError::UnsupportedFeature(
+            "Judgment adjacent reaper soul/execution".into(),
+        ));
+    }
+    let capture_owner = if owner == actor {
+        actor.opponent()
+    } else {
+        actor
+    };
+    clear_piece(state, &piece.id);
+    if state.flag("vigilance", owner) {
+        let enemy = owner.opponent();
+        let remaining = if state.turn == enemy { 2.0 } else { 1.0 };
+        let mut royals = Vec::new();
+        let mut seen = BTreeSet::new();
+        for royal in state.board.iter().flatten().flatten() {
+            if royal.color == owner && state.royal_identity(royal) && seen.insert(royal.id.clone())
+            {
+                let mut royal = royal.clone();
+                let old = crate::observation::number(
+                    royal
+                        .extra
+                        .get("vigilanceProtection")
+                        .and_then(|v| v.get("remaining")),
+                )
+                .unwrap_or(0.0);
+                royal.extra.insert(
+                    "vigilanceProtection".into(),
+                    json!({"countBy":enemy,"remaining":f64::max(remaining,old)}),
+                );
+                royals.push(royal);
+            }
+        }
+        for royal in royals {
+            update_piece(state, &royal);
+        }
+    }
+    state.captures.get_mut(capture_owner).push(piece.clone());
+    crate::card_effects::mark_vanish_animation(state, &piece, square)?;
+    crate::flow::mark_progress(state);
+    crate::replay::add_log(
+        state,
+        format!(
+            "레드카드: {}{}의 {}이 마지막 드래프트 이후 영구적으로 제거되었습니다.",
+            char::from(b'a' + square.col),
+            8 - square.row,
+            crate::replay::piece_label(&piece.kind)
+        ),
+    )?;
+    if piece.kind == "pawn"
+        && state.flag("resolve", owner)
+        && crate::observation::number(
+            state
+                .extra
+                .get("resolveSpentTurn")
+                .and_then(|v| v.get(owner.as_str())),
+        ) != Some(f64::from(*state.turns_taken.get(owner)))
+    {
+        if !crate::observation::truth(state.extra.get("resolveReady")) {
+            state
+                .extra
+                .insert("resolveReady".into(), json!({"white":false,"black":false}));
+        }
+        let ready = state
+            .extra
+            .get_mut("resolveReady")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| EngineError::InvalidState("resolveReady must be a color map".into()))?;
+        ready.insert(owner.as_str().into(), json!(true));
+    }
+    Ok(Some(piece))
+}
 /// Sacrifice bypasses ordinary shield and HP capture protection. The source
 /// stores it as a capture without granting wizard mana or capturedTypes.
 pub(crate) fn sacrifice(
@@ -693,6 +839,7 @@ pub(crate) fn expansion_sacrifice(
 ) -> Result<Option<Piece>> {
     let removed = sacrifice(state, square, capture_color)?;
     if let Some(piece) = &removed {
+        crate::card_effects::mark_vanish_animation(state, piece, square)?;
         crate::replay::queue_visual(
             state,
             json!({"type":"board-change","effect":"cleanup-sacrifice","color":capture_color,"removals":[{"square":square,"color":piece.color,"pieceType":piece.kind}],"relocations":[],"transformations":[],"spawns":[]}),

@@ -288,7 +288,7 @@ pub(crate) fn truth(value: Option<&Value>) -> bool {
         _ => true,
     })
 }
-fn number(value: Option<&Value>) -> Option<f64> {
+pub(crate) fn number(value: Option<&Value>) -> Option<f64> {
     value
         .and_then(|v| match v {
             Value::Null => Some(0.0),

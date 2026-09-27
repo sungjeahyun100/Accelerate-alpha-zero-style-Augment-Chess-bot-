@@ -159,6 +159,20 @@ D-001~D-003은 기존 결정입니다. D-004~D-006과 D-003 보완은 2026-09-27
   full next state·result·RNG를 비교한다. signature·몇 개 기본 기물·구조 검사만으로 GO를
   선언하지 않는다. 아직 실패·미구현·근거 부족인 항목은 실행 보고에 유지한다.
 
+## D-010: immutable snapshot 비교의 renderer 실행 context 명시
+
+- **날짜**: 2026-09-28
+- **상태**: 기존 immutable Position 요구를 위한 구현 선택 채택; 전체 카드 재검증 진행 중
+- **결정**: `accelerate-headless-semantic-v2`는 성공한 restore/newGame admission에서
+  원문의 activePieceAnimationUntil module Map을 cold 초기화한다. action 내부와 queued
+  settlement에서는 유지하고 복원 실패는 state·RNG·cache·callback을 보존한다.
+- **이유**: 같은 serialized snapshot·RNG도 snapshot 밖의 renderer Map에 따라
+  animatedPieceIds가 달랐다. reused oracle의 일치를 독립 snapshot 전이 증거로 사용할 수 없다.
+- **영향**: serialized field를 삭제하거나 비교에서 제외하지 않는다. 최초 source hash와
+  rules/catalog/관측 정책 버전은 유지하며 실행 profile과 증거의 context를 별도로 기록한다.
+  기존 v1·renderer audit 증거는 당시 범위로 보존하고 v2의 fresh full-state·RNG 재검증과
+  구분한다. 이 경계는 populated browser의 미래 RNG 동등성이나 전체 코드 GO의 근거가 아니다.
+
 ## 열린 질문
 
 O-001과 O-002는 각각 D-007과 D-008로 해결했다. 새로운 의미 또는 성능 선택이 필요하면

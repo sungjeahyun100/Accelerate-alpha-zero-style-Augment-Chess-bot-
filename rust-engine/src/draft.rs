@@ -250,21 +250,7 @@ fn draw_mixed(
     unavailable.extend(excluded.iter().cloned());
     let mut picked = Vec::new();
     for _ in 0..count {
-        let mut pool = Vec::new();
-        for card in &definitions().definitions {
-            let id = card["id"].as_str().expect("id");
-            if id == "shotgun-king"
-                || owned.contains(id)
-                || unavailable.contains(id)
-                || conflicts(id, &unavailable)
-                || !categories.contains(&category(card))
-            {
-                continue;
-            }
-            if crate::eligibility::draft_drawable(state, card, color)? {
-                pool.push(card);
-            }
-        }
+        let pool = mixed_pool(state, categories, color, &unavailable)?;
         let Some(card) = weighted_pick(state, &pool, opening)? else {
             break;
         };
@@ -272,6 +258,286 @@ fn draw_mixed(
         unavailable.insert(card["id"].as_str().expect("id").into());
     }
     Ok(picked)
+}
+
+fn mixed_pool(
+    state: &mut GameState,
+    categories: &[&str],
+    color: Color,
+    unavailable: &BTreeSet<String>,
+) -> Result<Vec<&'static Value>> {
+    let mut pool = Vec::new();
+    for card in &definitions().definitions {
+        let id = card["id"].as_str().expect("id");
+        if id == "shotgun-king"
+            || unavailable.contains(id)
+            || conflicts(id, unavailable)
+            || !categories.contains(&category(card))
+        {
+            continue;
+        }
+        if crate::eligibility::draft_drawable(state, card, color)? {
+            pool.push(card);
+        }
+    }
+    Ok(pool)
+}
+
+/// Normal initial OPENING importance proposal. Every sequence containing the
+/// required acquired definition has positive proposal probability: early draws
+/// exclude its mutually exclusive alternatives, and the last draw requires it
+/// only when it has not already occurred. Source denominators retain those
+/// alternatives. Thus p/q corrects the proposal without an unknown event
+/// normalizing constant. This is not a uniform finite-LCG-seed posterior claim.
+pub(crate) fn propose_hidden_normal_offer(
+    state: &mut GameState,
+    required: &str,
+    color: Color,
+) -> Result<(f64, f64)> {
+    balanced_normal_proposal(state, color, |state, force| {
+        normal_offer_trace(state, required, color, force)
+    })
+}
+
+/// A proposal on the complete realized balancing trace. A uniformly chosen
+/// latent attempt is forced to the observed ordered offer; all other attempts
+/// are drawn from the source prior. The returned q is the mixture over all
+/// three components, including components not reached after an early stop.
+/// Every source trace selecting the observed offer has positive q, because
+/// its selected attempt is one of these components. No best-of-three marginal
+/// or unknown event-normalizing constant is substituted for this trace density.
+pub(crate) fn propose_observed_normal_offer(
+    state: &mut GameState,
+    public: &[Value],
+    color: Color,
+) -> Result<(f64, f64)> {
+    if public.len() != 3 {
+        return Err(EngineError::InvalidState(
+            "normal OPENING offer must contain three public cards".into(),
+        ));
+    }
+    balanced_normal_proposal(state, color, |state, force| {
+        observed_normal_trace(state, public, color, force)
+    })
+}
+
+pub(crate) fn propose_unobserved_normal_offer(
+    state: &mut GameState,
+    color: Color,
+) -> Result<(f64, f64)> {
+    let (p, _) = balanced_normal_proposal(state, color, |state, _| {
+        let mut unavailable = acquired_ids(state);
+        let mut picked = Vec::new();
+        let mut p = 1.0;
+        for _ in 0..3 {
+            let pool = mixed_pool(state, &["OPENING", "MIDDLE", "PIECE"], color, &unavailable)?;
+            let total = pool.iter().map(|card| weight(card, true)).sum::<f64>();
+            let selected = weighted_pick(state, &pool, true)?.ok_or_else(|| {
+                EngineError::ConditioningMismatch("empty unconditional normal offer".into())
+            })?;
+            p *= weight(selected, true) / total;
+            picked.push(clone_card(state, selected)?);
+            unavailable.insert(selected["id"].as_str().expect("id").to_owned());
+        }
+        Ok((picked, p, p))
+    })?;
+    // All latent components are exactly the same source prior, so this is
+    // their algebraic mixture density, without an avoidable 3*p/3 rounding.
+    Ok((p, p))
+}
+
+fn balanced_normal_proposal(
+    state: &mut GameState,
+    color: Color,
+    mut draw: impl FnMut(&mut GameState, bool) -> Result<(Vec<Value>, f64, f64)>,
+) -> Result<(f64, f64)> {
+    let target = state
+        .extra
+        .get("draftBalance")
+        .filter(|balance| color == Color::Black && balance["phase"] == "OPENING")
+        .and_then(|balance| balance["averageScore"].as_f64());
+    // For source's up-to-three balancing attempts, choose one latent attempt
+    // to tilt. q is the MIXTURE density, not merely the density of the chosen
+    // component: branches whose attempt is never reached are ordinary source
+    // draws. This keeps every successful source acquisition trace in support.
+    let force_index = if target.is_some() {
+        (state.rng.sample()? * 3.0).floor() as usize
+    } else {
+        0
+    };
+    let mut traces = Vec::new();
+    let mut best = Vec::new();
+    let mut best_gap = f64::INFINITY;
+    for attempt in 0..if target.is_some() { 3 } else { 1 } {
+        let (candidate, p, q) = draw(state, attempt == force_index)?;
+        traces.push((p, q));
+        let gap = target
+            .map(|target| (average_score(&candidate).unwrap_or(target) - target).abs())
+            .unwrap_or(0.0);
+        if gap < best_gap {
+            best = candidate;
+            best_gap = gap;
+        }
+        if best_gap <= 2.0 {
+            break;
+        }
+    }
+    let source_probability = traces.iter().map(|(p, _)| p).product::<f64>();
+    let proposal_probability = if target.is_some() {
+        (0..3)
+            .map(|component| {
+                traces
+                    .iter()
+                    .enumerate()
+                    .map(|(attempt, (p, q))| if attempt == component { *q } else { *p })
+                    .product::<f64>()
+            })
+            .sum::<f64>()
+            / 3.0
+    } else {
+        traces[0].1
+    };
+    state
+        .extra
+        .get_mut("draft")
+        .ok_or(EngineError::IllegalAction)?["choices"] = json!(best);
+    state
+        .extra
+        .get_mut("openingAutoNoticeShown")
+        .ok_or_else(|| EngineError::InvalidState("opening notice state missing".into()))?
+        [color.as_str()] = json!(best.iter().any(|card| category(card) == "OPENING"));
+    Ok((source_probability, proposal_probability))
+}
+
+fn observed_normal_trace(
+    state: &mut GameState,
+    public: &[Value],
+    color: Color,
+    force: bool,
+) -> Result<(Vec<Value>, f64, f64)> {
+    let mut unavailable = acquired_ids(state);
+    let mut picked = Vec::new();
+    let mut source_probability = 1.0;
+    let mut matches = true;
+    for observed in public {
+        let source = mixed_pool(state, &["OPENING", "MIDDLE", "PIECE"], color, &unavailable)?;
+        let source_sum = source.iter().map(|card| weight(card, true)).sum::<f64>();
+        if !source_sum.is_finite() || source_sum <= 0.0 {
+            return Err(EngineError::ConditioningMismatch(
+                "empty observed OPENING source pool".into(),
+            ));
+        }
+        let selected = if force {
+            // The proposal fixes the semantic outcome; this ancillary uniform
+            // draw keeps source clone/availability invocation order intact.
+            state.rng.sample()?;
+            source
+                .iter()
+                .copied()
+                .find(|card| card["id"] == observed["id"] && weight(card, true) > 0.0)
+                .ok_or_else(|| {
+                    EngineError::ConditioningMismatch(
+                        "observed OPENING sequence violates source eligibility or exclusives"
+                            .into(),
+                    )
+                })?
+        } else {
+            weighted_pick(state, &source, true)?.ok_or_else(|| {
+                EngineError::ConditioningMismatch("empty observed offer proposal".into())
+            })?
+        };
+        source_probability *= weight(selected, true) / source_sum;
+        matches &= selected["id"] == observed["id"];
+        picked.push(clone_card(state, selected)?);
+        unavailable.insert(selected["id"].as_str().expect("id").to_owned());
+    }
+    Ok((picked, source_probability, if matches { 1.0 } else { 0.0 }))
+}
+
+fn normal_offer_trace(
+    state: &mut GameState,
+    required: &str,
+    color: Color,
+    force: bool,
+) -> Result<(Vec<Value>, f64, f64)> {
+    let mut unavailable = acquired_ids(state);
+    let mut picked = Vec::new();
+    let mut source_probability = 1.0;
+    let mut proposal_probability = 1.0;
+    for index in 0..3 {
+        let source = mixed_pool(state, &["OPENING", "MIDDLE", "PIECE"], color, &unavailable)?;
+        let source_sum = source.iter().map(|card| weight(card, true)).sum::<f64>();
+        if !source_sum.is_finite() || source_sum <= 0.0 {
+            return Err(EngineError::ConditioningMismatch(
+                "empty hidden OPENING source pool".into(),
+            ));
+        }
+        let already_selected = unavailable.contains(required);
+        let proposal = source
+            .iter()
+            .copied()
+            .filter(|card| {
+                let id = card["id"].as_str().expect("id");
+                if already_selected {
+                    return true;
+                }
+                if index == 2 {
+                    return id == required;
+                }
+                !conflicts(required, &BTreeSet::from([id.to_owned()]))
+            })
+            .collect::<Vec<_>>();
+        let proposal_sum = proposal.iter().map(|card| weight(card, true)).sum::<f64>();
+        if force
+            && (!proposal_sum.is_finite()
+                || proposal_sum <= 0.0
+                || !already_selected && !source.iter().any(|card| card["id"] == required))
+        {
+            return Err(EngineError::ConditioningMismatch(
+                "observed acquisition has no source-valid hidden offer".into(),
+            ));
+        }
+        let selected = weighted_pick(state, if force { &proposal } else { &source }, true)?
+            .ok_or_else(|| {
+                EngineError::ConditioningMismatch("empty hidden offer proposal".into())
+            })?;
+        let selected_weight = weight(selected, true);
+        source_probability *= selected_weight / source_sum;
+        proposal_probability *= if proposal_sum > 0.0 && proposal.contains(&selected) {
+            selected_weight / proposal_sum
+        } else {
+            0.0
+        };
+        picked.push(clone_card(state, selected)?);
+        unavailable.insert(selected["id"].as_str().expect("id").to_owned());
+    }
+    Ok((picked, source_probability, proposal_probability))
+}
+
+pub(crate) fn selected_draft_cards(state: &GameState, action: &Action) -> Result<Vec<Value>> {
+    let choices = state
+        .extra
+        .get("draft")
+        .and_then(|v| v.get("choices"))
+        .and_then(Value::as_array)
+        .ok_or(EngineError::IllegalAction)?;
+    if action.kind == ActionKind::DraftBundlePick {
+        let index = action
+            .extra
+            .get("bundleIndex")
+            .and_then(Value::as_u64)
+            .filter(|index| *index < 3)
+            .ok_or(EngineError::IllegalAction)? as usize;
+        return choices
+            .get(index * 2..index * 2 + 2)
+            .map(<[Value]>::to_vec)
+            .ok_or(EngineError::IllegalAction);
+    }
+    choices
+        .iter()
+        .find(|card| card["instanceId"].as_str() == action.card_instance_id.as_deref())
+        .map(|card| vec![card.clone()])
+        .ok_or(EngineError::IllegalAction)
 }
 fn exclusive_opening(card: &Value) -> bool {
     definitions().constants["EXCLUSIVE_OPENING_CARD_IDS"]
@@ -596,6 +862,15 @@ pub(crate) fn condition_grand_initial_choices(
 }
 
 pub(crate) fn condition_initial_offer(state: &mut GameState, public: &[Value]) -> Result<()> {
+    condition_opening_offer(state, public, Color::White)
+}
+/// Condition a supported past OPENING draw. Source eligibility is evaluated
+/// for the actual drafting side, after any acquired opening effects.
+pub(crate) fn condition_opening_offer(
+    state: &mut GameState,
+    public: &[Value],
+    color: Color,
+) -> Result<()> {
     let chaos = state.extra.get("gameStyle").and_then(Value::as_str) == Some("chaos");
     if public.len() != if chaos { 6 } else { 3 } {
         return Err(EngineError::InvalidState(
@@ -620,7 +895,7 @@ pub(crate) fn condition_initial_offer(state: &mut GameState, public: &[Value]) -
             || conflicts(id, &unavailable)
             || !matches!(category(definition), "OPENING" | "MIDDLE" | "PIECE")
             || weight(definition, true) <= 0.0
-            || !crate::eligibility::draft_drawable(&mut probe, definition, Color::White)?
+            || !crate::eligibility::draft_drawable(&mut probe, definition, color)?
         {
             return Err(EngineError::ConditioningMismatch("initial offer violates source pool availability, categories, weights or exclusives".into()));
         }
@@ -661,8 +936,8 @@ pub(crate) fn condition_initial_offer(state: &mut GameState, public: &[Value]) -
     state
         .extra
         .get_mut("openingAutoNoticeShown")
-        .ok_or_else(|| EngineError::InvalidState("initial notice state missing".into()))?["white"] =
-        json!(opening);
+        .ok_or_else(|| EngineError::InvalidState("initial notice state missing".into()))?
+        [color.as_str()] = json!(opening);
     Ok(())
 }
 

@@ -762,6 +762,31 @@ fn grand_offers_and_picks_preserve_rng_identity_and_public_card_slots() {
     );
     assert_eq!(initial.state().rng.cursor, 112);
     assert!(initial.state().deck_slots.black[0].vacant);
+    let second_action = first.position.legal_actions().unwrap()[0].clone();
+    let second = first.position.apply(&second_action).unwrap();
+    for viewer in [Color::White, Color::Black] {
+        let expected = second.position.try_observe(viewer).unwrap();
+        let proposal = first
+            .position
+            .apply_weighted_conditioned_public(
+                &second_action,
+                serde_json::to_value(&expected).unwrap(),
+                71,
+            )
+            .unwrap();
+        assert_eq!(
+            proposal.step.position.try_observe(viewer).unwrap(),
+            expected
+        );
+        assert_eq!(
+            (
+                proposal.source_probability,
+                proposal.proposal_probability,
+                proposal.importance_weight
+            ),
+            (1.0, 1.0, 1.0)
+        );
+    }
 }
 
 #[test]
@@ -1031,7 +1056,189 @@ fn regular_draft_acquisition_enters_play_and_clock_commits_at_turn_boundary() {
     assert!(black_offer.state().flag("cornerKick", Color::White));
     assert!(black_offer.state().deck_slots.white[0].used);
     assert_eq!(black_offer.state().rng.cursor, 214);
+    let sampled = Position::sample_initial_public(
+        GameConfig::default(),
+        serde_json::to_value(initial.try_observe(Color::White).unwrap()).unwrap(),
+        71,
+    )
+    .unwrap();
+    let choice_id = initial.state().extra["draft"]["choices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|card| card["id"] == "corner-kick")
+        .unwrap()["instanceId"]
+        .clone();
+    let action = sampled
+        .bind_payload(json!({"type":"draftPick","color":"white","cardInstanceId":choice_id}))
+        .unwrap();
+    let expected = black_offer.try_observe(Color::Black).unwrap();
+    let spectator = Position::sample_initial_public(
+        GameConfig::default(),
+        serde_json::to_value(initial.try_observe(Color::Black).unwrap()).unwrap(),
+        71,
+    )
+    .unwrap();
+    let previous = spectator.try_observe(Color::Black).unwrap();
+    let proposal = spectator
+        .condition_hidden_opening_draft(serde_json::to_value(&expected).unwrap(), 117)
+        .unwrap();
+    assert_eq!(
+        proposal.position.try_observe(Color::Black).unwrap(),
+        previous
+    );
+    assert!(proposal.source_probability.is_finite() && proposal.source_probability > 0.0);
+    assert!(proposal.proposal_probability.is_finite() && proposal.proposal_probability > 0.0);
+    assert_eq!(
+        proposal.importance_weight,
+        proposal.source_probability / proposal.proposal_probability
+    );
+    let actions = proposal.position.legal_actions().unwrap();
+    let compatible = actions
+        .iter()
+        .filter(|action| {
+            proposal
+                .position
+                .public_transition_compatible(action, serde_json::to_value(&expected).unwrap())
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(compatible.len(), 1);
+    let conditioned_hidden = proposal
+        .position
+        .apply_conditioned_public(compatible[0], serde_json::to_value(&expected).unwrap(), 93)
+        .unwrap();
+    assert_eq!(
+        conditioned_hidden
+            .position
+            .try_observe(Color::Black)
+            .unwrap(),
+        expected
+    );
+    assert_eq!(spectator.try_observe(Color::Black).unwrap(), previous);
+    let conditioned = sampled
+        .apply_conditioned_public(&action, serde_json::to_value(&expected).unwrap(), 93)
+        .unwrap();
+    assert_eq!(
+        conditioned.position.try_observe(Color::Black).unwrap(),
+        expected
+    );
+    assert_eq!(conditioned.position.state().rng, RngState::seeded(93));
+    assert_ne!(conditioned.position.state().rng, black_offer.state().rng);
+    assert!(
+        sampled
+            .state()
+            .deck_slots
+            .white
+            .iter()
+            .all(|card| card.vacant)
+    );
+    let mut weighted = None;
+    for seed in 0..8 {
+        match sampled.apply_weighted_conditioned_public(
+            &action,
+            serde_json::to_value(&expected).unwrap(),
+            seed,
+        ) {
+            Ok(proposal) => {
+                weighted = Some(proposal);
+                break;
+            }
+            Err(EngineError::ConditioningMismatch(_)) => {}
+            Err(error) => panic!("unexpected weighted transition error: {error}"),
+        }
+    }
+    let weighted = weighted.expect("bounded proposal includes a supported balancing component");
+    assert_eq!(
+        weighted.step.position.try_observe(Color::Black).unwrap(),
+        expected
+    );
+    assert!(weighted.source_probability > 0.0 && weighted.source_probability < 1.0);
+    assert!(weighted.proposal_probability > 0.0 && weighted.proposal_probability <= 1.0);
+    assert_eq!(
+        weighted.importance_weight,
+        weighted.source_probability / weighted.proposal_probability
+    );
+    assert_ne!(weighted.importance_weight, 1.0);
+    let unobserved = sampled
+        .apply_weighted_conditioned_public(
+            &action,
+            serde_json::to_value(black_offer.try_observe(Color::White).unwrap()).unwrap(),
+            0,
+        )
+        .unwrap();
+    assert_eq!(
+        unobserved.step.position.try_observe(Color::White).unwrap(),
+        black_offer.try_observe(Color::White).unwrap()
+    );
+    assert!(unobserved.source_probability > 0.0 && unobserved.source_probability < 1.0);
+    assert_eq!(
+        unobserved.source_probability,
+        unobserved.proposal_probability
+    );
+    assert_eq!(unobserved.importance_weight, 1.0);
+    assert_eq!(
+        sampled.try_observe(Color::White).unwrap(),
+        initial.try_observe(Color::White).unwrap()
+    );
     let play = choose(&black_offer, "reaper");
+    let white_play = play.try_observe(Color::White).unwrap();
+    let black_proposal = black_offer
+        .condition_hidden_opening_draft(serde_json::to_value(&white_play).unwrap(), 117)
+        .unwrap();
+    assert_eq!(
+        black_proposal.position.try_observe(Color::White).unwrap(),
+        black_offer.try_observe(Color::White).unwrap()
+    );
+    let matching = black_proposal
+        .position
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .filter(|action| {
+            black_proposal
+                .position
+                .public_transition_compatible(action, serde_json::to_value(&white_play).unwrap())
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(matching.len(), 1);
+    let proposed_play = black_proposal
+        .position
+        .apply_conditioned_public(&matching[0], serde_json::to_value(&white_play).unwrap(), 93)
+        .unwrap();
+    assert_eq!(
+        proposed_play.position.try_observe(Color::White).unwrap(),
+        white_play
+    );
+    assert_eq!(
+        black_proposal.importance_weight,
+        black_proposal.source_probability / black_proposal.proposal_probability
+    );
+    let weighted_play = black_proposal
+        .position
+        .apply_weighted_conditioned_public(
+            &matching[0],
+            serde_json::to_value(&white_play).unwrap(),
+            93,
+        )
+        .unwrap();
+    assert_eq!(
+        weighted_play
+            .step
+            .position
+            .try_observe(Color::White)
+            .unwrap(),
+        white_play
+    );
+    assert_eq!(
+        (
+            weighted_play.source_probability,
+            weighted_play.proposal_probability,
+            weighted_play.importance_weight
+        ),
+        (1.0, 1.0, 1.0)
+    );
     assert_eq!(play.state().mode, "play");
     assert_eq!(play.state().rng.cursor, 216);
     assert_eq!(play.state().extra["clock"]["runningColor"], "white");
@@ -1050,4 +1257,74 @@ fn regular_draft_acquisition_enters_play_and_clock_commits_at_turn_boundary() {
         json!({"row":6,"col":0})
     );
     assert_eq!(initial.state().extra["clock"]["runningColor"], Value::Null);
+}
+
+#[test]
+fn royal_sound_probes_execute_owned_captures_and_source_protection_window() {
+    let mut state = empty();
+    put(&mut state, "king", Color::White, 6, 6);
+    put(&mut state, "king", Color::Black, 0, 7);
+    put(&mut state, "bishop", Color::Black, 4, 4);
+    let original = state.clone();
+    assert!(crate::threat::has_royal_capture(&state, Color::White).unwrap());
+    assert_eq!(state, original);
+    let king = state.board[6][6].as_mut().unwrap();
+    king.extra.insert("protected".into(), json!(true));
+    king.extra.insert(
+        "lastResistance".into(),
+        json!({"remaining":2,"previousProtected":false}),
+    );
+    assert!(!crate::threat::has_royal_capture(&state, Color::White).unwrap());
+    state.board[6][6]
+        .as_mut()
+        .unwrap()
+        .extra
+        .get_mut("lastResistance")
+        .unwrap()["remaining"] = json!(1);
+    assert!(crate::threat::has_royal_capture(&state, Color::White).unwrap());
+    state.extra.insert(
+        "lastMove".into(),
+        json!({"soundName":"moveSelf","soundColor":"white"}),
+    );
+    let rng = state.rng.clone();
+    crate::threat::play_move_sound(&mut state, "moveSelf", Color::White).unwrap();
+    assert_eq!(state.extra["lastMove"]["soundName"], "checkDanger");
+    assert_eq!(state.rng, rng);
+    state.board[4][4]
+        .as_mut()
+        .unwrap()
+        .extra
+        .insert("hiddenFrom".into(), json!("white"));
+    assert!(!crate::threat::has_royal_capture(&state, Color::White).unwrap());
+    state.extra.insert(
+        "delayedHazards".into(),
+        json!([{"cells":[{"row":6,"col":6}]}]),
+    );
+    assert!(matches!(
+        crate::threat::has_royal_capture(&state, Color::White),
+        Err(EngineError::UnsupportedFeature(_))
+    ));
+
+    let mut fianchetto = empty();
+    put(&mut fianchetto, "bishop", Color::Black, 0, 7);
+    put(&mut fianchetto, "pawn", Color::White, 5, 3);
+    fianchetto.set_flag("fianchetto", Color::Black, true);
+    let pawn = fianchetto.board[5][3].as_ref().unwrap();
+    assert!(!crate::movement::fianchetto_destination_allowed(
+        &fianchetto,
+        pawn,
+        Square { row: 5, col: 3 },
+        &[Square { row: 4, col: 3 }]
+    ));
+    assert!(
+        crate::movement::piece_moves(&fianchetto, pawn, Square { row: 5, col: 3 })
+            .unwrap()
+            .is_empty()
+    );
+    assert!(crate::movement::fianchetto_destination_allowed(
+        &fianchetto,
+        pawn,
+        Square { row: 4, col: 3 },
+        &[Square { row: 3, col: 4 }]
+    ));
 }

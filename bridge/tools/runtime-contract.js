@@ -2,6 +2,7 @@
 const crypto = require("node:crypto");
 const catalog = require("../catalog/site-20260927.json");
 const observationPolicy = require("../catalog/observation-20260927.json");
+const ORACLE_PROFILE_VERSION = "accelerate-headless-semantic-v2";
 const { validate } = require("./validate");
 const VERSIONS = Object.freeze({ position: "accelerate-position-v1", action: "accelerate-action-v1", observation: "accelerate-observation-v2", result: "accelerate-result-v1", step: "accelerate-step-v1" });
 const digest = value => crypto.createHash("sha256").update(canonical(value)).digest("hex");
@@ -213,4 +214,4 @@ function validateObservation(value) {
   if (informationStateKey !== digest(content)) throw new TypeError("Information state identity mismatch.");
   return value;
 }
-module.exports = { catalog, observationPolicy, VERSIONS, canonical, digest, jsonCopy, deepFreeze, rng, nextRandom, validateRng, position, validatePosition, action, validateAction, validatePayload, validateObservation, validateGameEvent, validateResult };
+module.exports = { catalog, observationPolicy, ORACLE_PROFILE_VERSION, VERSIONS, canonical, digest, jsonCopy, deepFreeze, rng, nextRandom, validateRng, position, validatePosition, action, validateAction, validatePayload, validateObservation, validateGameEvent, validateResult };
