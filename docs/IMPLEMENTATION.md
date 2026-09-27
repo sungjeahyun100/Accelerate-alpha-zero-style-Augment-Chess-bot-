@@ -31,17 +31,60 @@ Hypernetwork는 향후 extension의 생성·적용·병합 가능 여부만 준�
 | 영역 | 실제 구현/관측 | 코드 완성·의미 coverage의 남은 조건 |
 |---|---|---|
 | 사이트·계약 | 동결 loader, v1 schema/JSON validators, 실제 client 초기/draft/전이/종료 adapter 구현 | 전체 256 효과·선택 순서·특수 phase·관측 분류·lazy action 경계 미완료 |
-| Oracle 검사 | depth0 actual passive settlement 포함 Node 계약/통합 12개 통과 | 짧은 기본 환경 검사이며 모든 카드의 full semantic parity 증거가 아님 |
+| Oracle 검사 | depth0 actual passive settlement 포함 Node 계약/통합 12개 통과 | 짧은 기본 환경 검사. renderAll의 potion 정리, terminal microtask와 presentation RNG 범위의 보완이 필요함 |
 | 과거 fixture | 349개, 757 sampled action을 최신 worker에 비교 | worker hash 불일치; 최신 client 전체 정답을 대신할 수 없음 |
 | Rust 규칙 | 순수 Rust 구현 진행, 담당자 로컬 compile/단위 검사 checkpoint 존재 | 전체 catalog legal/reject/full-next-state/result/RNG 비교 미완료 |
 | PyO3/maturin | 담당자 Linux wheel/FFI checkpoint 검사 존재 | Windows native 검증과 최종 공통 history/관측 재검증은 별도 확인 필요 |
-| Python 모델·encoding | 구현 진행, 담당자 모델 checkpoint 검사 존재 | 최종 공개 관측 allowlist와 hidden-state 불변성·export 입력 의미 통합 필요 |
-| ort/tract | 채택된 backend 구조 | 실행한 export/backend 수치 검증 결과를 후속 checkpoint에 기록해야 함 |
-| ISMCTS·replay·CLI | 실행 계약과 구현 계획 | 실제 통합 구현·bounded 실행·자료 보존·오류 경로 검증이 남음 |
+| Python 모델·encoding | 확정된 EncoderSpec 15개 필드, root Windows 모델 7개 검사 통과 | 최종 공개 관측 allowlist와 실제 탐색 입력 통합 필요 |
+| ort/tract | Linux 실제 두 backend에서 확정 계약의 FP32 base/adapter 48개 수치 비교 통과 | Windows 및 최종 source 규칙/탐색과의 통합 실행을 확인해야 함 |
+| ISMCTS·replay·CLI | 공개 trace/particle filter/availability PUCT 구현 중 | 실제 3개 mode 통합, replay·checkpoint·CLI와 bounded 실행·오류 경로 검증이 남음 |
 | CI | 기존 구조/fixture validator 실행 경로 유지 | 이번 feature 최종 로컬 검사·원격 CI 관측은 아직 전체 완료 증거가 아님 |
 
 다른 영역의 작은 test count나 compile 성공은 해당 checkpoint이며 전체 GO로 승격하지 않는다.
 CI 요청/관측한 성공, Windows/Linux 확인, 모델 export 수치, 실제 semantic coverage를 따로 기록한다.
+
+Linux sdist에서 만든 wheel 설치 검사 결과는 native 6 + model 7 + runtime 6 = 19개 통과,
+skip 0이다. full history와 summary history의 public-intent 모델을 각각 24개 사례로 검사했고
+최대 절대 오차는 둘 다 1.2218952178955078e-6이다(`atol=1e-5`, `rtol=1e-4`). 보고서는
+`%APPDATA%\Accelerate\reports\native-bot\Linux`에 보관한다. 이 배포 경로와 수치 검사는
+현재 native 규칙 경계의 checkpoint이며 전체 카드 의미 coverage의 증거는 아니다.
+
+## 구현 연결 순서와 완료 기준
+
+작업별 담당자는 하나로 유지하고 공통 계약은 담당자끼리 확인한다. 다음 순서는 의존 관계이며,
+각 단계의 통과를 전체 구현 완료로 보고하지 않는다.
+
+| 작업 | 전달할 구현 | 완료를 판단하는 코드 증거 |
+|---|---|---|
+| 1. 동결 source와 oracle | 실제 client 실행, public projection, 정확한 legal iterator, queued settlement | rule에 영향을 주는 UI 정리와 RNG를 보존하고 동결 source에서 legal/reject/state/result/RNG 비교가 재현됨 |
+| 2. 순수 Rust 규칙 | 초기·draft·256 카드·RULE·84개 catalog type과 reachable 상태 전이 | 채택된 8x8 normal/chaos/grand의 reachable 기능에 Unsupported나 대체 구현이 남지 않고 source 비교가 통과함 |
+| 3. Python 연동 | immutable Position/Action, owned 배열, direct/JSON 경계, maturin sdist/wheel | Windows/Linux에서 실제 배포 wheel을 설치하고 동일 의미·오류·소유권을 확인함 |
+| 4. 인코딩과 모델 | 공개 관측·이력, ResNet, static LoRA, FiLM, checkpoint/export | 숨은 상태 불변성, adapter 전용 갱신, 복사본 병합, 명시적 condition 입력과 계약 hash를 확인함 |
+| 5. Rust 추론 | 기본 ort, 명시적 tract, strict artifact 검증 | 두 실제 backend에서 base/adapter와 여러 B/A shape의 FP32 오차·condition 효과·오류 경로를 확인함 |
+| 6. 공개 정보 탐색 | public trace, source-conditioned particles, availability PUCT, bounded search | 세 mode에서 실제 native 규칙과 연결되고 private 환경 상태·seed 없이 선택·재구성·취소가 작동함 |
+| 7. 실행과 자료 보존 | 유한 CLI, replay/dataset, optimizer/RNG checkpoint, 평가 코드 | 작은 synthetic 검증으로 중단·복원·미완료 판정·version 경계를 확인하고 실학습을 시작하지 않음 |
+| 8. 통합 검증 | 구조 검사, Rust lint/test, wheel 설치, source parity와 오류 경로 리뷰 | 최종 공통 commit에서 Windows/Linux CI 성공과 전체 미완료 항목의 해소를 관측함 |
+
+우선 oracle의 의미 보존과 Rust의 public-conditioned 초기화·행동 의도 경계를 완성해 탐색에 연결한다.
+규칙 전체 포팅과 병행해 모델/추론의 확정 계약 검사를 마친 다음 replay·CLI와 최종 CI를 연결한다.
+중간 단계에서 미지원 기능을 명시적으로 거부하는 것은 허용하지만, 이를 전체 지원이나 GO로
+보고하지 않는다. 검사 개수나 문서 채택, workflow 요청만으로 GO를 내리지 않는다.
+
+카드별 큰 snapshot을 영구 추가하는 방식으로 coverage를 늘리지 않는다. 작은 공통 시나리오와
+프로그램으로 만든 선택·오류 입력을 재사용하고 대규모 비교 결과는 외부 reports에 보관한다.
+
+### 공개 선택과 모델 계약
+
+실제 Action의 의미 payload는 실행·직렬화에서 손실 없이 보존한다. 탐색과 봇용 모델은 source UI에서
+선택할 수 있는 `public-decision-intent-v1`을 사용한다. 숨은 occupant에 따라 달라지는 capture flag나
+실행 정보는 `Position.bind_public_intent`에서 해결하고 탐색 입력으로 되돌리지 않는다.
+실제 환경 Position으로 탐색 후보를 사전 필터링하거나 Python에서 임의로 flag를 제거하지 않는다.
+
+EncoderSpec은 history와 action 정책을 각각 명시한다. 봇용 기본은
+`public-history-summary-v1`과 `public-decision-intent-v1`이다. summary는 전체 public history의
+event count·JCS digest·actor/change 집계와 최근 8개 event를 담고 원본 trace/replay는 보존한다.
+full history 및 exact execution payload용 모델은 별도 계약 hash를 가지며 자동 호환으로 취급하지 않는다.
+탐색의 value 시점은 물리적인 turn 대신 실제 decision actor의 `observation.viewer`를 따른다.
 
 ## 동결 source와 재현
 
@@ -62,6 +105,16 @@ CI는 `$RUNNER_TEMP/Accelerate/cache/site-baseline`, 다른 OS는 명시적 경�
 fdb08546776ec6228b03e8d02b40d4ab3255bae5f401adba7ff5dad927ac5c9c로 검사한다.
 parser와 raw 사이트 번들을 source에 vendoring하지 않는다. 오프라인 실행은 외부 network와
 background timer를 막고 presentation hooks를 분리한다. VM 자체를 보안 sandbox라고 주장하지 않는다.
+
+CI의 실행 의존 파일은 위 동결 client·worker와 parser다. index는 최초 발견 시점의 provenance로
+보존하며 현재 HTML이 바뀌어도 새 main URL을 따라가거나 baseline을 갱신하지 않는다. oracle이
+읽지 않는 index를 실행 hash gate에서 제외하는 경우 원래 provenance를 유지하고 이유를 보고한다.
+
+현재 presentation hook 분리는 의미 보존 검토가 완료되지 않았다. `renderAll`은
+`pruneBoardPotionEffects`를 통해 실제 기물 상태를 정리하며, terminal replay microtask에는
+추가 정산과 notation ID용 RNG 소비가 있다. DOM 유무에 따라 animation/log의 RNG 소비도 달라진다.
+이 경로를 모두 무조건 no-op으로 처리한 결과는 전체 future RNG/state 동등성의 근거가 될 수 없다.
+후속 adapter는 rule 정리와 queued settlement를 보존하고 presentation RNG의 비교 범위를 명시해야 한다.
 
 실제 본체 resetGame/beginInitialGameFlow는 초기 259개 root field를 만든다. 여러 최신 card 효과는
 root field를 lazily 추가하므로 초기 기본값만으로 전체 field 목록이 완성되지는 않는다.

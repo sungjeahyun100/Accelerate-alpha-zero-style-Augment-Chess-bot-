@@ -1,0 +1,11 @@
+[workspace]
+resolver = "3"
+members = ["rust-engine", "bridge/native", "bridge/runtime"]
+
+[workspace.package]
+rust-version = "1.96"
+edition = "2024"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

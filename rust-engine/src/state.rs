@@ -1,0 +1,1295 @@
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
+use std::{collections::BTreeMap, fmt};
+
+pub type Result<T> = std::result::Result<T, EngineError>;
+pub type Fields = Map<String, Value>;
+
+pub(crate) fn validate_json_value(value: &Value, initial_depth: usize) -> Result<()> {
+    let mut pending = vec![(value, initial_depth)];
+    while let Some((value, depth)) = pending.pop() {
+        if depth > 64 {
+            return Err(EngineError::InvalidState(
+                "JSON nesting exceeds depth 64".into(),
+            ));
+        }
+        match value {
+            Value::Number(number) => {
+                let number = number.as_f64().ok_or_else(|| {
+                    EngineError::InvalidState("number is outside the JSON execution range".into())
+                })?;
+                if !number.is_finite()
+                    || (number.fract() == 0.0 && number.abs() > 9_007_199_254_740_991.0)
+                {
+                    return Err(EngineError::InvalidState(
+                        "JSON numbers must be finite and integers must be JavaScript-safe".into(),
+                    ));
+                }
+            }
+            Value::Array(items) => pending.extend(items.iter().map(|item| (item, depth + 1))),
+            Value::Object(items) => pending.extend(items.values().map(|item| (item, depth + 1))),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EngineError {
+    InvalidState(String),
+    InvalidConfig(String),
+    Serialization(String),
+    UnsupportedFeature(String),
+    /// A well-formed public frame is incompatible with this sampled world.
+    /// Particle filtering may reject this candidate; malformed inputs and
+    /// unsupported rule semantics remain distinct errors.
+    ConditioningMismatch(String),
+    IllegalAction,
+    WrongActor,
+    StaleAction,
+    Terminal,
+}
+impl EngineError {
+    pub(crate) fn serialization(error: serde_json::Error) -> Self {
+        Self::Serialization(error.to_string())
+    }
+}
+impl fmt::Display for EngineError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidState(s) => write!(f, "invalid state: {s}"),
+            Self::InvalidConfig(s) => write!(f, "invalid config: {s}"),
+            Self::Serialization(s) => write!(f, "serialization: {s}"),
+            Self::UnsupportedFeature(s) => write!(f, "unsupported feature: {s}"),
+            Self::ConditioningMismatch(s) => write!(f, "conditioning mismatch: {s}"),
+            Self::IllegalAction => f.write_str("illegal action"),
+            Self::WrongActor => f.write_str("wrong actor"),
+            Self::StaleAction => f.write_str("action belongs to another position"),
+            Self::Terminal => f.write_str("game is terminal"),
+        }
+    }
+}
+impl std::error::Error for EngineError {}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Color {
+    White,
+    Black,
+}
+impl Color {
+    pub fn opponent(self) -> Self {
+        match self {
+            Self::White => Self::Black,
+            Self::Black => Self::White,
+        }
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::White => "white",
+            Self::Black => "black",
+        }
+    }
+    pub fn pawn_dir(self) -> i8 {
+        match self {
+            Self::White => -1,
+            Self::Black => 1,
+        }
+    }
+    pub fn home_row(self) -> u8 {
+        match self {
+            Self::White => 7,
+            Self::Black => 0,
+        }
+    }
+    pub fn promotion_row(self) -> u8 {
+        self.opponent().home_row()
+    }
+}
+
+/// Board allegiance is separate from the player making a decision. Neutral
+/// obstacles have no deck, turn counter, or player-specific passive effects.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PieceColor {
+    White,
+    Black,
+    Neutral,
+}
+impl PieceColor {
+    pub fn owner(self) -> Option<Color> {
+        match self {
+            Self::White => Some(Color::White),
+            Self::Black => Some(Color::Black),
+            Self::Neutral => None,
+        }
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::White => "white",
+            Self::Black => "black",
+            Self::Neutral => "neutral",
+        }
+    }
+}
+impl From<Color> for PieceColor {
+    fn from(color: Color) -> Self {
+        match color {
+            Color::White => Self::White,
+            Color::Black => Self::Black,
+        }
+    }
+}
+impl PartialEq<Color> for PieceColor {
+    fn eq(&self, color: &Color) -> bool {
+        self.owner() == Some(*color)
+    }
+}
+impl PartialEq<PieceColor> for Color {
+    fn eq(&self, color: &PieceColor) -> bool {
+        color == self
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct Square {
+    pub row: u8,
+    pub col: u8,
+}
+impl Square {
+    pub fn new(row: u8, col: u8) -> Result<Self> {
+        if row < 8 && col < 8 {
+            Ok(Self { row, col })
+        } else {
+            Err(EngineError::InvalidState("square outside 8x8 board".into()))
+        }
+    }
+    pub fn offset(self, dr: i8, dc: i8) -> Option<Self> {
+        let row = i16::from(self.row) + i16::from(dr);
+        let col = i16::from(self.col) + i16::from(dc);
+        ((0..8).contains(&row) && (0..8).contains(&col)).then_some(Self {
+            row: row as u8,
+            col: col as u8,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Piece {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub color: PieceColor,
+    #[serde(default)]
+    pub moved: bool,
+    #[serde(default)]
+    pub id: String,
+    #[serde(flatten)]
+    pub extra: Fields,
+}
+impl Piece {
+    pub fn new(
+        kind: impl Into<String>,
+        color: impl Into<PieceColor>,
+        id: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind: kind.into(),
+            color: color.into(),
+            id: id.into(),
+            moved: false,
+            extra: Fields::new(),
+        }
+    }
+    pub fn flag(&self, name: &str) -> bool {
+        self.extra
+            .get(name)
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+    pub fn number(&self, name: &str) -> i64 {
+        self.extra.get(name).and_then(Value::as_i64).unwrap_or(0)
+    }
+    pub fn is_large(&self) -> bool {
+        matches!(self.kind.as_str(), "colossus" | "bigRook" | "bigBishop")
+    }
+    pub fn is_royal(&self) -> bool {
+        self.flag("crownRoyal")
+            || self.flag("editorRoyal")
+            || matches!(
+                self.kind.as_str(),
+                "king" | "royalKnight" | "shotgunKing" | "darkWizard" | "merchant"
+            )
+    }
+    pub fn is_defeat_royal(&self) -> bool {
+        self.is_royal() || self.kind == "vip"
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MoveTarget {
+    pub row: u8,
+    pub col: u8,
+    #[serde(flatten)]
+    pub flags: Fields,
+}
+impl MoveTarget {
+    pub fn at(square: Square) -> Self {
+        Self {
+            row: square.row,
+            col: square.col,
+            flags: Fields::new(),
+        }
+    }
+    pub fn square(&self) -> Square {
+        Square {
+            row: self.row,
+            col: self.col,
+        }
+    }
+    pub fn flag(&self, name: &str) -> bool {
+        match self.flags.get(name) {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(value)) => *value,
+            Some(Value::String(value)) => !value.is_empty(),
+            Some(Value::Number(value)) => value.as_f64().is_some_and(|number| number != 0.0),
+            Some(Value::Array(_) | Value::Object(_)) => true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ActionKind {
+    Move,
+    Card,
+    Promotion,
+    PromotionChoice,
+    ShotgunReload,
+    WizardSpell,
+    FileSurgeSkip,
+    DraftPick,
+    DraftBundlePick,
+    TrolleyChoice,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Action {
+    #[serde(rename = "type")]
+    pub kind: ActionKind,
+    pub color: Color,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<Square>,
+    #[serde(rename = "move", default, skip_serializing_if = "Option::is_none")]
+    pub destination: Option<MoveTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card_instance_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position_key: Option<String>,
+    #[serde(flatten)]
+    pub extra: Fields,
+}
+impl Action {
+    pub fn movement(color: Color, from: Square, to: MoveTarget) -> Self {
+        Self {
+            kind: ActionKind::Move,
+            color,
+            from: Some(from),
+            destination: Some(to),
+            card_id: None,
+            card_instance_id: None,
+            target: None,
+            position_key: None,
+            extra: Fields::new(),
+        }
+    }
+    pub fn card(color: Color, card: &CardSlot, target: Option<Value>) -> Self {
+        Self {
+            kind: ActionKind::Card,
+            color,
+            from: None,
+            destination: None,
+            card_id: Some(card.id.clone()),
+            card_instance_id: Some(card.instance_id.clone()),
+            target,
+            position_key: None,
+            extra: Fields::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardSlot {
+    pub id: String,
+    pub effect: String,
+    #[serde(default)]
+    pub instance_id: String,
+    #[serde(default)]
+    pub stars: f64,
+    #[serde(default, skip_serializing_if = "false_value")]
+    pub used: bool,
+    #[serde(default, skip_serializing_if = "false_value")]
+    pub recovering: bool,
+    #[serde(skip)]
+    pub vacant: bool,
+    #[serde(flatten)]
+    pub extra: Fields,
+}
+impl CardSlot {
+    pub fn star_value(&self) -> f64 {
+        self.extra
+            .get("ratingHalfStars")
+            .and_then(Value::as_u64)
+            .map(|half| half as f64 / 2.0)
+            .unwrap_or(self.stars)
+    }
+}
+fn false_value(value: &bool) -> bool {
+    !*value
+}
+
+fn deserialize_decks<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Sides<Vec<CardSlot>>, D::Error> {
+    let raw = Sides::<Vec<Option<CardSlot>>>::deserialize(deserializer)?;
+    let convert = |slots: Vec<Option<CardSlot>>| {
+        slots
+            .into_iter()
+            .map(|slot| {
+                slot.unwrap_or(CardSlot {
+                    id: String::new(),
+                    effect: String::new(),
+                    instance_id: String::new(),
+                    stars: 0.0,
+                    used: false,
+                    recovering: false,
+                    vacant: true,
+                    extra: Fields::new(),
+                })
+            })
+            .collect()
+    };
+    Ok(Sides {
+        white: convert(raw.white),
+        black: convert(raw.black),
+    })
+}
+fn serialize_decks<S: serde::Serializer>(
+    decks: &Sides<Vec<CardSlot>>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    fn convert(slots: &[CardSlot]) -> Vec<Option<&CardSlot>> {
+        slots
+            .iter()
+            .map(|slot| (!slot.vacant).then_some(slot))
+            .collect()
+    }
+    Sides {
+        white: convert(&decks.white),
+        black: convert(&decks.black),
+    }
+    .serialize(serializer)
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Sides<T> {
+    pub white: T,
+    pub black: T,
+}
+impl<T: Default> Default for Sides<T> {
+    fn default() -> Self {
+        Self {
+            white: T::default(),
+            black: T::default(),
+        }
+    }
+}
+impl<T> Sides<T> {
+    pub fn get(&self, color: Color) -> &T {
+        match color {
+            Color::White => &self.white,
+            Color::Black => &self.black,
+        }
+    }
+    pub fn get_mut(&mut self, color: Color) -> &mut T {
+        match color {
+            Color::White => &mut self.white,
+            Color::Black => &mut self.black,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnPassant {
+    pub row: u8,
+    pub col: u8,
+    pub captured_row: u8,
+    pub captured_col: u8,
+    pub color: Color,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RngState {
+    pub algorithm: String,
+    pub state: u32,
+    #[serde(default)]
+    pub tape: Vec<f64>,
+    #[serde(default)]
+    pub cursor: usize,
+}
+impl RngState {
+    pub fn seeded(seed: u64) -> Self {
+        Self {
+            algorithm: "lcg32-v1".into(),
+            state: seed as u32,
+            tape: Vec::new(),
+            cursor: 0,
+        }
+    }
+    pub fn sample(&mut self) -> Result<f64> {
+        if self.algorithm != "lcg32-v1" {
+            return Err(EngineError::UnsupportedFeature(format!(
+                "RNG {}",
+                self.algorithm
+            )));
+        }
+        if self.cursor >= 9_007_199_254_740_991usize {
+            return Err(EngineError::InvalidState("RNG cursor overflow".into()));
+        }
+        self.state = self.state.wrapping_mul(1664525).wrapping_add(1013904223);
+        let value = self
+            .tape
+            .get(self.cursor)
+            .copied()
+            .unwrap_or(f64::from(self.state) / 4294967296.0);
+        self.cursor += 1;
+        Ok(value)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameState {
+    pub board: Vec<Vec<Option<Piece>>>,
+    pub turn: Color,
+    #[serde(default = "play")]
+    pub mode: String,
+    #[serde(default)]
+    pub winner: Option<String>,
+    #[serde(default = "one")]
+    pub actions_remaining: u32,
+    #[serde(default)]
+    pub move_count: u32,
+    #[serde(default = "one")]
+    pub full_move: u32,
+    #[serde(default)]
+    pub turns_taken: Sides<u32>,
+    #[serde(default)]
+    pub cards_used_this_turn: Sides<u32>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_decks",
+        serialize_with = "serialize_decks"
+    )]
+    pub deck_slots: Sides<Vec<CardSlot>>,
+    #[serde(default)]
+    pub captures: Sides<Vec<Piece>>,
+    #[serde(default)]
+    pub en_passant: Option<EnPassant>,
+    #[serde(default = "default_ruleset")]
+    pub ruleset_id: String,
+    #[serde(default = "default_rng")]
+    pub rng: RngState,
+    #[serde(default)]
+    pub history: Vec<Value>,
+    #[serde(flatten)]
+    pub extra: Fields,
+}
+fn one() -> u32 {
+    1
+}
+fn play() -> String {
+    "play".into()
+}
+fn default_ruleset() -> String {
+    "augment-site-20260927-abfe01a035813875".into()
+}
+fn default_rng() -> RngState {
+    RngState::seeded(0)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GameResult {
+    White,
+    Black,
+    Draw,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GameConfig {
+    #[serde(default = "normal")]
+    pub game_style: String,
+    #[serde(default)]
+    pub draft_delete: bool,
+    #[serde(default)]
+    pub rule_card_ids: Vec<String>,
+    #[serde(default = "star_limit")]
+    pub star_win_limit: u32,
+    #[serde(default = "enabled")]
+    pub deathmatch_enabled: bool,
+    #[serde(default = "deathmatch_limit")]
+    pub deathmatch_limit_turns: u32,
+}
+fn normal() -> String {
+    "normal".into()
+}
+fn star_limit() -> u32 {
+    45
+}
+fn deathmatch_limit() -> u32 {
+    10
+}
+fn enabled() -> bool {
+    true
+}
+impl Default for GameConfig {
+    fn default() -> Self {
+        Self {
+            game_style: normal(),
+            draft_delete: false,
+            rule_card_ids: Vec::new(),
+            star_win_limit: star_limit(),
+            deathmatch_enabled: true,
+            deathmatch_limit_turns: deathmatch_limit(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PublicEvent {
+    pub protocol_version: String,
+    pub actor: Color,
+    pub action: Action,
+    pub turn_changed: bool,
+    pub public: Sides<PublicTransition>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BoardChange {
+    pub square: Square,
+    pub before: Option<Value>,
+    pub after: Option<Value>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PublicTransition {
+    pub kind: String,
+    pub actor: Color,
+    pub next_actor: Color,
+    pub phase: String,
+    pub board_changes: Vec<BoardChange>,
+    pub own_cards: Vec<Value>,
+    pub revealed_opponent_cards: Vec<Value>,
+    pub captures: Sides<Vec<Value>>,
+    pub result: Value,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResultRecord {
+    pub protocol_version: String,
+    pub status: String,
+    pub winner: Option<Color>,
+    pub outcome: Option<GameResult>,
+    pub reason: String,
+}
+impl ResultRecord {
+    fn validate(&self) -> Result<()> {
+        let expected = match self.outcome {
+            Some(GameResult::White) => Some(Color::White),
+            Some(GameResult::Black) => Some(Color::Black),
+            _ => None,
+        };
+        if self.protocol_version != "accelerate-result-v1"
+            || !matches!(self.status.as_str(), "ongoing" | "terminal")
+            || self.winner != expected
+            || (self.status == "ongoing" && (self.outcome.is_some() || !self.reason.is_empty()))
+            || (self.status == "terminal" && self.outcome.is_none())
+        {
+            return Err(EngineError::InvalidState(
+                "invalid result record in history".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Observation {
+    pub protocol_version: String,
+    pub viewer: Color,
+    pub turn: Color,
+    pub board: Vec<Vec<Option<Value>>>,
+    pub own_cards: Vec<Value>,
+    pub opponent_hand_count: usize,
+    pub public_state: Fields,
+    pub history: Vec<Value>,
+    pub information_state_key: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ObservationPolicy {
+    state_public_fields: Vec<String>,
+    piece_public_fields: Vec<String>,
+    card_public_fields: Vec<String>,
+}
+fn observation_policy() -> &'static ObservationPolicy {
+    static POLICY: std::sync::OnceLock<ObservationPolicy> = std::sync::OnceLock::new();
+    POLICY.get_or_init(|| {
+        serde_json::from_str(include_str!(
+            "../../bridge/catalog/observation-20260927.json"
+        ))
+        .expect("adopted observation metadata")
+    })
+}
+fn public_object(value: Value, names: &[String]) -> Value {
+    Value::Object(
+        value
+            .as_object()
+            .expect("public source object")
+            .iter()
+            .filter(|(name, _)| names.contains(name))
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect(),
+    )
+}
+
+impl GameState {
+    pub fn new(config: GameConfig, seed: u64) -> Result<Self> {
+        crate::draft::initialize(config, seed)
+    }
+    pub fn at(&self, square: Square) -> Option<&Piece> {
+        self.board
+            .get(square.row as usize)?
+            .get(square.col as usize)?
+            .as_ref()
+    }
+    pub fn decision_actor(&self) -> Color {
+        let decision_color = |name| {
+            self.extra
+                .get(name)
+                .and_then(|window| window.get("color"))
+                .and_then(Value::as_str)
+                .and_then(|color| match color {
+                    "white" => Some(Color::White),
+                    "black" => Some(Color::Black),
+                    _ => None,
+                })
+        };
+        if self.mode == "draft" {
+            return decision_color("draft").unwrap_or(self.turn);
+        }
+        [
+            "pendingPromotion",
+            "activeTrolley",
+            "ruleTicketChoice",
+            "jokerChoice",
+            "barricadeDirectionChoice",
+        ]
+        .into_iter()
+        .find_map(decision_color)
+        .unwrap_or(self.turn)
+    }
+    pub fn at_mut(&mut self, square: Square) -> Option<&mut Piece> {
+        self.board
+            .get_mut(square.row as usize)?
+            .get_mut(square.col as usize)?
+            .as_mut()
+    }
+    pub fn flag(&self, name: &str, color: impl Into<PieceColor>) -> bool {
+        let Some(color) = color.into().owner() else {
+            return false;
+        };
+        match self.extra.get(name) {
+            Some(Value::Bool(value)) => *value,
+            Some(Value::Object(sides)) => sides
+                .get(color.as_str())
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            _ => false,
+        }
+    }
+    pub fn result(&self) -> Option<GameResult> {
+        match self.winner.as_deref() {
+            Some("white") => Some(GameResult::White),
+            Some("black") => Some(GameResult::Black),
+            Some("draw") => Some(GameResult::Draw),
+            _ if self.mode == "gameover" => Some(GameResult::Draw),
+            _ => None,
+        }
+    }
+    pub fn validate_and_identify(&mut self) -> Result<()> {
+        for value in self.extra.values() {
+            validate_json_value(value, 1)?;
+        }
+        for piece in self
+            .board
+            .iter()
+            .flatten()
+            .flatten()
+            .chain(self.captures.white.iter())
+            .chain(self.captures.black.iter())
+        {
+            for value in piece.extra.values() {
+                validate_json_value(value, 4)?;
+            }
+        }
+        for card in self.deck_slots.white.iter().chain(&self.deck_slots.black) {
+            for value in card.extra.values() {
+                validate_json_value(value, 4)?;
+            }
+        }
+        for event in &self.history {
+            validate_json_value(event, 2)?;
+        }
+        if self.board.len() != 8 || self.board.iter().any(|row| row.len() != 8) {
+            return Err(EngineError::InvalidState("board must be 8x8".into()));
+        }
+        if self.actions_remaining > 32 {
+            return Err(EngineError::InvalidState(
+                "actionsRemaining exceeds supported bound".into(),
+            ));
+        }
+        if self.winner.as_deref() == Some("") {
+            self.winner = None;
+        }
+        if self
+            .winner
+            .as_deref()
+            .is_some_and(|value| !matches!(value, "white" | "black" | "draw"))
+        {
+            return Err(EngineError::InvalidState("invalid winner".into()));
+        }
+        if self
+            .rng
+            .tape
+            .iter()
+            .any(|value| !value.is_finite() || !(0.0..1.0).contains(value))
+            || self.rng.cursor > 9_007_199_254_740_991usize
+        {
+            return Err(EngineError::InvalidState("invalid random tape".into()));
+        }
+        for card in self
+            .deck_slots
+            .white
+            .iter()
+            .chain(&self.deck_slots.black)
+            .filter(|card| !card.vacant)
+        {
+            if !card.stars.is_finite()
+                || card.stars < 0.0
+                || card
+                    .extra
+                    .get("ratingHalfStars")
+                    .is_some_and(|rating| rating.as_u64().is_none())
+            {
+                return Err(EngineError::InvalidState(
+                    "card rating must be a finite nonnegative half-star value".into(),
+                ));
+            }
+            if card.stars != 0.0
+                && card.extra.contains_key("ratingHalfStars")
+                && card.stars != card.star_value()
+            {
+                return Err(EngineError::InvalidState(
+                    "card stars and ratingHalfStars disagree".into(),
+                ));
+            }
+        }
+        for event in &self.history {
+            let event: PublicEvent = serde_json::from_value(event.clone()).map_err(|error| {
+                EngineError::InvalidState(format!("invalid game history event: {error}"))
+            })?;
+            if event.protocol_version != "accelerate-game-event-v1"
+                || event.action.position_key.is_some()
+                || event.actor != event.action.color
+                || event
+                    .action
+                    .from
+                    .is_some_and(|square| square.row >= 8 || square.col >= 8)
+                || event
+                    .action
+                    .destination
+                    .as_ref()
+                    .is_some_and(|square| square.row >= 8 || square.col >= 8)
+            {
+                return Err(EngineError::InvalidState(
+                    "unsupported history protocol, action actor or internal action binding".into(),
+                ));
+            }
+            for transition in [&event.public.white, &event.public.black] {
+                if transition.kind != "transition"
+                    || transition.phase.is_empty()
+                    || transition.actor != event.actor
+                    || transition
+                        .board_changes
+                        .iter()
+                        .any(|change| change.square.row >= 8 || change.square.col >= 8)
+                {
+                    return Err(EngineError::InvalidState(
+                        "invalid public history transition".into(),
+                    ));
+                }
+                let result: ResultRecord = serde_json::from_value(transition.result.clone())
+                    .map_err(|error| {
+                        EngineError::InvalidState(format!("invalid history result: {error}"))
+                    })?;
+                result.validate()?;
+                let allowed = &observation_policy().piece_public_fields;
+                for value in transition
+                    .board_changes
+                    .iter()
+                    .flat_map(|change| [&change.before, &change.after])
+                    .flatten()
+                {
+                    if value
+                        .as_object()
+                        .is_none_or(|object| object.keys().any(|name| !allowed.contains(name)))
+                    {
+                        return Err(EngineError::InvalidState(
+                            "nonpublic piece data in history".into(),
+                        ));
+                    }
+                }
+                for capture in transition
+                    .captures
+                    .white
+                    .iter()
+                    .chain(&transition.captures.black)
+                {
+                    if capture.as_object().is_none_or(|object| {
+                        !object.contains_key("type")
+                            || !object.contains_key("color")
+                            || object.keys().any(|name| {
+                                !matches!(
+                                    name.as_str(),
+                                    "type" | "color" | "logDir" | "windmillMode"
+                                )
+                            })
+                    }) {
+                        return Err(EngineError::InvalidState(
+                            "nonpublic capture data in history".into(),
+                        ));
+                    }
+                }
+                if transition.captures.white.len() > 12 || transition.captures.black.len() > 12 {
+                    return Err(EngineError::InvalidState(
+                        "public captures exceed the site display window".into(),
+                    ));
+                }
+                for card in transition
+                    .own_cards
+                    .iter()
+                    .chain(&transition.revealed_opponent_cards)
+                {
+                    if card.as_object().is_none_or(|object| {
+                        object
+                            .keys()
+                            .any(|name| !observation_policy().card_public_fields.contains(name))
+                    }) {
+                        return Err(EngineError::InvalidState(
+                            "nonpublic card data in history".into(),
+                        ));
+                    }
+                }
+            }
+        }
+        let mut identities = BTreeMap::<String, Piece>::new();
+        for row in 0..8 {
+            for col in 0..8 {
+                if let Some(piece) = &mut self.board[row][col] {
+                    if piece.kind.is_empty() {
+                        return Err(EngineError::InvalidState("piece type empty".into()));
+                    }
+                    if piece.id.is_empty() {
+                        let anchor_row = piece
+                            .extra
+                            .get("anchorRow")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(row as u64);
+                        let anchor_col = piece
+                            .extra
+                            .get("anchorCol")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(col as u64);
+                        piece.id = format!("{}-{anchor_row}-{anchor_col}", piece.color.as_str());
+                    }
+                    if let Some(previous) = identities.get(&piece.id) {
+                        if previous != piece || !piece.is_large() {
+                            return Err(EngineError::InvalidState(format!(
+                                "conflicting identity {}",
+                                piece.id
+                            )));
+                        }
+                    } else {
+                        identities.insert(piece.id.clone(), piece.clone());
+                    }
+                }
+            }
+        }
+        for piece in identities.values().filter(|piece| piece.is_large()) {
+            let cells = self
+                .board
+                .iter()
+                .flatten()
+                .filter(|cell| cell.as_ref().is_some_and(|item| item.id == piece.id))
+                .count();
+            if cells != 4 {
+                return Err(EngineError::InvalidState(format!(
+                    "large piece {} must occupy four cells",
+                    piece.id
+                )));
+            }
+        }
+        Ok(())
+    }
+    pub fn observe(&self, viewer: Color) -> Observation {
+        let policy = observation_policy();
+        let state_value = serde_json::to_value(self).expect("validated state serializes");
+        let mut public_state = public_object(state_value, &policy.state_public_fields)
+            .as_object()
+            .expect("state object")
+            .clone();
+        let project_cards = |color: Color| {
+            self.deck_slots
+                .get(color)
+                .iter()
+                .filter(|card| !card.vacant)
+                .map(|card| {
+                    public_object(
+                        serde_json::to_value(card).expect("card serializes"),
+                        &policy.card_public_fields,
+                    )
+                })
+                .collect::<Vec<Value>>()
+        };
+        let own_cards = project_cards(viewer);
+        let other_cards = project_cards(viewer.opponent());
+        public_state.insert("revealedOpponentCards".into(), json!(other_cards));
+        public_state.insert(
+            "ownStarTotal".into(),
+            json!(crate::flow::star_total(self, viewer)),
+        );
+        public_state.insert(
+            "opponentStarTotal".into(),
+            json!(crate::flow::star_total(self, viewer.opponent())),
+        );
+        public_state.insert("rulesVersion".into(), json!(self.ruleset_id));
+        public_state.insert(
+            "catalogVersion".into(),
+            json!("yt63f_Lcq4xUPu4GbbdwAyv5IUTuC079nNxvF3IFrj4"),
+        );
+        let style = self
+            .extra
+            .get("gameStyle")
+            .and_then(Value::as_str)
+            .unwrap_or("normal");
+        let phase = if style == "grand" {
+            "GRAND"
+        } else if !self.flag("middleDraftDone", viewer) {
+            "OPENING"
+        } else if self.flag("endDraftDone", viewer) {
+            "END"
+        } else {
+            "MIDDLE"
+        };
+        public_state.insert("phase".into(), json!(phase));
+        let rule_ids = self
+            .extra
+            .get("appliedRuleCard")
+            .and_then(|card| card.get("id"))
+            .and_then(Value::as_str)
+            .into_iter()
+            .chain(
+                self.extra
+                    .get("additionalRuleCards")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|card| card.get("id").and_then(Value::as_str)),
+            )
+            .collect::<Vec<_>>();
+        public_state.insert("ruleCardIds".into(), json!(rule_ids));
+        public_state.insert("captures".into(), json!(self.public_captures()));
+        let clock_fields = [
+            "enabled",
+            "initialMs",
+            "incrementMs",
+            "whiteMs",
+            "blackMs",
+            "runningColor",
+            "timeoutWinner",
+            "timeoutLoser",
+        ]
+        .map(str::to_owned);
+        public_state.insert(
+            "clock".into(),
+            self.extra
+                .get("clock")
+                .filter(|v| v.is_object())
+                .map(|v| public_object(v.clone(), &clock_fields))
+                .unwrap_or(Value::Null),
+        );
+        let last_move = self.extra.get("lastMove").filter(|value| {
+            value.is_object()
+                && value.get("hiddenFrom").and_then(Value::as_str) != Some(viewer.as_str())
+        });
+        let last_move = last_move
+            .map(|value| {
+                let mut projected = public_object(
+                    value.clone(),
+                    &["from", "to", "color", "kind"].map(str::to_owned),
+                );
+                for field in ["from", "to"] {
+                    if let Some(square) = projected.get_mut(field) {
+                        *square = public_object(square.clone(), &["row", "col"].map(str::to_owned));
+                    }
+                }
+                projected
+            })
+            .unwrap_or(Value::Null);
+        public_state.insert("lastMove".into(), last_move);
+        let selection = if let Some(pending) =
+            self.extra.get("pendingPromotion").filter(|v| !v.is_null())
+        {
+            json!({"kind":"promotion","color":pending.get("color"),"row":pending.get("row"),"col":pending.get("col"),"choices":if pending.get("color").and_then(Value::as_str)==Some(viewer.as_str()){pending.get("choices").cloned().unwrap_or_else(||json!([]))}else{json!([])}})
+        } else if let Some(trolley) = self.extra.get("activeTrolley").filter(|v| !v.is_null()) {
+            let choices=trolley.get("choices").and_then(Value::as_array).into_iter().flatten().map(|choice|choice.get("pieces").and_then(Value::as_array).into_iter().flatten().map(|cell|json!({"type":cell.get("type").or_else(||cell.get("piece").and_then(|p|p.get("type"))),"color":cell.get("color").or_else(||cell.get("piece").and_then(|p|p.get("color")))})).collect::<Vec<_>>()).collect::<Vec<_>>();
+            json!({"kind":"trolley","color":trolley.get("color"),"windowId":trolley.get("id"),"choices":choices})
+        } else {
+            Value::Null
+        };
+        public_state.insert("selectionPhase".into(), selection);
+        let taboo = self
+            .extra
+            .get("tabooPending")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .map(|entry| json!({"color":entry.get("color"),"square":entry.get("square")}))
+            .collect::<Vec<_>>();
+        public_state.insert("tabooPending".into(), json!(taboo));
+        let plans=self.extra.get("pendingFreeMoves").and_then(Value::as_array).into_iter().flatten().filter(|entry|entry.get("color").and_then(Value::as_str)==Some(viewer.as_str())).map(|entry| {
+            let moves=entry.get("moves").and_then(Value::as_array).into_iter().flatten().map(|m|json!({"from":m.get("from"),"to":m.get("to")})).collect::<Vec<_>>();
+            json!({"kind":"premove","triggerColor":entry.get("triggerColor"),"triggerTurn":entry.get("triggerTurn"),"moves":moves})
+        }).collect::<Vec<_>>();
+        public_state.insert("ownPlans".into(), json!(plans));
+        if self.mode == "draft"
+            && let Some(draft) = self.extra.get("draft").and_then(Value::as_object)
+            && (draft.get("color").and_then(Value::as_str) == Some(viewer.as_str())
+                || draft.get("kind").and_then(Value::as_str) == Some("grand"))
+        {
+            let choices = draft
+                .get("choices")
+                .and_then(Value::as_array)
+                .map(|cards| {
+                    cards
+                        .iter()
+                        .map(|card| public_object(card.clone(), &policy.card_public_fields))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            public_state.insert("draft".into(),json!({"kind":draft.get("kind").and_then(Value::as_str).unwrap_or(style),"phase":draft.get("phase"),"color":draft.get("color"),"choices":choices}));
+        }
+        let board = self
+            .board
+            .iter()
+            .enumerate()
+            .map(|(row, cells)| {
+                cells
+                    .iter()
+                    .enumerate()
+                    .map(|(col, cell)| {
+                        cell.as_ref().and_then(|piece| {
+                            if !self.piece_visible(
+                                piece,
+                                Square {
+                                    row: row as u8,
+                                    col: col as u8,
+                                },
+                                viewer,
+                            ) {
+                                return None;
+                            }
+                            let mut value = serde_json::to_value(piece).expect("piece serializes");
+                            let hallucinated = self
+                                .extra
+                                .get("hallucination")
+                                .and_then(|sides| sides.get(viewer.as_str()))
+                                .is_some_and(|entry| {
+                                    entry.get("color").and_then(Value::as_str)
+                                        == Some(piece.color.as_str())
+                                        && entry
+                                            .get("remaining")
+                                            .and_then(Value::as_i64)
+                                            .unwrap_or(0)
+                                            > 0
+                                });
+                            let visible_type = if hallucinated
+                                && !matches!(
+                                    piece.kind.as_str(),
+                                    "wall" | "football" | "blackHole" | "monster"
+                                ) {
+                                "queen"
+                            } else if piece.kind == "windmill" {
+                                if piece.extra.get("windmillMode").and_then(Value::as_str)
+                                    == Some("rook")
+                                {
+                                    "windmillRook"
+                                } else {
+                                    "windmillBishop"
+                                }
+                            } else if piece.kind == "log"
+                                && piece.extra.get("logDir").is_some_and(|dir| !dir.is_null())
+                            {
+                                "logRolling"
+                            } else {
+                                &piece.kind
+                            };
+                            value["type"] = json!(visible_type);
+                            Some(public_object(value, &policy.piece_public_fields))
+                        })
+                    })
+                    .collect()
+            })
+            .collect();
+        let history = self
+            .history
+            .iter()
+            .map(|entry| {
+                entry
+                    .get("public")
+                    .and_then(|public| public.get(viewer.as_str()))
+                    .expect("validated viewer history")
+                    .clone()
+            })
+            .collect();
+        let mut observation = Observation {
+            protocol_version: "accelerate-observation-v1".into(),
+            viewer,
+            turn: self.turn,
+            board,
+            own_cards,
+            opponent_hand_count: other_cards.len(),
+            public_state,
+            history,
+            information_state_key: String::new(),
+        };
+        let mut content = serde_json::to_value(&observation).expect("observation serializes");
+        content
+            .as_object_mut()
+            .expect("observation object")
+            .remove("informationStateKey");
+        let bytes = serde_jcs::to_vec(&content).expect("validated observation canonicalizes");
+        observation.information_state_key = format!("{:x}", Sha256::digest(bytes));
+        observation
+    }
+    /// Full viewer-facing projection, including the site's highlight surface.
+    /// Unsupported active rules are explicit errors at the language boundary.
+    pub fn try_observe(&self, viewer: Color) -> Result<Observation> {
+        let hints = crate::movement::public_hints(self, viewer)?;
+        let mut observation = self.observe(viewer);
+        observation.public_state.insert("legalHints".into(), hints);
+        observation.refresh_key();
+        Ok(observation)
+    }
+    pub(crate) fn piece_visible(&self, piece: &Piece, square: Square, viewer: Color) -> bool {
+        if piece.color == viewer {
+            return true;
+        }
+        if let Some(hidden) = piece
+            .extra
+            .get("hiddenFrom")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
+            return hidden != viewer.as_str();
+        }
+        if piece.color.owner().is_some() && self.flag("camouflageRule", viewer) && !piece.is_royal()
+        {
+            let row = piece
+                .extra
+                .get("anchorRow")
+                .and_then(Value::as_u64)
+                .unwrap_or(u64::from(square.row));
+            let col = piece
+                .extra
+                .get("anchorCol")
+                .and_then(Value::as_u64)
+                .unwrap_or(u64::from(square.col));
+            let light = (row + col).is_multiple_of(2);
+            let matching = if piece.color == Color::White {
+                light
+            } else {
+                !light
+            };
+            if matching {
+                return false;
+            }
+        }
+        true
+    }
+    pub(crate) fn public_captures(&self) -> Sides<Vec<Value>> {
+        let names = ["type", "color", "logDir", "windmillMode"].map(str::to_owned);
+        let project = |color| {
+            self.captures
+                .get(color)
+                .iter()
+                .skip(self.captures.get(color).len().saturating_sub(12))
+                .map(|piece| {
+                    public_object(
+                        serde_json::to_value(piece).expect("piece serializes"),
+                        &names,
+                    )
+                })
+                .collect()
+        };
+        Sides {
+            white: project(Color::White),
+            black: project(Color::Black),
+        }
+    }
+    pub(crate) fn set_flag(&mut self, name: &str, color: Color, value: bool) {
+        let entry = self
+            .extra
+            .entry(name.to_string())
+            .or_insert_with(|| json!({"white":false,"black":false}));
+        if let Value::Object(sides) = entry {
+            sides.insert(color.as_str().into(), Value::Bool(value));
+        }
+    }
+}
+
+impl Observation {
+    pub(crate) fn refresh_key(&mut self) {
+        let mut value = serde_json::to_value(&*self).expect("observation serializes");
+        value
+            .as_object_mut()
+            .expect("observation object")
+            .remove("informationStateKey");
+        let bytes = serde_jcs::to_vec(&value).expect("validated observation canonicalizes");
+        self.information_state_key = format!("{:x}", Sha256::digest(bytes));
+    }
+}

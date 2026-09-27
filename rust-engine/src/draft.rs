@@ -1,0 +1,570 @@
+//! Frozen card metadata and the initial/draft phase state machine.
+use crate::*;
+use serde::Deserialize;
+use serde_json::{Value, json};
+use std::{collections::BTreeSet, sync::OnceLock};
+
+#[derive(Deserialize)]
+struct Definitions {
+    definitions: Vec<Value>,
+    constants: Value,
+}
+fn definitions() -> &'static Definitions {
+    static DATA: OnceLock<Definitions> = OnceLock::new();
+    DATA.get_or_init(|| {
+        serde_json::from_str(include_str!(
+            "../../bridge/catalog/card-definitions-20260927.json"
+        ))
+        .expect("adopted card definitions")
+    })
+}
+pub(crate) fn frozen_timestamp() -> Result<i64> {
+    static TIME: OnceLock<std::result::Result<i64, String>> = OnceLock::new();
+    TIME.get_or_init(|| {
+        let catalog: Value =
+            serde_json::from_str(include_str!("../../bridge/catalog/site-20260927.json"))
+                .map_err(|e| e.to_string())?;
+        let text = catalog["source"]["frozenAt"]
+            .as_str()
+            .ok_or("freeze timestamp missing")?;
+        let number = |start: usize, end: usize| {
+            text.get(start..end)
+                .ok_or("invalid freeze timestamp")?
+                .parse::<i64>()
+                .map_err(|e| e.to_string())
+        };
+        let year = number(0, 4)?;
+        let month = number(5, 7)?;
+        let day = number(8, 10)?;
+        let adjusted = year - i64::from(month <= 2);
+        let era = adjusted.div_euclid(400);
+        let yoe = adjusted - era * 400;
+        let shifted = month + if month > 2 { -3 } else { 9 };
+        let doy = (153 * shifted + 2) / 5 + day - 1;
+        let days = era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
+        Ok(
+            (((days * 24 + number(11, 13)?) * 60 + number(14, 16)?) * 60 + number(17, 19)?) * 1000
+                + number(20, 23)?,
+        )
+    })
+    .clone()
+    .map_err(EngineError::InvalidState)
+}
+#[derive(Deserialize)]
+struct Weights {
+    weights: Vec<Weight>,
+}
+#[derive(Deserialize)]
+struct Weight {
+    id: String,
+    phase: String,
+    weight: f64,
+    #[serde(rename = "openingWeight")]
+    opening_weight: f64,
+}
+fn weights() -> &'static Weights {
+    static DATA: OnceLock<Weights> = OnceLock::new();
+    DATA.get_or_init(|| {
+        serde_json::from_str(include_str!("../../bridge/catalog/draft-20260927.json"))
+            .expect("adopted draft weights")
+    })
+}
+fn category(card: &Value) -> &str {
+    weights()
+        .weights
+        .iter()
+        .find(|weight| card.get("id").and_then(Value::as_str) == Some(&weight.id))
+        .map(|weight| weight.phase.as_str())
+        .unwrap_or("")
+}
+fn weight(card: &Value, opening: bool) -> f64 {
+    weights()
+        .weights
+        .iter()
+        .find(|weight| card.get("id").and_then(Value::as_str) == Some(&weight.id))
+        .map(|weight| {
+            if opening {
+                weight.opening_weight
+            } else {
+                weight.weight
+            }
+        })
+        .unwrap_or(0.0)
+}
+
+// Bounded fractional radix conversion uses the f64 interval and rounds the
+// last digit to even, matching Number.toString(36) for the RNG domain [0,1).
+// Mathematical reference: V8 src/numbers/conversions.cc DoubleToRadixStringView.
+pub(crate) fn random_suffix(value: f64) -> Result<String> {
+    if !value.is_finite() || !(0.0..1.0).contains(&value) {
+        return Err(EngineError::InvalidState(
+            "random identity value outside [0,1)".into(),
+        ));
+    }
+    if value == 0.0 {
+        return Ok(String::new());
+    }
+    let mut fraction = value;
+    let mut delta = ((f64::from_bits(value.to_bits() + 1) - value) * 0.5).max(f64::from_bits(1));
+    let mut digits = Vec::<u8>::new();
+    for _ in 0..2200 {
+        fraction *= 36.0;
+        delta *= 36.0;
+        let digit = fraction.floor() as u8;
+        digits.push(digit);
+        fraction -= f64::from(digit);
+        if (fraction > 0.5 || (fraction == 0.5 && digit % 2 == 1)) && fraction + delta > 1.0 {
+            while let Some(last) = digits.pop() {
+                if last < 35 {
+                    digits.push(last + 1);
+                    break;
+                }
+            }
+            break;
+        }
+        if fraction < delta {
+            break;
+        }
+    }
+    let alphabet = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    Ok(digits
+        .into_iter()
+        .map(|digit| char::from(alphabet[usize::from(digit)]))
+        .collect())
+}
+
+fn clone_card(state: &mut GameState, card: &Value) -> Result<Value> {
+    let mut card = card.clone();
+    let suffix = random_suffix(state.rng.sample()?)?;
+    card["instanceId"] = json!(format!(
+        "{}-{suffix}",
+        card["id"].as_str().expect("definition id")
+    ));
+    Ok(card)
+}
+fn weighted_pick<'a>(
+    state: &mut GameState,
+    pool: &'a [&'a Value],
+    opening: bool,
+) -> Result<Option<&'a Value>> {
+    if pool.is_empty() {
+        return Ok(None);
+    }
+    let sum = pool.iter().map(|card| weight(card, opening)).sum::<f64>();
+    let random = state.rng.sample()?;
+    if sum <= 0.0 {
+        return Ok(pool
+            .get((random * pool.len() as f64).floor() as usize)
+            .copied());
+    }
+    let mut roll = random * sum;
+    for &card in pool {
+        roll -= weight(card, opening);
+        if roll <= 0.0 {
+            return Ok(Some(card));
+        }
+    }
+    Ok(pool.last().copied())
+}
+fn conflicts(id: &str, unavailable: &BTreeSet<String>) -> bool {
+    definitions().constants["LATEST_MUTUALLY_EXCLUSIVE_DRAFT_CARD_GROUPS"]
+        .as_array()
+        .expect("conflict groups")
+        .iter()
+        .any(|group| {
+            group
+                .as_array()
+                .expect("conflict group")
+                .iter()
+                .any(|value| value.as_str() == Some(id))
+                && group
+                    .as_array()
+                    .expect("group")
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .any(|other| other != id && unavailable.contains(other))
+        })
+}
+fn grand_conflicts(id: &str, unavailable: &BTreeSet<String>) -> bool {
+    conflicts(id, unavailable)
+        || matches!(id, "democracy" | "queens-gambit")
+            && unavailable.contains(if id == "democracy" {
+                "queens-gambit"
+            } else {
+                "democracy"
+            })
+}
+fn shuffled(state: &mut GameState, items: &mut [Value]) -> Result<()> {
+    for index in (1..items.len()).rev() {
+        let destination = (state.rng.sample()? * (index + 1) as f64).floor() as usize;
+        items.swap(index, destination);
+    }
+    Ok(())
+}
+fn grand_pool(state: &mut GameState) -> Result<Vec<Value>> {
+    let mut unavailable = BTreeSet::new();
+    let mut choices = Vec::new();
+    for (phase, count) in [("OPENING", 4), ("MIDDLE", 10), ("PIECE", 7), ("END", 7)] {
+        let mut picked = Vec::new();
+        for _ in 0..count {
+            let pool = definitions()
+                .definitions
+                .iter()
+                .filter(|card| {
+                    category(card) == phase
+                        && card["id"] != "shotgun-king"
+                        && !unavailable.contains(card["id"].as_str().expect("card id"))
+                        && !grand_conflicts(card["id"].as_str().expect("card id"), &unavailable)
+                })
+                .collect::<Vec<_>>();
+            let Some(card) = weighted_pick(state, &pool, false)? else {
+                break;
+            };
+            picked.push(clone_card(state, card)?);
+            unavailable.insert(card["id"].as_str().expect("card id").into());
+        }
+        shuffled(state, &mut picked)?;
+        choices.extend(picked);
+    }
+    Ok(choices)
+}
+pub(crate) fn condition_grand_initial_choices(
+    state: &mut GameState,
+    public: &[Value],
+) -> Result<()> {
+    if public.len() != 28 {
+        return Err(EngineError::InvalidState(
+            "initial grand pool must contain 28 cards".into(),
+        ));
+    }
+    let mut unavailable = BTreeSet::new();
+    let mut identities = BTreeSet::new();
+    let mut conditioned = Vec::new();
+    let mut index = 0;
+    for (phase, count) in [("OPENING", 4), ("MIDDLE", 10), ("PIECE", 7), ("END", 7)] {
+        for _ in 0..count {
+            let view = &public[index];
+            index += 1;
+            let id = view
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| EngineError::InvalidState("public grand card id missing".into()))?;
+            let definition = definitions()
+                .definitions
+                .iter()
+                .find(|card| card["id"].as_str() == Some(id))
+                .ok_or_else(|| {
+                    EngineError::InvalidState(format!("unknown public grand card {id}"))
+                })?;
+            if id == "shotgun-king"
+                || category(definition) != phase
+                || weight(definition, false) <= 0.0
+                || unavailable.contains(id)
+                || grand_conflicts(id, &unavailable)
+            {
+                return Err(EngineError::InvalidState("public grand pool violates source categories, weights, uniqueness or exclusives".into()));
+            }
+            let identity = view
+                .get("instanceId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    EngineError::InvalidState("public grand card instance missing".into())
+                })?;
+            crate::conditioning::validate_initial_identity(id, identity)?;
+            if !identities.insert(identity.to_owned()) {
+                return Err(EngineError::InvalidState(
+                    "duplicate public grand card identity".into(),
+                ));
+            }
+            let mut card = definition.clone();
+            card["instanceId"] = json!(identity);
+            conditioned.push(card);
+            unavailable.insert(id.to_owned());
+        }
+    }
+    state
+        .extra
+        .get_mut("draft")
+        .ok_or_else(|| EngineError::InvalidState("sampled grand phase missing".into()))?["choices"] =
+        json!(conditioned);
+    Ok(())
+}
+
+pub(crate) fn initialize(config: GameConfig, seed: u64) -> Result<GameState> {
+    if seed > u64::from(u32::MAX)
+        || !matches!(config.game_style.as_str(), "normal" | "chaos" | "grand")
+        || config.star_win_limit == 0
+        || config.deathmatch_limit_turns == 0
+    {
+        return Err(EngineError::InvalidConfig(
+            "invalid initial game configuration".into(),
+        ));
+    }
+    if !config.rule_card_ids.is_empty() {
+        return Err(EngineError::UnsupportedFeature(
+            "initial RULE activation".into(),
+        ));
+    }
+    let raw: Value = serde_json::from_str(include_str!(
+        "../../bridge/catalog/initial-state-20260927.json"
+    ))
+    .expect("adopted reset defaults");
+    let mut state: GameState =
+        serde_json::from_value(raw["state"].clone()).map_err(EngineError::serialization)?;
+    state.rng = RngState::seeded(seed);
+    for col in 0..8 {
+        for row in [0, 7] {
+            let suffix = random_suffix(state.rng.sample()?)?;
+            let piece = state.board[row][col].as_mut().expect("initial rank");
+            piece.id = format!("{}-{}-{suffix}", piece.color.as_str(), piece.kind);
+        }
+    }
+    for col in 0..8 {
+        for row in [1, 6] {
+            let suffix = random_suffix(state.rng.sample()?)?;
+            let piece = state.board[row][col].as_mut().expect("initial pawn");
+            piece.id = format!("{}-{}-{suffix}", piece.color.as_str(), piece.kind);
+        }
+    }
+    state
+        .extra
+        .insert("gameStyle".into(), json!(config.game_style));
+    state.extra.insert("localMode".into(), json!("local"));
+    state
+        .extra
+        .insert("draftDelete".into(), json!(config.draft_delete));
+    state
+        .extra
+        .insert("starWinLimit".into(), json!(config.star_win_limit));
+    state
+        .extra
+        .insert("deathmatchEnabled".into(), json!(config.deathmatch_enabled));
+    state.extra.insert(
+        "deathmatchLimitTurns".into(),
+        json!(config.deathmatch_limit_turns),
+    );
+    let slots = if config.game_style == "normal" { 3 } else { 6 };
+    state.deck_slots=serde_json::from_value::<GameState>(json!({"board":state.board,"turn":"white","deckSlots":{"white":vec![Value::Null;slots],"black":vec![Value::Null;slots]}})).map_err(EngineError::serialization)?.deck_slots;
+    if config.draft_delete {
+        state.mode = "play".into();
+        state.turn = Color::White;
+        crate::flow::record_position(&mut state)?;
+    } else if config.game_style == "grand" {
+        state.mode = "draft".into();
+        state.turn = Color::Black;
+        state.extra.insert("middleDraftDone".into(), json!(true));
+        state.extra.insert("endDraftDone".into(), json!(true));
+        state.extra.insert("endPhaseStartMove".into(), json!(0));
+        let choices = grand_pool(&mut state)?;
+        state.extra.insert("draft".into(),json!({"kind":"grand","version":1,"phase":"GRAND","color":"black","choices":choices,"picks":[],"pickIndex":0}));
+    } else {
+        return Err(EngineError::UnsupportedFeature(
+            "weighted normal/chaos draft eligibility".into(),
+        ));
+    }
+    Ok(state)
+}
+
+pub(crate) fn legal_actions(state: &GameState) -> Result<Vec<Action>> {
+    let draft = state
+        .extra
+        .get("draft")
+        .ok_or_else(|| EngineError::InvalidState("draft phase missing offer".into()))?;
+    if draft.get("kind").and_then(Value::as_str) != Some("grand") {
+        return Err(EngineError::UnsupportedFeature(
+            "normal/chaos draft transition".into(),
+        ));
+    }
+    let color: Color =
+        serde_json::from_value(draft["color"].clone()).map_err(EngineError::serialization)?;
+    let picks = draft["picks"]
+        .as_array()
+        .ok_or_else(|| EngineError::InvalidState("grand picks missing".into()))?;
+    if picks.len() >= 12 {
+        return Ok(Vec::new());
+    }
+    let owned = picks
+        .iter()
+        .filter(|pick| pick["color"] == color.as_str())
+        .filter_map(|pick| pick["cardId"].as_str().map(str::to_owned))
+        .collect::<BTreeSet<_>>();
+    if owned.len() >= 6 {
+        return Ok(Vec::new());
+    }
+    let exclusive = definitions().constants["EXCLUSIVE_OPENING_CARD_IDS"]
+        .as_array()
+        .expect("exclusive opening ids");
+    draft["choices"]
+        .as_array()
+        .ok_or_else(|| EngineError::InvalidState("grand choices missing".into()))?
+        .iter()
+        .filter(|card| {
+            !picks
+                .iter()
+                .any(|pick| pick["instanceId"] == card["instanceId"])
+                && !conflicts(card["id"].as_str().expect("card id"), &owned)
+                && !(exclusive.contains(&card["id"])
+                    && owned.iter().any(|id| exclusive.contains(&json!(id))))
+        })
+        .map(|card| {
+            let mut action = Action::movement(
+                color,
+                Square { row: 0, col: 0 },
+                MoveTarget::at(Square { row: 0, col: 0 }),
+            );
+            action.kind = ActionKind::DraftPick;
+            action.from = None;
+            action.destination = None;
+            action.card_instance_id = Some(
+                card["instanceId"]
+                    .as_str()
+                    .ok_or_else(|| EngineError::InvalidState("draft instance missing".into()))?
+                    .into(),
+            );
+            Ok(action)
+        })
+        .collect()
+}
+
+pub(crate) fn apply_pick(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
+    let draft = state
+        .extra
+        .get("draft")
+        .cloned()
+        .ok_or(EngineError::IllegalAction)?;
+    if draft["kind"] != "grand" {
+        return Err(EngineError::UnsupportedFeature(
+            "normal draft acquisition".into(),
+        ));
+    }
+    let card = draft["choices"]
+        .as_array()
+        .ok_or(EngineError::IllegalAction)?
+        .iter()
+        .find(|card| card["instanceId"].as_str() == action.card_instance_id.as_deref())
+        .cloned()
+        .ok_or(EngineError::IllegalAction)?;
+    let color = action.color;
+    let slot = state
+        .deck_slots
+        .get(color)
+        .iter()
+        .position(|card| card.vacant)
+        .ok_or_else(|| EngineError::InvalidState("grand deck is full".into()))?;
+    let nonce = state
+        .extra
+        .get("cardAcquisitionNonce")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        .checked_add(1)
+        .ok_or_else(|| EngineError::InvalidState("card acquisition order overflow".into()))?;
+    let mut stored = card.clone();
+    let phase = category(&card);
+    stored["deckCard"] = json!(true);
+    stored["firstTurnCard"] = json!(state.move_count == 0 && phase == "OPENING");
+    stored["slot"] = json!(slot);
+    stored["acquiredOrder"] = json!(nonce);
+    if phase == "END" {
+        stored["nextTurnPending"] = json!(true);
+        stored["nextTurnPendingSinceTurn"] = json!(0);
+    } else {
+        stored
+            .as_object_mut()
+            .expect("card")
+            .remove("nextTurnPending");
+        stored
+            .as_object_mut()
+            .expect("card")
+            .remove("nextTurnPendingSinceTurn");
+    }
+    stored
+        .as_object_mut()
+        .expect("card")
+        .remove("passiveApplied");
+    state.deck_slots.get_mut(color)[slot] =
+        serde_json::from_value(stored).map_err(EngineError::serialization)?;
+    state
+        .extra
+        .insert("cardAcquisitionNonce".into(), json!(nonce));
+    // The actual client queues gain notation before noteCardEvent. Its notation
+    // identifier consumes Math.random even though it is presentation metadata;
+    // omitting that draw would change every subsequent gameplay chance outcome.
+    state.rng.sample()?;
+    crate::flow::note_card_event(state)?;
+    let mut next_draft = draft;
+    let picks = next_draft["picks"]
+        .as_array_mut()
+        .ok_or(EngineError::IllegalAction)?;
+    let order = picks.len() + 1;
+    picks.push(
+        json!({"instanceId":card["instanceId"],"cardId":card["id"],"color":color,"order":order}),
+    );
+    next_draft["pickIndex"] = json!(order);
+    state.extra.insert("draft".into(), next_draft);
+    if order < 12 {
+        let next = if order % 2 == 0 {
+            Color::Black
+        } else {
+            Color::White
+        };
+        state.turn = next;
+        state.extra.get_mut("draft").expect("draft")["color"] = json!(next);
+        state.extra.insert("draftLocked".into(), json!(false));
+    } else {
+        let catalog: Value =
+            serde_json::from_str(include_str!("../../bridge/catalog/site-20260927.json"))
+                .expect("adopted card catalog");
+        let mut acquired = state.extra["draft"]["picks"]
+            .as_array()
+            .expect("grand picks")
+            .clone();
+        let priority = |id: &str| match id {
+            "london-system" => 0,
+            "horde" => 1,
+            "big-rook" | "big-bishop" => 2,
+            "false-start" => 4,
+            "locust-swarm" => 5,
+            _ => 3,
+        };
+        acquired.sort_by_key(|pick| {
+            (
+                priority(pick["cardId"].as_str().unwrap_or("")),
+                pick["order"].as_u64().unwrap_or(0),
+            )
+        });
+        for pick in acquired {
+            if state.mode == "gameover" {
+                break;
+            }
+            let side: Color = serde_json::from_value(pick["color"].clone())
+                .map_err(EngineError::serialization)?;
+            let Some(slot) =
+                state.deck_slots.get(side).iter().position(|card| {
+                    Some(card.instance_id.as_str()) == pick["instanceId"].as_str()
+                })
+            else {
+                continue;
+            };
+            let card = &state.deck_slots.get(side)[slot];
+            if catalog["cards"]
+                .as_array()
+                .expect("catalog cards")
+                .iter()
+                .any(|definition| {
+                    definition["id"] == card.id && definition["activation"] == "PASSIVE"
+                })
+            {
+                crate::transition::apply_draft_passive(state, side, slot)?;
+            }
+        }
+        crate::flow::note_card_event(state)?;
+        if state.mode == "gameover" {
+            return Ok(Vec::new());
+        }
+        state.mode = "play".into();
+        state.turn = Color::White;
+        state.extra.insert("draftLocked".into(), json!(false));
+        crate::flow::record_position(state)?;
+    }
+    Ok(Vec::new())
+}

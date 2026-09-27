@@ -30,6 +30,20 @@ card.target.direction에 들어간다. 실제 `chooseRuleTicket`, `chooseJokerCa
 `chooseBarricadeDirection`은 활성화 전에 정보를 선택하며 그 사이 RNG·행동자 변화가 없어
 하나의 최종 card 행동으로 정규화한다. `draftDelete`는 draft 생략 설정이며 행동 종류가 아니다.
 
+공개 정보 탐색의 선택 형식은 `public-decision-intent-v1`이다. `Action.public_intent()`가
+source UI에서 선택할 수 있는 정보만 투영하며, 현재 일반 이동은
+`{type:'move', color, from:{row,col}, destination:{row,col}}`을 사용한다. 카드 instance와
+공개 선택·ordered target은 선택 의미에 맞춰 보존한다. 실제 환경의
+`Position.bind_public_intent(intent)`가 화면의 선택 순서대로 실행 payload를 해결한다.
+그때 결정되는 숨은 기물·capture flag·private position identity는 신경망·정보집합 키에 넣지 않는다.
+아직 미지원인 특수 선택을 Python에서 임의 flag 제거로 대신하지 않는다.
+
+ONNX encoder 계약은 `exact-payload`와 `public-decision-intent-v1`의 action 정책을 각각
+기록하고 별도 hash를 갖는다. 봇 탐색은 공개 intent 계약을 사용하며 실행 Action의 lossless
+직렬화는 위 v1 envelope로 유지한다. 원본 public trace/replay를 보존하면서 신경망 history만
+`full` 또는 `public-history-summary-v1`로 명시할 수 있다. 서로 다른 정책의 artifact를
+자동으로 호환 처리하지 않는다.
+
 JCS 입력은 유한 수, safe integer, 유효 Unicode, dense array, 일반 JSON object로 제한한다.
 최대 depth 64, node 100000, 경계 byte budget 8 MiB를 적용한다. unknown wrapper 필드,
 NaN/Infinity, lone surrogate, sparse array, cursor overflow와 malformed history는 명시적으로
