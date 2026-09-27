@@ -393,7 +393,7 @@ pub(crate) fn validate_action(state: &GameState, action: &Action) -> Result<()> 
                         && Some(&card.instance_id) == action.card_instance_id.as_ref()
                 })
                 .ok_or(EngineError::IllegalAction)?;
-            if crate::transition::card_actions(state, card)?.contains(action) {
+            if crate::transition::validate_card_action(state, card, action)? {
                 Ok(())
             } else {
                 Err(EngineError::IllegalAction)
@@ -450,6 +450,7 @@ pub(crate) fn public_hints(state: &GameState, viewer: Color) -> Result<Value> {
             }
         }
     }
+    let mut card_targets = Vec::new();
     if !state
         .extra
         .get("draftDelete")
@@ -469,15 +470,42 @@ pub(crate) fn public_hints(state: &GameState, viewer: Color) -> Result<Value> {
             {
                 continue;
             }
-            // Targeting cards require a port of the actual getTargetSquares
-            // surface. Exact legal payloads are never copied into public hints.
-            return Err(EngineError::UnsupportedFeature(format!(
-                "public card target hints {}",
-                card.effect
-            )));
+            let targets = if let Some(targets) = crate::card_effects::target_squares(state, card)? {
+                targets
+            } else {
+                crate::transition::card_ui_actions(state, card)?
+                    .into_iter()
+                    .map(|a| {
+                        a.target
+                            .ok_or_else(|| {
+                                EngineError::UnsupportedFeature(format!(
+                                    "card target surface {}",
+                                    card.effect
+                                ))
+                            })
+                            .and_then(|v| {
+                                serde_json::from_value::<Square>(v).map_err(|_| {
+                                    EngineError::UnsupportedFeature(format!(
+                                        "compound card target surface {}",
+                                        card.effect
+                                    ))
+                                })
+                            })
+                    })
+                    .collect::<Result<Vec<_>>>()?
+            };
+            let targets = targets
+                .into_iter()
+                .filter(|&square| {
+                    state
+                        .at(square)
+                        .is_none_or(|piece| state.piece_visible(piece, square, viewer))
+                })
+                .collect::<Vec<_>>();
+            card_targets.push(json!({"cardInstanceId":card.instance_id,"targets":targets}));
         }
     }
-    Ok(json!({"moves":hints,"cardTargets":[]}))
+    Ok(json!({"moves":hints,"cardTargets":card_targets}))
 }
 fn highlight_cells(target: &MoveTarget) -> Result<Vec<Square>> {
     if target.flags.contains_key("bodyCells") || target.flag("shotgunBlast") {
@@ -606,7 +634,6 @@ fn ensure_supported(state: &GameState) -> Result<()> {
         "regency",
         "racingKing",
         "radicalCharge",
-        "encouragement",
         "ironMonarch",
         "imperialStudies",
         "religiousVictory",
@@ -729,7 +756,131 @@ fn active(value: &Value) -> bool {
     }
 }
 pub(crate) fn frozen(piece: &Piece) -> bool {
-    piece.flag("frozen") || piece.number("frozen") > 0 || piece.number("frozenTurns") > 0
+    piece.kind != "scarecrow"
+        && piece.extra.get("frozen").is_some_and(|v| match v {
+            Value::Null => false,
+            Value::Bool(v) => *v,
+            Value::Number(v) => v.as_f64().is_some_and(|v| v != 0.0),
+            Value::String(v) => !v.is_empty(),
+            _ => true,
+        })
+}
+
+/// Source placement and relocation differ: placement checks opponent d4 and
+/// all reserved portal cells; relocation checks only movement-blocking portals.
+pub(crate) fn open_placement(
+    state: &GameState,
+    square: Square,
+    color: Option<Color>,
+) -> Result<bool> {
+    if square.row >= 8
+        || square.col >= 8
+        || state.at(square).is_some()
+        || quantum_occupied(state, square)?
+    {
+        return Ok(false);
+    }
+    if let Some(color) = color {
+        let enemy = color.opponent();
+        if state.flag("d4", enemy)
+            && square
+                == (Square {
+                    row: if enemy == Color::Black { 3 } else { 4 },
+                    col: 3,
+                })
+        {
+            return Ok(false);
+        }
+    }
+    Ok(!reserved(state, square, false)?)
+}
+pub(crate) fn open_relocation(state: &GameState, square: Square) -> Result<bool> {
+    Ok(square.row < 8
+        && square.col < 8
+        && state.at(square).is_none()
+        && !quantum_occupied(state, square)?
+        && !reserved(state, square, true)?)
+}
+pub(crate) fn open_alibaba_placement(
+    state: &GameState,
+    square: Square,
+    owner: Color,
+) -> Result<bool> {
+    if !open_placement(state, square, Some(owner))? || collapsed(state, square) {
+        return Ok(false);
+    }
+    if state.extra.get("crownRule").is_some_and(active) {
+        return Err(EngineError::UnsupportedFeature(
+            "placement on ground crowns".into(),
+        ));
+    }
+    let holes = state.extra.get("blackHole").filter(|v| !v.is_null());
+    if let Some(holes) = holes {
+        let holes = holes.as_array().ok_or_else(|| {
+            EngineError::UnsupportedFeature("legacy black-hole placement shape".into())
+        })?;
+        if holes.iter().any(|cell| {
+            cell.get("row").and_then(Value::as_u64) == Some(u64::from(square.row))
+                && cell.get("col").and_then(Value::as_u64) == Some(u64::from(square.col))
+        }) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+fn quantum_occupied(state: &GameState, square: Square) -> Result<bool> {
+    for piece in state.board.iter().flatten().flatten() {
+        let Some(quantum) = piece.extra.get("quantum").filter(|q| !q.is_null()) else {
+            continue;
+        };
+        let anchor: Square =
+            serde_json::from_value(quantum.clone()).map_err(EngineError::serialization)?;
+        let size = if piece.is_large() { 2 } else { 1 };
+        if square.row >= anchor.row
+            && square.col >= anchor.col
+            && square.row - anchor.row < size
+            && square.col - anchor.col < size
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+fn reserved(state: &GameState, square: Square, relocation: bool) -> Result<bool> {
+    let same_square = |value: &Value| {
+        value.get("row").and_then(Value::as_u64) == Some(u64::from(square.row))
+            && value.get("col").and_then(Value::as_u64) == Some(u64::from(square.col))
+    };
+    for name in ["pendingScarecrows", "pendingLobsters", "pendingPortals"] {
+        let Some(entries) = state.extra.get(name).filter(|v| !v.is_null()) else {
+            continue;
+        };
+        let entries = entries
+            .as_array()
+            .ok_or_else(|| EngineError::InvalidState(format!("{name} must be an array")))?;
+        for entry in entries {
+            let matches = match name {
+                "pendingScarecrows" => {
+                    entry
+                        .get("pieceId")
+                        .is_none_or(|v| v.is_null() || v.as_str() == Some(""))
+                        && same_square(entry)
+                }
+                "pendingLobsters" => same_square(entry),
+                _ => {
+                    (!relocation || entry.get("blocksMovement") == Some(&json!(true)))
+                        && entry
+                            .get("cells")
+                            .and_then(Value::as_array)
+                            .is_some_and(|cells| cells.iter().any(&same_square))
+                }
+            };
+            if matches {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 fn forced_piece_id(state: &GameState) -> Option<&str> {
     state
@@ -742,6 +893,7 @@ fn forced_piece_id(state: &GameState) -> Option<&str> {
 }
 
 pub(crate) fn can_capture(state: &GameState, attacker: &Piece, target: &Piece) -> bool {
+    let ability = attacker.ability_kind();
     let Some(actor) = attacker.color.owner() else {
         return false;
     };
@@ -758,10 +910,24 @@ pub(crate) fn can_capture(state: &GameState, attacker: &Piece, target: &Piece) -
         || target.flag("protected")
         || frozen(target)
         || target.flag("submerged")
+        || target.ability_kind() == "guard"
+        || target.ability_kind() == "revolvingDoor"
+        || encouraged(state, target)
     {
         return false;
     }
-    if matches!(attacker.kind.as_str(), "campfire" | "paladin" | "guard") {
+    let socialist = state.flag("socialism", actor)
+        && !state.royal_identity(attacker)
+        && attacker.kind != "crown"
+        && ability != "slime";
+    if matches!(
+        ability,
+        "campfire" | "paladin" | "revolvingDoor" | "recruiter" | "guard"
+    ) && !socialist
+    {
+        return false;
+    }
+    if ability == "idol" && !attacker.flag("crownBearer") && !socialist {
         return false;
     }
     if state.flag("saturationRule", attacker.color) && attacker.number("capturesMade") >= 3 {
@@ -781,29 +947,52 @@ pub(crate) fn can_capture(state: &GameState, attacker: &Piece, target: &Piece) -
     {
         return false;
     }
-    if target.kind == "jester" && attacker.kind != "king" {
+    if (target.ability_kind() == "jester"
+        || target
+            .extra
+            .get("captureRestriction")
+            .and_then(Value::as_str)
+            == Some("royal-only"))
+        && (ability == "jester"
+            || !(attacker.flag("crownBearer") || state.royal_identity(attacker)))
+    {
         return false;
     }
-    if !target.is_royal()
-        && target.kind != "scarecrow"
-        && state.board.iter().flatten().flatten().any(|piece| {
-            piece.kind == "campfire" && piece.color == target.color && piece.id != target.id
+    true
+}
+pub(crate) fn encouraged(state: &GameState, target: &Piece) -> bool {
+    if target.kind == "scarecrow" {
+        return false;
+    }
+    if target.flag("outpostProtected") {
+        return true;
+    }
+    let Some(cell) = find_square(state, &target.id) else {
+        return false;
+    };
+    if !state.royal_identity(target)
+        && ORTHO.iter().any(|delta| {
+            cell.offset(delta.0, delta.1)
+                .and_then(|square| state.at(square))
+                .is_some_and(|piece| piece.kind == "campfire" && piece.color == target.color)
         })
     {
-        let target_pos = find_square(state, &target.id);
-        if let Some(square) = target_pos {
-            for delta in ORTHO {
-                if square
-                    .offset(delta.0, delta.1)
-                    .and_then(|s| state.at(s))
-                    .is_some_and(|piece| piece.kind == "campfire" && piece.color == target.color)
-                {
-                    return false;
-                }
+        return true;
+    }
+    if !state.flag("encouragement", target.color) {
+        return false;
+    }
+    for row in 0..8 {
+        for col in 0..8 {
+            let king = Square { row, col };
+            if state.at(king).is_some_and(|piece| {
+                piece.color == target.color && (piece.is_royal() || piece.flag("regencyHeir"))
+            }) {
+                return row.abs_diff(cell.row) + col.abs_diff(cell.col) == 1;
             }
         }
     }
-    true
+    false
 }
 fn find_square(state: &GameState, id: &str) -> Option<Square> {
     for row in 0..8 {
@@ -976,31 +1165,11 @@ pub(crate) fn piece_moves(
         "cannon" => cannon(state, piece, from),
         "grasshopper" => grasshopper(state, piece, from),
         "checker" | "checkerKing" => checker(state, piece, from),
-        "missionary" => DIAG
-            .iter()
-            .filter_map(|&(dr, dc)| from.offset(dr, dc))
-            .filter(|&to| {
-                !collapsed(state, to)
-                    && state.at(to).is_none_or(|target| {
-                        target.color != piece.color
-                            && !target.is_royal()
-                            && !matches!(
-                                target.kind.as_str(),
-                                "wall" | "football" | "monster" | "blackHole"
-                            )
-                    })
-            })
-            .map(|to| {
-                let mut m = MoveTarget::at(to);
-                if state.at(to).is_some() {
-                    m.flags.insert("missionaryConvert".into(), json!(true));
-                }
-                m
-            })
-            .collect(),
+        "missionary" => missionary(state, piece, from),
         "bigRook" | "bigBishop" => large_rays(state, piece, from),
         "wall" | "coffin" | "scarecrow" => Vec::new(),
-        other => return Err(EngineError::UnsupportedFeature(format!("movement {other}"))),
+        other => crate::variant_movement::base_moves(state, piece, from)?
+            .ok_or_else(|| EngineError::UnsupportedFeature(format!("movement {other}")))?,
     };
     if state.flag("socialism", piece.color)
         && !piece.is_royal()
@@ -1027,7 +1196,11 @@ pub(crate) fn piece_moves(
     Ok(moves)
 }
 
-fn expansion_destination_allowed(state: &GameState, color: PieceColor, cells: &[Square]) -> bool {
+pub(crate) fn expansion_destination_allowed(
+    state: &GameState,
+    color: PieceColor,
+    cells: &[Square],
+) -> bool {
     if cells.is_empty() || cells.iter().any(|cell| cell.row >= 8 || cell.col >= 8) {
         return false;
     }
@@ -1166,7 +1339,7 @@ fn expansion_move_allowed(
     Ok(true)
 }
 
-fn pawn_moves(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget> {
+pub(crate) fn pawn_moves(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget> {
     let Some(actor) = piece.color.owner() else {
         return Vec::new();
     };
@@ -1201,7 +1374,7 @@ fn pawn_moves(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget>
             let start = if piece.color == Color::White { 6 } else { 1 };
             if forward == dir
                 && !piece.moved
-                && from.row == start
+                && (from.row == start || from.row == actor.home_row())
                 && let Some(two) = one.offset(forward, 0)
                 && state.at(two).is_none()
                 && !collapsed(state, two)
@@ -1211,7 +1384,8 @@ fn pawn_moves(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget>
                     .flags
                     .insert("standardPawnDoubleStep".into(), json!(true));
                 moves.push(target);
-                if state.flag("pawnSprint", piece.color)
+                if piece.kind == "pawn"
+                    && state.flag("pawnSprint", piece.color)
                     && let Some(three) = two.offset(forward, 0)
                     && state.at(three).is_none()
                     && !collapsed(state, three)
@@ -1265,7 +1439,67 @@ fn pawn_moves(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget>
             moves.push(target);
         }
     }
+    let bearer = piece.ability_kind() == "standardBearer"
+        || piece.kind == "pawn"
+            && state.board[from.row as usize]
+                .iter()
+                .flatten()
+                .any(|target| {
+                    target.color == piece.color && target.ability_kind() == "standardBearer"
+                });
+    if bearer {
+        let capture_ready = state.board[from.row as usize]
+            .iter()
+            .flatten()
+            .any(|target| {
+                target.color == piece.color
+                    && target.ability_kind() == "standardBearer"
+                    && target.number("freshNoCaptureUntil")
+                        <= i64::from(*state.turns_taken.get(actor))
+            });
+        for dc in [-1, 1] {
+            if let Some(cell) = from.offset(0, dc)
+                && state
+                    .at(cell)
+                    .is_none_or(|target| capture_ready && can_capture(state, piece, target))
+                && !collapsed(state, cell)
+            {
+                moves.push(MoveTarget::at(cell));
+            }
+        }
+    }
     moves
+}
+
+pub(crate) fn missionary(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget> {
+    DIAG.iter()
+        .filter_map(|&(dr, dc)| from.offset(dr, dc))
+        .filter(|&to| {
+            !collapsed(state, to)
+                && state.at(to).is_none_or(|target| {
+                    target.color != piece.color
+                        && target.color.owner().is_some()
+                        && !matches!(
+                            target.kind.as_str(),
+                            "wall" | "football" | "monster" | "blackHole"
+                        )
+                        && !(piece.flag("desperado")
+                            && (target.flag("regencyHeir")
+                                || target.flag("crownRoyal")
+                                || matches!(
+                                    target.kind.as_str(),
+                                    "king" | "royalKnight" | "shotgunKing" | "darkWizard"
+                                )))
+                })
+        })
+        .map(|to| {
+            let mut target = MoveTarget::at(to);
+            if state.at(to).is_some() {
+                target.flags.insert("missionaryConvert".into(), json!(true));
+            }
+            target
+        })
+        .collect()
 }
 
 fn castling(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget> {
@@ -1322,7 +1556,7 @@ fn castling(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget> {
     }
     moves
 }
-fn cannon(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget> {
+pub(crate) fn cannon(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget> {
     let mut moves = Vec::new();
     for &(dr, dc) in ORTHO {
         let mut cursor = from;
@@ -1351,9 +1585,9 @@ fn cannon(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget> {
     }
     moves
 }
-fn grasshopper(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget> {
+pub(crate) fn grasshopper(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget> {
     let mut moves = Vec::new();
-    for &(dr, dc) in KING {
+    for &(dr, dc) in DIAG.iter().chain(ORTHO.iter()) {
         let mut cursor = from;
         while let Some(to) = cursor.offset(dr, dc) {
             cursor = to;
@@ -1372,7 +1606,7 @@ fn grasshopper(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget
     }
     moves
 }
-fn checker(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget> {
+pub(crate) fn checker(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget> {
     let Some(actor) = piece.color.owner() else {
         return Vec::new();
     };

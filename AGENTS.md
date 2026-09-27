@@ -13,8 +13,8 @@
 - 기존에 사용할 수 있는 checkout을 우선한다. 작업 격리가 필요할 때만 worktree를
   추가하고 다른 작업이 사용하는 checkout·브랜치를 정리하지 않는다.
 - `rust-engine/`: 독립 규칙 엔진. Python·PyO3·신경망·ONNX runtime을 의존하지 않는다.
-- `bridge/`: 공통 계약과 얇은 언어 연동. PyO3 바인딩은 향후 이 영역의 독립 crate에
-  두며, 게임 규칙·MCTS·학습 로직을 넣지 않는다.
+- `bridge/`: 공통 계약과 얇은 언어 연동. PyO3 바인딩은 `bridge/native/`, 독립 ONNX
+  추론 adapter는 `bridge/runtime/`에 두며, 게임 규칙·MCTS·학습 로직을 넣지 않는다.
 - `python/`: 인코딩·MCTS·ResNet·LoRA·FiLM·self-play·학습·평가. 규칙을 중복 구현하지 않는다.
 - `infra/`: JS oracle과 기존 실험 도구. 상대 경로와 기존 동작을 보존한다.
 - `pre_cpp_engine_code/`: Rust 포팅 참고용 C++ 초안. 완성된 엔진으로 간주하지 않는다.

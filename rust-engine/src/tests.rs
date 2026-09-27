@@ -90,6 +90,17 @@ fn standard_initial_moves_branch_without_mutation() {
     assert_eq!(step.position.state().turn, Color::Black);
     assert!(step.turn_changed);
     assert_eq!(step.position.state().en_passant.as_ref().unwrap().row, 5);
+    let replay = &step.position.state().extra["moveReplay"]["white"];
+    assert_eq!(replay["delta"].as_array().unwrap().len(), 2);
+    assert_eq!(replay["recordedMoveCount"], 1);
+    assert_eq!(step.position.state().extra["notationEvent"]["text"], "e4");
+    assert_eq!(
+        step.position.state().extra["replayEvents"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     assert_eq!(step.position.legal_actions().unwrap().len(), 20);
     assert_eq!(
         step.position.apply(&action).unwrap_err(),
@@ -218,6 +229,7 @@ fn card_is_free_and_additional_action_changes_actor_only_at_boundary() {
         used: false,
         recovering: false,
         vacant: false,
+        source_order: Vec::new(),
         extra: Fields::new(),
     };
     let position = Position::from_state(state).unwrap();
@@ -293,6 +305,7 @@ fn nonpublic_piece_offers_and_rng_do_not_enter_observation_or_its_key() {
         used: false,
         recovering: false,
         vacant: false,
+        source_order: Vec::new(),
         extra: Fields::new(),
     });
     let first = Position::from_state(state.clone())
@@ -311,6 +324,105 @@ fn nonpublic_piece_offers_and_rng_do_not_enter_observation_or_its_key() {
     assert!(serialized.contains("black-secret"));
     assert!(!serialized.contains("secret-offer"));
     assert!(!serialized.contains("lcg32"));
+}
+
+#[test]
+fn source_visible_badges_and_hidden_siren_surface_preserve_public_information() {
+    let mut state = empty();
+    put(&mut state, "pawn", Color::White, 5, 0);
+    put(&mut state, "siren", Color::Black, 2, 4);
+    let pawn = state.board[5][0].as_mut().unwrap();
+    pawn.extra.insert(
+        "holdoutPromotion".into(),
+        json!({"readyTurn":120,"by":"private-owner"}),
+    );
+    pawn.extra.insert(
+        "vipInvitation".into(),
+        json!({"triggerTurn":4,"pieceId":"private-plan"}),
+    );
+    state.board[2][4]
+        .as_mut()
+        .unwrap()
+        .extra
+        .insert("hiddenFrom".into(), json!("white"));
+    state.turns_taken = Sides::new(3, 2);
+    let view = Position::from_state(state).unwrap().observe(Color::White);
+    assert_eq!(
+        view.board[5][0].as_ref().unwrap()["status"]["holdoutRemaining"],
+        json!(118.0)
+    );
+    assert_eq!(
+        view.board[5][0].as_ref().unwrap()["status"]["vipRemaining"],
+        json!(1.0)
+    );
+    assert!(view.board[2][4].is_none());
+    assert_eq!(
+        view.public_state["boardMarks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|mark| mark["kind"] == "sirenAura")
+            .count(),
+        9
+    );
+    let json = serde_json::to_string(&view).unwrap();
+    assert!(
+        !json.contains("private-owner")
+            && !json.contains("private-plan")
+            && !json.contains("black-2-4")
+    );
+    crate::observation::validate_projection(&view).unwrap();
+    let mut malformed = view.clone();
+    malformed.public_state.insert(
+        "armistice".into(),
+        json!({"remaining":2,"pieceId":"private-id"}),
+    );
+    assert!(matches!(
+        crate::observation::validate_projection(&malformed),
+        Err(EngineError::InvalidState(_))
+    ));
+    let mut malformed = view.clone();
+    malformed.board[5][0].as_mut().unwrap()["status"]["privateDeadline"] = json!(50);
+    assert!(matches!(
+        crate::observation::validate_projection(&malformed),
+        Err(EngineError::InvalidState(_))
+    ));
+    // Semantic JSON integers remain equivalent after canonical transport.
+    let mut canonical = view.clone();
+    canonical.board[5][0].as_mut().unwrap()["status"]["holdoutRemaining"] = json!(118);
+    crate::observation::validate_projection(&canonical).unwrap();
+    let mut state = empty();
+    state.mode = "draft".into();
+    state.extra.insert("draft".into(), Value::Null);
+    put(&mut state, "trickster", Color::White, 4, 3);
+    state.board[4][3]
+        .as_mut()
+        .unwrap()
+        .extra
+        .insert("tricksterMoveType".into(), json!("wizard"));
+    let before = state.observe(Color::White);
+    assert!(
+        before.board[4][3].as_ref().unwrap()["status"]
+            .get("tricksterMovement")
+            .is_none()
+    );
+    state.mode = "play".into();
+    let own = state.observe(Color::White);
+    assert_eq!(
+        own.board[4][3].as_ref().unwrap()["status"]["tricksterMovement"],
+        json!("wizard")
+    );
+    assert!(
+        state.observe(Color::Black).board[4][3].as_ref().unwrap()["status"]
+            .get("tricksterMovement")
+            .is_none()
+    );
+    state.deck_slots.white.push(serde_json::from_value(json!({"id":"random-roulette","effect":"randomRoulette","instanceId":"public-card","revealed":{"privateSeed":71}})).unwrap());
+    assert!(
+        state.observe(Color::White).own_cards[0]
+            .get("revealed")
+            .is_none()
+    );
 }
 
 #[test]
@@ -348,6 +460,56 @@ fn large_identity_moves_and_serializes_as_one_entity() {
             .state()
             .at(Square { row: 5, col: 3 })
             .is_none()
+    );
+}
+
+#[test]
+fn raw_card_acceptance_does_not_expand_public_source_selection() {
+    let mut state = empty();
+    let mut piece = Piece::new("bigRook", Color::White, "large");
+    piece.extra.insert("anchorRow".into(), json!(3));
+    piece.extra.insert("anchorCol".into(), json!(3));
+    for row in 3..5 {
+        for col in 3..5 {
+            state.board[row][col] = Some(piece.clone());
+        }
+    }
+    let mut card: CardSlot = serde_json::from_value(
+        crate::draft::definitions()
+            .definitions
+            .iter()
+            .find(|c| c["id"] == "outpost")
+            .unwrap()
+            .clone(),
+    )
+    .unwrap();
+    card.instance_id = "outpost-test".into();
+    state.deck_slots.white[0] = card;
+    let position = Position::from_state(state).unwrap();
+    let original = position.to_json().unwrap();
+    let payload = json!({"type":"card","color":"white","cardId":"outpost","cardInstanceId":"outpost-test","target":{"row":4,"col":4}});
+    let raw = position.bind_payload(payload.clone()).unwrap();
+    assert_eq!(
+        position.public_intent(&raw).unwrap_err(),
+        EngineError::IllegalAction
+    );
+    assert_eq!(
+        position.bind_public_intent(payload).unwrap_err(),
+        EngineError::IllegalAction
+    );
+    assert!(
+        !position
+            .legal_actions()
+            .unwrap()
+            .iter()
+            .any(|a| a.target == raw.target && a.kind == ActionKind::Card)
+    );
+    assert_eq!(position.to_json().unwrap(), original);
+    assert!(
+        position.apply(&raw).unwrap().position.state().board[3][3]
+            .as_ref()
+            .unwrap()
+            .flag("outpostProtected")
     );
 }
 
@@ -404,6 +566,11 @@ fn source_snapshot_preserves_presence_null_slots_and_outer_metadata() {
     assert!(exported.get("activeTrolley").is_none());
     let restored = Position::from_snapshot_value(exported).unwrap();
     assert!(restored.state().extra.get("activeTrolley").is_none());
+    let mut external = source;
+    external["gameoverReplayPending"] = json!(true);
+    let imported = Position::from_snapshot_value(external.clone()).unwrap();
+    assert_eq!(imported.export_state().unwrap(), external);
+    assert!(!imported.state().gameover_replay_pending);
 }
 
 #[test]
@@ -470,6 +637,7 @@ fn repetition_uses_board_identity_and_lower_half_star_total_wins() {
         used: true,
         recovering: false,
         vacant: false,
+        source_order: Vec::new(),
         extra: Fields::new(),
     };
     card.extra.insert("ratingHalfStars".into(), json!(3));
@@ -493,6 +661,7 @@ fn deathmatch_counts_black_boundaries_and_progress_resets_the_window() {
     state.turns_taken = Sides {
         white: 45,
         black: 45,
+        white_first: true,
     };
     state.extra.insert("deathmatchEnabled".into(), json!(true));
     state.extra.insert("deathmatchLimitTurns".into(), json!(1));
@@ -541,6 +710,17 @@ fn private_exact_history_is_separate_from_each_viewers_public_changes() {
         2
     );
     assert!(white.history[0].get("action").is_none());
+    // Choice-window identity stays in exact execution history. Its random
+    // spelling cannot change either viewer's public trace or information key.
+    let mut private_choice = next.state().clone();
+    private_choice.history[0]["action"] = json!({"type":"trolleyChoice","color":"black","doomedIndex":0,"windowId":"private-window-one"});
+    let one = Position::from_state(private_choice.clone()).unwrap();
+    private_choice.history[0]["action"]["windowId"] = json!("private-window-two");
+    let two = Position::from_state(private_choice).unwrap();
+    for viewer in [Color::White, Color::Black] {
+        assert_eq!(one.observe(viewer), two.observe(viewer));
+        assert!(one.observe(viewer).history[0].get("windowId").is_none());
+    }
     let mut malformed = next.state().clone();
     malformed.history[0]["actor"] = json!("white");
     assert!(Position::from_state(malformed).is_err());
@@ -640,6 +820,7 @@ fn direct_rust_inputs_enforce_safe_numbers_depth_and_finite_ratings() {
         used: false,
         recovering: false,
         vacant: false,
+        source_order: Vec::new(),
         extra: Fields::new(),
     };
     assert!(Position::from_state(state).is_err());

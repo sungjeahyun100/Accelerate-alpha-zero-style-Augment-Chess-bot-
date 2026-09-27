@@ -3,6 +3,29 @@ use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
 pub(crate) fn card_actions(state: &GameState, card: &CardSlot) -> Result<Vec<Action>> {
+    let candidates = card_ui_actions(state, card)?;
+    let mut accepted = Vec::new();
+    for action in candidates {
+        if validate_card_action(state, card, &action)? {
+            accepted.push(action);
+        }
+    }
+    Ok(accepted)
+}
+pub(crate) fn validate_card_action(
+    state: &GameState,
+    card: &CardSlot,
+    action: &Action,
+) -> Result<bool> {
+    if let Some(accepted) = crate::card_effects::validate(state, card, action)? {
+        return Ok(accepted);
+    }
+    Ok(card_ui_actions(state, card)?.contains(action))
+}
+pub(crate) fn card_ui_actions(state: &GameState, card: &CardSlot) -> Result<Vec<Action>> {
+    if let Some(actions) = crate::card_effects::actions(state, card)? {
+        return Ok(actions);
+    }
     let color = state.turn;
     match card.effect.as_str() {
         "genevaConvention" | "cornerKick" | "retreat" => {
@@ -179,17 +202,21 @@ pub(crate) fn apply_draft_passive(
                         piece
                             .extra
                             .insert("freshNoCaptureUntil".into(), json!(lock));
-                        piece.extra.remove("vipInvitation");
-                        piece.extra.remove("holdoutPromotion");
+                        piece.extra.shift_remove("vipInvitation");
+                        piece.extra.shift_remove("holdoutPromotion");
                     }
                 }
             }
         }
-        _ => {
-            return Err(EngineError::UnsupportedFeature(format!(
-                "acquired passive {effect}"
-            )));
-        }
+        _ => match crate::opening::apply(state, color, effect)? {
+            Some(true) => {}
+            Some(false) => return Ok(false),
+            None => {
+                return Err(EngineError::UnsupportedFeature(format!(
+                    "acquired passive {effect}"
+                )));
+            }
+        },
     }
     for side in [Color::White, Color::Black] {
         if state.flag("religiousVictory", side) {
@@ -221,10 +248,22 @@ pub(crate) fn apply_draft_passive(
     let stored = &mut state.deck_slots.get_mut(color)[slot];
     stored.used = true;
     stored.recovering = false;
+    stored.source_order.retain(|name| name != "recovering");
     stored.extra.insert("passiveApplied".into(), json!(true));
     stored
         .extra
         .insert("usedAt".into(), json!(crate::draft::frozen_timestamp()?));
+    crate::replay::add_log(
+        state,
+        format!(
+            "{} 패시브: {}",
+            crate::replay::label(color),
+            card.extra
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("undefined")
+        ),
+    )?;
     Ok(true)
 }
 
@@ -233,6 +272,7 @@ pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>
     let before = Sides {
         white: state.observe(Color::White),
         black: state.observe(Color::Black),
+        white_first: true,
     };
     let captures = match action.kind {
         ActionKind::Move => apply_move(state, action)?,
@@ -243,6 +283,7 @@ pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>
         }
         other => return Err(EngineError::UnsupportedFeature(format!("action {other:?}"))),
     };
+    crate::replay::settle(state)?;
     let transition = |viewer| {
         let after = state.observe(viewer);
         let before = before.get(viewer);
@@ -293,6 +334,7 @@ pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>
         public: Sides {
             white: transition(Color::White),
             black: transition(Color::Black),
+            white_first: true,
         },
     };
     state
@@ -309,6 +351,8 @@ fn apply_move(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
         .ok_or(EngineError::IllegalAction)?;
     let to = target.square();
     let mut piece = state.at(from).cloned().ok_or(EngineError::IllegalAction)?;
+    let original_piece = piece.clone();
+    let replay_before = crate::replay::begin_move(state, action.color)?;
     let actor = piece.color.owner().ok_or(EngineError::WrongActor)?;
     let original_type = piece.kind.clone();
     let mut captures = Vec::new();
@@ -477,28 +521,38 @@ fn apply_move(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
         memory.insert(actor.as_str().into(), json!({"type":original_type}));
         Value::Object(memory)
     });
-    let trace =
-        json!({"from":from,"to":to,"pieceId":piece.id,"pieceType":original_type,"color":actor});
-    let recent = state
-        .extra
-        .entry("recentMoves")
-        .or_insert_with(|| json!([]));
-    if let Some(recent) = recent.as_array_mut() {
-        recent.push(trace);
-        if recent.len() > 10 {
-            recent.remove(0);
-        }
-    }
+    crate::card_effects::mark_animation(state, &piece)?;
+    crate::replay::track_moving(state, &piece)?;
     state.extra.insert(
         "lastMove".into(),
         json!({"from":from,"to":to,"pieceId":piece.id,"pieceType":original_type,
-            "soundName":if target.flag("castle"){"castle"}else if captures.is_empty(){"move"}else{"capture"},
+            "soundName":if target.flag("castle"){"castle"}else if captures.is_empty(){if actor==Color::White {"moveSelf"} else {"moveOpponent"}}else{"capture"},
             "soundColor":actor,"hiddenFrom":piece.extra.get("hiddenFrom").and_then(Value::as_str).unwrap_or(""),
             "idolEncoreEligible":false,"idolEncoreId":"","idolEncorePieceId":"","idolEncoreConsumed":false}),
     );
     // queueMoveHistoryNotation creates its identifier before promotion and turn
     // settlement, sharing the source random stream with later rule draws.
-    state.rng.sample()?;
+    crate::replay::queue_move(
+        state,
+        &replay_before,
+        &original_piece,
+        from,
+        to,
+        target,
+        !captures.is_empty(),
+    )?;
+    crate::replay::add_log(
+        state,
+        format!(
+            "{} {}: {}{} -> {}{}",
+            crate::replay::label(actor),
+            crate::replay::piece_label(&original_type),
+            char::from(b'a' + from.col),
+            8 - from.row,
+            char::from(b'a' + to.col),
+            8 - to.row
+        ),
+    )?;
     if original_type == "pawn" || !captures.is_empty() {
         crate::flow::mark_progress(state);
     }
@@ -516,6 +570,15 @@ fn apply_move(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
     if state.result().is_none() {
         finish_move(state, actor)?;
     }
+    crate::replay::commit_move(state, &replay_before, actor)?;
+    crate::replay::record(
+        state,
+        if state.mode == "gameover" {
+            "gameover"
+        } else {
+            "move"
+        },
+    )?;
     Ok(captures)
 }
 
@@ -541,14 +604,29 @@ fn capture(
         ));
     }
     clear_piece(state, &victim.id);
-    victim.extra.remove("checkerChainCapture");
+    victim.extra.shift_remove("checkerChainCapture");
     let actor = attacker.color.owner().ok_or(EngineError::WrongActor)?;
     state.captures.get_mut(actor).push(victim.clone());
     captures.push(victim.clone());
     if victim.is_defeat_royal() {
-        crate::flow::pause_clock(state)?;
-        state.mode = "gameover".into();
-        state.winner = Some(attacker.color.as_str().into());
+        let label = if victim.color == Color::White {
+            "백"
+        } else {
+            "흑"
+        };
+        let reason = if victim.kind == "vip" {
+            format!("{label} 귀빈이 잡혔습니다.")
+        } else if victim.kind == "merchant" {
+            format!("{label} 상인이 쓰러졌습니다.")
+        } else {
+            state.set_flag(
+                "kingDead",
+                victim.color.owner().ok_or(EngineError::WrongActor)?,
+                true,
+            );
+            format!("{label} 킹이 잡혔습니다.")
+        };
+        crate::flow::end_game(state, Some(actor), &reason)?;
     }
     Ok(())
 }
@@ -560,6 +638,68 @@ pub(crate) fn clear_piece(state: &mut GameState, id: &str) {
         }
     }
 }
+/// Sacrifice bypasses ordinary shield and HP capture protection. The source
+/// stores it as a capture without granting wizard mana or capturedTypes.
+pub(crate) fn sacrifice(
+    state: &mut GameState,
+    square: Square,
+    capture_color: Color,
+) -> Result<Option<Piece>> {
+    let Some(piece) = state.at(square).cloned() else {
+        return Ok(None);
+    };
+    for color in [Color::White, Color::Black] {
+        if state.flag("vigilance", color) || state.flag("recycling", color) {
+            return Err(EngineError::UnsupportedFeature(
+                "sacrifice vigilance/recycling reaction".into(),
+            ));
+        }
+    }
+    if state
+        .board
+        .iter()
+        .flatten()
+        .flatten()
+        .any(|candidate| candidate.ability_kind() == "reaper")
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "sacrifice reaper nearby deaths".into(),
+        ));
+    }
+    clear_piece(state, &piece.id);
+    if let Some(prophecy) = state
+        .extra
+        .get_mut("prophecy")
+        .and_then(Value::as_object_mut)
+    {
+        for color in [Color::White, Color::Black] {
+            if prophecy
+                .get(color.as_str())
+                .is_some_and(|entry| !entry.is_null())
+            {
+                prophecy.insert(color.as_str().into(), Value::Null);
+            }
+        }
+    }
+    state.captures.get_mut(capture_color).push(piece.clone());
+    Ok(Some(piece))
+}
+/// Expansion removal adds a replay visual even when the DOM animation returns
+/// early. Ordinary sacrifices deliberately do not queue this visual.
+pub(crate) fn expansion_sacrifice(
+    state: &mut GameState,
+    square: Square,
+    capture_color: Color,
+) -> Result<Option<Piece>> {
+    let removed = sacrifice(state, square, capture_color)?;
+    if let Some(piece) = &removed {
+        crate::replay::queue_visual(
+            state,
+            json!({"type":"board-change","effect":"cleanup-sacrifice","color":capture_color,"removals":[{"square":square,"color":piece.color,"pieceType":piece.kind}],"relocations":[],"transformations":[],"spawns":[]}),
+        )?;
+    }
+    Ok(removed)
+}
 fn update_piece(state: &mut GameState, piece: &Piece) {
     for cell in state.board.iter_mut().flatten() {
         if cell.as_ref().is_some_and(|p| p.id == piece.id) {
@@ -569,6 +709,7 @@ fn update_piece(state: &mut GameState, piece: &Piece) {
 }
 
 fn finish_move(state: &mut GameState, actor: Color) -> Result<()> {
+    crate::replay::normalize_color_booleans(state, "skipTurn");
     if state.actions_remaining > 1 {
         state.actions_remaining -= 1;
         return Ok(());
@@ -583,8 +724,8 @@ fn finish_move(state: &mut GameState, actor: Color) -> Result<()> {
         .flatten()
         .filter(|piece| piece.color == actor)
     {
-        piece.extra.remove("thiefVisited");
-        piece.extra.remove("thiefLastDirection");
+        piece.extra.shift_remove("thiefVisited");
+        piece.extra.shift_remove("thiefLastDirection");
     }
     state.move_count = state
         .move_count
@@ -603,8 +744,35 @@ fn finish_move(state: &mut GameState, actor: Color) -> Result<()> {
             .checked_add(1)
             .ok_or_else(|| EngineError::InvalidState("full move count overflow".into()))?;
     }
+    state.cards_used_this_turn = Sides::new(
+        state.cards_used_this_turn.white,
+        state.cards_used_this_turn.black,
+    );
     *state.cards_used_this_turn.get_mut(actor) = 0;
-    state.set_flag("reversal", actor, false);
+    for key in [
+        "zugzwang",
+        "mistakeCard",
+        "freeMoveCaptureLock",
+        "magicGirlSurge",
+        "magicGirlSurgeRefreshPending",
+    ] {
+        crate::replay::normalize_color_booleans(state, key);
+    }
+    for key in ["zugzwang", "mistakeCard", "freeMoveCaptureLock"] {
+        state.extra.get_mut(key).expect("normalized colors")[actor.as_str()] = json!(false);
+    }
+    let refresh = state.extra["magicGirlSurgeRefreshPending"][actor.as_str()].clone();
+    state
+        .extra
+        .get_mut("magicGirlSurge")
+        .expect("normalized colors")[actor.as_str()] = refresh;
+    state
+        .extra
+        .get_mut("magicGirlSurgeRefreshPending")
+        .expect("normalized colors")[actor.as_str()] = json!(false);
+    if state.extra.contains_key("reversal") {
+        state.set_flag("reversal", actor, false);
+    }
     state.turn = actor.opponent();
     state.actions_remaining = if state.flag("acceleration", state.turn) {
         2
@@ -670,9 +838,9 @@ fn apply_promotion(state: &mut GameState, action: &Action) -> Result<Vec<Piece>>
     piece
         .extra
         .insert("promotedFromPawn".into(), json!(kind != "pawn"));
-    piece.extra.remove("noPromotion");
-    piece.extra.remove("holdoutPromotion");
-    piece.extra.remove("vipInvitation");
+    piece.extra.shift_remove("noPromotion");
+    piece.extra.shift_remove("holdoutPromotion");
+    piece.extra.shift_remove("vipInvitation");
     piece.extra.insert(
         "origin".into(),
         json!(format!(
@@ -704,6 +872,7 @@ fn apply_card(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
         })
         .ok_or(EngineError::IllegalAction)?;
     let effect = state.deck_slots.get(color)[slot].effect.clone();
+    let card = state.deck_slots.get(color)[slot].clone();
     let mut captures = Vec::new();
     match effect.as_str() {
         "genevaConvention" | "cornerKick" | "retreat" => state.set_flag(&effect, color, true),
@@ -731,14 +900,274 @@ fn apply_card(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
             captures.push(victim);
             state.set_flag("reversal", color, true);
         }
-        _ => return Err(EngineError::UnsupportedFeature(format!("card {effect}"))),
+        _ => {
+            let card = state.deck_slots.get(color)[slot].clone();
+            captures = crate::card_effects::apply(state, &card, action)?
+                .ok_or_else(|| EngineError::UnsupportedFeature(format!("card {effect}")))?;
+        }
     }
-    state.deck_slots.get_mut(color)[slot].used = true;
-    crate::flow::mark_progress(state);
-    crate::flow::note_card_event(state)?;
-    let used = state.cards_used_this_turn.get_mut(color);
-    *used = used
-        .checked_add(1)
-        .ok_or_else(|| EngineError::InvalidState("card count overflow".into()))?;
+    refresh_submerged(state)?;
+    if card.extra.get("devCard") != Some(&json!(true)) {
+        state.deck_slots.get_mut(color)[slot].used = true;
+        state.deck_slots.get_mut(color)[slot]
+            .extra
+            .insert("usedAt".into(), json!(crate::draft::frozen_timestamp()?));
+        state.cards_used_this_turn = Sides::new(
+            state.cards_used_this_turn.white,
+            state.cards_used_this_turn.black,
+        );
+        let used = state.cards_used_this_turn.get_mut(color);
+        *used = used
+            .checked_add(1)
+            .ok_or_else(|| EngineError::InvalidState("card count overflow".into()))?;
+        crate::flow::note_card_event(state)?;
+    }
+    if !crate::draft::is_passive_definition(
+        &serde_json::to_value(&card).map_err(EngineError::serialization)?,
+    ) && card.extra.get("phase").and_then(Value::as_str) != Some("RULE")
+    {
+        crate::flow::mark_progress(state);
+    }
+    for field in [
+        "selected",
+        "targeting",
+        "barricadePreview",
+        "barricadeDirectionChoice",
+    ] {
+        state.extra.insert(field.into(), Value::Null);
+    }
+    state.extra.insert("legalMoves".into(), json!([]));
+    crate::replay::add_log(
+        state,
+        format!(
+            "카드: {}",
+            card.extra
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("undefined")
+        ),
+    )?;
+    crate::replay::queue_card(state, color, &card)?;
+    state.extra.insert("ruleTicketChoice".into(), Value::Null);
+    state.extra.insert("jokerChoice".into(), Value::Null);
+    refresh_submerged(state)?;
+    if state
+        .extra
+        .get("blackHole")
+        .and_then(Value::as_array)
+        .is_some_and(|v| !v.is_empty())
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "post-card black-hole deaths".into(),
+        ));
+    }
+    update_palaces(state)?;
+    resolve_herald_threats(state, color)?;
+    crate::flow::check_star_limit(state)?;
+    crate::replay::record(state, "card")?;
     Ok(captures)
+}
+
+pub(crate) fn refresh_submerged(state: &mut GameState) -> Result<()> {
+    if state
+        .extra
+        .get("pendingRecurrences")
+        .and_then(Value::as_array)
+        .is_some_and(|entries| !entries.is_empty())
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "board recurrence settlement".into(),
+        ));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    let mut revealed = Vec::new();
+    for row in 0..8 {
+        for col in 0..8 {
+            let from = Square { row, col };
+            let Some(piece) = state.at(from).filter(|p| p.flag("submerged")) else {
+                continue;
+            };
+            if !seen.insert(piece.id.clone()) {
+                continue;
+            }
+            let Some(owner) = piece.color.owner() else {
+                continue;
+            };
+            let origin = if piece.is_large() {
+                Square {
+                    row: piece
+                        .extra
+                        .get("anchorRow")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(u64::from(row)) as u8,
+                    col: piece
+                        .extra
+                        .get("anchorCol")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(u64::from(col)) as u8,
+                }
+            } else {
+                from
+            };
+            if crate::movement::KING
+                .iter()
+                .filter_map(|&(dr, dc)| origin.offset(dr, dc))
+                .any(|square| {
+                    state.at(square).is_some_and(|neighbor| {
+                        neighbor.id != piece.id && neighbor.color == owner.opponent()
+                    })
+                })
+            {
+                revealed.push((origin, piece.clone()));
+            }
+        }
+    }
+    for (origin, mut piece) in revealed {
+        piece.extra.shift_remove("submerged");
+        update_piece(state, &piece);
+        crate::card_effects::mark_animation(state, &piece)?;
+        let concealed = [Color::White, Color::Black]
+            .into_iter()
+            .any(|viewer| !state.piece_visible(&piece, origin, viewer));
+        crate::replay::add_log(
+            state,
+            if concealed {
+                "기물이 행동했습니다.".into()
+            } else {
+                format!(
+                    "잠복 해제: {}{}의 {}이 발각되었습니다.",
+                    char::from(b'a' + origin.col),
+                    8 - origin.row,
+                    crate::replay::piece_label(&piece.kind)
+                )
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn herald_victory(state: &GameState, color: Color) -> bool {
+    (0..8)
+        .flat_map(|row| (0..8).map(move |col| Square { row, col }))
+        .any(|from| {
+            let Some(piece) = state.at(from).filter(|p| p.color == color) else {
+                return false;
+            };
+            if piece.ability_kind() != "herald"
+                && !(piece.kind == "trickster"
+                    && piece
+                        .extra
+                        .get("tricksterPreviousAbilityForTurn")
+                        .and_then(Value::as_str)
+                        == Some("herald"))
+            {
+                return false;
+            }
+            crate::movement::KING
+                .iter()
+                .filter_map(|&(dr, dc)| from.offset(dr, dc))
+                .any(|to| {
+                    state.at(to).is_some_and(|target| {
+                        target.color == color.opponent()
+                            && (state.royal_identity(target) || target.kind == "merchant")
+                    })
+                })
+        })
+}
+pub(crate) fn resolve_herald_for_color(state: &mut GameState, color: Color) -> Result<bool> {
+    if herald_victory(state, color) {
+        crate::flow::end_game(
+            state,
+            Some(color),
+            "전령이 상대 킹과 협정을 이끌어냈습니다.",
+        )?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+pub(crate) fn resolve_herald_threats(state: &mut GameState, actor: Color) -> Result<bool> {
+    if state.result().is_some() || resolve_herald_for_color(state, actor)? {
+        return Ok(true);
+    }
+    if herald_victory(state, actor.opponent()) {
+        crate::flow::end_game(
+            state,
+            Some(actor.opponent()),
+            "상대 킹이 전령의 협정권에 들어왔습니다.",
+        )?;
+        return Ok(true);
+    }
+    if [Color::White, Color::Black]
+        .into_iter()
+        .any(|color| state.flag("racingKing", color) || state.flag("binaMate", color))
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "racing-king/double-check threat resolution".into(),
+        ));
+    }
+    Ok(false)
+}
+pub(crate) fn mark_card_no_capture(state: &GameState, piece: &mut Piece) -> Result<()> {
+    let turns = piece
+        .color
+        .owner()
+        .map(|color| *state.turns_taken.get(color))
+        .unwrap_or(0);
+    let deadline = turns
+        .checked_add(1)
+        .ok_or_else(|| EngineError::InvalidState("card capture lock overflow".into()))?;
+    piece
+        .extra
+        .insert("cardNoCaptureUntil".into(), json!(deadline));
+    Ok(())
+}
+
+fn update_palaces(state: &mut GameState) -> Result<()> {
+    let Some(palaces) = state.extra.get("palaces") else {
+        return Ok(());
+    };
+    let palaces = palaces
+        .as_array()
+        .ok_or_else(|| EngineError::InvalidState("palaces must be an array".into()))?
+        .clone();
+    let mut retained = Vec::new();
+    for palace in palaces {
+        let color: Color = serde_json::from_value(
+            palace
+                .get("color")
+                .cloned()
+                .ok_or_else(|| EngineError::InvalidState("palace color missing".into()))?,
+        )
+        .map_err(EngineError::serialization)?;
+        let king = (0..8)
+            .flat_map(|row| (0..8).map(move |col| Square { row, col }))
+            .find(|&square| {
+                state
+                    .at(square)
+                    .is_some_and(|p| p.color == color && state.royal_identity(p))
+            });
+        let Some(king) = king else {
+            continue;
+        };
+        let cells: Vec<Square> = serde_json::from_value(
+            palace
+                .get("cells")
+                .cloned()
+                .ok_or_else(|| EngineError::InvalidState("palace cells missing".into()))?,
+        )
+        .map_err(EngineError::serialization)?;
+        if cells.contains(&king) {
+            retained.push(palace);
+        } else {
+            crate::replay::add_log(
+                state,
+                format!(
+                    "{} 킹이 궁성 밖으로 탈출해 궁성이 무너졌습니다.",
+                    crate::replay::label(color)
+                ),
+            )?;
+        }
+    }
+    state.extra.insert("palaces".into(), Value::Array(retained));
+    Ok(())
 }

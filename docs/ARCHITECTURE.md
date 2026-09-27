@@ -1,9 +1,10 @@
 # 아키텍처
 
-이 문서는 책임과 목표 인터페이스를 정의한다. JS oracle·fixture·차분 하네스·C++ 초안은
-존재하지만 Rust 엔진, Python AI, PyO3/maturin 패키지, 신경망·ONNX 추론은 구현 전이다.
-bridge의 JSON Schema와 예시는 `bridge-draft-0` 초안이다. 새 설계 D-004~D-006은 해당
-변경의 `develop` 병합 시 적용한다. [DECISIONS](DECISIONS.md)에서 채택·미결정을 구분한다.
+이 문서는 책임과 구현 인터페이스를 정의한다. 독립 Rust 규칙, PyO3/maturin 패키지,
+Python 공개 정보 탐색·replay·CLI, ResNet·FiLM·LoRA와 실제 ONNX 추론을 연결했다.
+공통 계약은 [runtime-v1](../bridge/protocol/runtime-v1.md)이며 기존 draft schema는 과거
+자료다. 전체 규칙·카드·visibility 포팅은 진행 중이고 전체 판정은 NO-GO다. 구현·관측한
+검증·남은 조건은 [IMPLEMENTATION](IMPLEMENTATION.md), 채택 결정은 [DECISIONS](DECISIONS.md)에 둔다.
 
 ## 책임과 실행 방향
 
@@ -18,19 +19,19 @@ Python ResNet 학습 (FiLM + 별도 LoRA)
   └─> 모델·어댑터·조건/규칙 메타데이터
        └─> 검증용 복사본의 정적 LoRA 병합·수치 비교
             └─> ONNX (FiLM 조건 입력 + policy/value)
-                 └─> 추론 adapter 후보: ort / tract
+                 └─> 독립 Rust 추론 adapter: ort 기본 / tract 명시 선택
 ```
 
 JS→Rust 화살표는 검증 관계다. 실제 탐색은 Python MCTS가 Rust 환경을 호출한다.
 추론 adapter는 모델 실행 경계에 두고 순수 규칙 엔진을 의존자로 만들지 않는다.
-backend 선택과 Rust 추론 adapter의 구체 배치는 모델 검증 단계에서 확정한다.
+추론 adapter는 `bridge/runtime/`, Python 경계는 `bridge/native/`에 둔다.
 
 ## 영역별 책임
 
 | 영역 | 소유하는 책임 | 넣지 않는 것 |
 |---|---|---|
 | `rust-engine/` | GameState, Action, legal/apply/terminal/result 규칙 | PyO3·Python·MCTS·학습·ort/tract 의존성 |
-| `bridge/` | 논리 계약, JSON 기록·검증, 얇은 PyO3 바인딩 | 규칙·탐색·학습의 중복 구현 |
+| `bridge/` | 논리 계약, JSON 기록·검증, 얇은 PyO3 바인딩과 독립 ONNX 추론 adapter | 규칙·탐색·학습의 중복 구현 |
 | `python/` | encoding, MCTS, network, self-play, training/evaluation/export | Python으로 다시 쓴 게임 규칙 |
 | `infra/` | 기존 JS oracle·NNUE·검증·실험 도구 | 새 AlphaZero 탐색의 주 실행 환경 |
 | `tests/differential/` | oracle 비교 fixture와 후보 검증 | 운영 데이터셋·모델 |
@@ -43,18 +44,20 @@ backend 선택과 Rust 추론 adapter의 구체 배치는 모델 검증 단계�
 ## Bridge와 PyO3/maturin
 
 `bridge/`는 공통 GameState·Action·결과·카드 정의와 언어 간 해석을 소유한다.
-PyO3 바인딩은 향후 이 영역의 얇은 독립 crate에 두며 Rust 규칙 crate를 호출한다.
+PyO3 바인딩은 `bridge/native/`의 얇은 독립 crate에서 Rust 규칙 crate를 호출한다.
 maturin은 이 바인딩의 빌드·Python 패키징 도구이고 모델 export 도구가 아니다.
 
 반복 호출은 PyO3 타입·배열을 직접 전달한다. JSON은 저장·교환·fixture·차분 검증에
 유지하며 탐색 노드마다 요청/응답 문자열을 만들도록 강제하지 않는다. 카드 정의의 1회
-등록과 위치별 상태·행동의 의미는 두 경로에서 같아야 한다. 바인딩의 구체 타입·배열
-소유권·batch·오류·GIL 해제는 Phase 5에서 검사한다. zero-copy나 성능 향상은 실측 전
-보장하지 않는다. 엔진의 stateless/stateful 방식은 여전히 bridge의 미결정 사항이다.
+등록과 위치별 상태·행동의 의미는 두 경로에서 같아야 한다. immutable Position/Action과
+소유하는 NumPy 배열, 타입 오류·stale action·GIL 경계를 설치 wheel에서 검사한다.
+엔진은 위치마다 독립 snapshot을 소유하고 적용 결과를 새 Position으로 반환한다.
+zero-copy나 성능 향상은 실측 전 보장하지 않는다.
 
-Rust는 독립적으로 `GameState`, `Action`, `legal_actions()`, `apply_action()`,
-`is_terminal()`, `result()`에 해당하는 규칙 API를 제공할 계획이다.
-기존 JSON 스키마는 초안이며 아직 엔진에 구현하지 않았다.
+Rust는 독립적으로 GameState/Position/Action, legal 조회·직접 검증·apply·observe·result와
+페이지 단위 action stream을 제공한다. 공개 intent의 숨은 실행 flag는 native 결속 경계에서
+해석한다. positionId·private RNG·실제 환경의 전체 상태는 탐색 특징으로 전달하지 않는다.
+기존 draft 스키마와 운영 runtime-v1을 자동 호환으로 취급하지 않는다.
 
 ## 신경망·LoRA·FiLM·Hypernetwork
 
@@ -72,15 +75,17 @@ Hypernetwork는 후속 확장이다. 어댑터의 생성, 적용, 병합/export�
 고정 가중치로 병합할 수 없다. 미지원 동적 어댑터를 정적 LoRA 경로로 처리하지 않는다.
 Hypernetwork 본체·생성 주기·추론 그래프는 이번 설계에서 구현하거나 확정하지 않는다.
 
-세부 ResNet 층·채널, LoRA rank·적용 층, FiLM 삽입 위치, encoder 언어(O-001),
-정책 행동 표현과 backend는 후속 단계의 결정이다. 기존 NNUE의 가치 출력이나 압축
+구현 기본값은 ResNet 8 block·128 channel, block의 두 convolution에 LoRA rank/alpha 8,
+dropout 0, 두 번째 BN 뒤 FiLM이다. encoding은 Python-first이고 봇의 행동·이력 정책은
+public-decision-intent-v1/public-history-summary-v1이다. 기존 NNUE의 가치 출력이나 압축
 self-play 기록을 새 policy/value와 완전한 게임 상태의 계약으로 간주하지 않는다.
 
 ## ONNX·추론 검증
 
 ONNX는 모델 배포 형식이며 규칙·MCTS·데이터 계약을 대신하지 않는다. ort/tract는
-같은 모델 입력·출력 계약의 후보 backend다. 어느 쪽이 더 빠르거나 지원하는 연산이
-충분한지는 실제 모델과 목표 OS·batch 설정에서 확인한다.
+같은 FP32 opset 18 모델 입력·출력 계약의 실제 backend다. 기본 ort와 명시 선택 tract는
+자동 fallback을 하지 않는다. 동적 batch/action 축, condition 연결·artifact hash·shape/dtype·
+유한값·자원 예산을 검사한다. backend 성능은 목표 OS·batch의 실제 측정으로 별도 확인한다.
 
 모델에는 기본 모델·어댑터 식별, encoder/action 버전, 규칙·카탈로그 버전, FiLM 조건
 명세, dtype/shape/layout, 출력 의미와 value 관점, opset·export 설정·파일 hash를 연결한다.
@@ -90,16 +95,19 @@ backend 속도와 대전 승률은 별도 근거로 기록한다.
 
 ## 차분 검증과 학습 흐름
 
-현재 하네스는 Rust 후보가 없으면 JS oracle 서버를 후보로 선택한다. CI는 기존
-2,072개 fixture 중 300개를 검사한다. 이 성공은 JS 자체 회귀이며 JS↔Rust 검증이 아니다.
-Rust 후보를 연결할 때 빌드 산출물 경로와 candidate 명령도 새 출력 계약에 맞춰 함께 바꾼다.
+historical JS fixture CI는 원래 JS 서버를 명시하고 기존 자료에서 300개를 검사한다.
+이 성공은 JS 자체 검증이며 JS↔Rust 검증이 아니다. 신규 본체 oracle은 최초 동결 client와
+pinned parser를 실행하고 명시 headless profile의 의미를 보존한다. 초기·draft 일부는 실제
+Rust와 비교했으며 전체 catalog의 normalized full state/RNG 동등성은 아직 미완료다.
 검증 대상은 legal actions, 적용/거절 결과, 전체 상태, 턴·카드·기물 상태와 종료 결과다.
-사이트와 JS가 다를 때의 기준은 O-002로 남아 있다.
+사이트와 기존 JS가 다를 때는 D-008의 최초 동결 client를 기준으로 한다.
 
 목표 학습 흐름은 `(state/observation, legal actions, visit policy, result, seed,
 model/encoder/rules versions)`를 보존하는 self-play → Python 학습 → 후보 모델의
 정확성·독립 대전 평가 → 승격이다. 중단 결과를 실제 무승부로 취급하지 않는다.
-추가 행동·확률·은신에 필요한 상태와 관측 의미는 Phase 1/6/7에서 명시한다.
+실제 학습·대전 성능 캠페인·모델 승격은 이번 코드 구현에서 실행하지 않는다. 공개 trace와
+독립 future RNG의 particle posterior, 실제 decision actor의 value 관점, bounded PUCT와
+leaf batch를 사용한다. 완료한 코드 경로의 검증을 전체 규칙 의미 coverage와 구분한다.
 
 ## 근거
 

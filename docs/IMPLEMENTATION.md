@@ -34,11 +34,11 @@ Hypernetwork는 향후 extension의 생성·적용·병합 가능 여부만 준�
 | Oracle 검사 | depth0 passive settlement·potion 정리·bounded terminal microtask·lazy premove·client 전용 loader 포함 Node 계약/통합 16개 통과 | 명시 headless profile의 검사이며 전체 catalog 및 populated browser의 future RNG 동등성은 별도 조건 |
 | 과거 fixture | 349개, 757 sampled action을 최신 worker에 비교 | worker hash 불일치; 최신 client 전체 정답을 대신할 수 없음 |
 | Rust 규칙 | Rust 1.96 단위 22개와 bounded JSON CLI 1개·strict lint 통과; normal/chaos 초기 추첨 12개와 regular draft 선택의 source 비교 일치 | 전체 획득·효과와 catalog legal/reject/full-next-state/result/RNG 비교 미완료 |
-| PyO3/maturin | 804d9f4의 Windows/Linux CI에서 실제 sdist→wheel 설치와 native 경계 검사 성공 | 최종 규칙·탐색과 공통 history/관측의 배포 검증 필요 |
-| Python 모델·encoding | 확정된 EncoderSpec 15개 필드, root Windows 모델 7개 검사 통과 | 최종 공개 관측 allowlist와 실제 탐색 입력 통합 필요 |
+| PyO3/maturin | f41e45d의 Windows/Linux CI에서 실제 sdist→wheel 설치와 native 경계 검사 성공 | 최종 규칙·탐색과 공통 history/관측의 배포 검증 필요 |
+| Python 모델·encoding | f41e45d의 관측 v1 EncoderSpec 15개 필드, root Windows 모델 7개 검사 통과 | 관측 v2·16개 spec 필드·최종 공개 관측 정책과 실제 탐색 입력 통합 필요 |
 | ort/tract | Windows/Linux CI에서 각각 실제 두 backend의 FP32 base/adapter 48개 수치 비교 통과 | 최종 source 규칙·탐색과의 통합 실행을 확인해야 함 |
-| ISMCTS·replay·CLI | 공개 trace/particle filter/availability PUCT와 최대 4 leaf batch 연결; core22 설치 wheel의 native 6 + search/session 15개 검사 통과 | 세 default mode의 전체 draft→play·카드 효과·공개 posterior·최종 source 연결을 확인해야 함 |
-| CI | 804d9f4의 구조·기존 engine·historical JS 검사 성공; 두 OS의 Rust 1.96 lint/test와 배포 wheel·실제 추론 19개 검사 성공 | 두 OS의 동결 worker 다운로드 hash 불일치 해결 및 최종 공통 commit 전체 검증 필요 |
+| ISMCTS·replay·CLI | 공개 trace/particle filter/availability PUCT와 최대 4 leaf batch 연결; 두 OS의 설치 wheel에서 native/model/runtime/search/session 34개 검사 통과 | 세 default mode의 전체 draft→play·카드 효과·공개 posterior·최종 source 연결을 확인해야 함 |
+| CI | f41e45d의 구조·기존 engine·historical JS와 Windows/Linux native workflow 전체 성공; Rust 1.96 lint/test·실제 배포 wheel·동결 client/parser oracle 통과 | 이후 전체 규칙·관측을 완성한 최종 공통 commit 검증 필요 |
 
 다른 영역의 작은 test count나 compile 성공은 해당 checkpoint이며 전체 GO로 승격하지 않는다.
 CI 요청/관측한 성공, Windows/Linux 확인, 모델 export 수치, 실제 semantic coverage를 따로 기록한다.
@@ -55,16 +55,122 @@ Linux 1.043081283569336e-6, Windows 1.1324882507324219e-6이다. 이후 두 job 
 현재 사이트의 `aiWorker.js`와 동결 원본의 hash가 달라 다운로드 gate에서 실패했다.
 본체 oracle 검사는 그 실행에서 시작되지 않았으며 workflow 전체를 성공으로 표시하지 않는다.
 
+후속 공유 커밋 f41e45d의 native CI 실행 36336831808은 Windows 2025와 Ubuntu 24.04에서
+전체 성공했다. 각 OS에서 실제 sdist→설치 wheel의 34개 검사(skip 0)를 실행했으며
+Linux 44.798초, Windows 50.626초다. 두 history 계약의 full ResNet·두 backend 48개
+비교에서 최대 절대 오차는 Linux 1.0356307029724121e-6, Windows 1.2218952178955078e-6이다.
+동결 main과 pinned parser를 실제 실행 의존성으로 검사했고 원래 worker/index는
+executed:false provenance로 보존한다. 이는 전체 baseline을 다시 동결하거나 worker
+로딩의 원래 hash 검사를 제거한 변경이 아니다. 원격 보고서는 Git 밖의
+`%APPDATA%\Accelerate\reports\full-stack-implementation\ci-f41`에 보관한다.
+34개 검사의 normal/chaos 범위는 초기 역조건화와 첫 draft/posterior까지이며 실제 CLI는
+명시 draftDelete:true를 사용했다. 이 성공을 전체 draft→play나 256개 효과의 완성으로 확대하지 않는다.
+
+후속 2B 기본 이동 checkpoint는 동결 client의 실제 getLegalMoves와 Rust base_moves를
+657개 구성 사례에서 전체 JSON 값으로 비교해 순서·중첩 선택·실행 flags까지 일치했다.
+양색 기본 이동 288개, 기억 이동 186개, trickster 171개, 명시 이동 mode 12개이며
+글로벌 modifier를 비활성화한 세 원점의 kernel 검사다. 실제 효과 실행·글로벌 legality·
+지원 등록의 완료 근거는 아니다. Rust 1.96 focused 4개와 strict clippy를 통과했고
+임시 비교 검사는 소스에서 제거했다. 재현 입력·script·source/module hash는 Git 밖
+`%APPDATA%\Accelerate\reports\variant-movement\checkpoint.json`에 기록한다.
+전체 상태 검증에서는 moveReplay를 후속 카드가 읽는 경로와 2x2 기물의 snapshot 복원
+alias를 확인하고 있다. raw replay/notation 필드를 이름만으로 제외하거나 객체 identity가
+깨진 oracle의 결과를 정답으로 사용하지 않는다.
+
+진행 중인 후속 규칙 checkpoint에서 담당자가 Rust 1.96의 library 34개와 bounded CLI 1개,
+strict lint 통과를 확인했다. common 이동 6개는 raw full next state·RNG·history를 맞췄고,
+opening 8개는 카드 정의의 name/text/art만 정규화해 비교했다. 54개 targeted 카드 정의의
+primitive 111개에서는 승인 107개의 상태·RNG·history, UI 후보 111개, 거부 4개를 비교했다.
+이 비교는 UI 후보를 먼저 실행한 동일 oracle의 renderer cache가 남아 있는 환경이다.
+후속 fresh-realm 비교에서 grappler의 animatedPieceIds가 달라져, 독립 스냅샷만으로
+전체 상태 전이를 재현한다는 증거로 사용하지 않는다.
+이는 production wrapper의 finishCard·replay 정산이나 전체 256개 효과의 완료가 아니다.
+wrapper 검사에서 남은 full-state 차이와 Unsupported는 담당자가 실패·미완료로 유지한다.
+54개 정의의 검증된 source는 외부 checkpoint로 보존했고 다음 카드 구현을 같은 담당자가 진행한다.
+이후 대형 기물 exile·전령의 queued endGame 정산을 연결한 생성 비교 167개에서는 승인 143개의
+전체 상태·RNG·history가 같은 reused-oracle 환경에서 일치했다. 완성 UI 행동·첫 클릭 후보·불변 검증은 각각 167개가
+일치했고 정상 거부 23개와 원문 예외 1개는 구분했다. 이 primitive 경계의 성공을 미완료
+production wrapper·global modifier 조합이나 전체 카드 지원으로 확대하지 않는다.
+
+공개 관측은 v2로 전환 중이다. source-visible 기물 상태·보드 표시·관계 schema와 정책 hash를
+Python encoder·replay·ONNX metadata·Rust runtime에 연결한다. root의 얇은
+`site_observation_policy()` API는 Rust 1.96 compile·fmt·strict lint를 통과했고, 설치 wheel의
+정책을 실제 sdist와 JCS로 비교하는 CI smoke도 추가했다. 당시 최종 projection과 encoder를 함께
+고정한 sdist→wheel의 설치 검사는 수행 전이었으며, 후속 로컬 검사는 아래에 별도로 기록한다.
+담당자의 중간 정책 비교에서는 60개 source 상태×양측 viewer의 공개 관측 120개가 정규화 없이
+전체 JCS·informationStateKey까지 일치했다. 별도로 실제 createPieceElement의 표시·배지·설명
+88개를 확인했고 owner-only 정보와 전체 공개 count를 보존했다. 이후 정책 보강분을 포함한
+최종 hash·projection 재검사를 마친 뒤 공통 코드 checkpoint로 묶는다.
+
+root의 별도 thin API 후보 검사에서는 캡처한 sdist를 Linux release wheel로 빌드해 독립
+Python 환경에 설치했다. 정책의 sdist/compiled JCS 일치·owned copy·명시 encoder 생성·계약
+복원을 확인했고, 기존 실제 runtime 검사 6개도 84.889초에 통과했다(skip/error/failure 0).
+두 history 계약의 8x128·rank/alpha 8 base/비영 LoRA 복사본 병합 모델을 ort/tract에서 비교한
+48개 사례의 최대 절대 오차는 1.2218952178955078e-6이다. 소형 모델의 48개 사례도 별도로 통과했다.
+이 후보는 당시의 3개 surface schema 정책이며 이후 overlay·공개 카드 결과 확장은 포함하지 않는다.
+최종 관측 의미·정책 hash·Windows 배포·전체 규칙 검증은 계속 미완료다. 후보의 미사용 helper
+경고 4개도 최종 lint 통과로 처리하지 않았다. 원본 archive/wheel/test source SHA와 JUnit·수치
+요약은 Git 밖 `reports/full-stack-implementation/policy-api-candidate-packaging.json`에 보관한다.
+같은 설치 후보에서 보강한 패키징 smoke도 실행했다. Python 모듈 10개는 sdist·wheel·설치 파일의
+SHA가 모두 일치했고 실제로 import한 native 바이너리도 wheel member와 일치했다. 보고서는
+`policy-api-candidate-installed-wheel.json`이며 최종 4-schema 정책의 배포 증거로 확대하지 않는다.
+
+대형 기물 exile의 복원 실패는 source 결함과 adapter 검사를 분리해 조사했다. 담당자의
+실제 원문 relink/normalize 실행은 disconnected 4개 cell의 JCS·RNG와 객체 alias를 보존했고,
+추가 geometry guard가 있던 adapter만 거부했다. snapshot admission의 2x2 가정을 제거하고
+same-frame 전체 속성 일관성·ID·frame independence를 유지하는 수정을 적용했다. 기존 Node
+검사 17개가 모두 통과했고 실제 원문의 bigRook/Bishop exile→normalize→restore→nullification
+두 경로는 전체 상태·RNG 동등성을 확인했다. 이 검사는 관측 v2의 최종 정책 완료와 구분한다.
+정상 배치 legality는 규칙 helper의 책임이며, 이 복원 거부를 원문 결함이나 지원 제외 근거로 쓰지 않는다.
+
+후속 관측 v2 checkpoint는 policy JCS SHA
+`14fd1c134efd56ed66fa9bd5fc1966e3a8fbcd88a75ce1bd5cb79242cd1c7388`로 고정했다.
+139개 raw public value schema와 기물 상태·보드 표시·관계·overlay의 네 surface schema를
+연결했고 실제 공개 카드 결과와 전체 설명 count를 보존했다. 트롤리의 시간·난수 window ID는
+공개 관측·intent·history에서 제외하고 실행 Action에 보존한다. 기존 Node 17개, Windows
+모델·탐색·세션 pure 검사 15개와 실제 renderer 88개를 확인했다. Windows의 15개 실행에서는
+native 7개를 의도적으로 제외했으며 Windows 설치 wheel의 통합 성공으로 보고하지 않는다.
+
+검증된 core·모델 소스를 캡처해 만든 최종 Linux sdist→설치 wheel에서도 정책·catalog JCS,
+Python 모듈 10개와 native 바이너리의 배포 일치를 확인했다. 실제 Rust 1.96 workspace
+fmt·all-target strict clippy와 36개 library + 1개 CLI 검사가 통과했고, 설치 wheel의 통합
+34개 검사도 49.85초에 통과했다(skip/error/failure 0). 두 history 계약의 full ResNet과 실제
+ort/tract의 base/비영 LoRA 복사본 병합 모델 비교 48개에서 최대 절대 오차는
+1.2218952178955078e-6이다. 공개 관측의 최종 source 비교 130개도 전체 JCS·key가 일치했다.
+sdist SHA는 `517f29f68efc39739bb939c7d3862e089f0ea26238fcbadbce5eb456689d2cfb`,
+wheel SHA는 `6650a8b5ae3e0413c89cdec9135e417ce973068153a842d981c3b965c7f04c7c`다.
+원본·검사 입력 SHA와 보고서는 Git 밖 `reports/full-stack-implementation/policy-v2-*`에 있다.
+로컬 offline ONNX 링크 실패와 Python 개발용 링크 누락은 성공과 분리해 남겼고, 잠금된
+의존성과 소유 빌드 캐시의 기존 Python runtime 링크로 같은 source 검사를 완료했다.
+
+이 checkpoint의 targeted 카드 primitive 승인 143개는 reused-oracle의 renderer cache가
+남아 있는 비교 환경에서 전체 상태·RNG·history가 일치했다. 원문의 activePieceAnimationUntil
+module Map은 serialized snapshot에 없으며, 동일 snapshot·RNG로도 fresh realm과 재사용한
+realm의 animatedPieceIds가 달라진다. 별도 fresh-source 대표 12개 중 baby-bear·grappler·
+judgment 계열 6개가 이 한계를 보였고 RNG는 12개 모두 일치했다. 이는 finishCard만의
+문제로 분류하지 않으며, 명시적인 실행 context와 full-state 재검증이 필요한 미완료 경계다.
+실제 production wrapper의 별도 outpost 두 경우와 monochrome-off siren은 3개 모두 일치했다.
+후속 17-family wrapper에서는 16개만 전체 상태가 일치했고 baby-bear의 animatedPieceIds 차이
+1개를 미완료로 유지한다. colossus·활성 monochrome의 Unsupported도 통과와 구분한다.
+최종 공개 관측 정책의 52개 audit 항목, 전체 256 효과·27 RULE·variant 실행·기본 세 모드의
+전체 흐름은 아직 미완료다. 설치 검사의 성공을 전체 코드 GO로 확대하지 않는다.
+
 ## 구현 연결 순서와 완료 기준
 
 작업별 담당자는 하나로 유지하고 공통 계약은 담당자끼리 확인한다. 다음 순서는 의존 관계이며,
 각 단계의 통과를 전체 구현 완료로 보고하지 않는다.
+이번 구현 세션에서 외부 어댑터는 검증 시간이 길어지는 경우 작업 하나에 최대 두 담당자를
+할당할 수 있다. 구현과 독립 검증의 소유 범위를 먼저 나누고 같은 파일을 동시에 수정하지 않는다.
+규칙 검증은 규칙 담당자가 진행하며 주 담당자는 계약·완료 조건을 조율하고 다른 구현을 병행한다.
 
-Rust 규칙 작업은 기능 경계로 2A와 2B를 나누어 각 담당자 하나를 둔다. 2A는 초기·draft·
+Rust 규칙 작업은 기능 경계로 2A·2B·2C를 나누어 각 담당자 하나를 둔다. 2A는 초기·draft·
 phase·공통 legality·효과 실행·모듈 연결을 담당한다. 2B는 variant 기물의 기본 이동과
 이동 payload 생성만 `variant_movement.rs`에 구현한다. 공통 이동 파일·상태·전이의 소유권은
 2A에 유지하고, 2B의 반환 flag를 실제 전이에서 처리한 뒤에만 해당 기물을 지원 목록에 넣는다.
 기능별 책임 분리이며 파일 크기를 기준으로 추가 파일을 만들지는 않는다.
+2C는 targeted 기물 변환과 속성 부여 카드의 target 생성·검증·상태 변경을
+`card_effects.rs`에 함께 구현한다. 사용 상태·notation RNG·턴 종료·공통 정산은 2A가 연결하고,
+변환된 기물의 기본 이동은 2B와 실제 source flag 의미를 확인한다.
 
 | 작업 | 전달할 구현 | 완료를 판단하는 코드 증거 |
 |---|---|---|

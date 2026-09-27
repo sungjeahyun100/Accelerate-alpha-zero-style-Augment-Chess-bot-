@@ -4,6 +4,7 @@ The synthetic source is an information-set/chance test double, not a second
 chess rules implementation. Native integration exercises the actual rules.
 """
 from copy import deepcopy
+from functools import lru_cache
 from dataclasses import replace
 import hashlib
 import json
@@ -17,6 +18,7 @@ from accelerate_chess.inference import ProductionEvaluator
 from accelerate_chess.search import (BeliefLimits, InformationMismatchError, InformationSetSearch,
     MissingHistoryError, NativeSourceFactory, ParticleBelief, ParticleExhaustedError,
     PublicTracker, SearchBudgetError, SearchLimits)
+from test_model_stack import observation_policy
 
 
 def sign(frame):
@@ -58,13 +60,13 @@ class TestPosition:
 
     def observe(self, viewer):
         board = [[None] * 8 for _ in range(8)]
-        board[6 - self.stage][1] = {"type": "pawn", "color": "white"}
-        board[2][0] = {"type": "wall", "color": "neutral", "id": "wall-2-0"}
+        board[6 - self.stage][1] = {"type": "pawn", "color": "white", "status": {}}
+        board[2][0] = {"type": "wall", "color": "neutral", "status": {}}
         move = TestAction(self.stage, self.latent).public_intent()
-        return sign({"protocolVersion": "accelerate-observation-v1", "viewer": viewer,
+        return sign({"protocolVersion": "accelerate-observation-v2", "viewer": viewer,
             "board": board, "turn": "white" if self.stage == 0 else "black",
             "ownCards": [], "opponentHandCount": 1, "history": deepcopy(self.history),
-            "publicState": {"gameStyle": "normal", "phase": "play", "revealedOpponentCards": [{"id": "slime", "instanceId": "revealed", "used": False}],
+            "publicState": {"projectionVersion": observation_policy()["projectionVersion"], "observationPolicyHash": spec().observation_policy_hash, "boardMarks": [], "relationships": [], "overlays": [], "gameStyle": "normal", "phase": "play", "revealedOpponentCards": [{"id": "slime", "instanceId": "revealed", "used": False}],
                 "legalHints": {"moves": [{"from": move["from"], "destinations": [move["move"]]}], "cardTargets": []}}, "informationStateKey": ""})
 
     def action_stream(self):
@@ -80,7 +82,7 @@ class TestPosition:
         assert action.as_payload()["move"]["capture"] == bool(self.latent)
         child = TestPosition(self.latent, self.stage + 1, chance=self.chance, reaction=self.reaction, history=self.history)
         event = {"kind": "transition", "actor": self.decision_actor, "nextActor": child.decision_actor,
-            "phase": "play", "boardChanges": [{"square": {"row": 6 - self.stage, "col": 1}, "before": {"type": "pawn", "color": "white"}, "after": None}],
+            "phase": "play", "boardChanges": [{"square": {"row": 6 - self.stage, "col": 1}, "before": {"type": "pawn", "color": "white", "status": {}}, "after": None}],
             "ownCards": [], "revealedOpponentCards": [{"id": "slime", "instanceId": "revealed", "used": False}], "captures": {"white": [], "black": []},
             "result": {"protocolVersion": "accelerate-result-v1", "status": "terminal" if child.result else "ongoing", "winner": child.result, "outcome": child.result, "reason": ""}}
         child.history.append(event)
@@ -112,10 +114,12 @@ class TestEvaluator(ProductionEvaluator):
         return np.zeros(action_features.shape[:2], np.float32), np.full((len(board), 1), self.value, np.float32)
 
 
+@lru_cache(maxsize=1)
 def spec():
-    return EncoderSpec("site-small", "a" * 64, ("pawn", "wall"), ("slime",), (),
+    policy = observation_policy()
+    return EncoderSpec(policy["rulesVersion"], "a" * 64, ("pawn", "wall"), ("slime",), (), hashlib.sha256(canonical_json(policy).encode()).hexdigest(),
         piece_payload_bytes=128, public_payload_bytes=4096, action_payload_bytes=256,
-        history_encoding="public-history-summary-v1", action_encoding="public-decision-intent-v1")
+        history_encoding="public-history-summary-v1", action_encoding="public-decision-intent-v1").with_observation_policy(policy)
 
 
 def belief(*, chance=False, reaction=False, particles=16):
@@ -277,18 +281,18 @@ def test_progressive_widening_cancellation_and_finite_budgets():
 @pytest.mark.parametrize("mode,draft_delete", [("normal", True), ("chaos", True), ("grand", True), ("grand", False)])
 def test_native_supported_conditioned_modes_and_public_intent_integration(mode, draft_delete):
     """No skip: production source factory/intent are required for completion."""
-    from accelerate_chess import Position
+    from accelerate_chess import Position, site_observation_policy
     catalog = json.loads((Path(__file__).parents[2] / "bridge/catalog/site-20260927.json").read_text(encoding="utf-8"))
-    encoder = PublicEncoder(EncoderSpec.from_catalog(catalog, history_encoding="public-history-summary-v1", action_encoding="public-decision-intent-v1"))
+    encoder = PublicEncoder(EncoderSpec.from_catalog(catalog, observation_policy=site_observation_policy(), history_encoding="public-history-summary-v1", action_encoding="public-decision-intent-v1"))
     _native_mode_flow(mode, draft_delete, encoder, Position)
 
 
 @pytest.mark.parametrize("mode", ["normal", "chaos"])
 def test_native_default_weighted_conditioning_completion_gate(mode):
     """No skip/xfail: this gate stays red until real inverse source sampling exists."""
-    from accelerate_chess import Position
+    from accelerate_chess import Position, site_observation_policy
     catalog = json.loads((Path(__file__).parents[2] / "bridge/catalog/site-20260927.json").read_text(encoding="utf-8"))
-    encoder = PublicEncoder(EncoderSpec.from_catalog(catalog, history_encoding="public-history-summary-v1", action_encoding="public-decision-intent-v1"))
+    encoder = PublicEncoder(EncoderSpec.from_catalog(catalog, observation_policy=site_observation_policy(), history_encoding="public-history-summary-v1", action_encoding="public-decision-intent-v1"))
     _native_mode_flow(mode, False, encoder, Position)
 
 

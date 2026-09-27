@@ -52,12 +52,7 @@ fn count(state: &GameState, color: Color, kind: &str) -> usize {
         .count()
 }
 fn royal(state: &GameState, piece: &Piece) -> bool {
-    piece.is_royal()
-        || piece.color.owner().is_some_and(|color| {
-            has(piece, "regencyHeir")
-                && side(state, "kingDead", color)
-                && side(state, "regency", color)
-        })
+    state.royal_identity(piece)
 }
 fn queen(piece: &Piece) -> bool {
     piece.kind == "queen" && !has(piece, "regencyHeir")
@@ -547,6 +542,14 @@ fn drawable(
             crate::draft::category(c) == "RULE"
                 && !active_ids(state, None).contains(c["id"].as_str().expect("id"))
         })),
+        "calling-card" => Some(any(state, enemy, |piece, _| {
+            nonroyal(piece)
+                && !matches!(
+                    piece.kind.as_str(),
+                    "pawn" | "wall" | "football" | "blackHole"
+                )
+                && !matches!(ability(piece), "guard" | "revolvingDoor" | "jester")
+        })),
         "insight" => Some(true),
         "taunt" => Some(any(state, enemy, |p, _| {
             !matches!(p.kind.as_str(), "wall" | "football" | "blackHole")
@@ -586,6 +589,48 @@ fn drawable(
                     "merchant" | "wall" | "football" | "colossus"
                 )
         })),
+        "panic" => Some(
+            entries(state)
+                .iter()
+                .filter(|(_, piece)| {
+                    piece.color == enemy
+                        && nonroyal(piece)
+                        && !matches!(
+                            piece.kind.as_str(),
+                            "merchant" | "wall" | "football" | "colossus" | "bigRook" | "bigBishop"
+                        )
+                        && !state
+                            .extra
+                            .get("pendingPanic")
+                            .and_then(Value::as_array)
+                            .is_some_and(|pending| {
+                                pending.iter().any(|entry| {
+                                    entry.get("pieces").and_then(Value::as_array).is_some_and(
+                                        |pieces| {
+                                            pieces.iter().any(|reference| {
+                                                reference.get("id").and_then(Value::as_str)
+                                                    == Some(&piece.id)
+                                            })
+                                        },
+                                    )
+                                })
+                            })
+                })
+                .count()
+                >= 2,
+        ),
+        "vortex" => Some(
+            entries(state)
+                .iter()
+                .filter(|(_, piece)| {
+                    piece.color == enemy
+                        && nonroyal(piece)
+                        && !piece.is_large()
+                        && !matches!(piece.kind.as_str(), "pawn" | "wall")
+                })
+                .count()
+                >= 2,
+        ),
         "alekhine-machine-gun" => {
             Some(for_draft || (own_queen() && count(state, color, "rook") >= 2))
         }
@@ -1064,6 +1109,15 @@ fn target_drawable(state: &GameState, card: &Value, color: Color) -> Result<bool
         return Ok(result);
     }
     Ok(match card["target"].as_str().unwrap_or("") {
+        "enemy-ranged" => any(state, enemy, |piece, _| {
+            nonroyal(piece) && ranged(state, piece)
+        }),
+        "enemy-slider" => any(state, enemy, |piece, _| {
+            nonroyal(piece) && matches!(piece.kind.as_str(), "queen" | "bishop" | "rook")
+        }),
+        "enemy-piece" => any(state, enemy, |piece, _| {
+            nonroyal(piece) && !matches!(piece.kind.as_str(), "wall" | "football" | "colossus")
+        }),
         "empty" => unobstructed.iter().any(|s| {
             s.offset(0, 1).is_some_and(|to| unobstructed.contains(&to))
                 || s.offset(1, 0).is_some_and(|to| unobstructed.contains(&to))

@@ -2,7 +2,7 @@
 
 `accelerate-engine`은 2026-09-27에 동결한 Augment Chess 본체 규칙을 순수 Rust로
 포팅하는 crate다. Python, PyO3, 신경망, ONNX runtime 또는 JS subprocess에 의존하지
-않는다. 전체 256개 공개 카드와 84개 기물의 포팅은 진행 중이며 컴파일·커널 검사
+않는다. 전체 256개 공개 카드·27개 RULE·84개 기물의 포팅은 진행 중이며 컴파일·커널 검사
 성공을 전체 규칙 지원의 GO 판정으로 사용하지 않는다.
 
 `Position`은 `Arc<GameState>`를 가진 불변 snapshot이다. `apply`는 새 position을
@@ -45,10 +45,19 @@ premove의 순서 있는 복합 계획은 이 API가 있다는 이유로 지원 
 기물의 `PieceColor`는 white·black·neutral이고, 실제 결정을 하는 `Color`는 white·black이다.
 중립 wall은 공개 장애물이며 어느 플레이어의 이동·효과 소속에도 포함되지 않는다.
 
+원시 카드 payload의 승인은 실제 사이트 실행 wrapper를 따른다. 일부 대형 기물의
+outpost처럼 화면 후보 밖의 표적도 이 wrapper가 승인하는 경우가 있다. 공개 행동과
+`public_intent` / `bind_public_intent`는 실제 화면 선택 범위를 추가로 검사한다.
+화면 후보 중 실제 effect가 거부하는 표적은 실행 행동 열거에서 제외한다. 이 두
+경계를 하나의 후보 목록으로 취급하지 않는다.
+
 외부 snapshot import는 원문 필드의 존재·null·빈 카드 slot을 보존한다. typed 기본값은
 내부 실행에 사용하고 실제 규칙 변화만 source state에 반영한다. 원문 필드의 보존은
 그 필드의 규칙 실행 지원을 증명하지 않는다. 아직 포팅하지 않은 기물, 활성 효과,
 카드 또는 단계는 `UnsupportedFeature`로 명시한다.
+같은 ID의 대형 기물은 모든 칸에서 속성이 같아야 한다. 원문 exile이 일부 칸만
+옮겨 만든 비연속 footprint도 source restore처럼 보존하며, 배치 행동의 2×2 조건을
+snapshot 자체의 허용 조건으로 강제하지 않는다.
 
 관측은 `bridge/catalog/observation-20260927.json` 공개 allowlist와 사이트의 실제
 `hiddenFrom`, camouflage, hallucination 의미를 따른다. 획득한 상대 카드도 사이트에서
@@ -77,7 +86,13 @@ identity 및 RNG 전체가 일치했다. source predicate 자체에 있는 bound
 비교했다. 시계는 해당 profile의 고정 논리 시간에서 시작·일시 정지·완료 턴 increment를
 보존한다. normal seed37의 corner-kick→reaper 획득까지 양측 전체 공개 frame·RNG·시계가
 일치했고 첫 폰 이동 후에는 white 공개 frame·RNG·시계가 일치했다. reaper의 실제 효과와
-black 카드 target hint는 아직 명시적 미지원이다. 초기 public conditioning은 세 mode
+black 카드 target hint까지의 전체 정산은 별도 미완료다. reaper 변환을 포함한
+54개 카드와 추가 17개 카드 및 Judgment 임시 추방 분기의 primitive effect·화면
+target·거부 경계는 실제 source 167개 경우로 검사했다. 승인된 143개 경우의 전체
+primitive 상태·RNG·이력과 167개 UI 행동·첫 선택 좌표·불변 검증 결과가 일치했다.
+정상 거부 23개와 원문 예외 1개를 구분한다. 이 검사는
+공통 finishCard·hazard·종료 정산이나 변환 후 모든 기물 이동의 완료를 뜻하지 않는다.
+초기 public conditioning은 세 mode
 각 viewer에서 독립 future RNG를 유지하고 JCS 숫자 표현을 포함해 공개 frame 전체를
 검증한다. 전체 자동 패시브, grand의 최종 정산, 전체 카드·RULE·특수 이동·예약 전이
 및 큰 조합 행동의 lazy 열거는 진행 중이다. 초기 draw 지원은 그 카드의 효과 지원을
@@ -89,13 +104,43 @@ black 카드 target hint는 아직 명시적 미지원이다. 초기 public cond
 `accelerate-engine-json`은 읽는 중 16 MiB 한도를 적용하는 줄 단위 검증 adapter이며
 규칙은 동일 crate API로 실행한다.
 
+재생 기록은 replay 카드의 향후 동작에 사용되므로 `replay.rs`가 notation·재생 delta·
+이동 rollback 상태를 유지한다. 원문의 `JSON.stringify` 비교에는 객체 삽입 순서가
+영향을 주어 serde JSON과 기물·카드·색별 map에서 그 순서를 보존한다. position key와
+공개 정보 상태 hash에는 계속 JCS를 사용한다. 표준 초기 이동 6개의 실제 전이는
+전체 source state·RNG·실행 이력이 일치했고, 오프닝 효과 8개도 카드 정의의
+name/text/art만 제외한 동일 비교를 통과했다. 원시 로그와 중복 전이 fixture는
+저장소에 추가하지 않는다. 변형 기물의 기본 이동은 별도 순수 kernel 657개 경우에서
+좌표·배열 순서·전체 flags가 일치했으며, 전역 이동 제한과 실제 실행 flags 정산의
+완료는 별도 판정한다.
+
+관측 v2는 renderer의 badge·공개 숫자·지형 표시·관계·quantum overlay·공개 카드 결과를
+투영하고 동결 rulesVersion과 별도로 projectionVersion 및 전체 정책의 JCS SHA-256을
+묶는다. 139개 공개 상태 필드의 중첩 schema와 기물·카드·선택창·이력의 공개 표면을
+엄격히 검사한다. 내부 deadline·기물 ID·난수 window ID를 원형으로 전달하지 않는다.
+대기 중 트롤리 window ID는 exact private action에만 남고 관측·공개 이력에는 없다.
+트롤리 실행 family 자체는 아직 미완료다. 현재 source 관측 130개 경우에서 전체 JSON과
+정보 상태 SHA-256이 일치했다. 초기 play의 공개 이동 강조도 이 비교에 포함하며,
+대부분의 추가 상태 조합은 draft 단계의 renderer 표면 비교다. 실제 DOM 표시 88개
+경우의 별도 검증 근거와 구분한다. 모든 활성 RULE의 fog·특수 강조·의사결정 전환이
+완료되었다는 의미로 사용하지 않는다. Rust 1.96에서 36개 커널 검사와 1개 입력 한도
+검사, 전체 target의 엄격 clippy 및 format 검사를 통과한 중간 checkpoint다.
+
 Linux 검사는 저장소 밖 고정 빌드 슬롯을 사용한다.
 
 ```sh
-CARGO_TARGET_DIR="$HOME/.cache/accelerate/build/full-stack-implementation/cargo" cargo test -p accelerate-engine
+CARGO_TARGET_DIR="$HOME/.cache/accelerate/build/full-stack-implementation/engine-check" cargo +1.96.0 test --locked -p accelerate-engine
 ```
 
 Windows에서는 `%APPDATA%\Accelerate\build\windows\full-stack-implementation\cargo`를
 사용한다. 현재 호스트에서 proc-macro DLL은 OS 정책에 의해 차단되어 Linux 검사를
-사용했다. Windows 실제 빌드·CI 검증과 전체 catalog differential 검사는 별도 완료
-증거가 필요하며 원시 실행 로그와 일회성 비교 결과는 Git 밖 reports에 둔다.
+사용했다. f41e45d 기반 Windows·Linux native CI의 전체 실행 성공은 확인되었고 각
+OS 설치 검사 34개는 skip 없이 통과했다. 이후 진행 중인 replay·카드·관측 v2 변경의
+검증과 전체 catalog differential 완료는 그 CI 결과와 구분한다. 원시 실행 로그와
+일회성 비교 결과는 Git 밖 reports에 둔다.
+
+이 167개 비교는 UI 후보를 먼저 실행한 reused oracle의 renderer cache가 남아 있는 환경이다.
+후속 fresh-source probe에서 babyBear·grappler·Judgment의 animatedPieceIds가 snapshot 밖
+activePieceAnimationUntil module Map에 따라 달라졌다. 기존 전체 상태 일치는 이 context에
+한정하며 독립 snapshot 전이의 완전한 증거로 사용하지 않는다. 명시적인 실행 context와
+profile version을 정한 뒤 전체 상태·RNG를 다시 검증해야 한다. 상태 field는 비교에서 제외하지 않는다.

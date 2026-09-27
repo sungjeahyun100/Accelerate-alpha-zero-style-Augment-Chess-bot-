@@ -5,6 +5,7 @@ import json
 import hashlib
 import os
 from pathlib import Path
+from functools import lru_cache
 
 import numpy as np
 import pytest
@@ -17,8 +18,14 @@ from accelerate_chess.network.model import AdapterDescriptor, ModelConfig, Polic
 torch.set_num_threads(1)
 
 
+@lru_cache(maxsize=1)
+def observation_policy():
+    return json.loads((Path(__file__).resolve().parents[2] / "bridge/catalog/observation-20260927.json").read_text(encoding="utf-8"))
+
+
 def spec() -> EncoderSpec:
-    return EncoderSpec("site-20260927", "a" * 64, ("king", "pawn", "wall"), ("slime", "rule-ticket"), ("crown",), piece_payload_bytes=256, public_payload_bytes=2048, action_payload_bytes=512)
+    policy = observation_policy()
+    return EncoderSpec(policy["rulesVersion"], "a" * 64, ("king", "pawn", "wall"), ("slime", "rule-ticket"), ("crown",), hashlib.sha256(canonical_json(policy).encode()).hexdigest(), piece_payload_bytes=256, public_payload_bytes=2304, action_payload_bytes=512).with_observation_policy(policy)
 
 
 def resign(observation):
@@ -28,11 +35,11 @@ def resign(observation):
 
 def observation(player="white"):
     board = [[None for _ in range(8)] for _ in range(8)]
-    board[6][1] = {"type": "pawn", "color": "white", "moved": False, "id": "p1", "shielded": True, "nested": {"memo": [2, 4]}}
-    board[2][0] = {"type": "wall", "color": "neutral", "id": "wall-2-0"}
-    return resign({"protocolVersion": "accelerate-observation-v1", "viewer": player, "board": board, "turn": player,
+    board[6][1] = {"type": "pawn", "color": "white", "moved": False, "shielded": True, "status": {"witchTrial": True, "witchTrialRemaining": 2}}
+    board[2][0] = {"type": "wall", "color": "neutral", "status": {}}
+    return resign({"protocolVersion": "accelerate-observation-v2", "viewer": player, "board": board, "turn": player,
             "ownCards": [{"id": "slime", "instanceId": "s1", "used": False}], "opponentHandCount": 3,
-            "publicState": {"actionsRemaining": 1, "moveCount": 2, "fullMove": 1, "rules": ["crown"], "revealedOpponentCards": [{"id": "rule-ticket", "instanceId": "public-opponent-1", "used": True}], "delayed": [{"row": 3, "col": 2}]},
+            "publicState": {"projectionVersion": observation_policy()["projectionVersion"], "observationPolicyHash": spec().observation_policy_hash, "actionsRemaining": 1, "moveCount": 2, "fullMove": 1, "ruleCardIds": ["crown"], "revealedOpponentCards": [{"id": "rule-ticket", "instanceId": "public-opponent-1", "used": True}], "boardMarks": [{"kind": "meteor", "square": {"row": 3, "col": 2}}], "relationships": [], "overlays": []},
             "history": [{"type": "move", "color": "black", "from": {"row": 1, "col": 2}}], "informationStateKey": ""})
 
 
@@ -105,6 +112,11 @@ def test_public_encoder_preserves_attributes_action_identity_and_orientation():
     resign(pending)
     assert encoder.encode(pending, actions()).condition[2 * len(contract.card_ids) + len(contract.rule_ids)] == 1
     assert contract.contract()["value_perspective"] == "observation.viewer"
+    assert contract.contract()["board_fields"][3] == "own-known-moved"
+    moved = observation("black")
+    moved["board"][6][1]["moved"] = True  # Full-record display can expose this flag.
+    resign(moved)
+    assert encoder.encode(moved, actions()).board[len(contract.piece_ids) + 2, 1, 6] == 0
 
 
 def test_public_boundary_capacity_and_catalog_fail_closed():
@@ -133,11 +145,26 @@ def test_public_boundary_capacity_and_catalog_fail_closed():
         encoder.encode(leaked, actions())
     with pytest.raises(TypeError, match="PublicObservation"):
         encoder.encode(object(), actions())
+    old = observation(); old["protocolVersion"] = "accelerate-observation-v1"; resign(old)
+    with pytest.raises(ValueError, match="Observation v2"):
+        encoder.encode(old, actions())
+    wrong_policy = observation(); wrong_policy["publicState"]["observationPolicyHash"] = "b" * 64; resign(wrong_policy)
+    with pytest.raises(ValueError, match="policy"):
+        encoder.encode(wrong_policy, actions())
+    malformed_status = observation(); malformed_status["board"][6][1]["status"]["witchTrialRemaining"] = "two"; resign(malformed_status)
+    with pytest.raises(ValueError, match="status"):
+        encoder.encode(malformed_status, actions())
+    wrong_metadata = json.loads(canonical_json(observation_policy())); wrong_metadata["projectionVersion"] = "other"
+    with pytest.raises(ValueError, match="policy"):
+        EncoderSpec.from_dict(spec().to_dict(), observation_policy=wrong_metadata)
     unknown = observation()
     unknown["board"][6][1]["type"] = "unversioned-piece"
     resign(unknown)
-    with pytest.raises(ValueError, match="unknown piece"):
+    with pytest.raises(ValueError, match="piece"):
         encoder.encode(unknown, actions())
+    nested = observation(); nested["publicState"]["winterKingdom"] = {"enabled": True, "previewIds": ["secret-piece"]}; resign(nested)
+    with pytest.raises(ValueError, match="publicState.winterKingdom"):
+        encoder.encode(nested, actions())
     with pytest.raises(ValueError, match="permits"):
         PublicEncoder(replace(spec(), action_payload_bytes=8)).encode(observation(), actions())
     with pytest.raises(ValueError, match="duplicate"):
@@ -158,6 +185,12 @@ def test_public_boundary_capacity_and_catalog_fail_closed():
     intent_spec = replace(summarized_spec, action_encoding="public-decision-intent-v1")
     with pytest.raises(ValueError, match="private position metadata"):
         PublicEncoder(intent_spec).encode(long_history, actions())
+    intent_encoder=PublicEncoder(intent_spec)
+    first=intent_encoder.encode(long_history,[{"type":"trolleyChoice","color":"white","doomedIndex":0}])
+    second=intent_encoder.encode(long_history,[{"type":"trolleyChoice","color":"white","doomedIndex":1}])
+    assert first.action_keys!=second.action_keys
+    with pytest.raises(ValueError, match="private field"):
+        intent_encoder.encode(long_history,[{"type":"trolleyChoice","color":"white","doomedIndex":0,"windowId":"random-private-window"}])
     assert intent_spec.digest != summarized_spec.digest
 
 
@@ -257,6 +290,12 @@ def test_base_adapter_checkpoint_roundtrip_and_failed_load_preserves_model(artif
     torch.save(oversized, oversized_path)
     with pytest.raises(ValueError, match="aggregate parameter budget"):
         load_base(oversized_path)
+    incompatible_policy = torch.load(base_path, weights_only=True)
+    incompatible_policy["observation_policy"]["projectionVersion"] = "other-projection"
+    policy_path = artifact_directory / "incompatible-policy.pt"
+    torch.save(incompatible_policy, policy_path)
+    with pytest.raises(ValueError, match="policy"):
+        load_base(policy_path, contract)
 
 
 def test_onnx_dynamic_batch_actions_film_merge_and_manifest(artifact_directory):
@@ -287,6 +326,11 @@ def test_onnx_dynamic_batch_actions_film_merge_and_manifest(artifact_directory):
     with pytest.raises(ValueError, match="encoder contract"):
         load_manifest(manifest, wrong)
     payload = json.loads(manifest.read_text(encoding="utf-8"))
+    incompatible_policy = json.loads(canonical_json(payload))
+    incompatible_policy["encoder"]["observation_policy"]["projectionVersion"] = "other-projection"
+    manifest.write_text(json.dumps(incompatible_policy), encoding="utf-8")
+    with pytest.raises(ValueError, match="policy"):
+        load_manifest(manifest)
     payload["encoder_hash"] = "b" * 64
     manifest.write_text(json.dumps(payload), encoding="utf-8")
     import onnx

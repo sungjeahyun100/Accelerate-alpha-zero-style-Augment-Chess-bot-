@@ -27,13 +27,16 @@ from .search import BeliefLimits, InformationSetSearch, NativeSourceFactory, Par
 from .training import DatasetCursor, ReplayDataset, TrainingLimits, create_optimizer, load_training_checkpoint, optimize, save_training_checkpoint
 
 
-def default_spec(catalog_path: str | None = None):
+def default_spec(catalog_path: str | None = None, *, observation_policy: dict | None = None):
+    if observation_policy is None:
+        from ._native import site_observation_policy
+        observation_policy = site_observation_policy()
     if catalog_path:
         catalog = read_json(catalog_path)
     else:
         from ._native import site_catalog
         catalog = site_catalog()
-    return EncoderSpec.from_catalog(catalog, history_encoding="public-history-summary-v1", action_encoding="public-decision-intent-v1")
+    return EncoderSpec.from_catalog(catalog, observation_policy=observation_policy, history_encoding="public-history-summary-v1", action_encoding="public-decision-intent-v1")
 
 
 def _configuration(args):

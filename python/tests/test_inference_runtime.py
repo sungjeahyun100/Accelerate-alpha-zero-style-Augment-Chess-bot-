@@ -31,7 +31,8 @@ def _root():
 
 def _spec(full=False, history_encoding="full", action_encoding="exact-payload"):
     catalog = json.loads((Path(__file__).resolve().parents[2] / "bridge/catalog/site-20260927.json").read_text(encoding="utf-8"))
-    return EncoderSpec.from_catalog(catalog, history_encoding=history_encoding, action_encoding=action_encoding, **({} if full else dict(piece_payload_bytes=32, public_payload_bytes=64, action_payload_bytes=48)))
+    policy = json.loads((Path(__file__).resolve().parents[2] / "bridge/catalog/observation-20260927.json").read_text(encoding="utf-8"))
+    return EncoderSpec.from_catalog(catalog, observation_policy=policy, history_encoding=history_encoding, action_encoding=action_encoding, **({} if full else dict(piece_payload_bytes=32, public_payload_bytes=64, action_payload_bytes=48)))
 
 
 def _model(spec, full=False):

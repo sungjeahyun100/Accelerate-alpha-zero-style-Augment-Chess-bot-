@@ -14,7 +14,7 @@ from typing import Any, Mapping
 from .encoding import EncoderSpec, PublicEncoder, canonical_json
 from .search import PublicTracker, SEARCH_VERSION, SearchResult
 
-REPLAY_VERSION = "accelerate-replay-v1"
+REPLAY_VERSION = "accelerate-replay-v2"
 MAX_REPLAY_BYTES = 16 * 1024 * 1024
 
 
@@ -153,7 +153,7 @@ class EpisodeRecorder:
                         "reason": reason}
 
     def snapshot(self):
-        content = {"version": REPLAY_VERSION, "metadata": self.metadata, "encoder": self.spec.to_dict(),
+        content = {"version": REPLAY_VERSION, "metadata": self.metadata, "encoder": self.spec.to_dict(), "observation_policy": self.spec.observation_policy,
                    "traces": {viewer: tracker.snapshot() for viewer, tracker in self.trackers.items()},
                    "decisions": self.decisions, "outcome": self.outcome}
         return {**content, "replay_hash": _digest(content)}
@@ -195,10 +195,10 @@ def _validate_decision(record, trackers, spec):
 
 class ReplayEpisode:
     def __init__(self, payload, expected_spec: EncoderSpec | None = None):
-        fields = {"version", "metadata", "encoder", "traces", "decisions", "outcome", "replay_hash"}
+        fields = {"version", "metadata", "encoder", "observation_policy", "traces", "decisions", "outcome", "replay_hash"}
         if not isinstance(payload, dict) or set(payload) != fields or payload["version"] != REPLAY_VERSION or payload["replay_hash"] != _digest({key: value for key, value in payload.items() if key != "replay_hash"}):
             raise ValueError("replay contract or content hash mismatch")
-        self.spec = EncoderSpec.from_dict(payload["encoder"])
+        self.spec = EncoderSpec.from_dict(payload["encoder"], observation_policy=payload["observation_policy"])
         if expected_spec is not None and expected_spec.digest != self.spec.digest:
             raise ValueError("replay encoder compatibility mismatch")
         metadata = payload["metadata"]

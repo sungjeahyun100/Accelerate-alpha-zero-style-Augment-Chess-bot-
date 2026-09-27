@@ -4,6 +4,49 @@ use crate::*;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
+pub(crate) fn end_game(state: &mut GameState, winner: Option<Color>, reason: &str) -> Result<()> {
+    pause_clock(state)?;
+    state.mode = "gameover".into();
+    state.winner = winner.map(|color| color.as_str().into());
+    if state
+        .extra
+        .get("replayEndedAt")
+        .is_none_or(|v| v.is_null() || v.as_str() == Some(""))
+    {
+        let catalog: Value =
+            serde_json::from_str(include_str!("../../bridge/catalog/site-20260927.json"))
+                .expect("adopted catalog");
+        state.extra.insert(
+            "replayEndedAt".into(),
+            catalog["source"]["frozenAt"].clone(),
+        );
+    }
+    state.extra.insert("replayEndReason".into(), json!(reason));
+    for field in [
+        "selected",
+        "targeting",
+        "ruleTicketChoice",
+        "jokerChoice",
+        "barricadeDirectionChoice",
+        "barricadePreview",
+        "drawOffer",
+    ] {
+        state.extra.insert(field.into(), Value::Null);
+    }
+    state.extra.insert("legalMoves".into(), json!([]));
+    crate::replay::add_log(
+        state,
+        format!(
+            "{}: {reason}",
+            winner
+                .map(|color| format!("{} 승리", crate::replay::label(color)))
+                .unwrap_or_else(|| "무승부".into())
+        ),
+    )?;
+    state.gameover_replay_pending = true;
+    Ok(())
+}
+
 /// The adopted local oracle profile advances rules at the catalog's frozen
 /// logical time. Clock state remains part of the rules snapshot; a wall-clock
 /// scheduler must supply elapsed time separately rather than enter this kernel.
@@ -128,16 +171,15 @@ pub(crate) fn commit_turn_clock(state: &mut GameState, color: Color) -> Result<b
     clock["runningColor"] = Value::Null;
     clock["lastStartedAt"] = Value::Null;
     clock["timeoutLoser"] = json!(color);
-    state.mode = "gameover".into();
-    state.winner = Some(color.opponent().as_str().into());
-    state.extra.insert(
-        "replayEndReason".into(),
-        json!(if color == Color::White {
+    end_game(
+        state,
+        Some(color.opponent()),
+        if color == Color::White {
             "백 시간패"
         } else {
             "흑 시간패"
-        }),
-    );
+        },
+    )?;
     Ok(false)
 }
 
@@ -319,6 +361,14 @@ pub(crate) fn check_termination(state: &mut GameState) -> Result<bool> {
         resolve_stars(state)?;
         return Ok(true);
     }
+    check_star_limit(state)
+}
+
+/// Cards check the turn limit without adding a board repetition occurrence.
+pub(crate) fn check_star_limit(state: &mut GameState) -> Result<bool> {
+    if state.result().is_some() {
+        return Ok(true);
+    }
     let active = state
         .extra
         .get("deathmatch")
@@ -352,6 +402,12 @@ pub(crate) fn check_termination(state: &mut GameState) -> Result<bool> {
             state
                 .extra
                 .insert("endPhaseStartMove".into(), json!(shared));
+            crate::replay::add_log(
+                state,
+                format!(
+                    "연장전 시작: {limit}수 이후 {turns}수 동안 폰 이동, 포획, 액티브 카드 사용이 없으면 별이 더 적은 쪽이 승리합니다."
+                ),
+            )?;
         } else {
             resolve_stars(state)?;
             return Ok(true);

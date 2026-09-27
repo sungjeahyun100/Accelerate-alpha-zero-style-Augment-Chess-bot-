@@ -486,7 +486,52 @@ pub(crate) fn start_draft(state: &mut GameState, color: Color, phase: &str) -> R
         "draft".into(),
         json!({"color":color,"phase":phase,"choices":choices,"tutorial":false}),
     );
+    start_draft_clock(state, color, None)?;
     Ok(())
+}
+fn start_draft_clock(state: &mut GameState, color: Color, grand_pick: Option<usize>) -> Result<()> {
+    let previous = state
+        .extra
+        .get("draftClock")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let enabled = state
+        .extra
+        .get("clock")
+        .and_then(|clock| clock.get("enabled"))
+        .and_then(Value::as_bool)
+        == Some(true);
+    let configured = previous
+        .get("initialMs")
+        .and_then(Value::as_u64)
+        .filter(|ms| [20000, 30000, 40000, 50000, 60000, 70000].contains(ms))
+        .unwrap_or(40000);
+    let preserve = grand_pick.is_none()
+        && previous["enabled"] == true
+        && color == Color::Black
+        && previous["whiteSelected"] == true
+        && previous["blackSelected"] != true;
+    let mut clock = if preserve {
+        previous
+    } else {
+        json!({"enabled":enabled,"initialMs":if enabled{json!(configured)}else{Value::Null},"whiteStartedAt":null,"blackStartedAt":null,"whiteSelected":false,"blackSelected":false,"whiteAutoSelected":false,"blackAutoSelected":false})
+    };
+    if let Some(pick) = grand_pick {
+        clock["grandPickIndex"] = json!(pick.min(12));
+    }
+    if clock["enabled"] == true {
+        clock[format!("{}StartedAt", color.as_str())] = json!(frozen_timestamp()?);
+    }
+    state.extra.insert("draftClock".into(), clock);
+    Ok(())
+}
+fn mark_draft_clock_selected(state: &mut GameState, color: Color) {
+    if let Some(clock) = state.extra.get_mut("draftClock")
+        && clock["enabled"] == true
+    {
+        clock[format!("{}Selected", color.as_str())] = json!(true);
+        clock[format!("{}AutoSelected", color.as_str())] = json!(true);
+    }
 }
 pub(crate) fn condition_grand_initial_choices(
     state: &mut GameState,
@@ -676,6 +721,24 @@ pub(crate) fn initialize(config: GameConfig, seed: u64) -> Result<GameState> {
     );
     let slots = if config.game_style == "normal" { 3 } else { 6 };
     state.deck_slots=serde_json::from_value::<GameState>(json!({"board":state.board,"turn":"white","deckSlots":{"white":vec![Value::Null;slots],"black":vec![Value::Null;slots]}})).map_err(EngineError::serialization)?.deck_slots;
+    // resetGame records the idle board before beginInitialGameFlow applies
+    // runtime configuration and starts the initial decision phase.
+    let configured = [
+        "draftDelete",
+        "starWinLimit",
+        "deathmatchEnabled",
+        "deathmatchLimitTurns",
+    ]
+    .into_iter()
+    .map(|key| (key.to_owned(), state.extra[key].clone()))
+    .collect::<Vec<_>>();
+    for (key, _) in &configured {
+        state.extra.insert(key.clone(), raw["state"][key].clone());
+    }
+    crate::replay::record(&mut state, "initial")?;
+    for (key, value) in configured {
+        state.extra.insert(key, value);
+    }
     if config.draft_delete {
         state.mode = "play".into();
         state.turn = Color::White;
@@ -689,10 +752,14 @@ pub(crate) fn initialize(config: GameConfig, seed: u64) -> Result<GameState> {
         state.extra.insert("endPhaseStartMove".into(), json!(0));
         let choices = grand_pool(&mut state)?;
         state.extra.insert("draft".into(),json!({"kind":"grand","version":1,"phase":"GRAND","color":"black","choices":choices,"picks":[],"pickIndex":0}));
+        start_draft_clock(&mut state, Color::Black, Some(0))?;
     } else {
         start_draft(&mut state, Color::White, "OPENING")?;
     }
-    Ok(state)
+    // The source Position contract snapshots through canonical JSON before
+    // actions are restored; retain that one-time construction boundary.
+    serde_json::from_slice(&serde_jcs::to_vec(&state).map_err(EngineError::serialization)?)
+        .map_err(EngineError::serialization)
 }
 
 pub(crate) fn legal_actions(state: &GameState) -> Result<Vec<Action>> {
@@ -839,16 +906,16 @@ pub(crate) fn apply_pick(state: &mut GameState, action: &Action) -> Result<Vec<P
         stored
             .as_object_mut()
             .expect("card")
-            .remove("nextTurnPending");
+            .shift_remove("nextTurnPending");
         stored
             .as_object_mut()
             .expect("card")
-            .remove("nextTurnPendingSinceTurn");
+            .shift_remove("nextTurnPendingSinceTurn");
     }
     stored
         .as_object_mut()
         .expect("card")
-        .remove("passiveApplied");
+        .shift_remove("passiveApplied");
     state.deck_slots.get_mut(color)[slot] =
         serde_json::from_value(stored).map_err(EngineError::serialization)?;
     state
@@ -857,7 +924,13 @@ pub(crate) fn apply_pick(state: &mut GameState, action: &Action) -> Result<Vec<P
     // The actual client queues gain notation before noteCardEvent. Its notation
     // identifier consumes Math.random even though it is presentation metadata;
     // omitting that draw would change every subsequent gameplay chance outcome.
-    state.rng.sample()?;
+    crate::replay::queue_gain(
+        state,
+        color,
+        &serde_json::to_value(&state.deck_slots.get(color)[slot])
+            .map_err(EngineError::serialization)?,
+        "OPENING",
+    )?;
     crate::flow::note_card_event(state)?;
     let mut next_draft = draft;
     let picks = next_draft["picks"]
@@ -869,7 +942,17 @@ pub(crate) fn apply_pick(state: &mut GameState, action: &Action) -> Result<Vec<P
     );
     next_draft["pickIndex"] = json!(order);
     state.extra.insert("draft".into(), next_draft);
+    mark_draft_clock_selected(state, color);
+    crate::replay::add_log(
+        state,
+        format!(
+            "{} 그랜드 드래프트 {order}/12: {}",
+            crate::replay::label(color),
+            card["name"].as_str().unwrap_or("undefined")
+        ),
+    )?;
     if order < 12 {
+        crate::replay::record(state, "draft:grand")?;
         let next = if order % 2 == 0 {
             Color::Black
         } else {
@@ -878,6 +961,7 @@ pub(crate) fn apply_pick(state: &mut GameState, action: &Action) -> Result<Vec<P
         state.turn = next;
         state.extra.get_mut("draft").expect("draft")["color"] = json!(next);
         state.extra.insert("draftLocked".into(), json!(false));
+        start_draft_clock(state, next, Some(order))?;
     } else {
         let catalog: Value =
             serde_json::from_str(include_str!("../../bridge/catalog/site-20260927.json"))
@@ -926,12 +1010,17 @@ pub(crate) fn apply_pick(state: &mut GameState, action: &Action) -> Result<Vec<P
             }
         }
         crate::flow::note_card_event(state)?;
+        crate::replay::record(state, "draft:grand")?;
         if state.mode == "gameover" {
             return Ok(Vec::new());
         }
         state.mode = "play".into();
         state.turn = Color::White;
         state.extra.insert("draftLocked".into(), json!(false));
+        state.actions_remaining = 1;
+        state.extra.insert("middleDraftDone".into(), json!(true));
+        state.extra.insert("endDraftDone".into(), json!(true));
+        state.extra.insert("endPhaseStartMove".into(), json!(0));
         crate::flow::start_clock(state)?;
         crate::flow::record_position(state)?;
     }
@@ -1019,7 +1108,7 @@ fn apply_regular_pick(state: &mut GameState, action: &Action, draft: &Value) -> 
         state.deck_slots.get_mut(color)[slot] =
             serde_json::from_value(stored.clone()).map_err(EngineError::serialization)?;
         // queueCardGainNotation -> createHistoryNotationId consumes one draw.
-        state.rng.sample()?;
+        crate::replay::queue_gain(state, color, &stored, phase)?;
         if selected.len() == 1 && is_passive_definition(card) {
             crate::transition::apply_draft_passive(state, color, slot)?;
         }
@@ -1041,9 +1130,20 @@ fn apply_regular_pick(state: &mut GameState, action: &Action, draft: &Value) -> 
         crate::flow::note_card_event(state)?;
     }
     state.extra.insert("draftLocked".into(), json!(true));
+    mark_draft_clock_selected(state, color);
     for field in ["draftPreviewCardId", "draftPreviewBundleIndex"] {
         state.extra.insert(field.into(), Value::Null);
     }
+    let names = selected
+        .iter()
+        .filter_map(|card| card["name"].as_str().or_else(|| card["id"].as_str()))
+        .collect::<Vec<_>>()
+        .join(" + ");
+    crate::replay::add_log(
+        state,
+        format!("{} 드래프트: {names}", crate::replay::label(color)),
+    )?;
+    crate::replay::record(state, &format!("draft:{}", phase.to_lowercase()))?;
     if state.mode == "gameover" {
         return Ok(Vec::new());
     }
@@ -1108,7 +1208,7 @@ fn apply_regular_pick(state: &mut GameState, action: &Action, draft: &Value) -> 
     }
     Ok(Vec::new())
 }
-fn is_passive_definition(card: &Value) -> bool {
+pub(crate) fn is_passive_definition(card: &Value) -> bool {
     static IDS: OnceLock<BTreeSet<String>> = OnceLock::new();
     IDS.get_or_init(|| {
         let catalog: Value =

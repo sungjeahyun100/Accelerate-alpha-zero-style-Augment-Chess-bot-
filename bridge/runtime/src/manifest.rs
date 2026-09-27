@@ -126,7 +126,7 @@ impl Bundle {
         json_numbers(&raw)?;
         let bundle: Self = serde_json::from_value(raw.clone())?;
         ensure!(
-            bundle.version == "onnx-policy-value-v1" && bundle.model_file == "model.onnx",
+            bundle.version == "onnx-policy-value-v2" && bundle.model_file == "model.onnx",
             "unsupported deployment manifest"
         );
         ensure!(
@@ -175,6 +175,8 @@ impl Bundle {
         );
         let catalog: Value =
             serde_json::from_str(include_str!("../../catalog/site-20260927.json"))?;
+        let policy: Value =
+            serde_json::from_str(include_str!("../../catalog/observation-20260927.json"))?;
         let spec = &bundle.encoder["spec"];
         fields(
             spec,
@@ -194,12 +196,18 @@ impl Bundle {
                 "catalog_version",
                 "history_encoding",
                 "action_encoding",
+                "observation_policy_hash",
             ],
         )?;
         ensure!(
             spec["rules_version"] == catalog["rulesVersion"]
                 && spec["catalog_version"] == catalog["catalogVersion"]
-                && spec["catalog_hash"].as_str() == Some(&canonical_hash(&catalog)?),
+                && spec["catalog_hash"].as_str() == Some(&canonical_hash(&catalog)?)
+                && spec["observation_policy_hash"].as_str() == Some(&canonical_hash(&policy)?)
+                && policy["schemaVersion"] == 2
+                && policy["protocolVersion"] == "accelerate-observation-v2"
+                && policy["projectionVersion"] == "source-visible-20260927-v2"
+                && policy["rulesVersion"] == catalog["rulesVersion"],
             "frozen rules/catalog compatibility mismatch"
         );
         ensure!(
@@ -236,9 +244,9 @@ impl Bundle {
             "card/rule catalog ordering mismatch"
         );
         ensure!(
-            spec["encoder_version"] == "public-utf8-v1"
+            spec["encoder_version"] == "public-utf8-v2"
                 && spec["action_version"] == "candidate-payload-v1"
-                && spec["condition_version"] == "public-film-v1",
+                && spec["condition_version"] == "public-film-v2",
             "unsupported encoder version"
         );
         let board_channels =
@@ -279,10 +287,10 @@ impl Bundle {
             _ => anyhow::bail!("unsupported candidate action encoding"),
         };
         let expected_encoder = json!({
-            "spec": spec, "observation_version": "accelerate-observation-v1", "dtype": "float32", "board_layout": "NCHW", "value_perspective": "observation.viewer",
+            "spec": spec, "observation_policy": policy, "observation_version": "accelerate-observation-v2", "dtype": "float32", "board_layout": "NCHW", "value_perspective": "observation.viewer",
             "history_policy": history_policy,
             "action_policy": action_policy,
-            "board_fields": ["piece-id-onehot", "own", "opponent", "moved", "occupied", "canonical-json-byte-length/capacity", "canonical-json-utf8-bytes/255"],
+            "board_fields": ["piece-id-onehot", "own", "opponent", "own-known-moved", "occupied", "canonical-json-byte-length/capacity", "canonical-json-utf8-bytes/255"],
             "condition_fields": ["own-card-id-counts", "revealed-opponent-card-id-counts", "rule-id-presence", "viewer-is-white", "actionsRemaining/16", "moveCount/512", "fullMove/256", "canonical-json-byte-length/capacity", "canonical-json-utf8-bytes/255"],
             "action_fields": ["action-type-onehot", "card-id-onehot", "from-row/7", "from-col/7", "to-row/7", "to-col/7", "target-row/7", "target-col/7", "canonical-json-byte-length/capacity", "canonical-json-utf8-bytes/255"],
             "board_channels": board_channels, "condition_dim": condition_dim, "action_dim": action_dim,

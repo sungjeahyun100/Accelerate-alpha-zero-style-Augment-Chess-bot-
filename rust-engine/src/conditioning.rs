@@ -37,7 +37,17 @@ fn checked_observation(value: Value) -> Result<Observation> {
     }
     let mut observation: Observation =
         serde_json::from_value(value).map_err(EngineError::serialization)?;
-    if observation.protocol_version != "accelerate-observation-v1"
+    if observation.protocol_version != crate::state::observation_protocol()
+        || observation
+            .public_state
+            .get("projectionVersion")
+            .and_then(Value::as_str)
+            != Some(crate::state::observation_projection())
+        || observation
+            .public_state
+            .get("observationPolicyHash")
+            .and_then(Value::as_str)
+            != Some(crate::state::observation_policy_hash())
         || observation.board.len() != 8
         || observation.board.iter().any(|row| row.len() != 8)
     {

@@ -32,6 +32,13 @@ fn catalog() -> &'static Value {
             .expect("checked source catalog")
     })
 }
+fn observation_policy() -> &'static Value {
+    static POLICY: OnceLock<Value> = OnceLock::new();
+    POLICY.get_or_init(|| {
+        serde_json::from_str(include_str!("../../catalog/observation-20260927.json"))
+            .expect("checked source observation policy")
+    })
+}
 fn error(error: EngineError) -> PyErr {
     match error {
         EngineError::StaleAction => StaleActionError::new_err(error.to_string()),
@@ -535,9 +542,16 @@ fn site_catalog(py: Python<'_>) -> PyResult<Py<PyAny>> {
     conversion::to_python(py, catalog())
 }
 
+/// Return an owned copy of the public projection policy compiled into this wheel.
+#[pyfunction]
+fn site_observation_policy(py: Python<'_>) -> PyResult<Py<PyAny>> {
+    conversion::to_python(py, observation_policy())
+}
+
 #[pymodule]
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(site_catalog, module)?)?;
+    module.add_function(wrap_pyfunction!(site_observation_policy, module)?)?;
     module.add_class::<inference::InferenceSession>()?;
     module.add_class::<Position>()?;
     module.add_class::<Action>()?;

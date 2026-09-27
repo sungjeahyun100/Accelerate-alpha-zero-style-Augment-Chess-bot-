@@ -1,6 +1,7 @@
 {
-  "schemaVersion": 1,
-  "protocolVersion": "accelerate-observation-v1",
+  "schemaVersion": 2,
+  "protocolVersion": "accelerate-observation-v2",
+  "projectionVersion": "source-visible-20260927-v2",
   "rulesVersion": "augment-site-20260927-abfe01a035813875",
   "statePublicFields": [
     "acceleration",
@@ -8,6 +9,7 @@
     "accelerationPendingTurns",
     "accelerationStartsAfterBlackTurns",
     "actionsRemaining",
+    "afterimageQueen",
     "armistice",
     "assembly",
     "backwardKnight",
@@ -16,6 +18,10 @@
     "bishopSnipe",
     "blackHole",
     "boardFlip",
+    "breakthroughPawns",
+    "camouflageRule",
+    "cannonGhostScreen",
+    "cannonScarecrowScreen",
     "captureTheFlag",
     "capturedTypes",
     "cardsUsedThisTurn",
@@ -28,6 +34,7 @@
     "completeRandom",
     "conscription",
     "conscriptionUsed",
+    "conveyorRule",
     "coolGuy",
     "cornerKick",
     "d4",
@@ -38,13 +45,15 @@
     "draftDelete",
     "e4",
     "earlyPromotion",
-    "effects",
+    "enPassantFrenzy",
     "endDraftDone",
     "endPhaseStartMove",
+    "extinctionMinorTargets",
     "falseStart",
     "fastGrowth",
     "fianchetto",
     "fieldPromotion",
+    "fileSurge",
     "finalWeapon",
     "freeCardUsed",
     "freeCastling",
@@ -61,17 +70,20 @@
     "hillKing",
     "imperialStudies",
     "infiltration",
+    "internalSixFixes",
+    "ironMonarch",
     "killerKing",
     "kingDead",
     "kingKnight",
+    "knightInjury",
     "knightmate",
     "locustSwarm",
     "longEnPassant",
     "machoChess",
     "madHorse",
     "majesty",
-    "mediumMovement",
     "middleDraftDone",
+    "miracleSelectsBishop",
     "mistakeCard",
     "mistakeRule",
     "mode",
@@ -79,8 +91,9 @@
     "moveCount",
     "mutation",
     "overtake",
+    "overtakeTurnOnly",
     "parrotBasicMovement",
-    "parrotMovement",
+    "parrotRookTarget",
     "pawnConversion",
     "pawnLeap",
     "pawnSprint",
@@ -89,30 +102,47 @@
     "racingKing",
     "radicalCharge",
     "recycling",
+    "regency",
+    "relay",
     "religiousVictory",
     "resolve",
+    "retreat",
+    "revolvingDoorGuard",
     "roller",
+    "rookLift",
     "royalKnightKing",
     "ruleOpeningEnabled",
     "ruleSelectionEnabled",
+    "saturationRule",
     "selectedRuleCardId",
     "selectedRuleCardIds",
+    "september18Balance",
     "shotgunDlc",
     "shotgunOpeningColor",
     "skipTurn",
     "socialism",
     "solidarity",
     "starWinLimit",
+    "substitution",
     "switcheroo",
     "symmetry",
     "synchronization",
+    "thiefQuietJump",
+    "thiefRemake",
+    "thiefRequiredJump",
+    "transcendenceRule",
     "trojanHorse",
     "turnsTaken",
     "underpromotion",
+    "unifiedJumpObstacles",
     "vanguard",
+    "vanguardDiagonalOnly",
+    "vanishing",
     "vigilance",
     "winner",
-    "winterKingdom"
+    "winterKingdom",
+    "zugzwang",
+    "zugzwangConsumesTurn"
   ],
   "derivedPublicFields": [
     "phase",
@@ -129,7 +159,13 @@
     "selectionPhase",
     "legalHints",
     "tabooPending",
-    "ownPlans"
+    "ownPlans",
+    "projectionVersion",
+    "observationPolicyHash",
+    "boardMarks",
+    "relationships",
+    "overlays",
+    "pendingRuleCardIds"
   ],
   "piecePublicFields": [
     "type",
@@ -149,7 +185,7 @@
     "windmillMode",
     "logDir",
     "submerged",
-    "size"
+    "status"
   ],
   "cardPublicFields": [
     "id",
@@ -163,7 +199,8 @@
     "slot",
     "passiveApplied",
     "nextTurnPending",
-    "firstTurnCard"
+    "firstTurnCard",
+    "revealed"
   ],
   "evidence": {
     "cards": "main.renderOpponentLibrary -> compareLibrarySlots -> playerDeck: acquired cards for both colors are public in normal/chaos/grand; only unchosen opposing draft offers stay private.",
@@ -192,7 +229,13 @@
       "playerCards",
       "replayEvents",
       "turn",
-      "tabooPending"
+      "tabooPending",
+      "mediumMovement",
+      "parrotMovement",
+      "effects",
+      "resolveReady",
+      "wizardImpact",
+      "magicGirlSurge"
     ],
     "privateOrViewerRestricted": [
       "hallucination",
@@ -269,18 +312,12 @@
     ],
     "visibilityReviewPending": [
       "accelerationTrail",
-      "afterimageQueen",
-      "breakthroughPawns",
       "brilliantMove",
-      "camouflageRule",
-      "cannonGhostScreen",
-      "cannonScarecrowScreen",
       "cardBanIds",
       "chainBonds",
       "chaosNoCaptureUntilHalfTurn",
       "clonedPassiveCards",
       "collapsePending",
-      "conveyorRule",
       "coronation",
       "crownRule",
       "deathmatch",
@@ -291,31 +328,21 @@
       "draftResumeTurn",
       "drawOffer",
       "enPassant",
-      "enPassantFrenzy",
       "encouragement",
       "exhaustion",
-      "extinctionMinorTargets",
       "feudalContracts",
-      "fileSurge",
       "firstMoveCardsForced",
       "freeMoveCaptureLock",
       "gomokuVictoryCells",
       "idolEncoreUsedByPiece",
       "initiative",
-      "internalSixFixes",
-      "ironMonarch",
       "judgmentExiles",
-      "knightInjury",
       "lastTurnCaptures",
-      "magicGirlSurge",
       "magicGirlSurgeRefreshPending",
-      "miracleSelectsBishop",
       "moving",
       "necromancy",
-      "overtakeTurnOnly",
       "overwhelm",
       "palaces",
-      "parrotRookTarget",
       "pendingBearRetaliations",
       "pendingFeudalStrike",
       "pendingGales",
@@ -325,34 +352,17 @@
       "portalRule",
       "positionCounts",
       "queensGambitFiles",
-      "regency",
-      "relay",
-      "retreat",
-      "revolvingDoorGuard",
-      "rookLift",
       "royalCommand",
       "ruleBombs",
       "ruleOpeningEvent",
-      "saturationRule",
-      "september18Balance",
       "shotgunOpeningForced",
       "sirenExposure",
-      "substitution",
       "taunt",
       "temporaryQueens",
-      "thiefQuietJump",
-      "thiefRemake",
-      "thiefRequiredJump",
       "timeIsMineSequence",
-      "transcendenceRule",
       "turnCaptures",
       "ultimatum",
-      "undeadResurrections",
-      "unifiedJumpObstacles",
-      "vanguardDiagonalOnly",
-      "vanishing",
-      "zugzwang",
-      "zugzwangConsumesTurn"
+      "undeadResurrections"
     ]
   },
   "visibilityReview": "Classification is explicit; visibilityReviewPending is not a claim of private information. Active pending fields require further client-renderer review before full coverage GO.",
@@ -389,5 +399,6737 @@
   },
   "ownPlanEvidence": "canViewFreeMovePlans + currentFreeMoveTraceSets(main72535..72555): owner known ordered plans, opponent invisible; random plan/piece IDs excluded.",
   "nestedVisibilityReview": "Previously raw nested fields moved to visibilityReviewPending until exact renderer/value projection is established; top-level allowlisting alone does not authorize internal pieceId/private coordinates.",
-  "privateNestedKeyGuard": "Explicitly rejects nested identity/hiddenFrom/RNG keys in raw public values; this is a boundary guard, not completion of the remaining renderer visibility audit."
+  "privateNestedKeyGuard": "Strict source value/status/selection schemas reject unreviewed nested keys. Raw identity/hiddenFrom/RNG keys and plural private piece/preview IDs are guarded; trolley windowId is execution-only. This is a boundary guard, not completion of remaining renderer visibility audit.",
+  "surfaceSchemas": {
+    "pieceStatus": {
+      "properties": {
+        "protected": {
+          "const": true
+        },
+        "chameleon": {
+          "const": true
+        },
+        "chimera": {
+          "const": true
+        },
+        "holdout": {
+          "const": true
+        },
+        "staked": {
+          "const": true
+        },
+        "cooling": {
+          "const": true
+        },
+        "explosive": {
+          "const": true
+        },
+        "brutalKnight": {
+          "const": true
+        },
+        "bribed": {
+          "const": true
+        },
+        "witchTrial": {
+          "const": true
+        },
+        "disarmed": {
+          "const": true
+        },
+        "severed": {
+          "const": true
+        },
+        "inertia": {
+          "const": true
+        },
+        "frenzy": {
+          "const": true
+        },
+        "exhaustionLocked": {
+          "const": true
+        },
+        "crownBearer": {
+          "const": true
+        },
+        "iceSheet": {
+          "const": true
+        },
+        "lastResistance": {
+          "const": true
+        },
+        "sacrificeProtection": {
+          "const": true
+        },
+        "necromancy": {
+          "const": true
+        },
+        "regencyHeir": {
+          "const": true
+        },
+        "regencyRoyal": {
+          "const": true
+        },
+        "diceLocked": {
+          "const": true
+        },
+        "quantum": {
+          "const": true
+        },
+        "quantumShadow": {
+          "const": true
+        },
+        "bloodCurse": {
+          "const": true
+        },
+        "poisonedPawn": {
+          "const": true
+        },
+        "poisonStunned": {
+          "const": true
+        },
+        "evasion": {
+          "const": true
+        },
+        "ghost": {
+          "const": true
+        },
+        "metalized": {
+          "const": true
+        },
+        "twinsLinked": {
+          "const": true
+        },
+        "loyalist": {
+          "const": true
+        },
+        "parry": {
+          "const": true
+        },
+        "emptyLunchbox": {
+          "const": true
+        },
+        "magicGirlAwakened": {
+          "const": true
+        },
+        "saturationLocked": {
+          "const": true
+        },
+        "nullification": {
+          "const": true
+        },
+        "recurrence": {
+          "const": true
+        },
+        "wanted": {
+          "const": true
+        },
+        "grapplerBound": {
+          "const": true
+        },
+        "sirenWarning": {
+          "const": true
+        },
+        "stealthed": {
+          "const": true
+        },
+        "fieldPromotionReady": {
+          "const": true
+        },
+        "locustReady": {
+          "const": true
+        },
+        "spy": {
+          "const": true
+        },
+        "trojanHorse": {
+          "const": true
+        },
+        "armisticeRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9
+        },
+        "babyBearGrowthRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9
+        },
+        "bribedRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9007199254740991
+        },
+        "crownHeldMoves": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9007199254740991
+        },
+        "emptyLunchboxRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9
+        },
+        "frozenRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9
+        },
+        "galeRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9
+        },
+        "gold": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9007199254740991
+        },
+        "holdoutRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9007199254740991
+        },
+        "iceSheetKingRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9
+        },
+        "lastResistanceRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9
+        },
+        "metalCooldown": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9007199254740991
+        },
+        "necromancyRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9
+        },
+        "pawnReverseRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9
+        },
+        "poisonStunRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9
+        },
+        "prophecyRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 3
+        },
+        "reaperCaptures": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 4
+        },
+        "retaliationsRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 2
+        },
+        "royalCommandRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9
+        },
+        "sacrificeProtectionRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9
+        },
+        "saturationCaptures": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 3
+        },
+        "severanceRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9
+        },
+        "stakedRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9007199254740991
+        },
+        "ultimatumRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 4
+        },
+        "undeadResurrectionRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9007199254740991
+        },
+        "vipRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 3
+        },
+        "witchTrialRemaining": {
+          "minimum": 0,
+          "type": "number",
+          "maximum": 9
+        },
+        "tricksterMovement": {
+          "enum": [
+            "alfil",
+            "amazon",
+            "assassin",
+            "babyBear",
+            "bat",
+            "bear",
+            "berserker",
+            "bigBishop",
+            "bigRook",
+            "bishop",
+            "blackHole",
+            "bomb",
+            "brutus",
+            "camel",
+            "campfire",
+            "cannon",
+            "cardinal",
+            "checker",
+            "checkerKing",
+            "clockwork",
+            "coffin",
+            "colossus",
+            "crown",
+            "darkWizard",
+            "donQuixote",
+            "dragon",
+            "eagle",
+            "fanatic",
+            "ferz",
+            "football",
+            "grappler",
+            "grasshopper",
+            "guard",
+            "hedgehog",
+            "herald",
+            "hook",
+            "idol",
+            "jester",
+            "king",
+            "knight",
+            "knightmaster",
+            "lobster",
+            "log",
+            "logRolling",
+            "magicGirl",
+            "man",
+            "medium",
+            "merchant",
+            "missionary",
+            "monster",
+            "octopus",
+            "paladin",
+            "parrot",
+            "pawn",
+            "pegasus",
+            "platform",
+            "portal",
+            "primeMinister",
+            "princess",
+            "protestant",
+            "queen",
+            "reaper",
+            "recruiter",
+            "revolvingDoor",
+            "rook",
+            "royalKnight",
+            "scarecrow",
+            "shotgunKing",
+            "siegeRam",
+            "siren",
+            "slime",
+            "squire",
+            "standardBearer",
+            "thief",
+            "timeTraveler",
+            "trickster",
+            "undead",
+            "vampireLord",
+            "vip",
+            "wall",
+            "windmill",
+            "windmillBishop",
+            "windmillRook",
+            "wizard"
+          ],
+          "type": "string"
+        },
+        "parrotMovement": {
+          "enum": [
+            "alfil",
+            "amazon",
+            "assassin",
+            "babyBear",
+            "bat",
+            "bear",
+            "berserker",
+            "bigBishop",
+            "bigRook",
+            "bishop",
+            "blackHole",
+            "bomb",
+            "brutus",
+            "camel",
+            "campfire",
+            "cannon",
+            "cardinal",
+            "checker",
+            "checkerKing",
+            "clockwork",
+            "coffin",
+            "colossus",
+            "crown",
+            "darkWizard",
+            "donQuixote",
+            "dragon",
+            "eagle",
+            "fanatic",
+            "ferz",
+            "football",
+            "grappler",
+            "grasshopper",
+            "guard",
+            "hedgehog",
+            "herald",
+            "hook",
+            "idol",
+            "jester",
+            "king",
+            "knight",
+            "knightmaster",
+            "lobster",
+            "log",
+            "logRolling",
+            "magicGirl",
+            "man",
+            "medium",
+            "merchant",
+            "missionary",
+            "monster",
+            "octopus",
+            "paladin",
+            "parrot",
+            "pawn",
+            "pegasus",
+            "platform",
+            "portal",
+            "primeMinister",
+            "princess",
+            "protestant",
+            "queen",
+            "reaper",
+            "recruiter",
+            "revolvingDoor",
+            "rook",
+            "royalKnight",
+            "scarecrow",
+            "shotgunKing",
+            "siegeRam",
+            "siren",
+            "slime",
+            "squire",
+            "standardBearer",
+            "thief",
+            "timeTraveler",
+            "trickster",
+            "undead",
+            "vampireLord",
+            "vip",
+            "wall",
+            "windmill",
+            "windmillBishop",
+            "windmillRook",
+            "wizard"
+          ],
+          "type": "string"
+        },
+        "mediumMovement": {
+          "enum": [
+            "alfil",
+            "amazon",
+            "assassin",
+            "babyBear",
+            "bat",
+            "bear",
+            "berserker",
+            "bigBishop",
+            "bigRook",
+            "bishop",
+            "blackHole",
+            "bomb",
+            "brutus",
+            "camel",
+            "campfire",
+            "cannon",
+            "cardinal",
+            "checker",
+            "checkerKing",
+            "clockwork",
+            "coffin",
+            "colossus",
+            "crown",
+            "darkWizard",
+            "donQuixote",
+            "dragon",
+            "eagle",
+            "fanatic",
+            "ferz",
+            "football",
+            "grappler",
+            "grasshopper",
+            "guard",
+            "hedgehog",
+            "herald",
+            "hook",
+            "idol",
+            "jester",
+            "king",
+            "knight",
+            "knightmaster",
+            "lobster",
+            "log",
+            "logRolling",
+            "magicGirl",
+            "man",
+            "medium",
+            "merchant",
+            "missionary",
+            "monster",
+            "octopus",
+            "paladin",
+            "parrot",
+            "pawn",
+            "pegasus",
+            "platform",
+            "portal",
+            "primeMinister",
+            "princess",
+            "protestant",
+            "queen",
+            "reaper",
+            "recruiter",
+            "revolvingDoor",
+            "rook",
+            "royalKnight",
+            "scarecrow",
+            "shotgunKing",
+            "siegeRam",
+            "siren",
+            "slime",
+            "squire",
+            "standardBearer",
+            "thief",
+            "timeTraveler",
+            "trickster",
+            "undead",
+            "vampireLord",
+            "vip",
+            "wall",
+            "windmill",
+            "windmillBishop",
+            "windmillRook",
+            "wizard"
+          ],
+          "type": "string"
+        },
+        "horseRiding": {
+          "enum": [
+            "alfil",
+            "amazon",
+            "assassin",
+            "babyBear",
+            "bat",
+            "bear",
+            "berserker",
+            "bigBishop",
+            "bigRook",
+            "bishop",
+            "blackHole",
+            "bomb",
+            "brutus",
+            "camel",
+            "campfire",
+            "cannon",
+            "cardinal",
+            "checker",
+            "checkerKing",
+            "clockwork",
+            "coffin",
+            "colossus",
+            "crown",
+            "darkWizard",
+            "donQuixote",
+            "dragon",
+            "eagle",
+            "fanatic",
+            "ferz",
+            "football",
+            "grappler",
+            "grasshopper",
+            "guard",
+            "hedgehog",
+            "herald",
+            "hook",
+            "idol",
+            "jester",
+            "king",
+            "knight",
+            "knightmaster",
+            "lobster",
+            "log",
+            "logRolling",
+            "magicGirl",
+            "man",
+            "medium",
+            "merchant",
+            "missionary",
+            "monster",
+            "octopus",
+            "paladin",
+            "parrot",
+            "pawn",
+            "pegasus",
+            "platform",
+            "portal",
+            "primeMinister",
+            "princess",
+            "protestant",
+            "queen",
+            "reaper",
+            "recruiter",
+            "revolvingDoor",
+            "rook",
+            "royalKnight",
+            "scarecrow",
+            "shotgunKing",
+            "siegeRam",
+            "siren",
+            "slime",
+            "squire",
+            "standardBearer",
+            "thief",
+            "timeTraveler",
+            "trickster",
+            "undead",
+            "vampireLord",
+            "vip",
+            "wall",
+            "windmill",
+            "windmillBishop",
+            "windmillRook",
+            "wizard"
+          ],
+          "type": "string"
+        },
+        "feudalGuardianType": {
+          "enum": [
+            "alfil",
+            "amazon",
+            "assassin",
+            "babyBear",
+            "bat",
+            "bear",
+            "berserker",
+            "bigBishop",
+            "bigRook",
+            "bishop",
+            "blackHole",
+            "bomb",
+            "brutus",
+            "camel",
+            "campfire",
+            "cannon",
+            "cardinal",
+            "checker",
+            "checkerKing",
+            "clockwork",
+            "coffin",
+            "colossus",
+            "crown",
+            "darkWizard",
+            "donQuixote",
+            "dragon",
+            "eagle",
+            "fanatic",
+            "ferz",
+            "football",
+            "grappler",
+            "grasshopper",
+            "guard",
+            "hedgehog",
+            "herald",
+            "hook",
+            "idol",
+            "jester",
+            "king",
+            "knight",
+            "knightmaster",
+            "lobster",
+            "log",
+            "logRolling",
+            "magicGirl",
+            "man",
+            "medium",
+            "merchant",
+            "missionary",
+            "monster",
+            "octopus",
+            "paladin",
+            "parrot",
+            "pawn",
+            "pegasus",
+            "platform",
+            "portal",
+            "primeMinister",
+            "princess",
+            "protestant",
+            "queen",
+            "reaper",
+            "recruiter",
+            "revolvingDoor",
+            "rook",
+            "royalKnight",
+            "scarecrow",
+            "shotgunKing",
+            "siegeRam",
+            "siren",
+            "slime",
+            "squire",
+            "standardBearer",
+            "thief",
+            "timeTraveler",
+            "trickster",
+            "undead",
+            "vampireLord",
+            "vip",
+            "wall",
+            "windmill",
+            "windmillBishop",
+            "windmillRook",
+            "wizard"
+          ],
+          "type": "string"
+        },
+        "captureRestriction": {
+          "enum": [
+            "immune",
+            "royal-only"
+          ]
+        },
+        "imperialStudyTypes": {
+          "maxItems": 83,
+          "type": "array",
+          "items": {
+            "enum": [
+              "alfil",
+              "amazon",
+              "assassin",
+              "babyBear",
+              "bat",
+              "bear",
+              "berserker",
+              "bigBishop",
+              "bigRook",
+              "bishop",
+              "blackHole",
+              "bomb",
+              "brutus",
+              "camel",
+              "campfire",
+              "cannon",
+              "cardinal",
+              "checker",
+              "checkerKing",
+              "clockwork",
+              "coffin",
+              "colossus",
+              "crown",
+              "darkWizard",
+              "donQuixote",
+              "dragon",
+              "eagle",
+              "fanatic",
+              "ferz",
+              "football",
+              "grappler",
+              "grasshopper",
+              "guard",
+              "hedgehog",
+              "herald",
+              "hook",
+              "idol",
+              "jester",
+              "king",
+              "knight",
+              "knightmaster",
+              "lobster",
+              "log",
+              "logRolling",
+              "magicGirl",
+              "man",
+              "medium",
+              "merchant",
+              "missionary",
+              "monster",
+              "octopus",
+              "paladin",
+              "parrot",
+              "pawn",
+              "pegasus",
+              "platform",
+              "portal",
+              "primeMinister",
+              "princess",
+              "protestant",
+              "queen",
+              "reaper",
+              "recruiter",
+              "revolvingDoor",
+              "rook",
+              "royalKnight",
+              "scarecrow",
+              "shotgunKing",
+              "siegeRam",
+              "siren",
+              "slime",
+              "squire",
+              "standardBearer",
+              "thief",
+              "timeTraveler",
+              "trickster",
+              "undead",
+              "vampireLord",
+              "vip",
+              "wall",
+              "windmill",
+              "windmillBishop",
+              "windmillRook",
+              "wizard"
+            ],
+            "type": "string"
+          }
+        },
+        "callingCard": {
+          "const": true
+        },
+        "basicTraining": {
+          "const": true
+        },
+        "potionEffects": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "enum": [
+              "sacrificeProtection",
+              "lastResistance",
+              "coronationProtection",
+              "shield",
+              "evasion",
+              "parry",
+              "basicTraining",
+              "stealth",
+              "loyalist",
+              "ghost",
+              "chameleon",
+              "submerge",
+              "freeze",
+              "chimera",
+              "witchTrial",
+              "stake",
+              "callingCard",
+              "emptyLunchbox",
+              "poisonStun",
+              "disarm",
+              "mannerNoCapture",
+              "saturationNoCapture",
+              "explosive",
+              "poisonedPawn",
+              "queensGambitProtection",
+              "trojanHorse",
+              "severance",
+              "inertia",
+              "outpostProtection",
+              "nullification",
+              "recurrence",
+              "grapplerBound"
+            ]
+          }
+        },
+        "fieldPromotionCapturesRemaining": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "ghillieRemaining": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "type": "object",
+      "additionalProperties": false
+    },
+    "boardMarks": {
+      "maxItems": 2048,
+      "type": "array",
+      "items": {
+        "properties": {
+          "square": {
+            "properties": {
+              "col": {
+                "minimum": 0,
+                "type": "integer",
+                "maximum": 7
+              },
+              "row": {
+                "minimum": 0,
+                "type": "integer",
+                "maximum": 7
+              }
+            },
+            "required": [
+              "row",
+              "col"
+            ],
+            "type": "object",
+            "additionalProperties": false
+          },
+          "index": {
+            "minimum": 0,
+            "type": "integer",
+            "maximum": 63
+          },
+          "kind": {
+            "enum": [
+              "blackHole",
+              "ruleBomb",
+              "portal",
+              "platform",
+              "palace",
+              "meteor",
+              "collapseWarning",
+              "gomokuVictory",
+              "accelerationTrail",
+              "conveyor",
+              "crownGround",
+              "winterForecast",
+              "platformForecast",
+              "scarecrowReserved",
+              "lobsterReserved",
+              "portalReserved",
+              "otherworldOrigin",
+              "fogHidden",
+              "encouraged",
+              "resolveReady",
+              "taboo",
+              "d4Forbidden",
+              "e4Destination",
+              "captureFlag",
+              "scarecrowPreview",
+              "lobsterPreview",
+              "portalPreview",
+              "lightning",
+              "revolvingDoor",
+              "knightmasterAura",
+              "clockworkAura",
+              "paladinAura",
+              "idolAura",
+              "sirenAura",
+              "reaperAura",
+              "darkMagicDomain"
+            ]
+          },
+          "owner": {
+            "enum": [
+              "white",
+              "black"
+            ]
+          },
+          "direction": {
+            "enum": [
+              "up",
+              "down",
+              "left",
+              "right"
+            ]
+          },
+          "remaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9007199254740991
+          },
+          "rotation": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 360
+          }
+        },
+        "required": [
+          "kind",
+          "square"
+        ],
+        "type": "object",
+        "additionalProperties": false
+      }
+    },
+    "relationships": {
+      "maxItems": 1024,
+      "type": "array",
+      "items": {
+        "properties": {
+          "kind": {
+            "const": "chain"
+          },
+          "owner": {
+            "enum": [
+              "white",
+              "black"
+            ]
+          },
+          "length": {
+            "enum": [
+              "one",
+              "sqrt2",
+              "two",
+              "sqrt5",
+              "two-sqrt2",
+              "offset"
+            ]
+          },
+          "to": {
+            "properties": {
+              "col": {
+                "minimum": 0,
+                "type": "integer",
+                "maximum": 7
+              },
+              "row": {
+                "minimum": 0,
+                "type": "integer",
+                "maximum": 7
+              }
+            },
+            "required": [
+              "row",
+              "col"
+            ],
+            "type": "object",
+            "additionalProperties": false
+          },
+          "from": {
+            "properties": {
+              "col": {
+                "minimum": 0,
+                "type": "integer",
+                "maximum": 7
+              },
+              "row": {
+                "minimum": 0,
+                "type": "integer",
+                "maximum": 7
+              }
+            },
+            "required": [
+              "row",
+              "col"
+            ],
+            "type": "object",
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "kind",
+          "owner",
+          "from",
+          "to",
+          "length"
+        ],
+        "type": "object",
+        "additionalProperties": false
+      }
+    },
+    "overlays": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "const": "quantum"
+          },
+          "cells": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "properties": {
+                "row": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 7
+                },
+                "col": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 7
+                }
+              },
+              "required": [
+                "row",
+                "col"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "piece": {
+            "type": "object",
+            "required": [
+              "type",
+              "color",
+              "status"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "alfil",
+                  "amazon",
+                  "assassin",
+                  "babyBear",
+                  "bat",
+                  "bear",
+                  "berserker",
+                  "bigBishop",
+                  "bigRook",
+                  "bishop",
+                  "blackHole",
+                  "bomb",
+                  "brutus",
+                  "camel",
+                  "campfire",
+                  "cannon",
+                  "cardinal",
+                  "checker",
+                  "checkerKing",
+                  "clockwork",
+                  "coffin",
+                  "colossus",
+                  "crown",
+                  "darkWizard",
+                  "donQuixote",
+                  "dragon",
+                  "eagle",
+                  "fanatic",
+                  "ferz",
+                  "football",
+                  "grappler",
+                  "grasshopper",
+                  "guard",
+                  "hedgehog",
+                  "herald",
+                  "hook",
+                  "idol",
+                  "jester",
+                  "king",
+                  "knight",
+                  "knightmaster",
+                  "lobster",
+                  "log",
+                  "logRolling",
+                  "magicGirl",
+                  "man",
+                  "medium",
+                  "merchant",
+                  "missionary",
+                  "monster",
+                  "octopus",
+                  "paladin",
+                  "parrot",
+                  "pawn",
+                  "pegasus",
+                  "platform",
+                  "portal",
+                  "primeMinister",
+                  "princess",
+                  "protestant",
+                  "queen",
+                  "reaper",
+                  "recruiter",
+                  "revolvingDoor",
+                  "rook",
+                  "royalKnight",
+                  "scarecrow",
+                  "shotgunKing",
+                  "siegeRam",
+                  "siren",
+                  "slime",
+                  "squire",
+                  "standardBearer",
+                  "thief",
+                  "timeTraveler",
+                  "trickster",
+                  "undead",
+                  "vampireLord",
+                  "vip",
+                  "wall",
+                  "windmill",
+                  "windmillBishop",
+                  "windmillRook",
+                  "wizard"
+                ]
+              },
+              "color": {
+                "enum": [
+                  "white",
+                  "black",
+                  "neutral"
+                ]
+              },
+              "moved": {
+                "type": "boolean"
+              },
+              "shielded": {
+                "type": "boolean"
+              },
+              "frozen": {
+                "type": "boolean"
+              },
+              "hp": {
+                "type": "number"
+              },
+              "maxHp": {
+                "type": "number"
+              },
+              "mana": {
+                "type": "number"
+              },
+              "maxMana": {
+                "type": "number"
+              },
+              "ammo": {
+                "type": "number"
+              },
+              "maxAmmo": {
+                "type": "number"
+              },
+              "anchorRow": {
+                "type": "number"
+              },
+              "anchorCol": {
+                "type": "number"
+              },
+              "facing": {
+                "enum": [
+                  "up",
+                  "down",
+                  "left",
+                  "right",
+                  "N",
+                  "NE",
+                  "E",
+                  "SE",
+                  "S",
+                  "SW",
+                  "W",
+                  "NW"
+                ]
+              },
+              "windmillMode": {
+                "enum": [
+                  "bishop",
+                  "rook"
+                ]
+              },
+              "logDir": {
+                "type": "object",
+                "required": [
+                  "dr",
+                  "dc"
+                ],
+                "properties": {
+                  "dr": {
+                    "type": "integer",
+                    "minimum": -1,
+                    "maximum": 1
+                  },
+                  "dc": {
+                    "type": "integer",
+                    "minimum": -1,
+                    "maximum": 1
+                  }
+                },
+                "additionalProperties": false
+              },
+              "submerged": {
+                "type": "boolean"
+              },
+              "status": {
+                "properties": {
+                  "protected": {
+                    "const": true
+                  },
+                  "chameleon": {
+                    "const": true
+                  },
+                  "chimera": {
+                    "const": true
+                  },
+                  "holdout": {
+                    "const": true
+                  },
+                  "staked": {
+                    "const": true
+                  },
+                  "cooling": {
+                    "const": true
+                  },
+                  "explosive": {
+                    "const": true
+                  },
+                  "brutalKnight": {
+                    "const": true
+                  },
+                  "bribed": {
+                    "const": true
+                  },
+                  "witchTrial": {
+                    "const": true
+                  },
+                  "disarmed": {
+                    "const": true
+                  },
+                  "severed": {
+                    "const": true
+                  },
+                  "inertia": {
+                    "const": true
+                  },
+                  "frenzy": {
+                    "const": true
+                  },
+                  "exhaustionLocked": {
+                    "const": true
+                  },
+                  "crownBearer": {
+                    "const": true
+                  },
+                  "iceSheet": {
+                    "const": true
+                  },
+                  "lastResistance": {
+                    "const": true
+                  },
+                  "sacrificeProtection": {
+                    "const": true
+                  },
+                  "necromancy": {
+                    "const": true
+                  },
+                  "regencyHeir": {
+                    "const": true
+                  },
+                  "regencyRoyal": {
+                    "const": true
+                  },
+                  "diceLocked": {
+                    "const": true
+                  },
+                  "quantum": {
+                    "const": true
+                  },
+                  "quantumShadow": {
+                    "const": true
+                  },
+                  "bloodCurse": {
+                    "const": true
+                  },
+                  "poisonedPawn": {
+                    "const": true
+                  },
+                  "poisonStunned": {
+                    "const": true
+                  },
+                  "evasion": {
+                    "const": true
+                  },
+                  "ghost": {
+                    "const": true
+                  },
+                  "metalized": {
+                    "const": true
+                  },
+                  "twinsLinked": {
+                    "const": true
+                  },
+                  "loyalist": {
+                    "const": true
+                  },
+                  "parry": {
+                    "const": true
+                  },
+                  "emptyLunchbox": {
+                    "const": true
+                  },
+                  "magicGirlAwakened": {
+                    "const": true
+                  },
+                  "saturationLocked": {
+                    "const": true
+                  },
+                  "nullification": {
+                    "const": true
+                  },
+                  "recurrence": {
+                    "const": true
+                  },
+                  "wanted": {
+                    "const": true
+                  },
+                  "grapplerBound": {
+                    "const": true
+                  },
+                  "sirenWarning": {
+                    "const": true
+                  },
+                  "stealthed": {
+                    "const": true
+                  },
+                  "fieldPromotionReady": {
+                    "const": true
+                  },
+                  "locustReady": {
+                    "const": true
+                  },
+                  "spy": {
+                    "const": true
+                  },
+                  "trojanHorse": {
+                    "const": true
+                  },
+                  "armisticeRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9
+                  },
+                  "babyBearGrowthRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9
+                  },
+                  "bribedRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9007199254740991
+                  },
+                  "crownHeldMoves": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9007199254740991
+                  },
+                  "emptyLunchboxRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9
+                  },
+                  "frozenRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9
+                  },
+                  "galeRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9
+                  },
+                  "gold": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9007199254740991
+                  },
+                  "holdoutRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9007199254740991
+                  },
+                  "iceSheetKingRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9
+                  },
+                  "lastResistanceRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9
+                  },
+                  "metalCooldown": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9007199254740991
+                  },
+                  "necromancyRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9
+                  },
+                  "pawnReverseRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9
+                  },
+                  "poisonStunRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9
+                  },
+                  "prophecyRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 3
+                  },
+                  "reaperCaptures": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 4
+                  },
+                  "retaliationsRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 2
+                  },
+                  "royalCommandRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9
+                  },
+                  "sacrificeProtectionRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9
+                  },
+                  "saturationCaptures": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 3
+                  },
+                  "severanceRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9
+                  },
+                  "stakedRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9007199254740991
+                  },
+                  "ultimatumRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 4
+                  },
+                  "undeadResurrectionRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9007199254740991
+                  },
+                  "vipRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 3
+                  },
+                  "witchTrialRemaining": {
+                    "minimum": 0,
+                    "type": "number",
+                    "maximum": 9
+                  },
+                  "tricksterMovement": {
+                    "enum": [
+                      "alfil",
+                      "amazon",
+                      "assassin",
+                      "babyBear",
+                      "bat",
+                      "bear",
+                      "berserker",
+                      "bigBishop",
+                      "bigRook",
+                      "bishop",
+                      "blackHole",
+                      "bomb",
+                      "brutus",
+                      "camel",
+                      "campfire",
+                      "cannon",
+                      "cardinal",
+                      "checker",
+                      "checkerKing",
+                      "clockwork",
+                      "coffin",
+                      "colossus",
+                      "crown",
+                      "darkWizard",
+                      "donQuixote",
+                      "dragon",
+                      "eagle",
+                      "fanatic",
+                      "ferz",
+                      "football",
+                      "grappler",
+                      "grasshopper",
+                      "guard",
+                      "hedgehog",
+                      "herald",
+                      "hook",
+                      "idol",
+                      "jester",
+                      "king",
+                      "knight",
+                      "knightmaster",
+                      "lobster",
+                      "log",
+                      "logRolling",
+                      "magicGirl",
+                      "man",
+                      "medium",
+                      "merchant",
+                      "missionary",
+                      "monster",
+                      "octopus",
+                      "paladin",
+                      "parrot",
+                      "pawn",
+                      "pegasus",
+                      "platform",
+                      "portal",
+                      "primeMinister",
+                      "princess",
+                      "protestant",
+                      "queen",
+                      "reaper",
+                      "recruiter",
+                      "revolvingDoor",
+                      "rook",
+                      "royalKnight",
+                      "scarecrow",
+                      "shotgunKing",
+                      "siegeRam",
+                      "siren",
+                      "slime",
+                      "squire",
+                      "standardBearer",
+                      "thief",
+                      "timeTraveler",
+                      "trickster",
+                      "undead",
+                      "vampireLord",
+                      "vip",
+                      "wall",
+                      "windmill",
+                      "windmillBishop",
+                      "windmillRook",
+                      "wizard"
+                    ],
+                    "type": "string"
+                  },
+                  "parrotMovement": {
+                    "enum": [
+                      "alfil",
+                      "amazon",
+                      "assassin",
+                      "babyBear",
+                      "bat",
+                      "bear",
+                      "berserker",
+                      "bigBishop",
+                      "bigRook",
+                      "bishop",
+                      "blackHole",
+                      "bomb",
+                      "brutus",
+                      "camel",
+                      "campfire",
+                      "cannon",
+                      "cardinal",
+                      "checker",
+                      "checkerKing",
+                      "clockwork",
+                      "coffin",
+                      "colossus",
+                      "crown",
+                      "darkWizard",
+                      "donQuixote",
+                      "dragon",
+                      "eagle",
+                      "fanatic",
+                      "ferz",
+                      "football",
+                      "grappler",
+                      "grasshopper",
+                      "guard",
+                      "hedgehog",
+                      "herald",
+                      "hook",
+                      "idol",
+                      "jester",
+                      "king",
+                      "knight",
+                      "knightmaster",
+                      "lobster",
+                      "log",
+                      "logRolling",
+                      "magicGirl",
+                      "man",
+                      "medium",
+                      "merchant",
+                      "missionary",
+                      "monster",
+                      "octopus",
+                      "paladin",
+                      "parrot",
+                      "pawn",
+                      "pegasus",
+                      "platform",
+                      "portal",
+                      "primeMinister",
+                      "princess",
+                      "protestant",
+                      "queen",
+                      "reaper",
+                      "recruiter",
+                      "revolvingDoor",
+                      "rook",
+                      "royalKnight",
+                      "scarecrow",
+                      "shotgunKing",
+                      "siegeRam",
+                      "siren",
+                      "slime",
+                      "squire",
+                      "standardBearer",
+                      "thief",
+                      "timeTraveler",
+                      "trickster",
+                      "undead",
+                      "vampireLord",
+                      "vip",
+                      "wall",
+                      "windmill",
+                      "windmillBishop",
+                      "windmillRook",
+                      "wizard"
+                    ],
+                    "type": "string"
+                  },
+                  "mediumMovement": {
+                    "enum": [
+                      "alfil",
+                      "amazon",
+                      "assassin",
+                      "babyBear",
+                      "bat",
+                      "bear",
+                      "berserker",
+                      "bigBishop",
+                      "bigRook",
+                      "bishop",
+                      "blackHole",
+                      "bomb",
+                      "brutus",
+                      "camel",
+                      "campfire",
+                      "cannon",
+                      "cardinal",
+                      "checker",
+                      "checkerKing",
+                      "clockwork",
+                      "coffin",
+                      "colossus",
+                      "crown",
+                      "darkWizard",
+                      "donQuixote",
+                      "dragon",
+                      "eagle",
+                      "fanatic",
+                      "ferz",
+                      "football",
+                      "grappler",
+                      "grasshopper",
+                      "guard",
+                      "hedgehog",
+                      "herald",
+                      "hook",
+                      "idol",
+                      "jester",
+                      "king",
+                      "knight",
+                      "knightmaster",
+                      "lobster",
+                      "log",
+                      "logRolling",
+                      "magicGirl",
+                      "man",
+                      "medium",
+                      "merchant",
+                      "missionary",
+                      "monster",
+                      "octopus",
+                      "paladin",
+                      "parrot",
+                      "pawn",
+                      "pegasus",
+                      "platform",
+                      "portal",
+                      "primeMinister",
+                      "princess",
+                      "protestant",
+                      "queen",
+                      "reaper",
+                      "recruiter",
+                      "revolvingDoor",
+                      "rook",
+                      "royalKnight",
+                      "scarecrow",
+                      "shotgunKing",
+                      "siegeRam",
+                      "siren",
+                      "slime",
+                      "squire",
+                      "standardBearer",
+                      "thief",
+                      "timeTraveler",
+                      "trickster",
+                      "undead",
+                      "vampireLord",
+                      "vip",
+                      "wall",
+                      "windmill",
+                      "windmillBishop",
+                      "windmillRook",
+                      "wizard"
+                    ],
+                    "type": "string"
+                  },
+                  "horseRiding": {
+                    "enum": [
+                      "alfil",
+                      "amazon",
+                      "assassin",
+                      "babyBear",
+                      "bat",
+                      "bear",
+                      "berserker",
+                      "bigBishop",
+                      "bigRook",
+                      "bishop",
+                      "blackHole",
+                      "bomb",
+                      "brutus",
+                      "camel",
+                      "campfire",
+                      "cannon",
+                      "cardinal",
+                      "checker",
+                      "checkerKing",
+                      "clockwork",
+                      "coffin",
+                      "colossus",
+                      "crown",
+                      "darkWizard",
+                      "donQuixote",
+                      "dragon",
+                      "eagle",
+                      "fanatic",
+                      "ferz",
+                      "football",
+                      "grappler",
+                      "grasshopper",
+                      "guard",
+                      "hedgehog",
+                      "herald",
+                      "hook",
+                      "idol",
+                      "jester",
+                      "king",
+                      "knight",
+                      "knightmaster",
+                      "lobster",
+                      "log",
+                      "logRolling",
+                      "magicGirl",
+                      "man",
+                      "medium",
+                      "merchant",
+                      "missionary",
+                      "monster",
+                      "octopus",
+                      "paladin",
+                      "parrot",
+                      "pawn",
+                      "pegasus",
+                      "platform",
+                      "portal",
+                      "primeMinister",
+                      "princess",
+                      "protestant",
+                      "queen",
+                      "reaper",
+                      "recruiter",
+                      "revolvingDoor",
+                      "rook",
+                      "royalKnight",
+                      "scarecrow",
+                      "shotgunKing",
+                      "siegeRam",
+                      "siren",
+                      "slime",
+                      "squire",
+                      "standardBearer",
+                      "thief",
+                      "timeTraveler",
+                      "trickster",
+                      "undead",
+                      "vampireLord",
+                      "vip",
+                      "wall",
+                      "windmill",
+                      "windmillBishop",
+                      "windmillRook",
+                      "wizard"
+                    ],
+                    "type": "string"
+                  },
+                  "feudalGuardianType": {
+                    "enum": [
+                      "alfil",
+                      "amazon",
+                      "assassin",
+                      "babyBear",
+                      "bat",
+                      "bear",
+                      "berserker",
+                      "bigBishop",
+                      "bigRook",
+                      "bishop",
+                      "blackHole",
+                      "bomb",
+                      "brutus",
+                      "camel",
+                      "campfire",
+                      "cannon",
+                      "cardinal",
+                      "checker",
+                      "checkerKing",
+                      "clockwork",
+                      "coffin",
+                      "colossus",
+                      "crown",
+                      "darkWizard",
+                      "donQuixote",
+                      "dragon",
+                      "eagle",
+                      "fanatic",
+                      "ferz",
+                      "football",
+                      "grappler",
+                      "grasshopper",
+                      "guard",
+                      "hedgehog",
+                      "herald",
+                      "hook",
+                      "idol",
+                      "jester",
+                      "king",
+                      "knight",
+                      "knightmaster",
+                      "lobster",
+                      "log",
+                      "logRolling",
+                      "magicGirl",
+                      "man",
+                      "medium",
+                      "merchant",
+                      "missionary",
+                      "monster",
+                      "octopus",
+                      "paladin",
+                      "parrot",
+                      "pawn",
+                      "pegasus",
+                      "platform",
+                      "portal",
+                      "primeMinister",
+                      "princess",
+                      "protestant",
+                      "queen",
+                      "reaper",
+                      "recruiter",
+                      "revolvingDoor",
+                      "rook",
+                      "royalKnight",
+                      "scarecrow",
+                      "shotgunKing",
+                      "siegeRam",
+                      "siren",
+                      "slime",
+                      "squire",
+                      "standardBearer",
+                      "thief",
+                      "timeTraveler",
+                      "trickster",
+                      "undead",
+                      "vampireLord",
+                      "vip",
+                      "wall",
+                      "windmill",
+                      "windmillBishop",
+                      "windmillRook",
+                      "wizard"
+                    ],
+                    "type": "string"
+                  },
+                  "captureRestriction": {
+                    "enum": [
+                      "immune",
+                      "royal-only"
+                    ]
+                  },
+                  "imperialStudyTypes": {
+                    "maxItems": 83,
+                    "type": "array",
+                    "items": {
+                      "enum": [
+                        "alfil",
+                        "amazon",
+                        "assassin",
+                        "babyBear",
+                        "bat",
+                        "bear",
+                        "berserker",
+                        "bigBishop",
+                        "bigRook",
+                        "bishop",
+                        "blackHole",
+                        "bomb",
+                        "brutus",
+                        "camel",
+                        "campfire",
+                        "cannon",
+                        "cardinal",
+                        "checker",
+                        "checkerKing",
+                        "clockwork",
+                        "coffin",
+                        "colossus",
+                        "crown",
+                        "darkWizard",
+                        "donQuixote",
+                        "dragon",
+                        "eagle",
+                        "fanatic",
+                        "ferz",
+                        "football",
+                        "grappler",
+                        "grasshopper",
+                        "guard",
+                        "hedgehog",
+                        "herald",
+                        "hook",
+                        "idol",
+                        "jester",
+                        "king",
+                        "knight",
+                        "knightmaster",
+                        "lobster",
+                        "log",
+                        "logRolling",
+                        "magicGirl",
+                        "man",
+                        "medium",
+                        "merchant",
+                        "missionary",
+                        "monster",
+                        "octopus",
+                        "paladin",
+                        "parrot",
+                        "pawn",
+                        "pegasus",
+                        "platform",
+                        "portal",
+                        "primeMinister",
+                        "princess",
+                        "protestant",
+                        "queen",
+                        "reaper",
+                        "recruiter",
+                        "revolvingDoor",
+                        "rook",
+                        "royalKnight",
+                        "scarecrow",
+                        "shotgunKing",
+                        "siegeRam",
+                        "siren",
+                        "slime",
+                        "squire",
+                        "standardBearer",
+                        "thief",
+                        "timeTraveler",
+                        "trickster",
+                        "undead",
+                        "vampireLord",
+                        "vip",
+                        "wall",
+                        "windmill",
+                        "windmillBishop",
+                        "windmillRook",
+                        "wizard"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "callingCard": {
+                    "const": true
+                  },
+                  "basicTraining": {
+                    "const": true
+                  },
+                  "potionEffects": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "sacrificeProtection",
+                        "lastResistance",
+                        "coronationProtection",
+                        "shield",
+                        "evasion",
+                        "parry",
+                        "basicTraining",
+                        "stealth",
+                        "loyalist",
+                        "ghost",
+                        "chameleon",
+                        "submerge",
+                        "freeze",
+                        "chimera",
+                        "witchTrial",
+                        "stake",
+                        "callingCard",
+                        "emptyLunchbox",
+                        "poisonStun",
+                        "disarm",
+                        "mannerNoCapture",
+                        "saturationNoCapture",
+                        "explosive",
+                        "poisonedPawn",
+                        "queensGambitProtection",
+                        "trojanHorse",
+                        "severance",
+                        "inertia",
+                        "outpostProtection",
+                        "nullification",
+                        "recurrence",
+                        "grapplerBound"
+                      ]
+                    }
+                  },
+                  "fieldPromotionCapturesRemaining": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "ghillieRemaining": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "type": "object",
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "kind",
+          "cells",
+          "piece"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "projectionEvidence": {
+    "pieceStatus": "createPieceElement75203..75767 + appendPieceStatusEffects20951 + appendExpansionPieceEffects4178; display-presence/counter/movement only; full nested trait objects and IDs are excluded",
+    "trickster": "tricksterMovementViewerColor72574/tricksterMovementBadgeType72624: live player ownership and phase; mana75702 + renderWizardPanel106028, opponent copied mana excluded",
+    "boardMarks": "renderBoard72823..73151: apply each original marker visibility condition, including public portal/bomb terrain and owner-only/hiddenFrom traces; do not blanket-hide source-visible forecast markers",
+    "relationships": "renderChainBondOverlay73220: both endpoints pass original fog/hidden checks; preserve public chain owner and geometric length class, exclude internal IDs",
+    "basePiece": "type/color and displayed hp/shield/freeze/direction; moved and selection-panel resources restricted to owner knowledge; old unconditional retained attributes are not a visibility claim",
+    "animation": "forceAnimatedPieceIds/animatedPieceIds64055,75808..75827 only entry-animation scheduling and are excluded from policy inputs",
+    "context": "Live per-player view (online player-color semantics) independent of physical turn; completed local-game source reveal is preserved",
+    "boardCoordinates": "Board mark positions and movement/facing directions use absolute site coordinates; the tensor board alone rotates for black. UI camera flipping does not change rule coordinates.",
+    "potionHelp": "activePotionEffects3872 + appendPotionPieceInfoButton75065; available viewer info preference may be enabled, hallucination suppresses the help; known active effect IDs only",
+    "auras": "renderKnightmasterAura74312/clockwork74336/paladin74360/idol74380/reaper74427 use visible source-piece gates; renderSirenAura74404 has no fog/hidden gate; area cells only, no internal piece identity or inferred owner",
+    "overlays": "renderQuantumOverlays74509: independent visible alternate ghost glyph/body; source hidden gate and any ghost body in fog-visible set; IDs/quantum raw metadata excluded",
+    "cardResults": "dynamicCardHelpItems79320 + revealedBoxCard79370 + opponent library79094 expose known roulette/potion/box results; unused blackBox result is suppressed",
+    "nestedState": "medium/parrot movement labels exist only on visible eligible piece badges; raw effects IDs omitted; winter/captureTheFlag expose enabled and rendered coordinate marks, no RNG preview IDs",
+    "selectedScope": {
+      "sourceMainSha256": "abfe01a035813875772d8eeaf8e300a1df0348888ff48778d4a1789b76ae492f",
+      "profile": "accelerate-headless-semantic-v1",
+      "sourceRendererCases": 88,
+      "sourceAnchors": [
+        75203,
+        75356,
+        75543,
+        75550,
+        75668,
+        75702
+      ],
+      "meaning": "Actual frozen createPieceElement classes, badges and accessible labels compared for both online-player viewers. Source per-surface wrapper gates are preserved. This selected scope is not a proof of every pending state family."
+    },
+    "trolley": {
+      "sourceAnchors": [
+        68174,
+        68179,
+        104653,
+        106940,
+        107005
+      ],
+      "meaning": "Only the two visible bundle labels and lever choice are public. Random/time window ID is private execution/staleness binding and never an observation or public intent feature; exact Action retains it."
+    }
+  },
+  "publicPieceSchema": {
+    "type": "object",
+    "required": [
+      "type",
+      "color",
+      "status"
+    ],
+    "properties": {
+      "type": {
+        "type": "string",
+        "enum": [
+          "alfil",
+          "amazon",
+          "assassin",
+          "babyBear",
+          "bat",
+          "bear",
+          "berserker",
+          "bigBishop",
+          "bigRook",
+          "bishop",
+          "blackHole",
+          "bomb",
+          "brutus",
+          "camel",
+          "campfire",
+          "cannon",
+          "cardinal",
+          "checker",
+          "checkerKing",
+          "clockwork",
+          "coffin",
+          "colossus",
+          "crown",
+          "darkWizard",
+          "donQuixote",
+          "dragon",
+          "eagle",
+          "fanatic",
+          "ferz",
+          "football",
+          "grappler",
+          "grasshopper",
+          "guard",
+          "hedgehog",
+          "herald",
+          "hook",
+          "idol",
+          "jester",
+          "king",
+          "knight",
+          "knightmaster",
+          "lobster",
+          "log",
+          "logRolling",
+          "magicGirl",
+          "man",
+          "medium",
+          "merchant",
+          "missionary",
+          "monster",
+          "octopus",
+          "paladin",
+          "parrot",
+          "pawn",
+          "pegasus",
+          "platform",
+          "portal",
+          "primeMinister",
+          "princess",
+          "protestant",
+          "queen",
+          "reaper",
+          "recruiter",
+          "revolvingDoor",
+          "rook",
+          "royalKnight",
+          "scarecrow",
+          "shotgunKing",
+          "siegeRam",
+          "siren",
+          "slime",
+          "squire",
+          "standardBearer",
+          "thief",
+          "timeTraveler",
+          "trickster",
+          "undead",
+          "vampireLord",
+          "vip",
+          "wall",
+          "windmill",
+          "windmillBishop",
+          "windmillRook",
+          "wizard"
+        ]
+      },
+      "color": {
+        "enum": [
+          "white",
+          "black",
+          "neutral"
+        ]
+      },
+      "moved": {
+        "type": "boolean"
+      },
+      "shielded": {
+        "type": "boolean"
+      },
+      "frozen": {
+        "type": "boolean"
+      },
+      "hp": {
+        "type": "number"
+      },
+      "maxHp": {
+        "type": "number"
+      },
+      "mana": {
+        "type": "number"
+      },
+      "maxMana": {
+        "type": "number"
+      },
+      "ammo": {
+        "type": "number"
+      },
+      "maxAmmo": {
+        "type": "number"
+      },
+      "anchorRow": {
+        "type": "number"
+      },
+      "anchorCol": {
+        "type": "number"
+      },
+      "facing": {
+        "enum": [
+          "up",
+          "down",
+          "left",
+          "right",
+          "N",
+          "NE",
+          "E",
+          "SE",
+          "S",
+          "SW",
+          "W",
+          "NW"
+        ]
+      },
+      "windmillMode": {
+        "enum": [
+          "bishop",
+          "rook"
+        ]
+      },
+      "logDir": {
+        "type": "object",
+        "required": [
+          "dr",
+          "dc"
+        ],
+        "properties": {
+          "dr": {
+            "type": "integer",
+            "minimum": -1,
+            "maximum": 1
+          },
+          "dc": {
+            "type": "integer",
+            "minimum": -1,
+            "maximum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "submerged": {
+        "type": "boolean"
+      },
+      "status": {
+        "properties": {
+          "protected": {
+            "const": true
+          },
+          "chameleon": {
+            "const": true
+          },
+          "chimera": {
+            "const": true
+          },
+          "holdout": {
+            "const": true
+          },
+          "staked": {
+            "const": true
+          },
+          "cooling": {
+            "const": true
+          },
+          "explosive": {
+            "const": true
+          },
+          "brutalKnight": {
+            "const": true
+          },
+          "bribed": {
+            "const": true
+          },
+          "witchTrial": {
+            "const": true
+          },
+          "disarmed": {
+            "const": true
+          },
+          "severed": {
+            "const": true
+          },
+          "inertia": {
+            "const": true
+          },
+          "frenzy": {
+            "const": true
+          },
+          "exhaustionLocked": {
+            "const": true
+          },
+          "crownBearer": {
+            "const": true
+          },
+          "iceSheet": {
+            "const": true
+          },
+          "lastResistance": {
+            "const": true
+          },
+          "sacrificeProtection": {
+            "const": true
+          },
+          "necromancy": {
+            "const": true
+          },
+          "regencyHeir": {
+            "const": true
+          },
+          "regencyRoyal": {
+            "const": true
+          },
+          "diceLocked": {
+            "const": true
+          },
+          "quantum": {
+            "const": true
+          },
+          "quantumShadow": {
+            "const": true
+          },
+          "bloodCurse": {
+            "const": true
+          },
+          "poisonedPawn": {
+            "const": true
+          },
+          "poisonStunned": {
+            "const": true
+          },
+          "evasion": {
+            "const": true
+          },
+          "ghost": {
+            "const": true
+          },
+          "metalized": {
+            "const": true
+          },
+          "twinsLinked": {
+            "const": true
+          },
+          "loyalist": {
+            "const": true
+          },
+          "parry": {
+            "const": true
+          },
+          "emptyLunchbox": {
+            "const": true
+          },
+          "magicGirlAwakened": {
+            "const": true
+          },
+          "saturationLocked": {
+            "const": true
+          },
+          "nullification": {
+            "const": true
+          },
+          "recurrence": {
+            "const": true
+          },
+          "wanted": {
+            "const": true
+          },
+          "grapplerBound": {
+            "const": true
+          },
+          "sirenWarning": {
+            "const": true
+          },
+          "stealthed": {
+            "const": true
+          },
+          "fieldPromotionReady": {
+            "const": true
+          },
+          "locustReady": {
+            "const": true
+          },
+          "spy": {
+            "const": true
+          },
+          "trojanHorse": {
+            "const": true
+          },
+          "armisticeRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9
+          },
+          "babyBearGrowthRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9
+          },
+          "bribedRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9007199254740991
+          },
+          "crownHeldMoves": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9007199254740991
+          },
+          "emptyLunchboxRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9
+          },
+          "frozenRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9
+          },
+          "galeRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9
+          },
+          "gold": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9007199254740991
+          },
+          "holdoutRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9007199254740991
+          },
+          "iceSheetKingRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9
+          },
+          "lastResistanceRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9
+          },
+          "metalCooldown": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9007199254740991
+          },
+          "necromancyRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9
+          },
+          "pawnReverseRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9
+          },
+          "poisonStunRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9
+          },
+          "prophecyRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 3
+          },
+          "reaperCaptures": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 4
+          },
+          "retaliationsRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 2
+          },
+          "royalCommandRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9
+          },
+          "sacrificeProtectionRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9
+          },
+          "saturationCaptures": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 3
+          },
+          "severanceRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9
+          },
+          "stakedRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9007199254740991
+          },
+          "ultimatumRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 4
+          },
+          "undeadResurrectionRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9007199254740991
+          },
+          "vipRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 3
+          },
+          "witchTrialRemaining": {
+            "minimum": 0,
+            "type": "number",
+            "maximum": 9
+          },
+          "tricksterMovement": {
+            "enum": [
+              "alfil",
+              "amazon",
+              "assassin",
+              "babyBear",
+              "bat",
+              "bear",
+              "berserker",
+              "bigBishop",
+              "bigRook",
+              "bishop",
+              "blackHole",
+              "bomb",
+              "brutus",
+              "camel",
+              "campfire",
+              "cannon",
+              "cardinal",
+              "checker",
+              "checkerKing",
+              "clockwork",
+              "coffin",
+              "colossus",
+              "crown",
+              "darkWizard",
+              "donQuixote",
+              "dragon",
+              "eagle",
+              "fanatic",
+              "ferz",
+              "football",
+              "grappler",
+              "grasshopper",
+              "guard",
+              "hedgehog",
+              "herald",
+              "hook",
+              "idol",
+              "jester",
+              "king",
+              "knight",
+              "knightmaster",
+              "lobster",
+              "log",
+              "logRolling",
+              "magicGirl",
+              "man",
+              "medium",
+              "merchant",
+              "missionary",
+              "monster",
+              "octopus",
+              "paladin",
+              "parrot",
+              "pawn",
+              "pegasus",
+              "platform",
+              "portal",
+              "primeMinister",
+              "princess",
+              "protestant",
+              "queen",
+              "reaper",
+              "recruiter",
+              "revolvingDoor",
+              "rook",
+              "royalKnight",
+              "scarecrow",
+              "shotgunKing",
+              "siegeRam",
+              "siren",
+              "slime",
+              "squire",
+              "standardBearer",
+              "thief",
+              "timeTraveler",
+              "trickster",
+              "undead",
+              "vampireLord",
+              "vip",
+              "wall",
+              "windmill",
+              "windmillBishop",
+              "windmillRook",
+              "wizard"
+            ],
+            "type": "string"
+          },
+          "parrotMovement": {
+            "enum": [
+              "alfil",
+              "amazon",
+              "assassin",
+              "babyBear",
+              "bat",
+              "bear",
+              "berserker",
+              "bigBishop",
+              "bigRook",
+              "bishop",
+              "blackHole",
+              "bomb",
+              "brutus",
+              "camel",
+              "campfire",
+              "cannon",
+              "cardinal",
+              "checker",
+              "checkerKing",
+              "clockwork",
+              "coffin",
+              "colossus",
+              "crown",
+              "darkWizard",
+              "donQuixote",
+              "dragon",
+              "eagle",
+              "fanatic",
+              "ferz",
+              "football",
+              "grappler",
+              "grasshopper",
+              "guard",
+              "hedgehog",
+              "herald",
+              "hook",
+              "idol",
+              "jester",
+              "king",
+              "knight",
+              "knightmaster",
+              "lobster",
+              "log",
+              "logRolling",
+              "magicGirl",
+              "man",
+              "medium",
+              "merchant",
+              "missionary",
+              "monster",
+              "octopus",
+              "paladin",
+              "parrot",
+              "pawn",
+              "pegasus",
+              "platform",
+              "portal",
+              "primeMinister",
+              "princess",
+              "protestant",
+              "queen",
+              "reaper",
+              "recruiter",
+              "revolvingDoor",
+              "rook",
+              "royalKnight",
+              "scarecrow",
+              "shotgunKing",
+              "siegeRam",
+              "siren",
+              "slime",
+              "squire",
+              "standardBearer",
+              "thief",
+              "timeTraveler",
+              "trickster",
+              "undead",
+              "vampireLord",
+              "vip",
+              "wall",
+              "windmill",
+              "windmillBishop",
+              "windmillRook",
+              "wizard"
+            ],
+            "type": "string"
+          },
+          "mediumMovement": {
+            "enum": [
+              "alfil",
+              "amazon",
+              "assassin",
+              "babyBear",
+              "bat",
+              "bear",
+              "berserker",
+              "bigBishop",
+              "bigRook",
+              "bishop",
+              "blackHole",
+              "bomb",
+              "brutus",
+              "camel",
+              "campfire",
+              "cannon",
+              "cardinal",
+              "checker",
+              "checkerKing",
+              "clockwork",
+              "coffin",
+              "colossus",
+              "crown",
+              "darkWizard",
+              "donQuixote",
+              "dragon",
+              "eagle",
+              "fanatic",
+              "ferz",
+              "football",
+              "grappler",
+              "grasshopper",
+              "guard",
+              "hedgehog",
+              "herald",
+              "hook",
+              "idol",
+              "jester",
+              "king",
+              "knight",
+              "knightmaster",
+              "lobster",
+              "log",
+              "logRolling",
+              "magicGirl",
+              "man",
+              "medium",
+              "merchant",
+              "missionary",
+              "monster",
+              "octopus",
+              "paladin",
+              "parrot",
+              "pawn",
+              "pegasus",
+              "platform",
+              "portal",
+              "primeMinister",
+              "princess",
+              "protestant",
+              "queen",
+              "reaper",
+              "recruiter",
+              "revolvingDoor",
+              "rook",
+              "royalKnight",
+              "scarecrow",
+              "shotgunKing",
+              "siegeRam",
+              "siren",
+              "slime",
+              "squire",
+              "standardBearer",
+              "thief",
+              "timeTraveler",
+              "trickster",
+              "undead",
+              "vampireLord",
+              "vip",
+              "wall",
+              "windmill",
+              "windmillBishop",
+              "windmillRook",
+              "wizard"
+            ],
+            "type": "string"
+          },
+          "horseRiding": {
+            "enum": [
+              "alfil",
+              "amazon",
+              "assassin",
+              "babyBear",
+              "bat",
+              "bear",
+              "berserker",
+              "bigBishop",
+              "bigRook",
+              "bishop",
+              "blackHole",
+              "bomb",
+              "brutus",
+              "camel",
+              "campfire",
+              "cannon",
+              "cardinal",
+              "checker",
+              "checkerKing",
+              "clockwork",
+              "coffin",
+              "colossus",
+              "crown",
+              "darkWizard",
+              "donQuixote",
+              "dragon",
+              "eagle",
+              "fanatic",
+              "ferz",
+              "football",
+              "grappler",
+              "grasshopper",
+              "guard",
+              "hedgehog",
+              "herald",
+              "hook",
+              "idol",
+              "jester",
+              "king",
+              "knight",
+              "knightmaster",
+              "lobster",
+              "log",
+              "logRolling",
+              "magicGirl",
+              "man",
+              "medium",
+              "merchant",
+              "missionary",
+              "monster",
+              "octopus",
+              "paladin",
+              "parrot",
+              "pawn",
+              "pegasus",
+              "platform",
+              "portal",
+              "primeMinister",
+              "princess",
+              "protestant",
+              "queen",
+              "reaper",
+              "recruiter",
+              "revolvingDoor",
+              "rook",
+              "royalKnight",
+              "scarecrow",
+              "shotgunKing",
+              "siegeRam",
+              "siren",
+              "slime",
+              "squire",
+              "standardBearer",
+              "thief",
+              "timeTraveler",
+              "trickster",
+              "undead",
+              "vampireLord",
+              "vip",
+              "wall",
+              "windmill",
+              "windmillBishop",
+              "windmillRook",
+              "wizard"
+            ],
+            "type": "string"
+          },
+          "feudalGuardianType": {
+            "enum": [
+              "alfil",
+              "amazon",
+              "assassin",
+              "babyBear",
+              "bat",
+              "bear",
+              "berserker",
+              "bigBishop",
+              "bigRook",
+              "bishop",
+              "blackHole",
+              "bomb",
+              "brutus",
+              "camel",
+              "campfire",
+              "cannon",
+              "cardinal",
+              "checker",
+              "checkerKing",
+              "clockwork",
+              "coffin",
+              "colossus",
+              "crown",
+              "darkWizard",
+              "donQuixote",
+              "dragon",
+              "eagle",
+              "fanatic",
+              "ferz",
+              "football",
+              "grappler",
+              "grasshopper",
+              "guard",
+              "hedgehog",
+              "herald",
+              "hook",
+              "idol",
+              "jester",
+              "king",
+              "knight",
+              "knightmaster",
+              "lobster",
+              "log",
+              "logRolling",
+              "magicGirl",
+              "man",
+              "medium",
+              "merchant",
+              "missionary",
+              "monster",
+              "octopus",
+              "paladin",
+              "parrot",
+              "pawn",
+              "pegasus",
+              "platform",
+              "portal",
+              "primeMinister",
+              "princess",
+              "protestant",
+              "queen",
+              "reaper",
+              "recruiter",
+              "revolvingDoor",
+              "rook",
+              "royalKnight",
+              "scarecrow",
+              "shotgunKing",
+              "siegeRam",
+              "siren",
+              "slime",
+              "squire",
+              "standardBearer",
+              "thief",
+              "timeTraveler",
+              "trickster",
+              "undead",
+              "vampireLord",
+              "vip",
+              "wall",
+              "windmill",
+              "windmillBishop",
+              "windmillRook",
+              "wizard"
+            ],
+            "type": "string"
+          },
+          "captureRestriction": {
+            "enum": [
+              "immune",
+              "royal-only"
+            ]
+          },
+          "imperialStudyTypes": {
+            "maxItems": 83,
+            "type": "array",
+            "items": {
+              "enum": [
+                "alfil",
+                "amazon",
+                "assassin",
+                "babyBear",
+                "bat",
+                "bear",
+                "berserker",
+                "bigBishop",
+                "bigRook",
+                "bishop",
+                "blackHole",
+                "bomb",
+                "brutus",
+                "camel",
+                "campfire",
+                "cannon",
+                "cardinal",
+                "checker",
+                "checkerKing",
+                "clockwork",
+                "coffin",
+                "colossus",
+                "crown",
+                "darkWizard",
+                "donQuixote",
+                "dragon",
+                "eagle",
+                "fanatic",
+                "ferz",
+                "football",
+                "grappler",
+                "grasshopper",
+                "guard",
+                "hedgehog",
+                "herald",
+                "hook",
+                "idol",
+                "jester",
+                "king",
+                "knight",
+                "knightmaster",
+                "lobster",
+                "log",
+                "logRolling",
+                "magicGirl",
+                "man",
+                "medium",
+                "merchant",
+                "missionary",
+                "monster",
+                "octopus",
+                "paladin",
+                "parrot",
+                "pawn",
+                "pegasus",
+                "platform",
+                "portal",
+                "primeMinister",
+                "princess",
+                "protestant",
+                "queen",
+                "reaper",
+                "recruiter",
+                "revolvingDoor",
+                "rook",
+                "royalKnight",
+                "scarecrow",
+                "shotgunKing",
+                "siegeRam",
+                "siren",
+                "slime",
+                "squire",
+                "standardBearer",
+                "thief",
+                "timeTraveler",
+                "trickster",
+                "undead",
+                "vampireLord",
+                "vip",
+                "wall",
+                "windmill",
+                "windmillBishop",
+                "windmillRook",
+                "wizard"
+              ],
+              "type": "string"
+            }
+          },
+          "callingCard": {
+            "const": true
+          },
+          "basicTraining": {
+            "const": true
+          },
+          "potionEffects": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "enum": [
+                "sacrificeProtection",
+                "lastResistance",
+                "coronationProtection",
+                "shield",
+                "evasion",
+                "parry",
+                "basicTraining",
+                "stealth",
+                "loyalist",
+                "ghost",
+                "chameleon",
+                "submerge",
+                "freeze",
+                "chimera",
+                "witchTrial",
+                "stake",
+                "callingCard",
+                "emptyLunchbox",
+                "poisonStun",
+                "disarm",
+                "mannerNoCapture",
+                "saturationNoCapture",
+                "explosive",
+                "poisonedPawn",
+                "queensGambitProtection",
+                "trojanHorse",
+                "severance",
+                "inertia",
+                "outpostProtection",
+                "nullification",
+                "recurrence",
+                "grapplerBound"
+              ]
+            }
+          },
+          "fieldPromotionCapturesRemaining": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "ghillieRemaining": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "type": "object",
+        "additionalProperties": false
+      }
+    },
+    "additionalProperties": false
+  },
+  "cardRevelationSchema": {
+    "type": "object",
+    "properties": {
+      "rouletteType": {
+        "enum": [
+          "alfil",
+          "amazon",
+          "assassin",
+          "babyBear",
+          "bat",
+          "bear",
+          "berserker",
+          "bigBishop",
+          "bigRook",
+          "bishop",
+          "blackHole",
+          "bomb",
+          "brutus",
+          "camel",
+          "campfire",
+          "cannon",
+          "cardinal",
+          "checker",
+          "checkerKing",
+          "clockwork",
+          "coffin",
+          "colossus",
+          "crown",
+          "darkWizard",
+          "donQuixote",
+          "dragon",
+          "eagle",
+          "fanatic",
+          "ferz",
+          "football",
+          "grappler",
+          "grasshopper",
+          "guard",
+          "hedgehog",
+          "herald",
+          "hook",
+          "idol",
+          "jester",
+          "king",
+          "knight",
+          "knightmaster",
+          "lobster",
+          "log",
+          "logRolling",
+          "magicGirl",
+          "man",
+          "medium",
+          "merchant",
+          "missionary",
+          "monster",
+          "octopus",
+          "paladin",
+          "parrot",
+          "pawn",
+          "pegasus",
+          "platform",
+          "portal",
+          "primeMinister",
+          "princess",
+          "protestant",
+          "queen",
+          "reaper",
+          "recruiter",
+          "revolvingDoor",
+          "rook",
+          "royalKnight",
+          "scarecrow",
+          "shotgunKing",
+          "siegeRam",
+          "siren",
+          "slime",
+          "squire",
+          "standardBearer",
+          "thief",
+          "timeTraveler",
+          "trickster",
+          "undead",
+          "vampireLord",
+          "vip",
+          "wall",
+          "windmill",
+          "windmillBishop",
+          "windmillRook",
+          "wizard"
+        ]
+      },
+      "potionEffect": {
+        "enum": [
+          "sacrificeProtection",
+          "lastResistance",
+          "coronationProtection",
+          "shield",
+          "evasion",
+          "parry",
+          "basicTraining",
+          "stealth",
+          "loyalist",
+          "ghost",
+          "chameleon",
+          "submerge",
+          "freeze",
+          "chimera",
+          "witchTrial",
+          "stake",
+          "callingCard",
+          "emptyLunchbox",
+          "poisonStun",
+          "disarm",
+          "mannerNoCapture",
+          "saturationNoCapture",
+          "explosive",
+          "poisonedPawn",
+          "queensGambitProtection",
+          "trojanHorse",
+          "severance",
+          "inertia",
+          "outpostProtection",
+          "nullification",
+          "recurrence",
+          "grapplerBound"
+        ]
+      },
+      "boxCardId": {
+        "enum": [
+          "acceleration",
+          "alekhine-machine-gun",
+          "amazon",
+          "apprentice-knights",
+          "armistice",
+          "assassin",
+          "baby-bear",
+          "backward-knight",
+          "barricade",
+          "basic-training",
+          "big-rook",
+          "bina-mate",
+          "black-box",
+          "black-hole",
+          "blue-jeans",
+          "breakthrough-order",
+          "bribe",
+          "calling-card",
+          "camouflage-color",
+          "canceling",
+          "castling",
+          "chain",
+          "chameleon-mutation",
+          "charge",
+          "checker",
+          "chess-344200",
+          "chess-960",
+          "chimera",
+          "cleanup-sacrifice",
+          "clone",
+          "collapse",
+          "conscription",
+          "constitutional-monarchy",
+          "conversion",
+          "conveyor",
+          "cool-guy",
+          "corner-kick",
+          "coronation",
+          "crown",
+          "death-squad",
+          "democracy",
+          "desperado",
+          "diagonal-chess",
+          "dice",
+          "disarm",
+          "dragon",
+          "dutch",
+          "eagle",
+          "early-promotion",
+          "eastern-policy",
+          "elephant-escape",
+          "emergency-evacuation",
+          "en-passant-bang",
+          "encouragement",
+          "evasion",
+          "exhaustion",
+          "exile",
+          "fanatical-ritual",
+          "fast-growth",
+          "feudal-contract",
+          "fianchetto",
+          "file-surge",
+          "final-weapon",
+          "football",
+          "freeze",
+          "frenzy",
+          "gale",
+          "ghost",
+          "grasshopper",
+          "guard",
+          "hallucination",
+          "herald",
+          "high-ground",
+          "highway",
+          "holdout",
+          "homecoming",
+          "hook",
+          "horde",
+          "horse-riding",
+          "icbm",
+          "ice-sheet",
+          "idol",
+          "imperial-studies",
+          "inertia",
+          "initiative",
+          "injury",
+          "insight",
+          "iron-monarch",
+          "jester",
+          "joker",
+          "judgment",
+          "knightmaster",
+          "knightmate",
+          "last-resistance",
+          "last-stand",
+          "leap",
+          "lobster",
+          "local-conscription",
+          "log",
+          "london-system",
+          "macho-chess",
+          "mad-horse",
+          "martyrdom",
+          "merchant-guild",
+          "missionary",
+          "mistake",
+          "mistake-card",
+          "mongolian-gambit",
+          "monochrome-chess",
+          "monster",
+          "moving",
+          "necromancy",
+          "ordination",
+          "othello",
+          "otherworld",
+          "overwhelm",
+          "palace",
+          "panic",
+          "pawn-conversion",
+          "pawn-storm",
+          "pegasus",
+          "periodic-collapse",
+          "poisoned-pawn",
+          "portal",
+          "portal-gun",
+          "premove",
+          "promotion-rush",
+          "prophecy",
+          "quantum-mechanics",
+          "queen-afterimage",
+          "queen-cavalry",
+          "queens-gambit",
+          "qxe1",
+          "racing-king",
+          "radical-charge",
+          "random-roulette",
+          "reaper",
+          "recycling",
+          "reformation",
+          "religious-victory",
+          "reposition",
+          "retreat",
+          "revelation",
+          "reverse-pawns",
+          "rook-lift",
+          "royal-command",
+          "royal-shield",
+          "rule-bombs",
+          "rule-ticket",
+          "sacrifice",
+          "saturation",
+          "scarecrow",
+          "schrodinger-pawns",
+          "severance",
+          "snipe",
+          "socialism",
+          "sprint",
+          "spy",
+          "stake",
+          "standard-bearer",
+          "stealth",
+          "submerge",
+          "substitution",
+          "suicide-bomber",
+          "summon-colossus",
+          "switcheroo",
+          "taunt",
+          "traitor",
+          "transcendence",
+          "trojan-horse",
+          "trolley",
+          "twins",
+          "ultimatum",
+          "underground-bunker",
+          "underpromotion",
+          "vanish",
+          "vip",
+          "vortex",
+          "white-box",
+          "windmill",
+          "winter-kingdom",
+          "witch-trial",
+          "wizard",
+          "zugzwang",
+          "king-of-the-hill",
+          "loyalist",
+          "black-magic",
+          "parry",
+          "fleeting-dream",
+          "empty-lunchbox",
+          "geneva-convention",
+          "platform",
+          "cleanup",
+          "relay",
+          "field-promotion",
+          "frontline-response",
+          "hypocrisy",
+          "siege-ram",
+          "suspicious-potion",
+          "berserker",
+          "magic-girl",
+          "replay",
+          "slime",
+          "siren",
+          "trickster",
+          "gomoku",
+          "undead",
+          "majesty",
+          "infiltration",
+          "killer-king",
+          "campfire",
+          "outpost",
+          "hedgehog",
+          "nullification",
+          "recurrence",
+          "princess",
+          "resolve",
+          "vanguard",
+          "reversal",
+          "miracle",
+          "big-bishop",
+          "overtake",
+          "capture-the-flag",
+          "highlander",
+          "thief",
+          "disassembly",
+          "false-start",
+          "proficiency",
+          "locust-swarm",
+          "long-en-passant",
+          "extinction",
+          "symmetry",
+          "brutus",
+          "clockwork",
+          "mutation",
+          "parrot",
+          "paladin",
+          "octopus",
+          "metal",
+          "chess-n-pow-30",
+          "d4",
+          "e4",
+          "bishop-infiltration",
+          "greek-gift",
+          "solidarity",
+          "grappler",
+          "revolving-door",
+          "don-quixote",
+          "taboo",
+          "brainwash",
+          "wanted",
+          "synchronization",
+          "assembly",
+          "vigilance",
+          "medium",
+          "roller"
+        ]
+      }
+    },
+    "additionalProperties": false
+  },
+  "reviewedFieldEvidence": {
+    "afterimageQueen": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        61071,
+        91118,
+        104629,
+        104630,
+        110740
+      ]
+    },
+    "breakthroughPawns": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        61073,
+        86682,
+        93387,
+        96382,
+        103338,
+        110786
+      ]
+    },
+    "camouflageRule": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        3512,
+        61150,
+        68475,
+        88503,
+        88504,
+        89029,
+        100225,
+        102147,
+        109723,
+        110857
+      ]
+    },
+    "cannonGhostScreen": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        386,
+        392,
+        521,
+        3506,
+        110599
+      ]
+    },
+    "cannonScarecrowScreen": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        517,
+        110593
+      ]
+    },
+    "conveyorRule": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        61122,
+        80221,
+        85287,
+        100457,
+        101932,
+        102004,
+        102135,
+        110834
+      ]
+    },
+    "extinctionMinorTargets": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        457,
+        110598
+      ]
+    },
+    "fileSurge": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        61067,
+        85429,
+        92478,
+        92505,
+        100563,
+        105170,
+        105171,
+        110736
+      ]
+    },
+    "internalSixFixes": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        481,
+        110594
+      ]
+    },
+    "ironMonarch": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        61044,
+        91052,
+        100477,
+        102985,
+        110733
+      ]
+    },
+    "knightInjury": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        61066,
+        74571,
+        74572,
+        97526,
+        103102,
+        103103,
+        103144,
+        103342,
+        103344,
+        110749
+      ]
+    },
+    "magicGirlSurge": {
+      "representation": "visible magicGirlAwakened piece status only; no raw owner flag exposing absent/hidden pieces",
+      "sourceAnchors": [
+        75220,
+        75265,
+        99694
+      ]
+    },
+    "miracleSelectsBishop": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        511,
+        110604
+      ]
+    },
+    "overtakeTurnOnly": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        410,
+        110597
+      ]
+    },
+    "parrotRookTarget": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        466,
+        110596
+      ]
+    },
+    "relay": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        22951,
+        22954,
+        43121,
+        43859,
+        61131,
+        68610,
+        68611,
+        86190,
+        86242,
+        91769,
+        93384,
+        95518,
+        95525,
+        100141,
+        100142,
+        100143,
+        110867,
+        110981,
+        110987,
+        110992,
+        113451
+      ]
+    },
+    "retreat": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        61024,
+        67589,
+        96173,
+        96178,
+        96256,
+        96261,
+        98576,
+        98577,
+        100255,
+        103918,
+        110727,
+        110728,
+        110729,
+        111174,
+        111175
+      ]
+    },
+    "revolvingDoorGuard": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        326,
+        110609
+      ]
+    },
+    "rookLift": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        61068,
+        67634,
+        85433,
+        92515,
+        100565,
+        105175,
+        105176,
+        110737
+      ]
+    },
+    "saturationRule": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        1912,
+        2002,
+        61114,
+        65706,
+        65716,
+        65719,
+        65727,
+        75217,
+        101570,
+        103066,
+        103158,
+        110755
+      ]
+    },
+    "september18Balance": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        346,
+        60992,
+        88527,
+        88564,
+        110601
+      ]
+    },
+    "substitution": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        17328,
+        19254,
+        43114,
+        43866,
+        61050,
+        86191,
+        86243,
+        93593,
+        96751,
+        96755,
+        96776,
+        96794,
+        100397,
+        105561,
+        105562,
+        110809,
+        110982,
+        110987,
+        110993,
+        111016,
+        113452
+      ]
+    },
+    "thiefQuietJump": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        399,
+        97009,
+        110605
+      ]
+    },
+    "thiefRemake": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        505,
+        110607
+      ]
+    },
+    "thiefRequiredJump": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        399,
+        404,
+        110606
+      ]
+    },
+    "transcendenceRule": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        61147,
+        86466,
+        102143,
+        102257,
+        110757
+      ]
+    },
+    "unifiedJumpObstacles": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        392,
+        110600
+      ]
+    },
+    "vanguardDiagonalOnly": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        471,
+        110595
+      ]
+    },
+    "vanishing": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        61065,
+        94443,
+        104101,
+        104102
+      ]
+    },
+    "zugzwang": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        2024,
+        5310,
+        19254,
+        19457,
+        43090,
+        55401,
+        61168,
+        67534,
+        68225,
+        68680,
+        87005,
+        92306,
+        92585,
+        92625,
+        93385,
+        95540,
+        95544,
+        95871,
+        96696,
+        99427,
+        99428,
+        99841,
+        99874,
+        99875,
+        99950,
+        100189,
+        103116,
+        103117,
+        103147,
+        106276,
+        106277,
+        107988,
+        109176,
+        110789,
+        115266
+      ]
+    },
+    "zugzwangConsumesTurn": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        527,
+        110608
+      ]
+    },
+    "regency": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        61023,
+        68264,
+        82464,
+        82473,
+        103357,
+        103677,
+        108220,
+        109148,
+        109187,
+        109193,
+        109194,
+        109198,
+        109338,
+        109350,
+        109354,
+        109360,
+        110884,
+        110886,
+        110888
+      ]
+    },
+    "enPassantFrenzy": {
+      "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
+      "sourceAnchors": [
+        61167,
+        82906,
+        93388,
+        96220,
+        96233,
+        96472,
+        104461,
+        104462,
+        110784
+      ]
+    },
+    "mediumMovement": {
+      "representation": "visible eligible piece.status.mediumMovement only",
+      "sourceAnchors": [
+        75175
+      ]
+    },
+    "parrotMovement": {
+      "representation": "visible eligible piece.status.parrotMovement only",
+      "sourceAnchors": [
+        75175
+      ]
+    },
+    "effects": {
+      "representation": "displayed royal-window badge/action counters; raw nested pawnQueen identity excluded",
+      "sourceAnchors": [
+        75829,
+        75837
+      ]
+    },
+    "winterKingdom": {
+      "representation": "enabled + visible winterForecast squares; frozenIds/previewIds/lastCycle excluded",
+      "sourceAnchors": [
+        61385,
+        73041
+      ]
+    },
+    "captureTheFlag": {
+      "representation": "enabled + rendered captureFlag squares/owner",
+      "sourceAnchors": [
+        73017
+      ]
+    },
+    "forceAnimatedPieceIds": {
+      "representation": "presentation-only Set, consumed by shouldAnimatePieceElement; no rule-future-state projection",
+      "sourceAnchors": [
+        75808,
+        75827
+      ]
+    }
+  },
+  "stateValueSchemas": {
+    "acceleration": {
+      "type": "boolean"
+    },
+    "accelerationPendingTurns": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "actionsRemaining": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "afterimageQueen": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "assembly": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "backwardKnight": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "binaMate": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "bishopInfiltration": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "bishopSnipe": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "boardFlip": {
+      "type": "boolean"
+    },
+    "breakthroughPawns": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "camouflageRule": {
+      "type": "boolean"
+    },
+    "cannonGhostScreen": {
+      "type": "boolean"
+    },
+    "cannonScarecrowScreen": {
+      "type": "boolean"
+    },
+    "captureTheFlag": {
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "capturedTypes": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": "object",
+          "required": [
+            "__simType",
+            "values"
+          ],
+          "properties": {
+            "__simType": {
+              "const": "Set"
+            },
+            "values": {
+              "type": "array",
+              "maxItems": 84,
+              "items": {
+                "enum": [
+                  "alfil",
+                  "amazon",
+                  "assassin",
+                  "babyBear",
+                  "bat",
+                  "bear",
+                  "berserker",
+                  "bigBishop",
+                  "bigRook",
+                  "bishop",
+                  "blackHole",
+                  "bomb",
+                  "brutus",
+                  "camel",
+                  "campfire",
+                  "cannon",
+                  "cardinal",
+                  "checker",
+                  "checkerKing",
+                  "clockwork",
+                  "coffin",
+                  "colossus",
+                  "crown",
+                  "darkWizard",
+                  "donQuixote",
+                  "dragon",
+                  "eagle",
+                  "fanatic",
+                  "ferz",
+                  "football",
+                  "grappler",
+                  "grasshopper",
+                  "guard",
+                  "hedgehog",
+                  "herald",
+                  "hook",
+                  "idol",
+                  "jester",
+                  "king",
+                  "knight",
+                  "knightmaster",
+                  "lobster",
+                  "log",
+                  "logRolling",
+                  "magicGirl",
+                  "man",
+                  "medium",
+                  "merchant",
+                  "missionary",
+                  "monster",
+                  "octopus",
+                  "paladin",
+                  "parrot",
+                  "pawn",
+                  "pegasus",
+                  "platform",
+                  "portal",
+                  "primeMinister",
+                  "princess",
+                  "protestant",
+                  "queen",
+                  "reaper",
+                  "recruiter",
+                  "revolvingDoor",
+                  "rook",
+                  "royalKnight",
+                  "scarecrow",
+                  "shotgunKing",
+                  "siegeRam",
+                  "siren",
+                  "slime",
+                  "squire",
+                  "standardBearer",
+                  "thief",
+                  "timeTraveler",
+                  "trickster",
+                  "undead",
+                  "vampireLord",
+                  "vip",
+                  "wall",
+                  "windmill",
+                  "windmillBishop",
+                  "windmillRook",
+                  "wizard"
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "black": {
+          "type": "object",
+          "required": [
+            "__simType",
+            "values"
+          ],
+          "properties": {
+            "__simType": {
+              "const": "Set"
+            },
+            "values": {
+              "type": "array",
+              "maxItems": 84,
+              "items": {
+                "enum": [
+                  "alfil",
+                  "amazon",
+                  "assassin",
+                  "babyBear",
+                  "bat",
+                  "bear",
+                  "berserker",
+                  "bigBishop",
+                  "bigRook",
+                  "bishop",
+                  "blackHole",
+                  "bomb",
+                  "brutus",
+                  "camel",
+                  "campfire",
+                  "cannon",
+                  "cardinal",
+                  "checker",
+                  "checkerKing",
+                  "clockwork",
+                  "coffin",
+                  "colossus",
+                  "crown",
+                  "darkWizard",
+                  "donQuixote",
+                  "dragon",
+                  "eagle",
+                  "fanatic",
+                  "ferz",
+                  "football",
+                  "grappler",
+                  "grasshopper",
+                  "guard",
+                  "hedgehog",
+                  "herald",
+                  "hook",
+                  "idol",
+                  "jester",
+                  "king",
+                  "knight",
+                  "knightmaster",
+                  "lobster",
+                  "log",
+                  "logRolling",
+                  "magicGirl",
+                  "man",
+                  "medium",
+                  "merchant",
+                  "missionary",
+                  "monster",
+                  "octopus",
+                  "paladin",
+                  "parrot",
+                  "pawn",
+                  "pegasus",
+                  "platform",
+                  "portal",
+                  "primeMinister",
+                  "princess",
+                  "protestant",
+                  "queen",
+                  "reaper",
+                  "recruiter",
+                  "revolvingDoor",
+                  "rook",
+                  "royalKnight",
+                  "scarecrow",
+                  "shotgunKing",
+                  "siegeRam",
+                  "siren",
+                  "slime",
+                  "squire",
+                  "standardBearer",
+                  "thief",
+                  "timeTraveler",
+                  "trickster",
+                  "undead",
+                  "vampireLord",
+                  "vip",
+                  "wall",
+                  "windmill",
+                  "windmillBishop",
+                  "windmillRook",
+                  "wizard"
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "cardsUsedThisTurn": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "castled": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "castlingCanceled": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "clonePassive": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "collapseDepth": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "collapsed": {
+      "type": "boolean"
+    },
+    "completeRandom": {
+      "type": "boolean"
+    },
+    "conscription": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "conscriptionUsed": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "conveyorRule": {
+      "type": "boolean"
+    },
+    "coolGuy": {
+      "type": "boolean"
+    },
+    "cornerKick": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "d4": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "deathmatchEnabled": {
+      "type": "boolean"
+    },
+    "deathmatchLimitTurns": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "democracy": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "disassembly": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "draftDelete": {
+      "type": "boolean"
+    },
+    "e4": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "earlyPromotion": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "enPassantFrenzy": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "endDraftDone": {
+      "type": "boolean"
+    },
+    "extinctionMinorTargets": {
+      "type": "boolean"
+    },
+    "falseStart": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "fastGrowth": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "fianchetto": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "fieldPromotion": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "fileSurge": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "finalWeapon": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "freeCardUsed": {
+      "type": "boolean"
+    },
+    "freeCastling": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "frontlineResponse": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "fullMove": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "genevaConvention": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "gomoku": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "greekGiftPending": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "highlander": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "highway": {
+      "type": "boolean"
+    },
+    "highwayCells": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": [
+          "row",
+          "col"
+        ],
+        "properties": {
+          "row": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 7
+          },
+          "col": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 7
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "hillKing": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "imperialStudies": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "infiltration": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "internalSixFixes": {
+      "type": "boolean"
+    },
+    "ironMonarch": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "killerKing": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "kingDead": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "kingKnight": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "knightInjury": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "knightmate": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "locustSwarm": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "longEnPassant": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "machoChess": {
+      "type": "boolean"
+    },
+    "madHorse": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "majesty": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "middleDraftDone": {
+      "type": "boolean"
+    },
+    "miracleSelectsBishop": {
+      "type": "boolean"
+    },
+    "mistakeCard": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "mistakeRule": {
+      "type": "boolean"
+    },
+    "monochromeChess": {
+      "type": "boolean"
+    },
+    "moveCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "mutation": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "overtake": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "overtakeTurnOnly": {
+      "type": "boolean"
+    },
+    "parrotBasicMovement": {
+      "type": "boolean"
+    },
+    "parrotRookTarget": {
+      "type": "boolean"
+    },
+    "pawnConversion": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "pawnLeap": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "pawnSprint": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "pieceCardFlip": {
+      "type": "boolean"
+    },
+    "proficiency": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "racingKing": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "radicalCharge": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "recycling": {
+      "type": "boolean"
+    },
+    "regency": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "relay": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "religiousVictory": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "resolve": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "retreat": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "revolvingDoorGuard": {
+      "type": "boolean"
+    },
+    "roller": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "rookLift": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "royalKnightKing": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "ruleOpeningEnabled": {
+      "type": "boolean"
+    },
+    "ruleSelectionEnabled": {
+      "type": "boolean"
+    },
+    "saturationRule": {
+      "type": "boolean"
+    },
+    "september18Balance": {
+      "type": "boolean"
+    },
+    "shotgunDlc": {
+      "type": "boolean"
+    },
+    "skipTurn": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "socialism": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "solidarity": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "starWinLimit": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "substitution": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "switcheroo": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "symmetry": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "synchronization": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "thiefQuietJump": {
+      "type": "boolean"
+    },
+    "thiefRemake": {
+      "type": "boolean"
+    },
+    "thiefRequiredJump": {
+      "type": "boolean"
+    },
+    "transcendenceRule": {
+      "type": "boolean"
+    },
+    "trojanHorse": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "turnsTaken": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "underpromotion": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "unifiedJumpObstacles": {
+      "type": "boolean"
+    },
+    "vanguard": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "vanguardDiagonalOnly": {
+      "type": "boolean"
+    },
+    "vanishing": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "vigilance": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "zugzwang": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "black": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "zugzwangConsumesTurn": {
+      "type": "boolean"
+    },
+    "accelerationPendingFor": {
+      "enum": [
+        null,
+        "white",
+        "black"
+      ]
+    },
+    "shotgunOpeningColor": {
+      "enum": [
+        null,
+        "white",
+        "black"
+      ]
+    },
+    "winner": {
+      "enum": [
+        null,
+        "white",
+        "black"
+      ]
+    },
+    "accelerationStartsAfterBlackTurns": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "endPhaseStartMove": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "gameStyle": {
+      "enum": [
+        "normal",
+        "chaos",
+        "grand"
+      ]
+    },
+    "mode": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "selectedRuleCardId": {
+      "enum": [
+        "",
+        "acceleration",
+        "black-hole",
+        "camouflage-color",
+        "chess-344200",
+        "chess-960",
+        "conveyor",
+        "cool-guy",
+        "crown",
+        "diagonal-chess",
+        "football",
+        "high-ground",
+        "highway",
+        "macho-chess",
+        "mistake",
+        "monochrome-chess",
+        "monster",
+        "periodic-collapse",
+        "portal",
+        "recycling",
+        "revelation",
+        "rule-bombs",
+        "saturation",
+        "transcendence",
+        "winter-kingdom",
+        "platform",
+        "capture-the-flag",
+        "chess-n-pow-30"
+      ]
+    },
+    "selectedRuleCardIds": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "enum": [
+          "acceleration",
+          "black-hole",
+          "camouflage-color",
+          "chess-344200",
+          "chess-960",
+          "conveyor",
+          "cool-guy",
+          "crown",
+          "diagonal-chess",
+          "football",
+          "high-ground",
+          "highway",
+          "macho-chess",
+          "mistake",
+          "monochrome-chess",
+          "monster",
+          "periodic-collapse",
+          "portal",
+          "recycling",
+          "revelation",
+          "rule-bombs",
+          "saturation",
+          "transcendence",
+          "winter-kingdom",
+          "platform",
+          "capture-the-flag",
+          "chess-n-pow-30"
+        ]
+      }
+    },
+    "blackHole": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": [
+          "row",
+          "col"
+        ],
+        "properties": {
+          "row": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 7
+          },
+          "col": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 7
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "highGround": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": [
+          "row",
+          "col"
+        ],
+        "properties": {
+          "row": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 7
+          },
+          "col": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 7
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "collapsedCells": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": [
+          "row",
+          "col"
+        ],
+        "properties": {
+          "row": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 7
+          },
+          "col": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 7
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "armistice": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "remaining": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "by": {
+          "enum": [
+            "white",
+            "black"
+          ]
+        },
+        "actedColors": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "enum": [
+              "white",
+              "black"
+            ]
+          }
+        }
+      },
+      "required": [
+        "remaining"
+      ],
+      "additionalProperties": false
+    },
+    "winterKingdom": {
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "publicValueEvidence": {
+    "sourceAnchors": [
+      607,
+      626,
+      710,
+      15856,
+      15903,
+      61034,
+      100574,
+      101545,
+      102163,
+      105957,
+      109285
+    ],
+    "meaning": "Public activated owner flags are strict color-to-boolean/counter maps. Installation coordinates are bounded visible squares; armistice actor/remaining is the public activation and action window. Captured type sets are public capture-history types. New nested keys are rejected rather than treated as visibility evidence.",
+    "limits": "Array limits are explicit 8x8 observation resource boundaries; raw full state/replay stays lossless outside neural inputs."
+  },
+  "coverage": {
+    "status": "partial-source-projection",
+    "pendingFieldDisposition": "visibilityReviewPending is an unresolved source audit, not a private/presentation classification or support claim. A caller must enforce engine typed support boundaries; full scope stays NO_GO until active families and source renderer/timing contexts are closed.",
+    "unsupportedContexts": [
+      "campaign-specific fog/madAi and time-travel UI",
+      "online room-only user identity/draw negotiation",
+      "real-time DOM animation, wall-clock draft timeout and beta optimistic previews"
+    ],
+    "traceVersion": "accelerate-public-trace-v1 patch envelope retained: each complete frame independently carries observation-v2/projection policy SHA and JCS informationStateKey",
+    "numericSemantics": "Source glyph counts retain the complete accessible aria value where available; only source clamps are applied. Integer JSON numerics accept integral finite floats under the shared safe-integer JCS boundary."
+  },
+  "selectionSchema": {
+    "anyOf": [
+      {
+        "type": "null"
+      },
+      {
+        "type": "object",
+        "required": [
+          "kind",
+          "color",
+          "row",
+          "col",
+          "choices"
+        ],
+        "properties": {
+          "kind": {
+            "const": "promotion"
+          },
+          "color": {
+            "enum": [
+              "white",
+              "black"
+            ]
+          },
+          "row": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 7
+          },
+          "col": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 7
+          },
+          "choices": {
+            "type": "array",
+            "maxItems": 84,
+            "items": {
+              "enum": [
+                "alfil",
+                "amazon",
+                "assassin",
+                "babyBear",
+                "bat",
+                "bear",
+                "berserker",
+                "bigBishop",
+                "bigRook",
+                "bishop",
+                "blackHole",
+                "bomb",
+                "brutus",
+                "camel",
+                "campfire",
+                "cannon",
+                "cardinal",
+                "checker",
+                "checkerKing",
+                "clockwork",
+                "coffin",
+                "colossus",
+                "crown",
+                "darkWizard",
+                "donQuixote",
+                "dragon",
+                "eagle",
+                "fanatic",
+                "ferz",
+                "football",
+                "grappler",
+                "grasshopper",
+                "guard",
+                "hedgehog",
+                "herald",
+                "hook",
+                "idol",
+                "jester",
+                "king",
+                "knight",
+                "knightmaster",
+                "lobster",
+                "log",
+                "logRolling",
+                "magicGirl",
+                "man",
+                "medium",
+                "merchant",
+                "missionary",
+                "monster",
+                "octopus",
+                "paladin",
+                "parrot",
+                "pawn",
+                "pegasus",
+                "platform",
+                "portal",
+                "primeMinister",
+                "princess",
+                "protestant",
+                "queen",
+                "reaper",
+                "recruiter",
+                "revolvingDoor",
+                "rook",
+                "royalKnight",
+                "scarecrow",
+                "shotgunKing",
+                "siegeRam",
+                "siren",
+                "slime",
+                "squire",
+                "standardBearer",
+                "thief",
+                "timeTraveler",
+                "trickster",
+                "undead",
+                "vampireLord",
+                "vip",
+                "wall",
+                "windmill",
+                "windmillBishop",
+                "windmillRook",
+                "wizard"
+              ]
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": [
+          "kind",
+          "color",
+          "choices"
+        ],
+        "properties": {
+          "kind": {
+            "const": "trolley"
+          },
+          "color": {
+            "enum": [
+              "white",
+              "black"
+            ]
+          },
+          "choices": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "required": [
+                  "type",
+                  "color"
+                ],
+                "properties": {
+                  "type": {
+                    "enum": [
+                      null,
+                      "alfil",
+                      "amazon",
+                      "assassin",
+                      "babyBear",
+                      "bat",
+                      "bear",
+                      "berserker",
+                      "bigBishop",
+                      "bigRook",
+                      "bishop",
+                      "blackHole",
+                      "bomb",
+                      "brutus",
+                      "camel",
+                      "campfire",
+                      "cannon",
+                      "cardinal",
+                      "checker",
+                      "checkerKing",
+                      "clockwork",
+                      "coffin",
+                      "colossus",
+                      "crown",
+                      "darkWizard",
+                      "donQuixote",
+                      "dragon",
+                      "eagle",
+                      "fanatic",
+                      "ferz",
+                      "football",
+                      "grappler",
+                      "grasshopper",
+                      "guard",
+                      "hedgehog",
+                      "herald",
+                      "hook",
+                      "idol",
+                      "jester",
+                      "king",
+                      "knight",
+                      "knightmaster",
+                      "lobster",
+                      "log",
+                      "logRolling",
+                      "magicGirl",
+                      "man",
+                      "medium",
+                      "merchant",
+                      "missionary",
+                      "monster",
+                      "octopus",
+                      "paladin",
+                      "parrot",
+                      "pawn",
+                      "pegasus",
+                      "platform",
+                      "portal",
+                      "primeMinister",
+                      "princess",
+                      "protestant",
+                      "queen",
+                      "reaper",
+                      "recruiter",
+                      "revolvingDoor",
+                      "rook",
+                      "royalKnight",
+                      "scarecrow",
+                      "shotgunKing",
+                      "siegeRam",
+                      "siren",
+                      "slime",
+                      "squire",
+                      "standardBearer",
+                      "thief",
+                      "timeTraveler",
+                      "trickster",
+                      "undead",
+                      "vampireLord",
+                      "vip",
+                      "wall",
+                      "windmill",
+                      "windmillBishop",
+                      "windmillRook",
+                      "wizard"
+                    ]
+                  },
+                  "color": {
+                    "enum": [
+                      null,
+                      "white",
+                      "black",
+                      "neutral"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    ]
+  }
 }

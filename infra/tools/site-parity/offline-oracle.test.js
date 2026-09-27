@@ -68,6 +68,86 @@ test("snapshot restore preserves exact RNG, public hints and 20 initial moves", 
   const wrong = contract.action(p, { ...a.payload, color: "black" });
   const rejected = oracle.apply(p, wrong);
   assert.equal(rejected.ok, false); assert.equal(rejected.position.positionId, p.positionId);
+  oracle.restore(p);
+  oracle.evaluate("queueMicrotask(()=>{state.restoreCallbackProbe=true;});scheduledGameOverReplayState={pending:'prior-position'};");
+  const beforeState = oracle.state(), beforeRandom = contract.jsonCopy(oracle.random);
+  for (const [field, malformed] of [["values", { __simType: "Set", values: 12 }], ["entries", { __simType: "Map", entries: 12 }]]) {
+    const state = contract.jsonCopy(p.state);
+    state.restoreMalformedCollection = malformed;
+    const input = contract.position(state, { ...p.rng, cursor: p.rng.cursor + 1 });
+    assert.throws(() => oracle.restore(input), /iterable/, field);
+    assert.deepEqual(oracle.state(), beforeState, "failed decoding preserves the live state");
+    assert.deepEqual(oracle.random, beforeRandom, "failed decoding preserves the live RNG");
+    assert.equal(oracle.evaluate("__microtasks.length"), 1);
+    assert.equal(oracle.evaluate("scheduledGameOverReplayState.pending"), "prior-position");
+    assert.equal(Object.hasOwn(oracle.main.context, "__restoredState"), false);
+  }
+  assert.equal(oracle.snapshot().state.restoreCallbackProbe, true, "the original callback still executes");
+  oracle.restore(p);
+});
+
+test("large-piece snapshot restoration retains source aliases within independent board frames", () => {
+  for (const kind of ["colossus", "bigRook", "bigBishop"]) {
+    oracle.newGame({ draftDelete: true }, 29, [0.1, 0.2]);
+    oracle.main.context.__largeKind = kind;
+    oracle.evaluate("state.board=Array.from({length:8},()=>Array(8).fill(null));placeColossus(piece('white',__largeKind),3,3);state.boardHistory=[{board:cloneBoardPreservePieces()}];state.replayBaseFrame=captureReplayFrame();state.replayTailFrame=captureReplayFrame();");
+    const input = oracle.snapshot(), unchanged = JSON.stringify(input);
+    oracle.evaluate("nullification({row:4,col:4})");
+    const direct = oracle.snapshot();
+    assert.equal(direct.state.board.flat().filter(piece => piece?.nullification).length, 4);
+    oracle.restore(JSON.parse(unchanged));
+    assert.equal(oracle.evaluate("[state.board,...state.boardHistory.map(frame=>frame.board),state.replayBaseFrame.board,state.replayTailFrame.board].every(board=>board[3][3]===board[3][4]&&board[3][3]===board[4][3]&&board[3][3]===board[4][4])"), true);
+    assert.equal(oracle.evaluate("new Set([state.board[3][3],state.boardHistory[0].board[3][3],state.replayBaseFrame.board[3][3],state.replayTailFrame.board[3][3]]).size"), 4, "equal IDs in different frames remain separate objects");
+    oracle.evaluate("nullification({row:4,col:4})");
+    assert.deepEqual(oracle.snapshot(), direct, "actual source transition, full state and RNG match after restoration");
+    assert.equal(oracle.state().boardHistory[0].board[3][3].nullification, undefined);
+    assert.equal(JSON.stringify(input), unchanged, "restoration never mutates caller snapshot data");
+    const edits = [
+      state => { state.board[4][4].color = "black"; },
+      state => { state.board[4][4].nullification = true; },
+      state => { for (const piece of state.board.flat().filter(Boolean)) delete piece.id; },
+      state => { state.board[0][0] = { ...state.board[3][3], type: "rook" }; },
+      state => { state.boardHistory[0].board[4][4].type = "rook"; },
+    ];
+    for (const edit of edits) {
+      const state = contract.jsonCopy(input.state); edit(state);
+      const invalid = contract.position(state, { ...input.rng, cursor: input.rng.cursor + 1 });
+      const current = oracle.snapshot();
+      assert.throws(() => oracle.restore(invalid), /snapshot piece|snapshot footprint/);
+      assert.deepEqual(oracle.snapshot(), current, "invalid alias groups preserve the live position and RNG");
+    }
+    const ordinary = contract.jsonCopy(input.state);
+    ordinary.board = Array.from({ length: 8 }, () => Array(8).fill(null));
+    ordinary.board[1][1] = ordinary.board[1][2] = { id: "duplicate-rook", type: "rook", color: "white" };
+    assert.throws(() => oracle.restore(contract.position(ordinary, input.rng)), /Duplicate non-large/);
+  }
+  oracle.newGame({ draftDelete: true }, 29);
+  oracle.evaluate("state.board=Array.from({length:8},()=>Array(8).fill(null));placeColossus(piece('white','bigRook'),7,6);");
+  const clipped = oracle.snapshot();
+  assert.equal(clipped.state.board.flat().filter(Boolean).length, 2, "the actual source helper clips its footprint at the edge");
+  oracle.restore(clipped);
+  assert.equal(oracle.evaluate("state.board[7][6]===state.board[7][7]"), true);
+  assert.deepEqual(oracle.snapshot(), clipped, "source-created partial footprints roundtrip without silent repair");
+  oracle.evaluate("for(const piece of state.board.flat().filter(Boolean)){delete piece.anchorRow;delete piece.anchorCol;}");
+  const legacy = oracle.snapshot(); oracle.restore(legacy);
+  assert.equal(oracle.evaluate("state.board[7][6]===state.board[7][7]"), true);
+  assert.deepEqual(oracle.snapshot(), legacy, "source relinking does not require or invent missing anchor metadata");
+  for (const kind of ["bigRook", "bigBishop"]) {
+    oracle.newGame({ draftDelete: true }, 31); oracle.main.context.__kind = kind;
+    oracle.evaluate("(()=>{state.board=Array.from({length:8},()=>Array(8).fill(null));const large=piece('black',__kind);placeColossus(large,3,3);large.origin='a8';})()");
+    assert.equal(oracle.evaluate("exile({row:3,col:3}).ok"), true);
+    oracle.evaluate("state.turn='black'");
+    const disconnected = oracle.snapshot();
+    oracle.main.context.__candidate = disconnected.state;
+    assert.equal(oracle.evaluate("(()=>{const candidate=__decode(__candidate);normalizeDeserializedState(candidate);return candidate.board[0][0]===candidate.board[3][4]&&candidate.board[3][4]===candidate.board[4][3]&&candidate.board[4][3]===candidate.board[4][4];})()"), true);
+    const directResult = JSON.parse(oracle.evaluate("__encode(nullification({row:4,col:4}))"));
+    assert.equal(directResult.ok, true);
+    const direct = oracle.snapshot(); oracle.restore(disconnected);
+    assert.equal(oracle.evaluate("state.board[0][0]===state.board[4][4]"), true);
+    assert.deepEqual(oracle.snapshot(), disconnected, "source-created disconnected aliases preserve the old metadata");
+    assert.deepEqual(JSON.parse(oracle.evaluate("__encode(nullification({row:4,col:4}))")), directResult);
+    assert.deepEqual(oracle.snapshot(), direct, "source effect/state/RNG match after disconnected restoration");
+  }
 });
 test("actual draft acquisition applies passive effects outside AI simulation", () => {
   let p = oracle.newGame({ gameStyle: "grand" }, 12345);
@@ -179,6 +259,30 @@ test("hidden piece and private RNG changes do not change viewer projection", () 
   const step = oracle.apply(first, oracle.actions(first)[0]);
   assert.ok(!JSON.stringify(oracle.observe(step.position, "white").history).includes("actionId"));
   assert.throws(() => oracle.observe(contract.position({ ...a, unknownPublicField: 1 }, contract.rng(1)), "white"), /Unclassified/);
+  oracle.restore(p);
+  oracle.evaluate("state.board=Array.from({length:8},()=>Array(8).fill(null));state.turnsTaken={white:8,black:5};state.board[3][3]={...piece('black','trickster'),tricksterMoveType:'wizard',mana:4,maxMana:5};state.board[4][2]={...piece('black','pawn'),vipInvitation:{by:'white',triggerTurn:8},holdoutPromotion:{by:'white',readyTurn:19},witchTrial:{by:'white',remaining:2,countBy:'white'}};state.board[2][2]={...piece('black','siren'),hiddenFrom:'white'};state.winterKingdom={enabled:true,previewIds:[state.board[2][2].id,state.board[4][2].id],frozenIds:[],lastCycle:1};state.deckSlots.black=[{...CARD_BY_ID.get('black-box'),instanceId:'box',used:false,boxRevealedCardId:'parry'},{...CARD_BY_ID.get('random-roulette'),instanceId:'roulette',used:true,randomRouletteResultType:'reaper'}];");
+  const surface = oracle.snapshot(), white = oracle.observe(surface, "white"), black = oracle.observe(surface, "black");
+  assertSchema(white); assertSchema(black);
+  assert.equal(white.board[3][3].mana, undefined); assert.equal(white.board[3][3].status.tricksterMovement, undefined);
+  assert.equal(black.board[3][3].mana, 4); assert.equal(black.board[3][3].status.tricksterMovement, "wizard");
+  assert.deepEqual([white.board[4][2].status.vipRemaining,white.board[4][2].status.holdoutRemaining,white.board[4][2].status.witchTrialRemaining], [3,14,2]);
+  assert.equal(white.board[2][2], null);
+  assert.ok(white.publicState.boardMarks.some(mark=>mark.kind==="sirenAura"&&mark.square.row===2&&mark.square.col===2));
+  assert.equal(white.publicState.boardMarks.filter(mark=>mark.kind==="winterForecast").length, 1);
+  assert.deepEqual(white.publicState.winterKingdom, {enabled:true});
+  assert.equal(white.publicState.revealedOpponentCards[0].revealed, undefined);
+  assert.deepEqual(white.publicState.revealedOpponentCards[1].revealed, {rouletteType:"reaper"});
+  assert.ok(!JSON.stringify(white).includes("triggerTurn")&&!JSON.stringify(white).includes("previewIds"));
+  oracle.newGame({draftDelete:true},43);
+  oracle.evaluate("state.activeTrolley=buildTrolleyDilemmaForColor('white','black')");
+  const trolley=oracle.snapshot(), changed=contract.jsonCopy(trolley.state);
+  assert.ok(trolley.state.activeTrolley, "the actual source produces a visible two-bundle dilemma");
+  changed.activeTrolley.id="private-other-window";
+  const originalView=oracle.observe(trolley,"white"), changedView=oracle.observe(contract.position(changed,contract.rng(123)),"white");
+  assert.equal(originalView.publicState.selectionPhase.kind,"trolley");
+  assert.equal(originalView.publicState.selectionPhase.windowId,undefined);
+  assert.equal(originalView.informationStateKey,changedView.informationStateKey);
+  assert.ok(!JSON.stringify(originalView).includes(trolley.state.activeTrolley.id));
 });
 test("actual king capture reaches terminal result", () => {
   const initial = oracle.newGame({ draftDelete: true }, 9), state = contract.jsonCopy(initial.state);

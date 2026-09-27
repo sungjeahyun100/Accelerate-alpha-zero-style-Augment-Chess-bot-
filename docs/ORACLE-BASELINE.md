@@ -1,6 +1,12 @@
 # 정답지(oracle) 기준 정리
 
-> 상태: 설명 문서입니다. 팀이 확정한 결정은 아니며, 제안은 [DECISIONS.md의 O-002](DECISIONS.md)에 열린 질문으로 올려 두었습니다.
+> 상태: 기존 worker와 fixture에 대한 과거 조사 자료입니다. O-002는 [DECISIONS.md의 D-008](DECISIONS.md#d-008-최초-동결-사이트-본체를-규칙-정답으로-고정)에서 최초 동결 client를 기준으로 채택했습니다. 아래 worker/fixture 비교 수치를 현재 Rust 엔진의 동등성으로 사용하지 않습니다.
+
+현재 실행 기준은 2026-09-27에 동결한 main-CqkYwJX4.js와 명시
+accelerate-headless-semantic-v1 profile이다. 최초 hash와 실행 의존성을 보존하고,
+사용자가 사용하는 client의 legal/apply/draft/result를 실제 Rust와 비교한다.
+worker의 useful/전략 필터는 client legality를 대신하지 않는다. 전체 catalog의 정답
+동등성은 아직 미완료이며 최신 판정과 검증 범위는 [IMPLEMENTATION](IMPLEMENTATION.md)에 기록한다.
 
 ## 1. "oracle / 정답지"가 여기서 뜻하는 것
 
@@ -12,7 +18,7 @@
 
 기준표가 틀렸다면 만점을 받아도 소용이 없습니다. 그래서 "기준표 자체는 무엇을 근거로 만들었나"를 분명히 해 두는 것이 이 문서의 목적입니다.
 
-## 2. 기준이 이어지는 순서 (reference chain)
+## 2. 기존 worker fixture의 기준 순서 (과거 reference chain)
 
 ```text
 ① 사이트 원본 worker         (진짜 정답, ground truth)
@@ -63,9 +69,14 @@
 - 마지막 표는 불일치 21개 중 처음 12종만 원문에 나열되어 있어 나머지 몇 개는 어느 항목인지 알 수 없습니다.
 - 이 목록은 "engine-merged가 사이트와 다르다"는 뜻일 뿐, 어느 쪽 구현 문제인지를 가르지는 않습니다. 기준은 사이트이므로 관례상 engine-merged 쪽 차이로 봅니다.
 
-**결론: Rust 포팅은 fixture(사이트 기준)를 따르고, engine-merged.js와 fixture가 다르면 fixture가 맞습니다.**
+이 자료를 수집할 당시에는 worker에서 만든 fixture를 engine-merged.js보다 우선했습니다.
+현재 Rust 포팅은 D-008의 동결 client를 따르며, 기존 fixture와 다른 경우에는 source 경로와
+버전 차이를 조사합니다. 과거 fixture의 일치를 현재 client 전체 의미의 일치로 보고하지 않습니다.
 
-## 4. 사이트가 바뀌었을 때 갱신 절차
+## 4. 기존 worker fixture의 갱신 절차
+
+아래는 기존 도구의 절차입니다. 현재 구현의 최초 동결 baseline은 이 절차로 자동 교체하지 않습니다.
+새 source 버전 채택은 별도의 계약·규칙 변경으로 검토해야 합니다.
 
 사이트가 업데이트되면 ①이 바뀌므로 ②도 낡습니다. 다음 순서로 갱신합니다.
 
@@ -82,4 +93,4 @@
 
 - 표의 각 불일치의 원인 규명과 수정
 - 사이트 코드 사용에 대한 운영자 동의 확인(`NOTICE.md`에 증빙이 아직 없다고 PR #19에 적혀 있음)
-- 정답 기준을 어떻게 명시할지의 결정 (DECISIONS.md O-002, 팀 확인 필요)
+- 현재 동결 client의 전체 normalized state/result/RNG 비교와 visibility 검증(IMPLEMENTATION 참조)

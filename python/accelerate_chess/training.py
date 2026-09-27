@@ -347,7 +347,7 @@ def load_training_checkpoint(model, optimizer, spec: EncoderSpec, cursor: Datase
     fields = {"version", "mode", "training", "config", "encoder", "encoder_hash", "base", "adapter", "base_hash", "adapter_hash", "optimizer", "optimizer_names", "rng", "cursor", "completed_steps", "checkpoint_hash"}
     if not isinstance(payload, dict) or set(payload) != fields or payload["version"] != TRAINING_VERSION:
         raise ValueError("training checkpoint format mismatch")
-    saved_spec, config = EncoderSpec.from_dict(payload["encoder"]), ModelConfig(**payload["config"])
+    saved_spec, config = EncoderSpec.from_dict(payload["encoder"], observation_policy=spec.observation_policy), ModelConfig(**payload["config"])
     if saved_spec.digest != spec.digest or payload["encoder_hash"] != spec.digest or config != model.config or payload["mode"] != model.training_mode or type(payload["training"]) is not bool or type(payload["completed_steps"]) is not int or payload["completed_steps"] < 0:
         raise ValueError("training checkpoint mode/model/encoder compatibility mismatch")
     if payload["mode"] == "adapter" and payload["base_hash"] != model.base_hash:

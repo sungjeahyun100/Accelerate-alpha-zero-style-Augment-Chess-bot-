@@ -47,6 +47,16 @@ explicit `draftDelete` modes. This initial-state boundary does not establish
 support for every later acquisition, effect or hidden-information transition.
 `site_catalog()` returns an owned mapping of the compiled frozen catalog, so an
 installed wheel can construct its encoder specification without a source checkout.
+`site_observation_policy()` returns a separate owned mapping of the public projection
+policy compiled into that same wheel. Pass both explicitly to
+`EncoderSpec.from_catalog(site_catalog(), observation_policy=site_observation_policy())`.
+The encoder and ONNX bundle retain the policy and its canonical SHA-256; the runtime
+checks it against its compiled policy. Packaging CI compares the installed mapping
+with the actual source distribution and records the policy version and hash. It also
+checks every packaged Python module against both the source distribution and the
+installed wheel, and the imported native binary against the wheel member. The
+installed implementation must reside in the validation environment outside the
+checkout; the report records these origins and SHA-256 values.
 
 Positions share immutable `Arc` snapshots. Python mappings and arrays are copied
 into owned values while attached to Python; rule calls then run with

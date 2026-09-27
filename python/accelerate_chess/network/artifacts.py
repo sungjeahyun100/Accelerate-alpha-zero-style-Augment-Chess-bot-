@@ -24,8 +24,8 @@ from ..encoding import EncoderSpec, canonical_json
 from .model import AdapterDescriptor, ModelConfig, PolicyValueNetwork, tensor_state_hash
 
 
-CHECKPOINT_VERSION = "model-checkpoint-v1"
-BUNDLE_VERSION = "onnx-policy-value-v1"
+CHECKPOINT_VERSION = "model-checkpoint-v2"
+BUNDLE_VERSION = "onnx-policy-value-v2"
 MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
 
 
@@ -86,15 +86,15 @@ def save_base(model: PolicyValueNetwork, spec: EncoderSpec, path: str | Path) ->
         raise ValueError("a merged deployment copy cannot overwrite a base checkpoint")
     state = _copy_state(model.base_state())
     fingerprint = tensor_state_hash(state)
-    _atomic_torch_save({"version": CHECKPOINT_VERSION, "kind": "base", "config": asdict(model.config), "encoder": spec.to_dict(), "encoder_hash": spec.digest, "base_hash": fingerprint, "state": state}, Path(path))
+    _atomic_torch_save({"version": CHECKPOINT_VERSION, "kind": "base", "config": asdict(model.config), "encoder": spec.to_dict(), "observation_policy": spec.observation_policy, "encoder_hash": spec.digest, "base_hash": fingerprint, "state": state}, Path(path))
     return fingerprint
 
 
 def load_base(path: str | Path, expected_spec: EncoderSpec | None = None) -> tuple[PolicyValueNetwork, EncoderSpec]:
     payload = _load(path)
-    if set(payload) != {"version", "kind", "config", "encoder", "encoder_hash", "base_hash", "state"} or payload["kind"] != "base":
+    if set(payload) != {"version", "kind", "config", "encoder", "observation_policy", "encoder_hash", "base_hash", "state"} or payload["kind"] != "base":
         raise ValueError("checkpoint is not a base model")
-    spec = EncoderSpec.from_dict(payload["encoder"])
+    spec = EncoderSpec.from_dict(payload["encoder"], observation_policy=payload["observation_policy"])
     if spec.digest != payload["encoder_hash"] or expected_spec is not None and expected_spec.digest != spec.digest:
         raise ValueError("base encoder compatibility mismatch")
     model = PolicyValueNetwork(ModelConfig(**payload["config"]))
@@ -272,7 +272,7 @@ def load_manifest(path: str | Path, expected_spec: EncoderSpec | None = None, *,
     required = {"version", "model_file", "model_sha256", "base_hash", "adapter_hash", "adapter", "model_config", "model_config_hash", "encoder", "encoder_hash", "onnx", "numerical_tolerance"}
     if not isinstance(manifest, dict) or set(manifest) != required or manifest["version"] != BUNDLE_VERSION or manifest["model_file"] != "model.onnx":
         raise ValueError("unsupported deployment manifest")
-    spec = EncoderSpec.from_dict(manifest["encoder"]["spec"])
+    spec = EncoderSpec.from_dict(manifest["encoder"]["spec"], observation_policy=manifest["encoder"]["observation_policy"])
     config = ModelConfig(**manifest["model_config"])
     if manifest["encoder"] != spec.contract() or manifest["encoder_hash"] != spec.digest or expected_spec is not None and expected_spec.digest != spec.digest:
         raise ValueError("deployment encoder contract mismatch")

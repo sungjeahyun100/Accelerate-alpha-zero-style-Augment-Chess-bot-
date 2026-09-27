@@ -7,7 +7,7 @@ description = "Independent immutable Augment Chess rules engine"
 
 [dependencies]
 serde = { version = "1", features = ["derive", "rc"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
 serde_jcs = "0.2"
 sha2 = "0.10"
 

@@ -175,19 +175,141 @@ impl Square {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Piece {
-    #[serde(rename = "type")]
     pub kind: String,
     pub color: PieceColor,
-    #[serde(default)]
     pub moved: bool,
-    #[serde(default)]
     pub id: String,
-    #[serde(flatten)]
     pub extra: Fields,
+    pub(crate) source_order: Vec<String>,
+}
+impl Serialize for Piece {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut fields = self.extra.clone();
+        fields.insert("type".into(), json!(self.kind));
+        fields.insert("color".into(), json!(self.color));
+        fields.insert("moved".into(), json!(self.moved));
+        fields.insert("id".into(), json!(self.id));
+        let mut map = serializer.serialize_map(Some(fields.len()))?;
+        for key in &self.source_order {
+            if let Some(value) = fields.shift_remove(key) {
+                map.serialize_entry(key, &value)?;
+            }
+        }
+        for (key, value) in fields {
+            map.serialize_entry(&key, &value)?;
+        }
+        map.end()
+    }
+}
+impl<'de> Deserialize<'de> for Piece {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let mut fields = Fields::deserialize(deserializer)?;
+        let source_order = fields.keys().cloned().collect();
+        let kind = fields
+            .shift_remove("type")
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .ok_or_else(|| serde::de::Error::missing_field("type"))?;
+        let color = serde_json::from_value(
+            fields
+                .shift_remove("color")
+                .ok_or_else(|| serde::de::Error::missing_field("color"))?,
+        )
+        .map_err(serde::de::Error::custom)?;
+        let moved = match fields.shift_remove("moved") {
+            Some(v) => serde_json::from_value(v).map_err(serde::de::Error::custom)?,
+            None => false,
+        };
+        let id = match fields.shift_remove("id") {
+            Some(v) => serde_json::from_value(v).map_err(serde::de::Error::custom)?,
+            None => String::new(),
+        };
+        Ok(Self {
+            kind,
+            color,
+            moved,
+            id,
+            extra: fields,
+            source_order,
+        })
+    }
 }
 impl Piece {
+    /// Source pieceAbilityType uses a validated trickster ability before the
+    /// visible physical type. Capture and movement share this exact identity.
+    pub(crate) fn ability_kind(&self) -> &str {
+        const TRICKSTER: &[&str] = &[
+            "queen",
+            "rook",
+            "bishop",
+            "missionary",
+            "knight",
+            "pawn",
+            "protestant",
+            "herald",
+            "cannon",
+            "fanatic",
+            "primeMinister",
+            "eagle",
+            "amazon",
+            "cardinal",
+            "pegasus",
+            "jester",
+            "camel",
+            "hook",
+            "grasshopper",
+            "dragon",
+            "man",
+            "assassin",
+            "reaper",
+            "knightmaster",
+            "standardBearer",
+            "guard",
+            "recruiter",
+            "squire",
+            "checker",
+            "checkerKing",
+            "wizard",
+            "alfil",
+            "windmill",
+            "idol",
+            "lobster",
+            "bear",
+            "siegeRam",
+            "magicGirl",
+            "berserker",
+            "slime",
+            "siren",
+            "undead",
+            "campfire",
+            "hedgehog",
+            "princess",
+            "thief",
+            "brutus",
+            "clockwork",
+            "parrot",
+            "paladin",
+            "octopus",
+            "grappler",
+            "revolvingDoor",
+            "donQuixote",
+            "medium",
+        ];
+        if self.kind == "trickster"
+            && let Some(kind) = self.extra.get("tricksterMoveType").and_then(Value::as_str)
+            && TRICKSTER.contains(&kind)
+        {
+            return kind;
+        }
+        &self.kind
+    }
     pub fn new(
         kind: impl Into<String>,
         color: impl Into<PieceColor>,
@@ -199,6 +321,10 @@ impl Piece {
             id: id.into(),
             moved: false,
             extra: Fields::new(),
+            source_order: ["color", "type", "moved", "id"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
         }
     }
     pub fn flag(&self, name: &str) -> bool {
@@ -323,23 +449,106 @@ impl Action {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CardSlot {
     pub id: String,
     pub effect: String,
-    #[serde(default)]
     pub instance_id: String,
-    #[serde(default)]
     pub stars: f64,
-    #[serde(default, skip_serializing_if = "false_value")]
     pub used: bool,
-    #[serde(default, skip_serializing_if = "false_value")]
     pub recovering: bool,
-    #[serde(skip)]
     pub vacant: bool,
-    #[serde(flatten)]
     pub extra: Fields,
+    pub(crate) source_order: Vec<String>,
+}
+impl Serialize for CardSlot {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut fields = self.extra.clone();
+        fields.insert("id".into(), Value::String(self.id.clone()));
+        fields.insert("effect".into(), Value::String(self.effect.clone()));
+        if !self.instance_id.is_empty() || self.source_order.iter().any(|k| k == "instanceId") {
+            fields.insert("instanceId".into(), Value::String(self.instance_id.clone()));
+        }
+        if self.stars != 0.0
+            || self.source_order.is_empty()
+            || self.source_order.iter().any(|k| k == "stars")
+        {
+            fields.insert(
+                "stars".into(),
+                serde_json::to_value(self.stars).map_err(serde::ser::Error::custom)?,
+            );
+        }
+        for (name, value) in [("used", self.used), ("recovering", self.recovering)] {
+            if value || self.source_order.iter().any(|k| k == name) {
+                fields.insert(name.into(), Value::Bool(value));
+            }
+        }
+        let mut map = serializer.serialize_map(Some(fields.len()))?;
+        for key in &self.source_order {
+            if let Some(value) = fields.shift_remove(key) {
+                map.serialize_entry(key, &value)?;
+            }
+        }
+        for (key, value) in fields {
+            map.serialize_entry(&key, &value)?;
+        }
+        map.end()
+    }
+}
+impl<'de> Deserialize<'de> for CardSlot {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let mut fields = Fields::deserialize(deserializer)?;
+        let source_order = fields.keys().cloned().collect();
+        let id = fields
+            .shift_remove("id")
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .ok_or_else(|| serde::de::Error::missing_field("id"))?;
+        let effect = fields
+            .shift_remove("effect")
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .ok_or_else(|| serde::de::Error::missing_field("effect"))?;
+        let instance_id = fields
+            .shift_remove("instanceId")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(serde::de::Error::custom)?
+            .unwrap_or_default();
+        let stars = fields
+            .shift_remove("stars")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(serde::de::Error::custom)?
+            .unwrap_or_default();
+        let used = fields
+            .shift_remove("used")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(serde::de::Error::custom)?
+            .unwrap_or_default();
+        let recovering = fields
+            .shift_remove("recovering")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(serde::de::Error::custom)?
+            .unwrap_or_default();
+        Ok(Self {
+            id,
+            effect,
+            instance_id,
+            stars,
+            used,
+            recovering,
+            vacant: false,
+            extra: fields,
+            source_order,
+        })
+    }
 }
 impl CardSlot {
     pub fn star_value(&self) -> f64 {
@@ -350,10 +559,6 @@ impl CardSlot {
             .unwrap_or(self.stars)
     }
 }
-fn false_value(value: &bool) -> bool {
-    !*value
-}
-
 fn deserialize_decks<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> std::result::Result<Sides<Vec<CardSlot>>, D::Error> {
@@ -371,6 +576,7 @@ fn deserialize_decks<'de, D: serde::Deserializer<'de>>(
                     recovering: false,
                     vacant: true,
                     extra: Fields::new(),
+                    source_order: Vec::new(),
                 })
             })
             .collect()
@@ -378,6 +584,7 @@ fn deserialize_decks<'de, D: serde::Deserializer<'de>>(
     Ok(Sides {
         white: convert(raw.white),
         black: convert(raw.black),
+        white_first: raw.white_first,
     })
 }
 fn serialize_decks<S: serde::Serializer>(
@@ -393,24 +600,101 @@ fn serialize_decks<S: serde::Serializer>(
     Sides {
         white: convert(&decks.white),
         black: convert(&decks.black),
+        white_first: decks.white_first,
     }
     .serialize(serializer)
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Sides<T> {
     pub white: T,
     pub black: T,
+    // Input/source map insertion order affects JSON.stringify replay deltas.
+    // It is control metadata, never an extra JSON field.
+    pub(crate) white_first: bool,
+}
+impl<T: Serialize> Serialize for Sides<T> {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(2))?;
+        if self.white_first {
+            map.serialize_entry("white", &self.white)?;
+            map.serialize_entry("black", &self.black)?;
+        } else {
+            map.serialize_entry("black", &self.black)?;
+            map.serialize_entry("white", &self.white)?;
+        }
+        map.end()
+    }
+}
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Sides<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        struct Visitor<T>(std::marker::PhantomData<T>);
+        impl<'de, T: Deserialize<'de>> serde::de::Visitor<'de> for Visitor<T> {
+            type Value = Sides<T>;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a white/black player map")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> std::result::Result<Self::Value, A::Error> {
+                let mut white = None;
+                let mut black = None;
+                let mut first = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "white" => {
+                            if white.is_some() {
+                                return Err(serde::de::Error::duplicate_field("white"));
+                            }
+                            first.get_or_insert(true);
+                            white = Some(map.next_value()?);
+                        }
+                        "black" => {
+                            if black.is_some() {
+                                return Err(serde::de::Error::duplicate_field("black"));
+                            }
+                            first.get_or_insert(false);
+                            black = Some(map.next_value()?);
+                        }
+                        _ => {
+                            map.next_value::<serde::de::IgnoredAny>()?;
+                        }
+                    }
+                }
+                Ok(Sides {
+                    white: white.ok_or_else(|| serde::de::Error::missing_field("white"))?,
+                    black: black.ok_or_else(|| serde::de::Error::missing_field("black"))?,
+                    white_first: first.unwrap_or(true),
+                })
+            }
+        }
+        deserializer.deserialize_map(Visitor(std::marker::PhantomData))
+    }
 }
 impl<T: Default> Default for Sides<T> {
     fn default() -> Self {
         Self {
             white: T::default(),
             black: T::default(),
+            white_first: true,
         }
     }
 }
 impl<T> Sides<T> {
+    pub fn new(white: T, black: T) -> Self {
+        Self {
+            white,
+            black,
+            white_first: true,
+        }
+    }
     pub fn get(&self, color: Color) -> &T {
         match color {
             Color::White => &self.white,
@@ -510,6 +794,8 @@ pub struct GameState {
     pub rng: RngState,
     #[serde(default)]
     pub history: Vec<Value>,
+    #[serde(skip)]
+    pub(crate) gameover_replay_pending: bool,
     #[serde(flatten)]
     pub extra: Fields,
 }
@@ -650,12 +936,37 @@ pub struct Observation {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ObservationPolicy {
-    state_public_fields: Vec<String>,
-    piece_public_fields: Vec<String>,
-    card_public_fields: Vec<String>,
+pub(crate) struct ObservationPolicy {
+    protocol_version: String,
+    projection_version: String,
+    pub(crate) state_public_fields: Vec<String>,
+    pub(crate) piece_public_fields: Vec<String>,
+    pub(crate) card_public_fields: Vec<String>,
+    pub(crate) derived_public_fields: Vec<String>,
+    pub(crate) state_value_schemas: Fields,
+    pub(crate) surface_schemas: Fields,
+    pub(crate) public_piece_schema: Value,
+    pub(crate) card_revelation_schema: Value,
+    pub(crate) selection_schema: Value,
 }
-fn observation_policy() -> &'static ObservationPolicy {
+pub(crate) fn observation_protocol() -> &'static str {
+    &observation_policy().protocol_version
+}
+pub(crate) fn observation_projection() -> &'static str {
+    &observation_policy().projection_version
+}
+pub(crate) fn observation_policy_hash() -> &'static str {
+    static HASH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    HASH.get_or_init(|| {
+        let policy: Value = serde_json::from_str(include_str!(
+            "../../bridge/catalog/observation-20260927.json"
+        ))
+        .expect("adopted observation metadata");
+        let canonical = serde_jcs::to_vec(&policy).expect("policy canonicalizes");
+        format!("{:x}", Sha256::digest(canonical))
+    })
+}
+pub(crate) fn observation_policy() -> &'static ObservationPolicy {
     static POLICY: std::sync::OnceLock<ObservationPolicy> = std::sync::OnceLock::new();
     POLICY.get_or_init(|| {
         serde_json::from_str(include_str!(
@@ -685,6 +996,12 @@ impl GameState {
             .get(square.row as usize)?
             .get(square.col as usize)?
             .as_ref()
+    }
+    pub(crate) fn royal_identity(&self, piece: &Piece) -> bool {
+        piece.is_royal()
+            || (piece.flag("regencyHeir")
+                && self.flag("kingDead", piece.color)
+                && self.flag("regency", piece.color))
     }
     pub fn decision_actor(&self) -> Color {
         let decision_color = |name| {
@@ -726,7 +1043,11 @@ impl GameState {
             Some(Value::Bool(value)) => *value,
             Some(Value::Object(sides)) => sides
                 .get(color.as_str())
-                .and_then(Value::as_bool)
+                .and_then(|value| {
+                    value
+                        .as_bool()
+                        .or_else(|| value.as_f64().map(|number| number != 0.0))
+                })
                 .unwrap_or(false),
             _ => false,
         }
@@ -857,22 +1178,22 @@ impl GameState {
                         EngineError::InvalidState(format!("invalid history result: {error}"))
                     })?;
                 result.validate()?;
-                let allowed = &observation_policy().piece_public_fields;
                 for value in transition
                     .board_changes
                     .iter()
                     .flat_map(|change| [&change.before, &change.after])
                     .flatten()
                 {
-                    if value
-                        .as_object()
-                        .is_none_or(|object| object.keys().any(|name| !allowed.contains(name)))
-                    {
-                        return Err(EngineError::InvalidState(
-                            "nonpublic piece data in history".into(),
-                        ));
-                    }
+                    crate::observation::validate_public_piece(value, "history.piece")?;
                 }
+                crate::observation::validate_public_cards(
+                    &transition.own_cards,
+                    "history.ownCards",
+                )?;
+                crate::observation::validate_public_cards(
+                    &transition.revealed_opponent_cards,
+                    "history.revealedOpponentCards",
+                )?;
                 for capture in transition
                     .captures
                     .white
@@ -949,20 +1270,10 @@ impl GameState {
                 }
             }
         }
-        for piece in identities.values().filter(|piece| piece.is_large()) {
-            let cells = self
-                .board
-                .iter()
-                .flatten()
-                .filter(|cell| cell.as_ref().is_some_and(|item| item.id == piece.id))
-                .count();
-            if cells != 4 {
-                return Err(EngineError::InvalidState(format!(
-                    "large piece {} must occupy four cells",
-                    piece.id
-                )));
-            }
-        }
+        // Frozen source exile can relocate one cell of a large piece while
+        // its other three cells still share the same object. Source restore
+        // accepts that state. Identity and attribute consistency belong here;
+        // canonical footprint geometry belongs to the action that places it.
         Ok(())
     }
     pub fn observe(&self, viewer: Color) -> Observation {
@@ -972,16 +1283,36 @@ impl GameState {
             .as_object()
             .expect("state object")
             .clone();
+        public_state.insert("projectionVersion".into(), json!(observation_projection()));
+        public_state.extend(
+            crate::observation::board_surface(self, viewer)
+                .as_object()
+                .expect("surface object")
+                .clone(),
+        );
+        public_state.insert(
+            "observationPolicyHash".into(),
+            json!(observation_policy_hash()),
+        );
         let project_cards = |color: Color| {
             self.deck_slots
                 .get(color)
                 .iter()
-                .filter(|card| !card.vacant)
-                .map(|card| {
-                    public_object(
+                .enumerate()
+                .filter(|(_, card)| !card.vacant)
+                .map(|(slot, card)| {
+                    let mut view = public_object(
                         serde_json::to_value(card).expect("card serializes"),
                         &policy.card_public_fields,
-                    )
+                    );
+                    view.as_object_mut()
+                        .expect("projected card")
+                        .shift_remove("revealed");
+                    view["slot"] = json!(slot);
+                    if let Some(revealed) = crate::observation::card_revelation(card) {
+                        view["revealed"] = revealed;
+                    }
+                    view
                 })
                 .collect::<Vec<Value>>()
         };
@@ -1032,6 +1363,22 @@ impl GameState {
             )
             .collect::<Vec<_>>();
         public_state.insert("ruleCardIds".into(), json!(rule_ids));
+        public_state.insert(
+            "pendingRuleCardIds".into(),
+            json!(
+                self.extra
+                    .get("pendingRuleTickets")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|entry| entry.get("ruleId").and_then(Value::as_str))
+                    .filter(|id| crate::draft::definitions()
+                        .definitions
+                        .iter()
+                        .any(|card| card.get("id").and_then(Value::as_str) == Some(*id)))
+                    .collect::<Vec<_>>()
+            ),
+        );
         public_state.insert("captures".into(), json!(self.public_captures()));
         let clock_fields = [
             "enabled",
@@ -1077,7 +1424,7 @@ impl GameState {
             json!({"kind":"promotion","color":pending.get("color"),"row":pending.get("row"),"col":pending.get("col"),"choices":if pending.get("color").and_then(Value::as_str)==Some(viewer.as_str()){pending.get("choices").cloned().unwrap_or_else(||json!([]))}else{json!([])}})
         } else if let Some(trolley) = self.extra.get("activeTrolley").filter(|v| !v.is_null()) {
             let choices=trolley.get("choices").and_then(Value::as_array).into_iter().flatten().map(|choice|choice.get("pieces").and_then(Value::as_array).into_iter().flatten().map(|cell|json!({"type":cell.get("type").or_else(||cell.get("piece").and_then(|p|p.get("type"))),"color":cell.get("color").or_else(||cell.get("piece").and_then(|p|p.get("color")))})).collect::<Vec<_>>()).collect::<Vec<_>>();
-            json!({"kind":"trolley","color":trolley.get("color"),"windowId":trolley.get("id"),"choices":choices})
+            json!({"kind":"trolley","color":trolley.get("color"),"choices":choices})
         } else {
             Value::Null
         };
@@ -1096,6 +1443,18 @@ impl GameState {
             json!({"kind":"premove","triggerColor":entry.get("triggerColor"),"triggerTurn":entry.get("triggerTurn"),"moves":moves})
         }).collect::<Vec<_>>();
         public_state.insert("ownPlans".into(), json!(plans));
+        if let Some(winter) = self.extra.get("winterKingdom") {
+            public_state.insert(
+                "winterKingdom".into(),
+                json!({"enabled":crate::observation::truth(winter.get("enabled"))}),
+            );
+        }
+        if let Some(capture) = self.extra.get("captureTheFlag") {
+            public_state.insert(
+                "captureTheFlag".into(),
+                json!({"enabled":crate::observation::truth(Some(capture))}),
+            );
+        }
         if self.mode == "draft"
             && let Some(draft) = self.extra.get("draft").and_then(Value::as_object)
             && (draft.get("color").and_then(Value::as_str) == Some(viewer.as_str())
@@ -1107,7 +1466,18 @@ impl GameState {
                 .map(|cards| {
                     cards
                         .iter()
-                        .map(|card| public_object(card.clone(), &policy.card_public_fields))
+                        .map(|card| {
+                            let mut view = public_object(card.clone(), &policy.card_public_fields);
+                            view.as_object_mut()
+                                .expect("projected card")
+                                .shift_remove("revealed");
+                            if let Ok(card) = serde_json::from_value::<CardSlot>(card.clone())
+                                && let Some(revealed) = crate::observation::card_revelation(&card)
+                            {
+                                view["revealed"] = revealed;
+                            }
+                            view
+                        })
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
@@ -1133,43 +1503,18 @@ impl GameState {
                             ) {
                                 return None;
                             }
-                            let mut value = serde_json::to_value(piece).expect("piece serializes");
-                            let hallucinated = self
-                                .extra
-                                .get("hallucination")
-                                .and_then(|sides| sides.get(viewer.as_str()))
-                                .is_some_and(|entry| {
-                                    entry.get("color").and_then(Value::as_str)
-                                        == Some(piece.color.as_str())
-                                        && entry
-                                            .get("remaining")
-                                            .and_then(Value::as_i64)
-                                            .unwrap_or(0)
-                                            > 0
-                                });
-                            let visible_type = if hallucinated
-                                && !matches!(
-                                    piece.kind.as_str(),
-                                    "wall" | "football" | "blackHole" | "monster"
-                                ) {
-                                "queen"
-                            } else if piece.kind == "windmill" {
-                                if piece.extra.get("windmillMode").and_then(Value::as_str)
-                                    == Some("rook")
-                                {
-                                    "windmillRook"
-                                } else {
-                                    "windmillBishop"
-                                }
-                            } else if piece.kind == "log"
-                                && piece.extra.get("logDir").is_some_and(|dir| !dir.is_null())
-                            {
-                                "logRolling"
-                            } else {
-                                &piece.kind
-                            };
-                            value["type"] = json!(visible_type);
-                            Some(public_object(value, &policy.piece_public_fields))
+                            let visible_type =
+                                crate::observation::visible_type(self, piece, viewer);
+                            Some(crate::observation::piece_view(
+                                self,
+                                piece,
+                                Square {
+                                    row: row as u8,
+                                    col: col as u8,
+                                },
+                                viewer,
+                                &visible_type,
+                            ))
                         })
                     })
                     .collect()
@@ -1187,7 +1532,7 @@ impl GameState {
             })
             .collect();
         let mut observation = Observation {
-            protocol_version: "accelerate-observation-v1".into(),
+            protocol_version: observation_protocol().into(),
             viewer,
             turn: self.turn,
             board,
@@ -1212,10 +1557,14 @@ impl GameState {
         let hints = crate::movement::public_hints(self, viewer)?;
         let mut observation = self.observe(viewer);
         observation.public_state.insert("legalHints".into(), hints);
+        crate::observation::validate_projection(&observation)?;
         observation.refresh_key();
         Ok(observation)
     }
     pub(crate) fn piece_visible(&self, piece: &Piece, square: Square, viewer: Color) -> bool {
+        if self.mode == "gameover" {
+            return true;
+        }
         if piece.color == viewer {
             return true;
         }
@@ -1227,7 +1576,9 @@ impl GameState {
         {
             return hidden != viewer.as_str();
         }
-        if piece.color.owner().is_some() && self.flag("camouflageRule", viewer) && !piece.is_royal()
+        if piece.color.owner().is_some()
+            && self.flag("camouflageRule", viewer)
+            && !self.royal_identity(piece)
         {
             let row = piece
                 .extra
@@ -1269,6 +1620,7 @@ impl GameState {
         Sides {
             white: project(Color::White),
             black: project(Color::Black),
+            white_first: true,
         }
     }
     pub(crate) fn set_flag(&mut self, name: &str, color: Color, value: bool) {

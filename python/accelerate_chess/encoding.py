@@ -8,7 +8,7 @@ encoder has no API accepting a full Position or its hidden RNG state.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, field, replace
 import hashlib
 import json
 import math
@@ -18,10 +18,11 @@ import numpy as np
 import jcs
 
 
-ENCODER_VERSION = "public-utf8-v1"
+ENCODER_VERSION = "public-utf8-v2"
 ACTION_VERSION = "candidate-payload-v1"
-CONDITION_VERSION = "public-film-v1"
-OBSERVATION_VERSION = "accelerate-observation-v1"
+CONDITION_VERSION = "public-film-v2"
+OBSERVATION_VERSION = "accelerate-observation-v2"
+PROJECTION_VERSION = "source-visible-20260927-v2"
 HISTORY_SUMMARY_VERSION = "public-history-summary-v1"
 ACTION_TYPES = ("move", "card", "promotion", "promotionChoice", "shotgunReload", "wizardSpell", "fileSurgeSkip", "draftPick", "draftBundlePick", "trolleyChoice")
 
@@ -58,6 +59,51 @@ def canonical_json(value: Any) -> str:
         raise ValueError("features must be finite JSON data") from error
 
 
+def _surface_shape(schema: Mapping[str, Any], value: Any, path: str) -> None:
+    """Validate the small, fail-closed JSON Schema subset in the source policy."""
+    allowed = {"type", "const", "enum", "properties", "required", "additionalProperties", "items", "minItems", "maxItems", "minimum", "maximum", "minLength", "maxLength", "anyOf"}
+    if not isinstance(schema, Mapping) or set(schema) - allowed:
+        raise ValueError("unsupported source surface schema keyword")
+    if "anyOf" in schema:
+        for branch in schema["anyOf"]:
+            try:
+                _surface_shape(branch, value, path)
+                break
+            except ValueError:
+                continue
+        else:
+            raise ValueError(f"invalid public surface alternatives at {path}")
+    # JSON Schema's integer is a numeric property, matching Number.isInteger
+    # and JCS, so a native 2.0 counter has the same meaning as Python's 2.
+    integral = type(value) is int or type(value) is float and math.isfinite(value) and value.is_integer()
+    actual = "null" if value is None else "boolean" if type(value) is bool else "integer" if integral else "number" if type(value) is float else "string" if isinstance(value, str) else "object" if isinstance(value, Mapping) else "array" if isinstance(value, (tuple, list)) else "unsupported"
+    expected = schema.get("type")
+    if expected is not None:
+        types = (expected,) if isinstance(expected, str) else tuple(expected)
+        if actual not in types and not (actual == "integer" and "number" in types):
+            raise ValueError(f"invalid public surface type at {path}")
+    if "const" in schema and canonical_json(value) != canonical_json(schema["const"]) or "enum" in schema and canonical_json(value) not in {canonical_json(item) for item in schema["enum"]}:
+        raise ValueError(f"invalid public surface value at {path}")
+    if actual in ("number", "integer"):
+        if not math.isfinite(value) or value < schema.get("minimum", -math.inf) or value > schema.get("maximum", math.inf):
+            raise ValueError(f"invalid public surface counter at {path}")
+    if actual == "string" and not schema.get("minLength", 0) <= len(value) <= schema.get("maxLength", math.inf):
+        raise ValueError(f"invalid public surface string at {path}")
+    if actual == "array":
+        if not schema.get("minItems", 0) <= len(value) <= schema.get("maxItems", math.inf):
+            raise ValueError(f"invalid public surface array at {path}")
+        if "items" in schema:
+            for index, item in enumerate(value):
+                _surface_shape(schema["items"], item, f"{path}[{index}]")
+    if actual == "object":
+        properties = schema.get("properties", {})
+        if set(schema.get("required", ())) - set(value) or schema.get("additionalProperties") is False and set(value) - set(properties):
+            raise ValueError(f"unknown or missing public surface fields at {path}")
+        for key, item in value.items():
+            if key in properties:
+                _surface_shape(properties[key], item, f"{path}.{key}")
+
+
 @dataclass(frozen=True)
 class EncoderSpec:
     rules_version: str
@@ -65,6 +111,7 @@ class EncoderSpec:
     piece_ids: tuple[str, ...]
     card_ids: tuple[str, ...]
     rule_ids: tuple[str, ...]
+    observation_policy_hash: str
     piece_payload_bytes: int = 2048
     public_payload_bytes: int = 32768
     action_payload_bytes: int = 4096
@@ -75,12 +122,14 @@ class EncoderSpec:
     catalog_version: str = ""
     history_encoding: str = "full"
     action_encoding: str = "exact-payload"
+    _observation_policy: Mapping[str, Any] | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if not self.rules_version or len(self.catalog_hash) != 64:
+        if not self.rules_version or len(self.catalog_hash) != 64 or not isinstance(self.observation_policy_hash, str) or len(self.observation_policy_hash) != 64:
             raise ValueError("rules version and SHA-256 catalog hash are required")
         try:
             bytes.fromhex(self.catalog_hash)
+            bytes.fromhex(self.observation_policy_hash)
         except ValueError as error:
             raise ValueError("catalog hash must be hexadecimal") from error
         for field in ("piece_ids", "card_ids", "rule_ids", "action_types"):
@@ -112,21 +161,23 @@ class EncoderSpec:
         return len(self.action_types) + len(self.card_ids) + 7 + self.action_payload_bytes
 
     def to_dict(self) -> dict[str, Any]:
-        result = asdict(self)
+        result = {name: getattr(self, name) for name in self.__dataclass_fields__ if name != "_observation_policy"}
         for key in ("piece_ids", "card_ids", "rule_ids", "action_types"):
             result[key] = list(result[key])
         return result
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> EncoderSpec:
+    def from_dict(cls, data: Mapping[str, Any], *, observation_policy: Mapping[str, Any]) -> EncoderSpec:
         values = dict(data)
+        if set(values) != set(cls.__dataclass_fields__) - {"_observation_policy"}:
+            raise ValueError("expected the exact 16-field encoder spec")
         for key in ("piece_ids", "card_ids", "rule_ids", "action_types"):
             if key in values:
                 values[key] = tuple(values[key])
-        return cls(**values)
+        return cls(**values).with_observation_policy(observation_policy)
 
     @classmethod
-    def from_catalog(cls, catalog: Mapping[str, Any], **capacities: int) -> EncoderSpec:
+    def from_catalog(cls, catalog: Mapping[str, Any], *, observation_policy: Mapping[str, Any], **capacities: int) -> EncoderSpec:
         """Catalog IDs are serialized in stable lexical order, never inferred."""
         if catalog.get("schemaVersion") != 1:
             raise ValueError("unsupported catalog schema")
@@ -134,14 +185,44 @@ class EncoderSpec:
         return cls(catalog["rulesVersion"], hashlib.sha256(canonical_json(catalog).encode("utf-8")).hexdigest(),
                    tuple(sorted(catalog["pieceTypes"])), tuple(sorted(card["id"] for card in cards)),
                    tuple(sorted(card["id"] for card in cards if card["draftCategory"] == "RULE")),
-                   action_types=tuple(catalog["actionTypes"]), catalog_version=catalog["catalogVersion"], **capacities)
+                   hashlib.sha256(canonical_json(observation_policy).encode("utf-8")).hexdigest(),
+                   action_types=tuple(catalog["actionTypes"]), catalog_version=catalog["catalogVersion"], **capacities).with_observation_policy(observation_policy)
+
+    def with_observation_policy(self, policy: Mapping[str, Any]) -> EncoderSpec:
+        """Bind explicit source projection metadata without adding spec keys.
+
+        Policy data is copied at the boundary. Checkpoints/manifests carry it
+        once alongside the serialized 16-field spec; tensor modules stay
+        independent of the native rule engine.
+        """
+        if not isinstance(policy, Mapping) or policy.get("schemaVersion") != 2 or policy.get("protocolVersion") != OBSERVATION_VERSION or policy.get("projectionVersion") != PROJECTION_VERSION or policy.get("rulesVersion") != self.rules_version:
+            raise ValueError("unsupported observation policy version or rules provenance")
+        encoded = canonical_json(policy)
+        if len(encoded.encode("utf-8")) > 1024 * 1024 or hashlib.sha256(encoded.encode("utf-8")).hexdigest() != self.observation_policy_hash:
+            raise ValueError("observation policy hash or metadata budget mismatch")
+        if not isinstance(policy.get("surfaceSchemas"), Mapping) or set(policy["surfaceSchemas"]) != {"pieceStatus", "boardMarks", "relationships", "overlays"}:
+            raise ValueError("observation policy needs the strict source surface schemas")
+        if not isinstance(policy.get("stateValueSchemas"), Mapping) or set(policy["stateValueSchemas"]) != set(policy["statePublicFields"]):
+            raise ValueError("observation policy needs explicit public state value schemas")
+        return replace(self, _observation_policy=json.loads(encoded))
+
+    @property
+    def observation_policy(self) -> dict[str, Any]:
+        policy = getattr(self, "_observation_policy", None)
+        if policy is None:
+            raise ValueError("observation policy metadata must be explicitly bound")
+        encoded = canonical_json(policy)
+        if hashlib.sha256(encoded.encode("utf-8")).hexdigest() != self.observation_policy_hash:
+            raise ValueError("bound observation policy was modified")
+        return json.loads(encoded)
 
     def contract(self) -> dict[str, Any]:
         return {
             "spec": self.to_dict(),
+            "observation_policy": self.observation_policy,
             "observation_version": OBSERVATION_VERSION,
             "dtype": "float32", "board_layout": "NCHW", "value_perspective": "observation.viewer",
-            "board_fields": ["piece-id-onehot", "own", "opponent", "moved", "occupied", "canonical-json-byte-length/capacity", "canonical-json-utf8-bytes/255"],
+            "board_fields": ["piece-id-onehot", "own", "opponent", "own-known-moved", "occupied", "canonical-json-byte-length/capacity", "canonical-json-utf8-bytes/255"],
             "condition_fields": ["own-card-id-counts", "revealed-opponent-card-id-counts", "rule-id-presence", "viewer-is-white", "actionsRemaining/16", "moveCount/512", "fullMove/256", "canonical-json-byte-length/capacity", "canonical-json-utf8-bytes/255"],
             "action_fields": ["action-type-onehot", "card-id-onehot", "from-row/7", "from-col/7", "to-row/7", "to-col/7", "target-row/7", "target-col/7", "canonical-json-byte-length/capacity", "canonical-json-utf8-bytes/255"],
             "board_channels": self.board_channels, "condition_dim": self.condition_dim, "action_dim": self.action_dim,
@@ -180,7 +261,7 @@ class PublicObservation:
     def from_native(cls, observation: Mapping[str, Any], *, belief_summary: Mapping[str, Any] | None = None) -> PublicObservation:
         expected = {"protocolVersion", "viewer", "board", "turn", "ownCards", "opponentHandCount", "publicState", "history", "informationStateKey"}
         if not isinstance(observation, Mapping) or set(observation) != expected or observation["protocolVersion"] != OBSERVATION_VERSION:
-            raise ValueError("expected the exact public Observation v1 contract, not a full game snapshot")
+            raise ValueError("expected the exact public Observation v2 contract, not a full game snapshot")
         if observation["viewer"] not in ("white", "black") or observation["turn"] not in ("white", "black"):
             raise ValueError("observation viewer/turn is invalid")
         if type(observation["opponentHandCount"]) is not int or observation["opponentHandCount"] < 0:
@@ -193,6 +274,10 @@ class PublicObservation:
             raise ValueError("public observation information state identity mismatch")
         if not isinstance(observation["publicState"], Mapping) or not isinstance(observation["ownCards"], (tuple, list)) or not isinstance(observation["history"], (tuple, list)):
             raise ValueError("observation public state, cards and history are invalid")
+        projection = observation["publicState"]
+        policy_hash = projection.get("observationPolicyHash")
+        if projection.get("projectionVersion") != PROJECTION_VERSION or not isinstance(policy_hash, str) or len(policy_hash) != 64 or any(character not in "0123456789abcdef" for character in policy_hash):
+            raise ValueError("public observation projection provenance mismatch")
         if any(not isinstance(card, Mapping) for card in observation["ownCards"]) or any(not isinstance(event, Mapping) for event in observation["history"]):
             raise ValueError("public cards and history must contain JSON objects")
         public = {key: observation[key] for key in ("turn", "ownCards", "opponentHandCount", "publicState", "informationStateKey")}
@@ -316,6 +401,50 @@ def _coordinates(value: Any, player: str) -> list[float]:
 class PublicEncoder:
     def __init__(self, spec: EncoderSpec):
         self.spec = spec
+        self.policy = spec.observation_policy
+        # This encoder owns a verified policy snapshot. Its frozen public
+        # spec and snapshot do not change per leaf; avoid hashing the full
+        # renderer schema again on every inference input.
+        self._spec_digest = spec.digest
+
+    def _validate_surface(self, observation: PublicObservation) -> None:
+        public = observation.public["publicState"]
+        if public.get("observationPolicyHash") != self.spec.observation_policy_hash or public.get("projectionVersion") != PROJECTION_VERSION:
+            raise ValueError("observation and encoder policy compatibility mismatch")
+        allowed = set(self.policy["statePublicFields"]) | set(self.policy["derivedPublicFields"])
+        if set(public) - allowed:
+            raise ValueError("unknown public state fields require a source visibility review")
+        for key in self.policy["statePublicFields"]:
+            if key in public:
+                _surface_shape(self.policy["stateValueSchemas"][key], public[key], f"publicState.{key}")
+        if "selectionPhase" in public:
+            _surface_shape(self.policy["selectionSchema"], public["selectionPhase"], "publicState.selectionPhase")
+        for key in ("boardMarks", "relationships", "overlays"):
+            if key not in public:
+                raise ValueError("public observation needs the source-derived board surface")
+            _surface_shape(self.policy["surfaceSchemas"][key], public[key], key)
+        cards = [*observation.public["ownCards"], *public.get("revealedOpponentCards", [])]
+        for card in cards:
+            if not isinstance(card, Mapping) or set(card) - set(self.policy["cardPublicFields"]):
+                raise ValueError("unknown public card fields require a source visibility review")
+            if "revealed" in card:
+                _surface_shape(self.policy["cardRevelationSchema"], card["revealed"], "card.revealed")
+        for row in observation.board:
+            for piece in row:
+                if piece is None:
+                    continue
+                if not isinstance(piece, Mapping) or set(piece) - set(self.policy["piecePublicFields"]):
+                    raise ValueError("unknown public piece fields require a source visibility review")
+                if "status" not in piece:
+                    raise ValueError("public pieces need an explicit source-derived status surface")
+                _surface_shape(self.policy["publicPieceSchema"], piece, "piece")
+        # Historical frames are separate public observations, not a way to
+        # smuggle raw piece attributes around the current-board boundary.
+        for event in observation.history:
+            for change in event.get("boardChanges", ()):
+                for key in ("before", "after"):
+                    if change.get(key) is not None:
+                        _surface_shape(self.policy["publicPieceSchema"], change[key], f"history.{key}")
 
     def encode(self, observation: PublicObservation | Mapping[str, Any], actions: Sequence[Mapping[str, Any]], *, belief_summary: Mapping[str, Any] | None = None) -> EncodedPosition:
         if isinstance(observation, Mapping):
@@ -331,12 +460,13 @@ class PublicEncoder:
             raise ValueError("only an 8x8 public board is supported")
         # These keys cannot be publicly supplied even through auxiliary history.
         if set(observation.public) != {"turn", "ownCards", "opponentHandCount", "publicState", "informationStateKey"}:
-            raise ValueError("typed public observation fields differ from the native v1 contract")
+            raise ValueError("typed public observation fields differ from the native v2 contract")
         # The public information key is an opaque lookup key, not a feature.
         # It is checked before features are materialized.
         public_data = {"public": {key: value for key, value in observation.public.items() if key != "informationStateKey"}, "history": observation.history, "belief": observation.belief_summary}
         self._reject_private(public_data)
         self._reject_private(observation.board)
+        self._validate_surface(observation)
         if self.spec.history_encoding == HISTORY_SUMMARY_VERSION:
             public_data["history"] = summarize_public_history(observation.history)
         board = np.zeros((self.spec.board_channels, 8, 8), np.float32)
@@ -349,7 +479,7 @@ class PublicEncoder:
                 color = piece.get("color")
                 if color not in ("white", "black", "neutral") or type(piece.get("moved", False)) is not bool:
                     raise ValueError("piece color and moved flag are invalid")
-                prefix = np.concatenate((_onehot(self.spec.piece_ids, piece.get("type"), "piece"), np.array([color == observation.player, color in ("white", "black") and color != observation.player, piece.get("moved", False), 1.], np.float32)))
+                prefix = np.concatenate((_onehot(self.spec.piece_ids, piece.get("type"), "piece"), np.array([color == observation.player, color in ("white", "black") and color != observation.player, color == observation.player and piece.get("moved", False), 1.], np.float32)))
                 encoded = np.concatenate((prefix, _bytes(piece, self.spec.piece_payload_bytes)))
                 target_row, target_col = (7-row_index, 7-col_index) if observation.player == "black" else (row_index, col_index)
                 board[:, target_row, target_col] = encoded
@@ -368,7 +498,7 @@ class PublicEncoder:
             raise ValueError("duplicate execution actions are not a policy choice")
         vectors = [self._action(action, observation.player) for action in payloads]
         features = np.stack(vectors) if vectors else np.empty((0, self.spec.action_dim), np.float32)
-        return EncodedPosition(board, condition, features, copied, keys, self.spec.digest)
+        return EncodedPosition(board, condition, features, copied, keys, self._spec_digest)
 
     def _condition(self, observation: PublicObservation, payload: Mapping[str, Any]) -> np.ndarray:
         cards = np.zeros(len(self.spec.card_ids), np.float32)
@@ -417,7 +547,7 @@ class PublicEncoder:
             for key, item in value.items():
                 if not isinstance(key, str):
                     raise ValueError("public JSON object keys must be strings")
-                if key.lower().replace("_", "") in {"rng", "rngstate", "randomstate", "seed", "randomtape", "opponentcards", "positionkey", "positionid", "hiddenstate", "privatecards", "actualposition"}:
+                if key.lower().replace("_", "") in {"rng", "rngstate", "randomstate", "seed", "randomtape", "opponentcards", "positionkey", "positionid", "windowid", "hiddenstate", "privatecards", "actualposition"}:
                     raise ValueError(f"private field {key!r} cannot enter public features")
                 PublicEncoder._reject_private(item, depth + 1)
         elif isinstance(value, (list, tuple)):

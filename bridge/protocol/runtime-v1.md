@@ -1,6 +1,8 @@
 # 실행 계약 v1
 
-현재 실행·저장·차분 비교의 기준은 `runtime-v1.schema.json`과 `runtime-contract.js`다.
+현재 실행·저장·차분 비교의 기준은 [runtime-v1.schema.json](../schemas/runtime-v1.schema.json)과
+[runtime-contract.js](../tools/runtime-contract.js)다. Position·Action envelope는 v1을 유지하고,
+공개 관측은 아래 Observation v2 계약을 사용한다.
 기존 bridge-draft-0 문서와 예시는 과거 검토 자료로 보존한다. v1 채택은 전체 규칙 구현의
 완료를 뜻하지 않으며, 실제 검사와 남은 범위는 [IMPLEMENTATION](../../docs/IMPLEMENTATION.md)에 있다.
 
@@ -18,6 +20,11 @@ cursor overflow는 거부한다. snapshot 복원은 상태·tape·cursor를 함�
 
 `positionId`는 나머지 Position 필드의 RFC 8785/JCS SHA-256이다. full state·RNG가 들어 있는
 private identity이므로 신경망 특징·공개 이력·informationStateKey에 넣지 않는다.
+동결 source의 효과는 같은 대형 기물 ID를 떨어진 여러 square에 남길 수 있다. snapshot
+admission은 같은 frame의 ID/type/color/전체 속성 일관성을 검사하고 이 source 상태를 보존한다.
+배치 모양을 2x2로 제한하는 추가 가정으로 source snapshot을 거부하지 않는다. 새 기물의
+정상 배치·이동 legality는 규칙 helper가 검사한다. 서로 다른 history/replay frame의 같은 ID는
+별도 객체이며, JS oracle 복원도 frame 간 객체를 공유하지 않는다.
 `Action`은 `{protocolVersion:'accelerate-action-v1', positionId, actionId, payload}`다.
 `actionId`는 **payload만** JCS SHA-256으로 계산한다. 다른 위치에서 동일 payload는 동일
 actionId를 가지며, 실행 시 positionId가 맞지 않으면 stale action으로 거부한다.
@@ -37,6 +44,9 @@ source UI에서 선택할 수 있는 정보만 투영하며, 현재 일반 이�
 `Position.bind_public_intent(intent)`가 화면의 선택 순서대로 실행 payload를 해결한다.
 그때 결정되는 숨은 기물·capture flag·private position identity는 신경망·정보집합 키에 넣지 않는다.
 아직 미지원인 특수 선택을 Python에서 임의 flag 제거로 대신하지 않는다.
+trolley 공개 intent는 `{type:'trolleyChoice', color, doomedIndex}`다. 원문의 `windowId`는
+시간·난수로 만든 실행/만료 확인용 식별자이므로 공개 관측과 intent에는 넣지 않는다.
+실제 환경은 현재 window에 intent를 bind하고 lossless 실행 Action에 해당 `windowId`를 보존한다.
 
 ONNX encoder 계약은 `exact-payload`와 `public-decision-intent-v1`의 action 정책을 각각
 기록하고 별도 hash를 갖는다. 봇 탐색은 공개 intent 계약을 사용하며 실행 Action의 lossless
@@ -52,7 +62,7 @@ Python/Rust 저장 identity 역시 JCS로 맞춘다.
 
 ## 관측과 힌트
 
-Observation은 `{protocolVersion:'accelerate-observation-v1', viewer, board, turn, ownCards,
+Observation은 `{protocolVersion:'accelerate-observation-v2', viewer, board, turn, ownCards,
 opponentHandCount, publicState, history, informationStateKey}`의 단일 형식이다.
 `informationStateKey`는 나머지 공개/관찰 가능한 필드만 JCS SHA-256으로 계산한다.
 동일한 viewer 관측·공개 history를 가진 서로 다른 hidden state/RNG는 같은 key를 가져야 한다.
@@ -78,6 +88,20 @@ promotion/trolley 선택 phase와 clock의 공개 잔여값도 보존한다. raw
 필드별 allowlist와 viewer projection/실제 private/presentation/아직 검토 중인 분류는
 `bridge/catalog/observation-20260927.json`에 있다. 새 unknown 필드는 검토 없이 무시하지 않는다.
 visibilityReviewPending은 비공개라는 결론이 아니며 전체 관측 coverage의 미완료 범위다.
+
+관측 v2는 동결 source renderer가 보여 주는 기물 상태, 보드 표시와 관계를 별도로 투영한다.
+기물의 `status`와 publicState의 `boardMarks`·`relationships`·`overlays`는 정책에 있는 strict schema를
+따른다. 효과의 내부 ID나 raw deadline을 복사하는 대신 실제 화면의 flag·남은 횟수·표시 좌표를
+제공한다. 소유자와 시간 정보가 화면에 나타나는 경우에는 그 공개 의미를 유지한다.
+정책은 schemaVersion 2·projectionVersion `source-visible-20260927-v2`이며, 규칙·catalog의
+동결 source 버전은 바꾸지 않는다. 정확한 필드별 구현 범위와 남은 검증은 IMPLEMENTATION에 기록한다.
+
+`EncoderSpec`은 `observation_policy_hash`를 포함한 16개 필드를 직렬화한다. Python 생성자는
+catalog와 관측 정책을 명시적으로 받고, encoder 계약·ONNX metadata·replay에는 그 정책도
+포함한다. 정책 hash는 JCS bytes의 SHA-256이며 native runtime은 배포 metadata의 정책을
+compile-time 정책과 비교한다. encoder/condition 버전은 `public-utf8-v2`·`public-film-v2`다.
+이전 관측 v1이나 정책이 누락된 artifact를 자동으로 보완하지 않는다. 설치 패키지의
+`site_catalog()`·`site_observation_policy()`는 서로 같은 wheel에 포함된 원본의 owned copy를 제공한다.
 
 ## 전이·이력·결과
 

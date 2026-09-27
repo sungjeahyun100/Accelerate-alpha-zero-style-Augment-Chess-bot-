@@ -1,13 +1,18 @@
 //! Independent rules and immutable snapshots. No language or inference runtime is used here.
+mod card_effects;
 mod conditioning;
 mod draft;
 mod eligibility;
 mod flow;
 mod movement;
+mod observation;
+mod opening;
+mod replay;
 mod state;
 #[cfg(test)]
 mod tests;
 mod transition;
+mod variant_movement;
 
 pub use movement::implemented_piece_types;
 pub use state::*;
@@ -36,13 +41,34 @@ impl Position {
     ) -> Result<Self> {
         conditioning::sample_initial(config, observation, seed)
     }
+    /// Inspect source draw predicates against an owned clone. Random predicate
+    /// probes cannot advance this immutable position's future random stream.
+    pub fn draft_availability(&self, color: Color) -> Result<Vec<(String, bool)>> {
+        let mut state = self.state().clone();
+        crate::draft::definitions()
+            .definitions
+            .iter()
+            .map(|card| {
+                Ok((
+                    card["id"].as_str().expect("adopted card id").to_owned(),
+                    crate::eligibility::draft_drawable(&mut state, card, color)?,
+                ))
+            })
+            .collect()
+    }
     pub fn condition_public_identities(&self, observation: Value) -> Result<Self> {
         conditioning::condition_identities(self, observation)
     }
     pub fn public_intent(&self, action: &Action) -> Result<Value> {
         self.validate_action(action)?;
+        self.validate_public_selection(action)?;
         let mut semantic = action.clone();
         semantic.position_key = None;
+        if semantic.kind == ActionKind::TrolleyChoice {
+            return Ok(
+                serde_json::json!({"type":"trolleyChoice","color":semantic.color,"doomedIndex":semantic.extra.get("doomedIndex")}),
+            );
+        }
         if semantic.kind == ActionKind::Move {
             movement::public_move_intent(self.state(), &semantic)
         } else {
@@ -51,12 +77,52 @@ impl Position {
     }
     pub fn bind_public_intent(&self, intent: Value) -> Result<Action> {
         state::validate_json_value(&intent, 0)?;
+        if intent.get("type").and_then(Value::as_str) == Some("trolleyChoice") {
+            let fields = intent.as_object().ok_or(EngineError::IllegalAction)?;
+            if fields.len() != 3
+                || fields
+                    .keys()
+                    .any(|key| !matches!(key.as_str(), "type" | "color" | "doomedIndex"))
+            {
+                return Err(EngineError::IllegalAction);
+            }
+            let mut payload = intent;
+            let window = self
+                .state()
+                .extra
+                .get("activeTrolley")
+                .and_then(|window| window.get("id"))
+                .filter(|id| !id.is_null())
+                .cloned()
+                .ok_or(EngineError::IllegalAction)?;
+            payload["windowId"] = window;
+            return self.bind_payload(payload);
+        }
         if intent.get("type").and_then(Value::as_str) != Some("move") {
-            return self.bind_payload(intent);
+            let action = self.bind_payload(intent)?;
+            self.validate_public_selection(&action)?;
+            return Ok(action);
         }
         let mut action = movement::resolve_move_intent(self.state(), &intent)?;
         action.position_key = Some(format!("{:016x}", self.key()));
         Ok(action)
+    }
+    fn validate_public_selection(&self, action: &Action) -> Result<()> {
+        if action.kind == ActionKind::Card {
+            let card = self
+                .state()
+                .deck_slots
+                .get(action.color)
+                .iter()
+                .find(|card| Some(&card.instance_id) == action.card_instance_id.as_ref())
+                .ok_or(EngineError::IllegalAction)?;
+            let mut semantic = action.clone();
+            semantic.position_key = None;
+            if !transition::card_ui_actions(self.state(), card)?.contains(&semantic) {
+                return Err(EngineError::IllegalAction);
+            }
+        }
+        Ok(())
     }
     pub fn new_game(config: GameConfig, seed: u64) -> Result<Self> {
         let state = GameState::new(config, seed)?;
@@ -113,7 +179,7 @@ impl Position {
                 .expect("state object")
                 .contains_key(name)
             {
-                output.remove(name);
+                output.shift_remove(name);
             }
         }
         for (name, value) in current.as_object().expect("state object") {
@@ -147,9 +213,9 @@ impl Position {
     }
     pub fn key(&self) -> u64 {
         stable_hash(
-            serde_json::to_string(self.state())
+            serde_jcs::to_vec(self.state())
                 .expect("validated state serializes")
-                .as_bytes(),
+                .as_slice(),
         )
     }
     pub fn legal_actions(&self) -> Result<Vec<Action>> {

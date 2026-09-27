@@ -46,10 +46,20 @@ test("typed history rejects arbitrary data and unknown event fields", () => {
   const rawAction = contract.jsonCopy(event); rawAction.public.white.action = move();
   assert.throws(() => contract.validateGameEvent(rawAction), /public transition/);
 });
-test("v1 schema enforces action discriminators, coordinates, SHA and RNG ranges", () => {
+test("runtime schema enforces envelopes, v2 projection provenance and public surfaces", () => {
   const schema = resolveRef("runtime-v1.schema.json#", "runtime-v1.schema.json");
   const p = contract.position(state(), contract.rng(1)), a = contract.action(p, move());
   assert.deepEqual(validate(schema.schema, p, "$", schema.docName), []);
   assert.deepEqual(validate(schema.schema, a, "$", schema.docName), []);
   for (const invalid of [{ ...a, actionId: "x" }, { ...a, payload: { ...a.payload, from: { row: 8, col: 0 } } }, { ...a, payload: { type: "card", color: "white" } }, { ...p, rng: { ...p.rng, tape: [1] } }]) assert.ok(validate(schema.schema, invalid, "$", schema.docName).length > 0);
+  const observation = { protocolVersion: contract.VERSIONS.observation, viewer: "white", board: state().board, turn: "white", ownCards: [], opponentHandCount: 0, history: [], publicState: { projectionVersion: contract.observationPolicy.projectionVersion, observationPolicyHash: contract.digest(contract.observationPolicy), boardMarks: [], relationships: [], overlays: [] } };
+  observation.board[2][0] = { type: "wall", color: "neutral", status: {} };
+  observation.informationStateKey = contract.digest(observation);
+  contract.validateObservation(observation);
+  assert.deepEqual(validate(schema.schema, observation, "$", schema.docName), []);
+  const resign = frame => { delete frame.informationStateKey; frame.informationStateKey = contract.digest(frame); return frame; };
+  for (const modify of [frame => { frame.protocolVersion = "accelerate-observation-v1"; }, frame => { frame.publicState.observationPolicyHash = "a".repeat(64); }, frame => { frame.board[2][0].status.privateId = "hidden"; }, frame => { frame.publicState.boardMarks.push({ kind: "platformForecast", square: { row: 8, col: 0 } }); }, frame => { delete frame.publicState.relationships; }, frame => { frame.publicState.winterKingdom={enabled:true,previewIds:["secret-piece"]}; }, frame=>{frame.publicState.selectionPhase={kind:"trolley",color:"white",choices:[[],[]],windowId:"private-window"};}]) {
+    assert.throws(() => contract.validateObservation(resign(modifyCopy(observation, modify))));
+  }
 });
+function modifyCopy(value, modify) { const copy = contract.jsonCopy(value); modify(copy); return copy; }

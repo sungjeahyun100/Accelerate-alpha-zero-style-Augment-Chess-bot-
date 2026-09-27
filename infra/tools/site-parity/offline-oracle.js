@@ -55,13 +55,193 @@ function __settleMicrotasks(){
 }
 function __encode(value) { return JSON.stringify(value,(_key,current)=>current instanceof Set?{__simType:"Set",values:[...current]}:current instanceof Map?{__simType:"Map",entries:[...current]}:current); }
 function __decode(value) { return JSON.parse(JSON.stringify(value),(_key,current)=>current?.__simType==="Set"?new Set(current.values):current?.__simType==="Map"?new Map(current.entries):current); }
+function __relinkSnapshotBoards(value) {
+  // The client's relinkBoardPieceReferences62055 creates one ID map per
+  // board. History/replay frames are independent snapshots (61255, 88741),
+  // so a piece with the same ID in two frames must not share live attributes.
+  relinkBoardPieceReferences(value.board);
+  for (const frame of value.boardHistory || []) if (frame?.board) relinkBoardPieceReferences(frame.board);
+  for (const frame of [value.replayBaseFrame, value.replayTailFrame]) if (frame?.board) relinkBoardPieceReferences(frame.board);
+}
+function __playerTricksterMovement(item, viewer) {
+  // The online renderer uses playerColor rather than physical board turn.
+  // Observe(viewer) has that same per-player ownership boundary. This read
+  // probe restores the UI context before any rule function can run.
+  if (state.mode === "gameover") return tricksterMovementBadgeType(item, false);
+  const saved = [online.enabled, online.role, online.playerColor];
+  try { online.enabled=true;online.role="player";online.playerColor=viewer;return tricksterMovementBadgeType(item,false); }
+  finally { [online.enabled,online.role,online.playerColor]=saved; }
+}
+function __publicPieceStatus(item, row, col, viewer) {
+  const status = {}, flag=(name, active)=>{if(active)status[name]=true;}, count=(name,value)=>{if(value!==""&&value!==null&&value!==undefined)status[name]=Number(value);};
+  // All these names occur in createPieceElement75203..75767 or its two
+  // status appenders20951/4178. Nested rule objects never leave this view.
+  for(const name of ["chameleon","chimera","staked","explosive","brutalKnight","bribed","witchTrial","disarmed","severed","inertia","frenzy","crownBearer","iceSheet","lastResistance","sacrificeProtection","necromancy","regencyHeir","bloodCurse","poisonedPawn","evasion","ghost","metalized","loyalist","parry","emptyLunchbox","nullification","recurrence","wanted","grapplerBound","callingCard","basicTraining"])flag(name,item[name]);
+  flag("protected",pieceProtectionActive(item));flag("holdout",item.type==="pawn"&&item.holdoutPromotion);
+  flag("cooling",shouldShowMannerCaptureLockVisual(item));flag("exhaustionLocked",isExhaustionMoveBlocked(state.exhaustion,item));
+  flag("diceLocked",isDiceLocked(item,state));flag("quantum",item.quantum);flag("quantumShadow",item.isQuantumShadow);
+  flag("poisonStunned",isPoisonStunned(item));flag("twinsLinked",item.twinBondId);
+  flag("regencyRoyal",item.regencyHeir&&isRegencyRoyalHeir(item,state));
+  flag("stealthed",pieceHiddenFromAt(item,row,col,state.board)&&(isFullRecordReveal()||item.color===viewer));
+  flag("magicGirlAwakened",item.type==="magicGirl"&&(typeof item.simpleEditorMagicGirlAwakened==="boolean"?item.simpleEditorMagicGirlAwakened:state.magicGirlSurge?.[item.color]));
+  const saturationActive=Boolean(state.saturationRule||item.potionSaturation), saturation=saturationActive?saturationCaptureCount(item,SATURATION_CAPTURE_LIMIT):0;
+  flag("saturationLocked",saturation>=SATURATION_CAPTURE_LIMIT);if(saturation>0)count("saturationCaptures",saturation);
+  const restriction=item.captureRestriction||(item.type==="trickster"||shouldShowHallucinatedQueen(item))&&(isGuardLikePiece(item,state)?"immune":pieceHasAbility(item,"jester")?"royal-only":null);
+  if(restriction)status.captureRestriction=restriction;
+  flag("sirenWarning",Number.isInteger(row)&&Number.isInteger(col)&&sirenConversionWarningActive(state.sirenExposure,item.id));
+  const promotion=fieldPromotionCaptureBadgeValue(item);if(promotion){const ready=Math.max(0,Number(item.totalCaptures)||0)>=2;flag("fieldPromotionReady",ready);count("fieldPromotionCapturesRemaining",ready?0:1);}
+  if(item.type==="bishop"&&typeof state.bishopInfiltration?.[item.color]==="number"&&state.bishopInfiltration[item.color]>0)count("ghillieRemaining",state.bishopInfiltration[item.color]);
+  if(pieceHasAbility(item,"reaper"))count("reaperCaptures",Math.max(0,Math.min(REAPER_CAPTURE_TARGET,Math.floor(Number(item.reaperCaptures)||0))));
+  const resurrection=undeadResurrectionBadgeValueFor(item,{row,col,board:state.board});if(resurrection)count("undeadResurrectionRemaining",resurrection);
+  if(item.type==="pawn"&&item.vipInvitation)count("vipRemaining",vipInvitationRemaining(item));
+  if(item.type==="babyBear"&&(item.babyBearGrowAtTurn||item.babyBearGrowAtMove))count("babyBearGrowthRemaining",babyBearGrowthRemaining(item));
+  else if(septemberCounterLimit(item.type)>0&&(Number(item.bearRetaliationsRemaining)||0)>0)count("retaliationsRemaining",Math.max(1,Math.min(septemberCounterLimit(item.type),Number(item.bearRetaliationsRemaining)||0)));
+  if(item.crownBearer){const crown=normalizeCrownRule(state.crownRule,state.board),ids=Array.isArray(item.crownTokenIds)?item.crownTokenIds:[];count("crownHeldMoves",Math.max(0,...crownRuleEntries(crown).filter(entry=>entry.holderId&&entry.holderId===item.id||ids.includes(entry.id)).map(entry=>Number(entry.heldMoves?.[item.color])||0)));}
+  if(item.metalized&&(Number(item.metalCooldown)||0)>0)count("metalCooldown",Math.max(0,Number(item.metalCooldown)||0));
+  if(item.emptyLunchbox)count("emptyLunchboxRemaining",Math.max(0,Math.min(9,(Number(item.emptyLunchbox.deadlineTurn)||0)-(Number(state.turnsTaken?.[item.color])||0))));
+  if(isPoisonStunned(item))count("poisonStunRemaining",Math.max(1,Math.min(9,Number(item.poisonStunTurns)||1)));
+  const frozen=Math.max(0,Math.min(9,Number(item.frozenByCard?.remaining)||0));if(frozen>0)count("frozenRemaining",frozen);
+  // Holdout/stake text is capped, but their accessible labels expose the
+  // complete remaining count; keep that public information (75543/75550).
+  for(const [name,value,max]of [["holdoutRemaining",holdoutRemaining(item),Number.MAX_SAFE_INTEGER],["stakedRemaining",stakedRemaining(item),Number.MAX_SAFE_INTEGER],["severanceRemaining",severanceRemaining(item),9],["iceSheetKingRemaining",iceSheetKingBadgeValue(item),9],["lastResistanceRemaining",lastResistanceRemaining(item),9]])if(value)count(name,Math.min(max,Math.max(1,value)));
+  if(item.witchTrial)count("witchTrialRemaining",Math.max(1,Math.min(9,Number(item.witchTrial.remaining)||1)));
+  const protection=Math.max(0,Number(item.sacrificeProtection?.remaining)||0);if(protection)count("sacrificeProtectionRemaining",Math.max(1,Math.min(9,protection)));
+  for(const [name,value]of [["pawnReverseRemaining",pawnReverseBadgeValueFor(item)],["royalCommandRemaining",royalCommandBadgeValueFor(item)],["ultimatumRemaining",ultimatumBadgeValueFor(item)],["prophecyRemaining",prophecyBadgeValueFor(item)],["armisticeRemaining",armisticeBadgeValueFor(item)],["galeRemaining",galeBadgeValueFor(item)]])if(value)count(name,value);
+  const guardian=feudalGuardianType(item);if(guardian)status.feudalGuardianType=guardian;
+  const trickster=__playerTricksterMovement(item,viewer);if(trickster)status.tricksterMovement=trickster;
+  const horse=horseRidingBadgeType(item);if(horse)status.horseRiding=horse;
+  const imperial=imperialStudyMoveTypes(item);if(imperial.length)status.imperialStudyTypes=imperial;
+  if(item.type==="merchant")count("gold",item.gold??0);if(item.bribedRemaining)count("bribedRemaining",item.bribedRemaining);
+  const necromancy=Math.max(0,Math.min(9,Number(item.necromancyRemaining||item.necromancy?.remaining)||0));if(necromancy)count("necromancyRemaining",necromancy);
+  if((item.type!=="trickster"||trickster)&&(pieceHasAbility(item,"medium")||pieceHasAbility(item,"parrot"))){const medium=pieceHasAbility(item,"medium"),memory=medium?state.mediumMovement:state.parrotMovement?.[item.color],type=memory?.type?.replace(/-([a-z])/g,(_,c)=>c.toUpperCase())||"";if(type)status[medium?"mediumMovement":"parrotMovement"]=type==="windmill"?memory.windmillMode==="rook"?"windmillRook":"windmillBishop":type;}
+  flag("locustReady",state.locustSwarm?.[item.color]&&locustReady(item,row,col,state));
+  if(isFullRecordReveal()){flag("spy",COLORS.includes(item.spyOwner));flag("trojanHorse",item.trojanHorse);}
+  // The optional info preference does not change available knowledge: the
+  // viewer can enable it. Hallucination really suppresses that help panel.
+  const potions=!isPieceInfoSuppressedByHallucination()?activePotionEffects(item):[];if(potions.length)status.potionEffects=potions;
+  return status;
+}
+function __publicPieceView(item, row, col, viewer) {
+  if(!item||!pieceVisibleToColorAt(item,row,col,viewer,state.board))return null;
+  return __publicPieceContent(item,row,col,viewer);
+}
+function __publicPieceContent(item,row,col,viewer) {
+  item={...item,type:visualPieceType(item.type)};
+  const type=visiblePieceType(item),own=item.color===viewer,view={type,color:item.color,status:__publicPieceStatus(item,row,col,viewer)};
+  if(own||isFullRecordReveal())view.moved=Boolean(item.moved);
+  for(const name of ["shielded","frozen","submerged"])if(Object.hasOwn(item,name))view[name]=Boolean(item[name]);
+  if(isHpPiece(item)){const max=Math.max(1,Number(item.maxHp)||Number(item.hp)||1);view.maxHp=max;view.hp=Math.max(0,Math.min(max,Number.isFinite(Number(item.hp))?Number(item.hp):max));}
+  if(pieceHasAbility(item,"wizard")&&Number.isFinite(Number(item.mana))&&(item.type!=="trickster"||view.status.tricksterMovement)){view.mana=Number(item.mana);if(own)view.maxMana=Number(item.maxMana??5);}
+  if(item.type==="shotgunKing"){view.facing=item.facing||defaultFacing(item.color);if(own){view.ammo=Number(item.ammo??0);view.maxAmmo=Number(item.maxAmmo??3);}}
+  if(isLargePiece(item))for(const name of ["anchorRow","anchorCol"])if(Number.isInteger(item[name]))view[name]=item[name];
+  if(item.type==="log"&&item.logDir)view.logDir={dr:item.logDir.dr,dc:item.logDir.dc};
+  if(item.type==="windmill")view.windmillMode=item.windmillMode==="rook"?"rook":"bishop";
+  return view;
+}
+function __publicBoardSurface(viewer) {
+  // Mirror renderBoard72823 and renderChainBondOverlay73220. A terrain or
+  // forecast marker may be visible on a fogged/occupied hidden square even
+  // when its occupant is not; preserve the renderer's individual gates.
+  const board=state.board,marks=[],relationships=[],overlays=[],fog=madAiFogVisibleSquares(board,false),key=squareKey;
+  const add=(kind,row,col,extra={})=>marks.push({kind,square:{row,col},...extra});
+  const black=new Set(activeBlackHoleCells(false).map(key)),bombs=new Set(activeRuleBombs().map(key)),portals=new Set((activePortalRule(board)?.cells||[]).map(key)),platforms=new Set(activePlatformCells(state.platformRule).map(key));
+  const scarecrows=new Map((state.pendingScarecrows||[]).flatMap(entry=>{if(!entry.pieceId)return [[key(entry),entry]];const found=findPieceOnBoardById(board,entry.pieceId);return found?[[key(found),{...entry,row:found.row,col:found.col}]]:[];}));
+  const lobsters=new Map((state.pendingLobsters||[]).map(entry=>[key(entry),entry])),pendingPortals=new Set((state.pendingPortals||[]).flatMap(entry=>(entry.cells||[]).map(key)));
+  const otherworld=new Map((state.pendingOtherworld||[]).filter(entry=>Number.isInteger(Number(entry?.row))&&Number.isInteger(Number(entry?.col))).map(entry=>[key({row:Number(entry.row),col:Number(entry.col)}),entry]));
+  const victory=new Map((state.gomokuVictoryCells||[]).map((cell,index)=>[key(cell),index])),trail=new Set(state.accelerationTrail?.hiddenFrom!==viewer?(state.accelerationTrail?.cells||[]).map(key):[]);
+  for(let row=0;row<8;row++)for(let col=0;col<8;col++){
+    const square={row,col},id=key(square),occupant=board[row][col],fogged=Boolean(fog&&!fog.has(id)),hidden=Boolean(occupant&&(fogged||isHiddenFromCurrentTurn(occupant,row,col,board)));
+    for(const [kind,set]of [["blackHole",black],["ruleBomb",bombs],["portal",portals],["platform",platforms],["accelerationTrail",trail]])if(set.has(id))add(kind,row,col);
+    if(isPalaceSquare(row,col))add("palace",row,col);if(isActiveCrownGround(row,col,board))add("crownGround",row,col);
+    const hazard=hazardClass(row,col);if(hazard)add(hazard.split(" ").at(-1)==="lightning"?"lightning":"meteor",row,col);
+    if(state.conveyorRule){const direction=conveyorDirectionAt(row,col,board);if(direction)add("conveyor",row,col,{direction});}
+    if(fogged)add("fogHidden",row,col);if(occupant&&isEncouraged(occupant,row,col))add("encouraged",row,col);
+    if(occupant?.type==="pawn"&&state.resolveReady?.[occupant.color])add("resolveReady",row,col);
+    if(occupant&&!hidden&&state.winterKingdom?.previewIds?.includes(occupant.id))add("winterForecast",row,col);
+    if(state.platformRule?.previewCell?.row===row&&state.platformRule.previewCell.col===col)add("platformForecast",row,col);
+    if(victory.has(id))add("gomokuVictory",row,col,{index:victory.get(id)});
+    for(const owner of COLORS){const flag=state.captureTheFlag?.flags?.[owner];if(flag?.row===row&&flag.col===col)add("captureFlag",row,col,{owner});}
+    const scarecrow=scarecrows.get(id),lobster=lobsters.get(id),returning=otherworld.get(id);
+    if(scarecrow&&(!scarecrow.pieceId||occupant?.scarecrowReserved))add("scarecrowReserved",row,col);
+    if(scarecrow&&!fogged&&(scarecrow.pieceId?occupant&&!hidden:!occupant||hidden))add("scarecrowPreview",row,col,{owner:scarecrow.color==="black"?"black":"white",remaining:pendingScarecrowTurns(scarecrow)});
+    if(lobster){add("lobsterReserved",row,col);if(!occupant)add("lobsterPreview",row,col,{owner:lobster.color==="black"?"black":"white",remaining:pendingLobsterTurns(lobster,state.moveCount)});}
+    if(pendingPortals.has(id)){add("portalReserved",row,col);if(!occupant)add("portalPreview",row,col);}
+    if(returning&&(!fogged||returning.color===viewer))add("otherworldOrigin",row,col,{remaining:Math.max(0,Math.ceil(undeadResurrectionRemainingHalfMoves(returning,state.moveCount)/2))});
+    if(!fogged){for(const owner of COLORS){const d=expansionNamedSquare("d",owner,8,8),e=expansionNamedSquare("e",owner,8,8);if(state.d4?.[owner]&&d?.row===row&&d.col===col)add("d4Forbidden",row,col,{owner});if(state.e4?.[owner]&&e?.row===row&&e.col===col)add("e4Destination",row,col,{owner});}if((state.tabooPending||[]).some(entry=>entry.square?.row===row&&entry.square.col===col))add("taboo",row,col);for(const rotation of revolvingDoorMarkersAt(board,row,col,false))add("revolvingDoor",row,col,{rotation});}
+  }
+  const quantumSeen=new Set();
+  forEachBoardSquare(board,(item,row,col)=>{
+    if(!item)return;
+    const visible=!isHiddenFromCurrentTurn(item,row,col,board)&&(!fog||pieceVisibleToColorAt(item,row,col,viewer,board,fog));
+    for(const ability of ["knightmaster","clockwork","paladin","idol","siren","reaper"]){
+      if(!pieceHasAbility(item,ability)||ability!=="siren"&&!visible||ability==="paladin"&&!usesSeptember18Balance(state)&&!lightSquare(row,col))continue;
+      for(const cell of knightmasterAuraCells(row,col))add(ability+"Aura",cell.row,cell.col);
+    }
+    if(item.type==="darkWizard"&&item.darkMagicCircle&&visible)for(const cell of darkMagicCircleCells(item,row,col,board))add("darkMagicDomain",cell.row,cell.col);
+    if(!item.id||!item.quantum||quantumSeen.has(item.id)||isHiddenFromCurrentTurn(item))return;
+    quantumSeen.add(item.id);const cells=quantumCellsForItemAt(item,item.quantum.row,item.quantum.col);
+    if(!cells.length||fog&&!cells.some(cell=>fog.has(key(cell))))return;
+    overlays.push({kind:"quantum",cells:cells.map(cell=>({row:cell.row,col:cell.col})),piece:__publicPieceContent(item,undefined,undefined,viewer)});
+  });
+  for(const bond of normalizeChainBonds(state.chainBonds||[])){
+    const first=findPieceOnBoardById(board,bond.aId),second=findPieceOnBoardById(board,bond.bId);
+    if(!first||!second||fog&&(!fog.has(key(first))||!fog.has(key(second)))||isHiddenFromCurrentTurn(first.item)||isHiddenFromCurrentTurn(second.item))continue;
+    if(first.row===second.row&&first.col===second.col)continue;
+    relationships.push({kind:"chain",owner:bond.by==="black"?"black":"white",from:{row:first.row,col:first.col},to:{row:second.row,col:second.col},length:chainBondLengthProfile(first,second).kind});
+  }
+  return {boardMarks:marks,relationships,overlays};
+}
+function __publicCardRevelation(card) {
+  const revealed={};
+  if(randomRouletteResultHelpItem(card))revealed.rouletteType=card.randomRouletteResultType;
+  if(suspiciousPotionResultHelpItem(card))revealed.potionEffect=card.suspiciousPotionResultId;
+  const box=revealedBoxCard(card);if(box)revealed.boxCardId=box.id;
+  return revealed;
+}
 `;
 const decisionActor = state => state.mode === "draft" && state.draft?.color || state.pendingPromotion?.color || state.activeTrolley?.color || state.turn;
+function validateBoardAliases(state) {
+  const boards = [["state.board", state.board]];
+  if (Array.isArray(state.boardHistory)) state.boardHistory.forEach((frame, index) => {
+    if (frame && Object.hasOwn(frame, "board")) boards.push([`state.boardHistory[${index}].board`, frame.board]);
+  });
+  for (const name of ["replayBaseFrame", "replayTailFrame"]) {
+    if (state[name] && Object.hasOwn(state[name], "board")) boards.push([`state.${name}.board`, state[name].board]);
+  }
+  for (const [label, board] of boards) {
+    if (!Array.isArray(board) || board.length !== 8 || board.some(row => !Array.isArray(row) || row.length !== 8)) throw new TypeError(`Invalid snapshot board shape at ${label}.`);
+    const groups = new Map();
+    for (let row = 0; row < 8; row++) for (let col = 0; col < 8; col++) {
+      const piece = board[row][col];
+      if (piece === null) continue;
+      if (!piece || typeof piece !== "object" || Array.isArray(piece)) throw new TypeError(`Invalid snapshot piece at ${label}[${row}][${col}].`);
+      const large = ["colossus", "bigRook", "bigBishop"].includes(piece.type);
+      if (large && (typeof piece.id !== "string" || !piece.id)) throw new TypeError(`Large snapshot piece needs a stable ID at ${label}.`);
+      if (Object.hasOwn(piece, "id") && typeof piece.id !== "string") throw new TypeError(`Invalid snapshot piece ID at ${label}.`);
+      if (!piece.id) continue;
+      const group = groups.get(piece.id) || { piece, cells: [], signature: contract.canonical(piece), large };
+      if (group.signature !== contract.canonical(piece)) throw new TypeError(`Conflicting snapshot piece ID ${piece.id} at ${label}.`);
+      group.cells.push({ row, col }); groups.set(piece.id, group);
+    }
+    for (const [id, { cells, large }] of groups) {
+      if (!large) {
+        if (cells.length !== 1) throw new TypeError(`Duplicate non-large snapshot piece ID ${id} at ${label}.`);
+        continue;
+      }
+      // Source relinkBoardPieceReferences62055 only groups by ID. Exile
+      // 103528 moves one bigRook/bigBishop cell to origin while the three
+      // remaining cells retain that object and its old anchor. Both actual
+      // source relink and normalizeDeserializedState preserve this reachable
+      // disconnected shape. Geometry belongs to creation/action legality;
+      // snapshot restoration must neither reject nor silently repair it.
+    }
+  }
+}
 function publicStateValue(value, field) {
   function inspect(current) {
     if (!current || typeof current !== "object") return;
     for (const [key, child] of Object.entries(current)) {
-      if (/^(?:id|instanceId|hiddenFrom|seed|rng|rngState|positionId|positionKey|pawnId|kingId)$/.test(key) || /pieceId$/i.test(key)) throw new Error(`Nested visibility review required for ${field}.${key}.`);
+      if (/^(?:id|instanceId|hiddenFrom|seed|rng|rngState|positionId|positionKey|pawnId|kingId)$/i.test(key) || /(?:piece|pawn|king|preview|frozen)Ids?$/i.test(key)) throw new Error(`Nested visibility review required for ${field}.${key}.`);
       inspect(child);
     }
   }
@@ -92,9 +272,22 @@ class OfflineOracle {
   state() { return JSON.parse(this.evaluate("__encode(state)")); }
   restore(position) {
     contract.validatePosition(position);
-    this.random = contract.jsonCopy(position.rng);
+    // Validate before changing this VM or its RNG; the source ID-only helper
+    // would otherwise silently merge malformed conflicting snapshot objects.
+    validateBoardAliases(position.state);
+    const random = contract.jsonCopy(position.rng);
     this.main.context.__position = position.state;
-    this.evaluate("__microtasks.length=0;scheduledGameOverReplayState=null;state=__decode(__position);selectedGameStyle=state.gameStyle||'normal';localPlayMode='local';playMode='local';");
+    try {
+      // Reviving collections and reconnecting board references can fail. Keep
+      // the prepared state separate until both operations succeed, including
+      // the existing RNG and callbacks owned by the currently live position.
+      this.main.context.__restoredState = this.evaluate("(()=>{const candidate=__decode(__position);__relinkSnapshotBoards(candidate);return candidate;})()");
+      this.evaluate("state=__restoredState;__microtasks.length=0;scheduledGameOverReplayState=null;selectedGameStyle=state.gameStyle||'normal';localPlayMode='local';playMode='local';");
+      this.random = random;
+    } finally {
+      delete this.main.context.__position;
+      delete this.main.context.__restoredState;
+    }
   }
   snapshot(history = []) {
     this.evaluate("__settleMicrotasks()");
@@ -131,24 +324,31 @@ class OfflineOracle {
     if (unknown.length) throw new Error(`Unclassified site state fields require a visibility review: ${unknown.join(", ")}`);
     this.main.context.__viewer = viewer;
     this.evaluate("localViewColor=()=>__viewer; boardViewColor=()=>__viewer;");
-    const projected = JSON.parse(this.evaluate("JSON.stringify(state.board.map((row,r)=>row.map((cell,c)=>cell&&pieceVisibleToColorAt(cell,r,c,__viewer,state.board)?{...cell,type:visiblePieceType(cell)}:null)))"));
-    const board = projected.map(row => row.map(cell => cell && Object.fromEntries(Object.entries(cell).filter(([key]) => policy.piecePublicFields.includes(key)))));
-    const cardView = (card, slot) => ({ ...Object.fromEntries(Object.entries(card).filter(([key]) => policy.cardPublicFields.includes(key))), ...(slot === undefined ? {} : { slot }) });
+    const board = JSON.parse(this.evaluate("JSON.stringify(state.board.map((row,r)=>row.map((cell,c)=>__publicPieceView(cell,r,c,__viewer))))"));
+    const cardView = (card, slot) => {
+      this.main.context.__card = card;
+      const revealed = JSON.parse(this.evaluate("JSON.stringify(__publicCardRevelation(__card))"));
+      return { ...Object.fromEntries(Object.entries(card).filter(([key]) => policy.cardPublicFields.includes(key) && key !== "revealed")), ...(slot === undefined ? {} : { slot }), ...(Object.keys(revealed).length ? { revealed } : {}) };
+    };
     const opponent = viewer === "white" ? "black" : "white";
     const ownCards = (state.deckSlots?.[viewer] || []).map((card, slot) => card && cardView(card, slot)).filter(Boolean);
     const other = (state.deckSlots?.[opponent] || []).filter(Boolean);
-    const publicState = Object.fromEntries(policy.statePublicFields.filter(key => Object.hasOwn(state, key)).map(key => [key, publicStateValue(state[key], key)]));
+    const publicState = Object.fromEntries(policy.statePublicFields.filter(key => Object.hasOwn(state, key)).map(key => [key, publicStateValue(["winterKingdom","captureTheFlag"].includes(key)?{enabled:key==="winterKingdom"?Boolean(state[key]?.enabled):Boolean(state[key])}:state[key], key)]));
     publicState.phase = this.evaluate("getPhase()");
     publicState.revealedOpponentCards = (state.deckSlots?.[opponent] || []).map((card, slot) => card && cardView(card, slot)).filter(Boolean);
     publicState.ownStarTotal = this.evaluate(`deckStarTotal(${JSON.stringify(viewer)})`);
     publicState.opponentStarTotal = this.evaluate(`deckStarTotal(${JSON.stringify(opponent)})`);
     publicState.ruleCardIds = [state.appliedRuleCard?.id, ...(state.additionalRuleCards || []).map(card => card.id)].filter(Boolean);
+    publicState.pendingRuleCardIds = JSON.parse(this.evaluate("JSON.stringify((state.pendingRuleTickets||[]).map(entry=>entry?.ruleId).filter(id=>CARD_BY_ID.has(id)))"));
     publicState.rulesVersion = position.rulesVersion;
     publicState.catalogVersion = position.catalogVersion;
+    publicState.projectionVersion = policy.projectionVersion;
+    publicState.observationPolicyHash = contract.digest(policy);
+    Object.assign(publicState, JSON.parse(this.evaluate("JSON.stringify(__publicBoardSurface(__viewer))")));
     publicState.captures = Object.fromEntries(Object.entries(state.captures || {}).map(([color, cells]) => [color, cells.slice(-12).map(cell => typeof cell === "string" ? { type: cell } : Object.fromEntries(Object.entries(cell).filter(([key]) => ["type", "color", "logDir", "windmillMode"].includes(key))))]));
     publicState.clock = state.clock && Object.fromEntries(Object.entries(state.clock).filter(([key]) => ["enabled", "initialMs", "incrementMs", "whiteMs", "blackMs", "runningColor", "timeoutWinner", "timeoutLoser"].includes(key)));
     publicState.lastMove = state.lastMove && state.lastMove.hiddenFrom !== viewer ? Object.fromEntries(Object.entries(state.lastMove).filter(([key]) => ["from", "to", "color", "kind"].includes(key)).map(([key,value])=>[key,["from","to"].includes(key)?{row:value.row,col:value.col}:value])) : null;
-    publicState.selectionPhase = state.pendingPromotion ? { kind: "promotion", color: state.pendingPromotion.color, row: state.pendingPromotion.row ?? null, col: state.pendingPromotion.col ?? null, choices: viewer === state.pendingPromotion.color ? state.pendingPromotion.choices || [] : [] } : state.activeTrolley ? { kind: "trolley", color: state.activeTrolley.color, windowId: state.activeTrolley.id, choices: JSON.parse(this.evaluate("JSON.stringify(state.activeTrolley.choices.map(choice=>(choice.pieces||[]).map(cell=>({type:cell.type||cell.piece?.type||null,color:cell.color||cell.piece?.color||null}))))")) } : null;
+    publicState.selectionPhase = state.pendingPromotion ? { kind: "promotion", color: state.pendingPromotion.color, row: state.pendingPromotion.row ?? null, col: state.pendingPromotion.col ?? null, choices: viewer === state.pendingPromotion.color ? state.pendingPromotion.choices || [] : [] } : state.activeTrolley ? { kind: "trolley", color: state.activeTrolley.color, choices: JSON.parse(this.evaluate("JSON.stringify(state.activeTrolley.choices.map(choice=>(choice.pieces||[]).map(cell=>({type:cell.type||cell.piece?.type||null,color:cell.color||cell.piece?.color||null}))))")) } : null;
     publicState.legalHints = this.publicHints(position, viewer);
     publicState.tabooPending = (state.tabooPending || []).map(entry => ({ color: entry.color, square: contract.jsonCopy(entry.square) }));
     publicState.ownPlans = (state.pendingFreeMoves || []).filter(entry => entry.color === viewer).map(entry => ({ kind: "premove", triggerColor: entry.triggerColor, triggerTurn: entry.triggerTurn, moves: entry.moves.map(move => ({ from: contract.jsonCopy(move.from), to: contract.jsonCopy(move.to) })) }));

@@ -1,6 +1,7 @@
 """Public replay and one synthetic optimizer step with deterministic resume."""
 from copy import deepcopy
 from dataclasses import replace
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -20,6 +21,7 @@ from accelerate_chess.search import PublicTracker, SearchResult
 from accelerate_chess.training import (DatasetCursor, ReplayDataset, TrainingLimits, _rng_snapshot,
     _tree_hash, create_optimizer, load_training_checkpoint, optimize, save_training_checkpoint)
 from test_search import TestAction, TestPosition, spec
+from test_model_stack import observation_policy
 
 torch.set_num_threads(1)
 
@@ -76,6 +78,11 @@ def test_public_replay_terminal_labels_and_streamed_dataset(session_directory):
     content["outcome"]["winner"] = "draw"
     with pytest.raises(ValueError, match="hash"):
         ReplayEpisode(content, spec())
+    incompatible_policy = completed.snapshot()
+    incompatible_policy["observation_policy"]["projectionVersion"] = "other-projection"
+    incompatible_policy["replay_hash"] = hashlib.sha256(canonical_json({key: value for key, value in incompatible_policy.items() if key != "replay_hash"}).encode()).hexdigest()
+    with pytest.raises(ValueError, match="policy"):
+        ReplayEpisode(incompatible_policy, spec())
     with pytest.raises(ValueError, match="no terminal"):
         ReplayDataset([session_directory / "unfinished.json"], spec())
     pending = synthetic_episode(terminal=False)
@@ -156,7 +163,7 @@ def test_cli_defaults_are_explicit_intent_summary_and_full_resnet():
     arguments = cli.parser().parse_args(["init"])
     assert (arguments.channels, arguments.blocks, arguments.rank) == (128, 8, 8)
     catalog_path = Path(__file__).parents[2] / "bridge/catalog/site-20260927.json"
-    contract = cli.default_spec(str(catalog_path))
+    contract = cli.default_spec(str(catalog_path), observation_policy=observation_policy())
     assert contract.history_encoding == "public-history-summary-v1" and contract.action_encoding == "public-decision-intent-v1"
     assert cli.parser().parse_args(["evaluate", "--replay", "episode.json"]).backend == "ort"
     assert cli.parser().parse_args(["selfplay"]).max_plies == 2

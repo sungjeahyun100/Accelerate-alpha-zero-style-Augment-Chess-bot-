@@ -6,7 +6,7 @@ explicit import failure when rules or inference are requested.
 """
 
 __version__ = "0.1.0"
-__all__ = ["Position", "Action", "ActionStream", "StepResult", "NativeError", "StaleActionError", "UnsupportedFeatureError", "ConditioningMismatchError", "site_catalog", "InferenceSession", "ProductionEvaluator"]
+__all__ = ["Position", "Action", "ActionStream", "StepResult", "NativeError", "StaleActionError", "UnsupportedFeatureError", "ConditioningMismatchError", "site_catalog", "site_observation_policy", "InferenceSession", "ProductionEvaluator"]
 
 
 def __getattr__(name: str):

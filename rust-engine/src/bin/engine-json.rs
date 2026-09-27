@@ -48,18 +48,52 @@ fn execute(request: &Value) -> Result<Value, String> {
         );
     }
     let state = request.get("state").ok_or("state missing")?;
-    let position = Position::from_json(&state.to_string()).map_err(|e| e.to_string())?;
+    let position = Position::from_snapshot_value(state.clone()).map_err(|e| e.to_string())?;
+    let position = if let Some(rng) = request.get("rng") {
+        position
+            .with_metadata(
+                serde_json::from_value(rng.clone()).map_err(|e| e.to_string())?,
+                request
+                    .get("history")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default(),
+            )
+            .map_err(|e| e.to_string())?
+    } else {
+        position
+    };
     match method {
+        "draft_availability" => {
+            let color: Color =
+                serde_json::from_value(request.get("color").cloned().ok_or("color missing")?)
+                    .map_err(|e| e.to_string())?;
+            Ok(
+                json!({"availability":position.draft_availability(color).map_err(|e|e.to_string())?}),
+            )
+        }
         "legal_actions" => {
             Ok(json!({"legalActions":position.legal_actions().map_err(|e|e.to_string())?}))
         }
+        "bind_payload" => Ok(json!({"action":position.bind_payload(
+            request.get("action").cloned().ok_or("action missing")?
+        ).map_err(|e|e.to_string())?})),
+        "public_intent" => {
+            let action: Action =
+                serde_json::from_value(request.get("action").cloned().ok_or("action missing")?)
+                    .map_err(|e| e.to_string())?;
+            Ok(json!({"intent":position.public_intent(&action).map_err(|e|e.to_string())?}))
+        }
+        "bind_public_intent" => Ok(json!({"action":position.bind_public_intent(
+            request.get("intent").cloned().ok_or("intent missing")?
+        ).map_err(|e|e.to_string())?})),
         "apply" => {
             let action: Action =
                 serde_json::from_value(request.get("action").cloned().ok_or("action missing")?)
                     .map_err(|e| e.to_string())?;
             let step = position.apply(&action).map_err(|e| e.to_string())?;
             Ok(
-                json!({"state":step.position.state(),"actor":step.actor,"turnChanged":step.turn_changed,"captures":step.captures,"result":step.result}),
+                json!({"state":step.position.state(),"sourceState":step.position.export_state().map_err(|e|e.to_string())?,"rng":step.position.state().rng,"history":step.position.state().history,"actor":step.actor,"turnChanged":step.turn_changed,"captures":step.captures,"result":step.result}),
             )
         }
         "observe" => {

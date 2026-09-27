@@ -41,6 +41,8 @@ D-001~D-003은 기존 결정입니다. D-004~D-006과 D-003 보완은 2026-09-27
 - **대안과 제외 이유**: 단순 Dense/CNN도 검토했으나, 입력 구조가 아직 확정 전이라 Phase 6(state/action encoding)에서 실제 성능으로 재확인 필요.
 - **영향**: `python/`의 policy/value network 구현은 이 구조를 기준으로 시작한다. 세부 레이어 수·채널 수는 Phase 8에서 결정한다.
   LoRA·FiLM 역할과 Hypernetwork 확장 경계는 D-005로 보완한다.
+- **구현 checkpoint**: 현재 기본값은 residual block 8개·channel 128개다.
+  코드와 ONNX 수치 검증 범위는 [IMPLEMENTATION](IMPLEMENTATION.md)에 기록한다.
 
 ## D-003: 엔진-AI 통신 프로토콜의 기본 틀
 
@@ -70,15 +72,16 @@ D-001~D-003은 기존 결정입니다. D-004~D-006과 D-003 보완은 2026-09-27
 - **이유**: 언어 연동과 모델 배포의 책임을 분리하고 탐색의 반복 문자열 직렬화를 피한다.
 - **대안과 제외 이유**: JSON 호출을 유일한 hot path로 유지하는 대신 검증 형식과 직접
   호출을 구분한다. 규칙 엔진에 ML runtime을 넣으면 의존성이 섞이므로 제외한다.
-- **영향**: bridge 아래 독립 바인딩 crate를 둔다. Phase 5에서 오류·수명·배열
-  소유권·GIL·직접 호출/JSON 동등성을 검사한다. backend 선택·API 상세·batch·zero-copy는
-  아직 확정하지 않는다. 기존 bridge-draft-0은 역사적 제안으로 보존하며 v1 실행 계약과
+- **영향**: bridge/native의 독립 바인딩 crate와 bridge/runtime의 독립 추론 adapter를 둔다.
+  오류·수명·배열 소유권·GIL·직접 호출/JSON 동등성을 설치 wheel에서 검사한다.
+  API와 batch 한도는 runtime-v1 및 모델 metadata에 명시한다. zero-copy와 성능 향상은
+  실측 전 보장하지 않는다. 기존 bridge-draft-0은 역사적 제안으로 보존하며 v1 실행 계약과
   혼용하지 않는다. backend의 실제 export 호환성은 실행 결과로 확인한다.
 
 ## D-005: ResNet의 FiLM 조건화와 LoRA 적응·Hypernetwork 확장
 
 - **날짜**: 2026-09-27
-- **상태**: 설계 채택(이 변경의 develop 병합 시 적용), 구현 전
+- **상태**: 설계 채택, 구현 진행(검증 범위는 IMPLEMENTATION 참조)
 - **결정**: FiLM은 카드·RULE·게임 상태로 ResNet 특징을 조건화한다. 조건을 ONNX 입력으로
   받고 FiLM은 그래프 내부에 유지한다. LoRA는 학습된 공통 모델의 모드·규칙 변화 적응용이다.
   학습 중 별도 어댑터로 저장하고, 성능 검증 단계에서 선택한 정적 LoRA를 기본 모델 복사본에
@@ -88,8 +91,10 @@ D-001~D-003은 기존 결정입니다. D-004~D-006과 D-003 보완은 2026-09-27
   상수로 고정하면 원본·조건 변화의 의미를 잃으므로 제외한다.
 - **영향**: 어댑터 생성·적용·병합/export를 분리해 Hypernetwork 확장을 준비한다.
   기본 모델 호환성·조건 고정 범위·병합 가능 여부를 계약에 둔다. 동적 어댑터를 하나의
-  고정 가중치로 병합하지 않는다. Hypernetwork 구현·주기는 미정이며 층·채널·rank·FiLM
-  위치·조건 인코딩은 Phase 6/8에서 결정한다. 두 기법의 채택은 성능 개선의 증명이 아니다.
+  고정 가중치로 병합하지 않는다. Hypernetwork 구현·주기는 후속 범위다. 현재 기본값은
+  8 block·128 channel, 각 block의 두 convolution에 rank 8·alpha 8·dropout 0,
+  두 번째 BN 뒤 FiLM이다. 조건 encoding은 D-007과 EncoderSpec에 명시한다.
+  두 기법의 채택과 export 수치 검증은 대전 성능 개선의 증명이 아니다.
 
 ## D-006: 저장소·에이전트 규약과 메타데이터 구조 검사
 
@@ -121,6 +126,11 @@ D-001~D-003은 기존 결정입니다. D-004~D-006과 D-003 보완은 2026-09-27
 - **이유**: 입력 의미와 조건 구조가 변하는 단계의 실험·수정을 단순하게 유지한다.
 - **대안과 영향**: Rust가 미리 encoding하는 방식은 성능 근거가 생길 때 재검토한다.
   [ENCODING-EVIDENCE](ENCODING-EVIDENCE.md)는 참고 증거이며 이번 구현의 실측을 대체하지 않는다.
+- **관측 v2 보완**: 동결 source 화면이 제공하는 기물 상태·보드 표시·관계를 정책 schema로
+  정의하고 encoder의 16개 직렬화 필드에 `observation_policy_hash`를 포함한다. ONNX와 replay는
+  정책 원문 및 JCS SHA-256을 보존하며 native runtime은 compiled 정책과 일치를 검사한다.
+  `public-utf8-v2`·`public-film-v2`는 이전 artifact를 자동으로 변환하지 않는다. 이는 규칙·catalog
+  동결 버전의 변경이 아니며 실제 관측 coverage와 배포 검증은 IMPLEMENTATION에서 확인한다.
 
 ## D-008: 최초 동결 사이트 본체를 규칙 정답으로 고정
 
