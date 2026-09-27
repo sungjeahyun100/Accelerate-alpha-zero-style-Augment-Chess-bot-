@@ -1,4 +1,9 @@
-# Bridge 프로토콜 (DRAFT bridge-draft-0)
+# Bridge 프로토콜
+
+현재 실행·저장 계약은 [runtime-v1.md](runtime-v1.md)와
+[runtime-v1.schema.json](../schemas/runtime-v1.schema.json)이다. 현재 구현 checkpoint와
+전체 NO-GO 범위는 [IMPLEMENTATION](../../docs/IMPLEMENTATION.md)에 기록한다.
+아래 bridge-draft-0 내용은 역사적 제안이며 실제 v1 호출과 혼용하지 않는다.
 
 > **JSON 초안(DRAFT)입니다.** D-003의 카드 정의 1회·위치별 상태 의미를 따르며 필드·메시지
 > 모양은 검토용 제안입니다. D-004는 PyO3 직접 호출/maturin 패키징과 JSON 기록·검증을
@@ -29,7 +34,7 @@ Python AI ──(요청 JSON)──> 엔진 ──(응답 JSON)──> Python AI
 - **실제 반복 호출은 PyO3 타입·배열**로 설계합니다(D-004, 해당 변경의 develop 병합 시 적용).
   maturin은 바인딩의 빌드·패키징 도구입니다. 위 그림은 JSON 기록·검증 경로이며 모든
   탐색 노드에서 문자열을 전달하는 실행 요구가 아닙니다. 스키마·예시 버전은 그대로입니다.
-- 인코딩(신경망 입력) 위치는 O-001이 미결정이므로 기본 응답에는 원문 상태만 있고, 선택 필드 `encoded`/`encode`를 확장 지점으로만 열어 두었습니다.
+- 이 초안의 encoding 확장 제안은 D-007의 Python-first 관측 encoding과 v1 계약으로 대체됐다.
 
 ## 근거로 삼은 자료
 

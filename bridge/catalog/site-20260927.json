@@ -1,0 +1,4589 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "yt63f_Lcq4xUPu4GbbdwAyv5IUTuC079nNxvF3IFrj4",
+  "rulesVersion": "augment-site-20260927-abfe01a035813875",
+  "source": {
+    "schemaVersion": 1,
+    "frozenAt": "2026-09-27T14:37:10.842Z",
+    "site": "https://augmentchess.org",
+    "files": [
+      {
+        "name": "index.html",
+        "url": "https://augmentchess.org/",
+        "sha256": "4b541aa23cd0f763b0835091cd044b8f3d5b4bd009f7c5bcfb4f7ce29b02fe0c",
+        "bytes": 50477
+      },
+      {
+        "name": "main-CqkYwJX4.js",
+        "url": "https://augmentchess.org/assets/main-CqkYwJX4.js",
+        "sha256": "abfe01a035813875772d8eeaf8e300a1df0348888ff48778d4a1789b76ae492f",
+        "bytes": 12887488
+      },
+      {
+        "name": "aiWorker.raw.js",
+        "url": "https://augmentchess.org/assets/aiWorker.js",
+        "sha256": "930746c09446dea014d346a06fe86ddc4c1decc9749e7ec40c035af9bd5c0c52",
+        "bytes": 1047059
+      }
+    ]
+  },
+  "cards": [
+    {
+      "id": "acceleration",
+      "effect": "acceleration",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "alekhine-machine-gun",
+      "effect": "alekhineMachineGun",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 5,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "amazon",
+      "effect": "amazon",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 9,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 2,
+        "maxSquares": 2,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 5
+    },
+    {
+      "id": "apprentice-knights",
+      "effect": "apprenticeKnights",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 3,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "armistice",
+      "effect": "armistice",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "assassin",
+      "effect": "assassin",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "baby-bear",
+      "effect": "babyBear",
+      "draftCategory": "END",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "backward-knight",
+      "effect": "backwardKnight",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "barricade",
+      "effect": "barricade",
+      "draftCategory": "END",
+      "ratingHalfStars": 5,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": true
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "basic-training",
+      "effect": "basicTraining",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "big-rook",
+      "effect": "bigRook",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 8,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "bina-mate",
+      "effect": "binaMate",
+      "draftCategory": "END",
+      "ratingHalfStars": 7,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "black-box",
+      "effect": "blackBox",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 5,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "black-hole",
+      "effect": "blackHole",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "blue-jeans",
+      "effect": "blueJeans",
+      "draftCategory": "END",
+      "ratingHalfStars": 10,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 4
+    },
+    {
+      "id": "breakthrough-order",
+      "effect": "breakthroughOrder",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "bribe",
+      "effect": "bribe",
+      "draftCategory": "END",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "calling-card",
+      "effect": "callingCard",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "camouflage-color",
+      "effect": "camouflageRule",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "canceling",
+      "effect": "canceling",
+      "draftCategory": "END",
+      "ratingHalfStars": 10,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 4
+    },
+    {
+      "id": "castling",
+      "effect": "freeCastling",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "chain",
+      "effect": "chain",
+      "draftCategory": "END",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 2,
+        "maxSquares": 2,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "chameleon-mutation",
+      "effect": "chameleonMutation",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 3,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 3,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "charge",
+      "effect": "charge",
+      "draftCategory": "END",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "checker",
+      "effect": "checker",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 5,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "chess-344200",
+      "effect": "chess344200",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "chess-960",
+      "effect": "chess960",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "chimera",
+      "effect": "chimera",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "cleanup-sacrifice",
+      "effect": "cleanupSacrifice",
+      "draftCategory": "END",
+      "ratingHalfStars": 3,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "clone",
+      "effect": "clonePassive",
+      "draftCategory": "END",
+      "ratingHalfStars": 10,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 4
+    },
+    {
+      "id": "collapse",
+      "effect": "collapse",
+      "draftCategory": "END",
+      "ratingHalfStars": 9,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 5
+    },
+    {
+      "id": "conscription",
+      "effect": "conscription",
+      "draftCategory": "END",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "constitutional-monarchy",
+      "effect": "constitutionalMonarchy",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 4,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "conversion",
+      "effect": "conversion",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 5,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "conveyor",
+      "effect": "conveyorRule",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "cool-guy",
+      "effect": "coolGuy",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "corner-kick",
+      "effect": "cornerKick",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "coronation",
+      "effect": "coronation",
+      "draftCategory": "END",
+      "ratingHalfStars": 7,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "crown",
+      "effect": "crownRule",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "death-squad",
+      "effect": "deathSquad",
+      "draftCategory": "END",
+      "ratingHalfStars": 5,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "democracy",
+      "effect": "democracy",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 8,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "desperado",
+      "effect": "desperado",
+      "draftCategory": "END",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "diagonal-chess",
+      "effect": "diagonalChess",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "dice",
+      "effect": "dice",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 4,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "disarm",
+      "effect": "disarm",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "dragon",
+      "effect": "dragon",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "dutch",
+      "effect": "dutch",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 8,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "eagle",
+      "effect": "eagle",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "early-promotion",
+      "effect": "earlyPromotion",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 7,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "eastern-policy",
+      "effect": "easternPolicy",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "elephant-escape",
+      "effect": "elephantEscape",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 4,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "emergency-evacuation",
+      "effect": "emergencyEvacuation",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 5,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 3,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "en-passant-bang",
+      "effect": "enPassantBang",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "encouragement",
+      "effect": "encouragement",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "evasion",
+      "effect": "evasion",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 5,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "exhaustion",
+      "effect": "exhaustion",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "exile",
+      "effect": "exile",
+      "draftCategory": "END",
+      "ratingHalfStars": 5,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "fanatical-ritual",
+      "effect": "fanaticalRitual",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "fast-growth",
+      "effect": "fastGrowth",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 7,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "feudal-contract",
+      "effect": "feudalContract",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 2,
+        "maxSquares": 2,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "fianchetto",
+      "effect": "fianchetto",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 7,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "file-surge",
+      "effect": "fileSurge",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "final-weapon",
+      "effect": "finalWeapon",
+      "draftCategory": "END",
+      "ratingHalfStars": 6,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "football",
+      "effect": "football",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "freeze",
+      "effect": "freeze",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "frenzy",
+      "effect": "frenzy",
+      "draftCategory": "END",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "gale",
+      "effect": "gale",
+      "draftCategory": "END",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "ghost",
+      "effect": "ghost",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 9,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 5
+    },
+    {
+      "id": "grasshopper",
+      "effect": "grasshopper",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "guard",
+      "effect": "guard",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 4,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "hallucination",
+      "effect": "hallucination",
+      "draftCategory": "END",
+      "ratingHalfStars": 4,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "herald",
+      "effect": "herald",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "high-ground",
+      "effect": "highGround",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "highway",
+      "effect": "highway",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "holdout",
+      "effect": "holdout",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "homecoming",
+      "effect": "homecoming",
+      "draftCategory": "END",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "hook",
+      "effect": "hook",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 9,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 2,
+        "maxSquares": 2,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 5
+    },
+    {
+      "id": "horde",
+      "effect": "horde",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 8,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "horse-riding",
+      "effect": "horseRiding",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 5,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "icbm",
+      "effect": "icbm",
+      "draftCategory": "END",
+      "ratingHalfStars": 4,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "ice-sheet",
+      "effect": "iceSheet",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 5,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "idol",
+      "effect": "idol",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "imperial-studies",
+      "effect": "imperialStudies",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 8,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "inertia",
+      "effect": "inertia",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "initiative",
+      "effect": "initiative",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 6,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "injury",
+      "effect": "injury",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 8,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "insight",
+      "effect": "insight",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "iron-monarch",
+      "effect": "ironMonarch",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 9,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 5
+    },
+    {
+      "id": "jester",
+      "effect": "jester",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 4,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "joker",
+      "effect": "joker",
+      "draftCategory": "END",
+      "ratingHalfStars": 9,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "choice",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": true
+      },
+      "enabled": true,
+      "draftWeightUnits": 5
+    },
+    {
+      "id": "judgment",
+      "effect": "judgment",
+      "draftCategory": "END",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "knightmaster",
+      "effect": "knightmaster",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 5,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "knightmate",
+      "effect": "knightmate",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 4,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "last-resistance",
+      "effect": "lastResistance",
+      "draftCategory": "END",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "last-stand",
+      "effect": "lastStand",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 4,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "leap",
+      "effect": "pawnLeap",
+      "draftCategory": "END",
+      "ratingHalfStars": 9,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 5
+    },
+    {
+      "id": "lobster",
+      "effect": "lobster",
+      "draftCategory": "END",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "local-conscription",
+      "effect": "localConscription",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "log",
+      "effect": "log",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 4,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "london-system",
+      "effect": "londonSystem",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 5,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "macho-chess",
+      "effect": "machoChess",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "mad-horse",
+      "effect": "madHorse",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "martyrdom",
+      "effect": "martyrdom",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "merchant-guild",
+      "effect": "merchantGuild",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 10,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 4
+    },
+    {
+      "id": "missionary",
+      "effect": "missionary",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "mistake",
+      "effect": "mistake",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "mistake-card",
+      "effect": "mistakeCard",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "mongolian-gambit",
+      "effect": "mongolianGambit",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 10,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 4
+    },
+    {
+      "id": "monochrome-chess",
+      "effect": "monochromeChess",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "monster",
+      "effect": "monsterRule",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "moving",
+      "effect": "moving",
+      "draftCategory": "END",
+      "ratingHalfStars": 8,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "necromancy",
+      "effect": "necromancy",
+      "draftCategory": "END",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "ordination",
+      "effect": "ordination",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 4,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "othello",
+      "effect": "othello",
+      "draftCategory": "END",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "otherworld",
+      "effect": "otherworld",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "overwhelm",
+      "effect": "overwhelm",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 9,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 5
+    },
+    {
+      "id": "palace",
+      "effect": "palace",
+      "draftCategory": "END",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "panic",
+      "effect": "panic",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 4,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 2,
+        "maxSquares": 2,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "pawn-conversion",
+      "effect": "pawnConversion",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 4,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "pawn-storm",
+      "effect": "pawnStorm",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 5,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 8,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "pegasus",
+      "effect": "pegasus",
+      "draftCategory": "END",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "periodic-collapse",
+      "effect": "periodicCollapse",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "poisoned-pawn",
+      "effect": "poisonedPawn",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "portal",
+      "effect": "portal",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "portal-gun",
+      "effect": "portalGun",
+      "draftCategory": "END",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 2,
+        "maxSquares": 2,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "premove",
+      "effect": "freeMove",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 2,
+        "maxSquares": 6,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "promotion-rush",
+      "effect": "promotionRush",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "prophecy",
+      "effect": "prophecy",
+      "draftCategory": "END",
+      "ratingHalfStars": 9,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 5
+    },
+    {
+      "id": "quantum-mechanics",
+      "effect": "quantumMechanics",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 5,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "queen-afterimage",
+      "effect": "queenAfterimage",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 5,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "queen-cavalry",
+      "effect": "queenCavalry",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 4,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "queens-gambit",
+      "effect": "queensGambit",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "qxe1",
+      "effect": "qxe1",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "racing-king",
+      "effect": "racingKing",
+      "draftCategory": "END",
+      "ratingHalfStars": 6,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "radical-charge",
+      "effect": "radicalCharge",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 9,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 5
+    },
+    {
+      "id": "random-roulette",
+      "effect": "randomRoulette",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "reaper",
+      "effect": "reaper",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "recycling",
+      "effect": "recycling",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "reformation",
+      "effect": "reformation",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "religious-victory",
+      "effect": "religiousVictory",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "reposition",
+      "effect": "reposition",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 5,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "retreat",
+      "effect": "retreat",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 5,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "revelation",
+      "effect": "revelation",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "reverse-pawns",
+      "effect": "reversePawns",
+      "draftCategory": "END",
+      "ratingHalfStars": 5,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "rook-lift",
+      "effect": "rookLift",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "royal-command",
+      "effect": "royalCommand",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "royal-shield",
+      "effect": "royalShield",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "rule-bombs",
+      "effect": "ruleBombs",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "rule-ticket",
+      "effect": "ruleTicket",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 5,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "choice",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": true
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "sacrifice",
+      "effect": "sacrifice",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 2,
+        "maxSquares": 2,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "saturation",
+      "effect": "saturation",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "scarecrow",
+      "effect": "scarecrow",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "schrodinger-pawns",
+      "effect": "schrodingerPawns",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "severance",
+      "effect": "severance",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "snipe",
+      "effect": "bishopSnipe",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "socialism",
+      "effect": "socialism",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "sprint",
+      "effect": "pawnSprint",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 6,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "spy",
+      "effect": "spy",
+      "draftCategory": "END",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 2,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "stake",
+      "effect": "stake",
+      "draftCategory": "END",
+      "ratingHalfStars": 5,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "standard-bearer",
+      "effect": "standardBearer",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 5,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "stealth",
+      "effect": "stealth",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "submerge",
+      "effect": "submerge",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 4,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "substitution",
+      "effect": "substitution",
+      "draftCategory": "END",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "suicide-bomber",
+      "effect": "suicideBomber",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "summon-colossus",
+      "effect": "summonColossus",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 10,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "END_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 4
+    },
+    {
+      "id": "switcheroo",
+      "effect": "switcheroo",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 3,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "taunt",
+      "effect": "taunt",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 5,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "traitor",
+      "effect": "traitor",
+      "draftCategory": "END",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "transcendence",
+      "effect": "transcendence",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "trojan-horse",
+      "effect": "trojanHorse",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "trolley",
+      "effect": "trolley",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 10,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 4
+    },
+    {
+      "id": "twins",
+      "effect": "twins",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 2,
+        "maxSquares": 2,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "ultimatum",
+      "effect": "ultimatum",
+      "draftCategory": "END",
+      "ratingHalfStars": 9,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 5
+    },
+    {
+      "id": "underground-bunker",
+      "effect": "undergroundBunker",
+      "draftCategory": "END",
+      "ratingHalfStars": 5,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "underpromotion",
+      "effect": "underpromotion",
+      "draftCategory": "END",
+      "ratingHalfStars": 6,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "vanish",
+      "effect": "vanish",
+      "draftCategory": "END",
+      "ratingHalfStars": 9,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 5
+    },
+    {
+      "id": "vip",
+      "effect": "vip",
+      "draftCategory": "END",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "vortex",
+      "effect": "vortex",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "white-box",
+      "effect": "whiteBox",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "windmill",
+      "effect": "windmill",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 3,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 2,
+        "maxSquares": 2,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "winter-kingdom",
+      "effect": "winterKingdom",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "witch-trial",
+      "effect": "witchTrial",
+      "draftCategory": "END",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "wizard",
+      "effect": "wizard",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 10,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 4
+    },
+    {
+      "id": "zugzwang",
+      "effect": "zugzwang",
+      "draftCategory": "END",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "END_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "king-of-the-hill",
+      "effect": "kingOfTheHill",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 5,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "loyalist",
+      "effect": "loyalist",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "black-magic",
+      "effect": "blackMagic",
+      "draftCategory": "END",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "parry",
+      "effect": "parry",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "fleeting-dream",
+      "effect": "fleetingDream",
+      "draftCategory": "END",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "empty-lunchbox",
+      "effect": "emptyLunchbox",
+      "draftCategory": "END",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "geneva-convention",
+      "effect": "genevaConvention",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 6,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "platform",
+      "effect": "platformRule",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "cleanup",
+      "effect": "cleanupPieces",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 4,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 3,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "relay",
+      "effect": "relay",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 5,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "field-promotion",
+      "effect": "fieldPromotion",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 7,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "frontline-response",
+      "effect": "frontlineResponse",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "NOT_APPLICABLE",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "hypocrisy",
+      "effect": "hypocrisy",
+      "draftCategory": "END",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 4,
+        "maxSquares": 4,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "siege-ram",
+      "effect": "siegeRam",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 5,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "suspicious-potion",
+      "effect": "suspiciousPotion",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "berserker",
+      "effect": "berserker",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "magic-girl",
+      "effect": "magicGirl",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "replay",
+      "effect": "replayMove",
+      "draftCategory": "END",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "slime",
+      "effect": "slime",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "siren",
+      "effect": "siren",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "trickster",
+      "effect": "trickster",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "gomoku",
+      "effect": "gomoku",
+      "draftCategory": "END",
+      "ratingHalfStars": 8,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "undead",
+      "effect": "undead",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "majesty",
+      "effect": "majesty",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "infiltration",
+      "effect": "infiltration",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "killer-king",
+      "effect": "killerKing",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 8,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "campfire",
+      "effect": "campfire",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "outpost",
+      "effect": "outpost",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "hedgehog",
+      "effect": "hedgehog",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "nullification",
+      "effect": "nullification",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "recurrence",
+      "effect": "recurrence",
+      "draftCategory": "END",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "princess",
+      "effect": "princess",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "resolve",
+      "effect": "resolve",
+      "draftCategory": "END",
+      "ratingHalfStars": 7,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "vanguard",
+      "effect": "vanguard",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 6,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "reversal",
+      "effect": "reversal",
+      "draftCategory": "END",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "miracle",
+      "effect": "miracle",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "END_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "big-bishop",
+      "effect": "bigBishop",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 8,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "overtake",
+      "effect": "overtake",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "capture-the-flag",
+      "effect": "captureTheFlag",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "highlander",
+      "effect": "highlander",
+      "draftCategory": "END",
+      "ratingHalfStars": 10,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 4
+    },
+    {
+      "id": "thief",
+      "effect": "thief",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "disassembly",
+      "effect": "disassembly",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 4,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "false-start",
+      "effect": "falseStart",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 6,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "proficiency",
+      "effect": "proficiency",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 5,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "locust-swarm",
+      "effect": "locustSwarm",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 6,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "long-en-passant",
+      "effect": "longEnPassant",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 4,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "extinction",
+      "effect": "extinction",
+      "draftCategory": "END",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "symmetry",
+      "effect": "symmetry",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "brutus",
+      "effect": "brutus",
+      "draftCategory": "END",
+      "ratingHalfStars": 7,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "clockwork",
+      "effect": "clockwork",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "mutation",
+      "effect": "mutation",
+      "draftCategory": "END",
+      "ratingHalfStars": 5,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "parrot",
+      "effect": "parrot",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "paladin",
+      "effect": "paladin",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "octopus",
+      "effect": "octopus",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "metal",
+      "effect": "metal",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "chess-n-pow-30",
+      "effect": "chessNPow30",
+      "draftCategory": "RULE",
+      "ratingHalfStars": 0,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "d4",
+      "effect": "d4",
+      "draftCategory": "OPENING",
+      "ratingHalfStars": 6,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "e4",
+      "effect": "e4",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "bishop-infiltration",
+      "effect": "bishopInfiltration",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "greek-gift",
+      "effect": "greekGift",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "solidarity",
+      "effect": "solidarity",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "grappler",
+      "effect": "grappler",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 2,
+        "maxSquares": 2,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "revolving-door",
+      "effect": "revolvingDoor",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "don-quixote",
+      "effect": "donQuixote",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 8,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 6
+    },
+    {
+      "id": "taboo",
+      "effect": "taboo",
+      "draftCategory": "END",
+      "ratingHalfStars": 5,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 2,
+        "maxSquares": 2,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 9
+    },
+    {
+      "id": "brainwash",
+      "effect": "brainwash",
+      "draftCategory": "END",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "END_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 2,
+        "maxSquares": 2,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "wanted",
+      "effect": "wanted",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "synchronization",
+      "effect": "synchronization",
+      "draftCategory": "END",
+      "ratingHalfStars": 7,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "assembly",
+      "effect": "assembly",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 7,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "vigilance",
+      "effect": "vigilance",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "PASSIVE",
+      "playTiming": "ON_ACQUIRE",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    },
+    {
+      "id": "medium",
+      "effect": "medium",
+      "draftCategory": "PIECE",
+      "ratingHalfStars": 7,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "squares",
+        "minSquares": 1,
+        "maxSquares": 1,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 7
+    },
+    {
+      "id": "roller",
+      "effect": "roller",
+      "draftCategory": "MIDDLE",
+      "ratingHalfStars": 6,
+      "activation": "ACTIVE",
+      "playTiming": "OWN_TURN",
+      "turnPolicy": "PRESERVE_TURN",
+      "selection": {
+        "kind": "none",
+        "minSquares": 0,
+        "maxSquares": 0,
+        "choiceRequired": false
+      },
+      "enabled": true,
+      "draftWeightUnits": 8
+    }
+  ],
+  "pieceTypes": [
+    "alfil",
+    "amazon",
+    "assassin",
+    "babyBear",
+    "bat",
+    "bear",
+    "berserker",
+    "bigBishop",
+    "bigRook",
+    "bishop",
+    "blackHole",
+    "bomb",
+    "brutus",
+    "camel",
+    "campfire",
+    "cannon",
+    "cardinal",
+    "checker",
+    "checkerKing",
+    "clockwork",
+    "coffin",
+    "colossus",
+    "crown",
+    "darkWizard",
+    "donQuixote",
+    "dragon",
+    "eagle",
+    "fanatic",
+    "ferz",
+    "football",
+    "grappler",
+    "grasshopper",
+    "guard",
+    "hedgehog",
+    "herald",
+    "hook",
+    "idol",
+    "jester",
+    "king",
+    "knight",
+    "knightmaster",
+    "lobster",
+    "log",
+    "logRolling",
+    "magicGirl",
+    "man",
+    "medium",
+    "merchant",
+    "missionary",
+    "monster",
+    "octopus",
+    "paladin",
+    "parrot",
+    "pawn",
+    "pegasus",
+    "platform",
+    "portal",
+    "primeMinister",
+    "princess",
+    "protestant",
+    "queen",
+    "reaper",
+    "recruiter",
+    "revolvingDoor",
+    "rook",
+    "royalKnight",
+    "scarecrow",
+    "shotgunKing",
+    "siegeRam",
+    "siren",
+    "slime",
+    "squire",
+    "standardBearer",
+    "thief",
+    "timeTraveler",
+    "trickster",
+    "undead",
+    "vampireLord",
+    "vip",
+    "wall",
+    "windmill",
+    "windmillBishop",
+    "windmillRook",
+    "wizard"
+  ],
+  "actionTypes": [
+    "move",
+    "card",
+    "promotion",
+    "promotionChoice",
+    "shotgunReload",
+    "wizardSpell",
+    "fileSurgeSkip",
+    "draftPick",
+    "draftBundlePick",
+    "trolleyChoice"
+  ],
+  "sourceUiChoices": [
+    {
+      "source": "chooseRuleTicket",
+      "target": "card.target.ruleId",
+      "changesBeforeActivation": false,
+      "rngBeforeActivation": false
+    },
+    {
+      "source": "chooseJokerCard",
+      "target": "card.target.cardInstanceId",
+      "changesBeforeActivation": false,
+      "rngBeforeActivation": false
+    },
+    {
+      "source": "chooseBarricadeDirection",
+      "target": "card.target.direction",
+      "changesBeforeActivation": false,
+      "rngBeforeActivation": false
+    }
+  ],
+  "pieceCatalogRole": {
+    "alfil": "not-classified-for-8x8",
+    "amazon": "current-card-effect",
+    "assassin": "current-card-effect",
+    "babyBear": "current-card-effect",
+    "bat": "not-classified-for-8x8",
+    "bear": "current-roulette-major",
+    "berserker": "current-card-effect",
+    "bigBishop": "current-card-effect",
+    "bigRook": "current-card-effect",
+    "bishop": "base",
+    "blackHole": "current-card-effect",
+    "bomb": "not-classified-for-8x8",
+    "brutus": "current-card-effect",
+    "camel": "not-classified-for-8x8",
+    "campfire": "current-card-effect",
+    "cannon": "not-classified-for-8x8",
+    "cardinal": "not-classified-for-8x8",
+    "checker": "current-card-effect",
+    "checkerKing": "not-classified-for-8x8",
+    "clockwork": "current-card-effect",
+    "coffin": "not-classified-for-8x8",
+    "colossus": "current-roulette-major",
+    "crown": "current-roulette-major",
+    "darkWizard": "not-classified-for-8x8",
+    "donQuixote": "current-card-effect",
+    "dragon": "current-card-effect",
+    "eagle": "current-card-effect",
+    "fanatic": "not-classified-for-8x8",
+    "ferz": "not-classified-for-8x8",
+    "football": "current-card-effect",
+    "grappler": "current-card-effect",
+    "grasshopper": "current-card-effect",
+    "guard": "current-card-effect",
+    "hedgehog": "current-card-effect",
+    "herald": "current-card-effect",
+    "hook": "current-card-effect",
+    "idol": "current-card-effect",
+    "jester": "current-card-effect",
+    "king": "base",
+    "knight": "base",
+    "knightmaster": "current-card-effect",
+    "lobster": "current-card-effect",
+    "log": "current-card-effect",
+    "logRolling": "visual-alias",
+    "magicGirl": "current-card-effect",
+    "man": "current-roulette-major",
+    "medium": "current-card-effect",
+    "merchant": "not-classified-for-8x8",
+    "missionary": "current-card-effect",
+    "monster": "not-classified-for-8x8",
+    "octopus": "current-card-effect",
+    "paladin": "current-card-effect",
+    "parrot": "current-card-effect",
+    "pawn": "base",
+    "pegasus": "current-card-effect",
+    "platform": "not-classified-for-8x8",
+    "portal": "current-card-effect",
+    "primeMinister": "current-roulette-major",
+    "princess": "current-card-effect",
+    "protestant": "not-classified-for-8x8",
+    "queen": "base",
+    "reaper": "current-card-effect",
+    "recruiter": "not-classified-for-8x8",
+    "revolvingDoor": "current-card-effect",
+    "rook": "base",
+    "royalKnight": "not-classified-for-8x8",
+    "scarecrow": "current-card-effect",
+    "shotgunKing": "not-classified-for-8x8",
+    "siegeRam": "current-card-effect",
+    "siren": "current-card-effect",
+    "slime": "current-card-effect",
+    "squire": "not-classified-for-8x8",
+    "standardBearer": "current-card-effect",
+    "thief": "current-card-effect",
+    "timeTraveler": "not-classified-for-8x8",
+    "trickster": "current-card-effect",
+    "undead": "current-card-effect",
+    "vampireLord": "not-classified-for-8x8",
+    "vip": "current-card-effect",
+    "windmill": "current-card-effect",
+    "windmillBishop": "visual-alias",
+    "windmillRook": "visual-alias",
+    "wizard": "current-card-effect",
+    "wall": "neutral-installation"
+  },
+  "pieceCatalogRoleNote": "84 identifiers: 83 source asset/value identifiers plus actual neutral wall installation. This is a superset; role metadata does not prove every identifier is playable in default 8x8."
+}

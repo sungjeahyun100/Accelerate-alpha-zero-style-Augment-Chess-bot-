@@ -11,7 +11,7 @@
 // use and THROWS on any other keyword, so a schema edit that needs more cannot silently pass:
 //   $schema $id $defs $ref title description $comment examples, type (string|array), enum, const,
 //   properties, required, additionalProperties (boolean|schema), items, minItems, maxItems,
-//   minimum, minLength, oneOf, anyOf, allOf
+//   minimum, maximum, exclusiveMaximum, minLength, pattern, oneOf, anyOf, allOf, if, then, else
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -23,7 +23,7 @@ const VERBOSE = process.argv.includes("--verbose");
 
 const ANNOTATIONS = new Set(["$schema", "$id", "$defs", "title", "description", "$comment", "examples"]);
 const KNOWN = new Set([...ANNOTATIONS, "$ref", "type", "enum", "const", "properties", "required",
-  "additionalProperties", "items", "minItems", "maxItems", "minimum", "minLength", "oneOf", "anyOf", "allOf"]);
+  "additionalProperties", "items", "minItems", "maxItems", "minimum", "maximum", "exclusiveMaximum", "minLength", "maxLength", "pattern", "oneOf", "anyOf", "allOf", "if", "then", "else"]);
 
 const docs = {};
 for (const f of fs.readdirSync(SCHEMA_DIR).filter((n) => n.endsWith(".json"))) {
@@ -72,9 +72,13 @@ function validate(schema, data, at, docName) {
   if (schema.enum !== undefined && !schema.enum.some((e) => deepEq(e, data))) errs.push(at + ": " + JSON.stringify(data) + " not in enum " + JSON.stringify(schema.enum));
   if (typeof data === "number") {
     if (schema.minimum !== undefined && data < schema.minimum) errs.push(at + ": " + data + " < minimum " + schema.minimum);
+    if (schema.maximum !== undefined && data > schema.maximum) errs.push(at + ": " + data + " > maximum " + schema.maximum);
+    if (schema.exclusiveMaximum !== undefined && data >= schema.exclusiveMaximum) errs.push(at + ": " + data + " >= exclusiveMaximum " + schema.exclusiveMaximum);
   }
   if (typeof data === "string") {
     if (schema.minLength !== undefined && data.length < schema.minLength) errs.push(at + ": string shorter than " + schema.minLength);
+    if (schema.maxLength !== undefined && data.length > schema.maxLength) errs.push(at + ": string longer than " + schema.maxLength);
+    if (schema.pattern !== undefined && !new RegExp(schema.pattern, "u").test(data)) errs.push(at + ": string does not match pattern " + schema.pattern);
   }
   if (Array.isArray(data)) {
     if (schema.minItems !== undefined && data.length < schema.minItems) errs.push(at + ": fewer than " + schema.minItems + " items");
@@ -91,6 +95,10 @@ function validate(schema, data, at, docName) {
     }
   }
   if (schema.allOf) for (const s of schema.allOf) errs.push(...validate(s, data, at, docName));
+  if (schema.if) {
+    const branch = validate(schema.if, data, at, docName).length === 0 ? schema.then : schema.else;
+    if (branch !== undefined) errs.push(...validate(branch, data, at, docName));
+  }
   if (schema.anyOf) {
     const results = schema.anyOf.map((s) => validate(s, data, at, docName));
     if (!results.some((e) => e.length === 0)) errs.push(at + ": matches none of anyOf", ...best(results, schema.anyOf, data, docName));
@@ -120,6 +128,7 @@ function best(results, branches, data, docName) {
 }
 
 // ---- run ----
+function run() {
 const manifest = JSON.parse(fs.readFileSync(path.join(EX_DIR, "manifest.json"), "utf8"));
 let failed = 0;
 
@@ -159,4 +168,7 @@ for (const f of walk(EX_DIR)) {
 }
 const nValid = manifest.filter((m) => m.valid).length;
 console.log((failed ? "FAILED" : "PASSED") + ": " + nValid + " valid + " + (manifest.length - nValid) + " invalid examples checked against " + Object.keys(docs).length + " schemas" + (failed ? " (" + failed + " problem(s))" : ""));
-process.exit(failed ? 1 : 0);
+return failed ? 1 : 0;
+}
+module.exports = { validate, resolveRef };
+if (require.main === module) process.exitCode = run();
