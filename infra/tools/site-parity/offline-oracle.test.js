@@ -1,12 +1,49 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const { OfflineOracle, HEADLESS_PROFILE } = require("./offline-oracle");
+const { cacheRoot, verify, loadMain, loadWorker } = require("./frozen-site");
+const { orderedSelections } = require("./client-enumeration");
 const contract = require("../../../bridge/tools/runtime-contract");
 const { validate, resolveRef } = require("../../../bridge/tools/validate");
 const oracle = new OfflineOracle(); // Deliberately fail when the adopted external baseline is unavailable.
 const schema = resolveRef("runtime-v1.schema.json#", "runtime-v1.schema.json");
 function assertSchema(value) { assert.deepEqual(validate(schema.schema, value, "$", schema.docName), []); }
+
+test("client-only cache validates executable dependencies and cannot load a worker", () => {
+  const original = cacheRoot(), root = path.join(original, "client-loader-check");
+  const baseline = JSON.parse(fs.readFileSync(path.join(original, "baseline.json"), "utf8"));
+  const dependencies = baseline.files.filter(file => /^main-/.test(file.name) || file.name === "acorn-8.15.0.js");
+  if (!dependencies.some(file => file.name === "acorn-8.15.0.js")) dependencies.push({
+    name: "acorn-8.15.0.js", sha256: "fdb08546776ec6228b03e8d02b40d4ab3255bae5f401adba7ff5dad927ac5c9c", bytes: 241575,
+  });
+  const manifest = { ...baseline, executionScope: "frozen-client", files: dependencies };
+  const owned = [...dependencies.map(file => file.name), "baseline.json"];
+  if (fs.existsSync(root)) {
+    assert.equal(fs.lstatSync(root).isSymbolicLink(), false, "owned loader slot cannot be a link");
+    assert.deepEqual(fs.readdirSync(root), [], "owned loader slot must be empty");
+  } else fs.mkdirSync(root);
+  try {
+    for (const file of dependencies) fs.copyFileSync(path.join(original, file.name), path.join(root, file.name));
+    fs.writeFileSync(path.join(root, "baseline.json"), JSON.stringify(manifest));
+    const client = loadMain(root);
+    assert.equal(client.evaluate("typeof createInitialBoard"), "function");
+    assert.equal(client.manifest.executionScope, "frozen-client");
+    assert.throws(() => verify(root), /requires the original worker/);
+    assert.throws(() => loadWorker(root), /requires the original worker/);
+    manifest.files = dependencies.filter(file => file.name !== "acorn-8.15.0.js");
+    fs.writeFileSync(path.join(root, "baseline.json"), JSON.stringify(manifest));
+    assert.throws(() => loadMain(root), /main asset and the pinned parser/);
+    manifest.files = [...dependencies, dependencies[0]];
+    fs.writeFileSync(path.join(root, "baseline.json"), JSON.stringify(manifest));
+    assert.throws(() => loadMain(root), /Duplicate baseline/);
+  } finally {
+    for (const name of owned) if (fs.existsSync(path.join(root, name))) fs.unlinkSync(path.join(root, name));
+    fs.rmdirSync(root);
+  }
+});
 
 for (const [style, choices, picks, cards] of [["normal", 3, 2, 1], ["chaos", 3, 2, 2], ["grand", 28, 12, 6]]) test(`actual ${style} initialization and draft reaches play`, () => {
   let p = oracle.newGame({ gameStyle: style }, 12345);
@@ -98,6 +135,39 @@ test("terminal microtasks retain source replay, chain cleanup and conditional no
   oracle.evaluate("queueMicrotask(function repeat(){queueMicrotask(repeat)})");
   assert.throws(() => oracle.snapshot(), /microtask budget exceeded/);
   oracle.restore(initial);
+});
+test("ordered premove pages preserve 1..3 plans and resume without materializing the surface", () => {
+  const groups = ["a", "b", "c"].map(piece => [0, 1].map(choice => ({ piece, choice })));
+  const plans = [...orderedSelections(groups)];
+  assert.deepEqual([1, 2, 3].map(length => plans.filter(plan => plan.length === length).length), [6, 24, 48]);
+  assert.equal(new Set(plans.map(plan => JSON.stringify(plan))).size, 78);
+  assert.ok(plans.some(plan => plan.map(move => move.piece).join("") === "abc"));
+  assert.ok(plans.some(plan => plan.map(move => move.piece).join("") === "cba"));
+  assert.ok(plans.every(plan => new Set(plan.map(move => move.piece)).size === plan.length));
+  assert.throws(() => orderedSelections(groups, 4).next(), /depth/);
+  const initial = oracle.newGame({ draftDelete: true }, 83);
+  oracle.restore(initial);
+  oracle.evaluate("state.draftDelete=false;state.deckSlots.white=[cloneCard(CARD_DEFS.find(card=>card.id==='premove'))];state.deck.white=state.deckSlots.white;state.playerCards=state.deckSlots;");
+  const position = oracle.snapshot();
+  const bounded = new OfflineOracle(undefined, { maxCandidates: 128 });
+  assert.throws(() => bounded.candidates(position), /explicit candidate budget/);
+  const first = bounded.actionStream(position, { cardId: "premove", legal: false });
+  const second = bounded.actionStream(position, { cardId: "premove", legal: false });
+  const a = first.nextPage(5, { maxExamined: 2 });
+  assert.equal(a.actions.length, 2); assert.equal(a.exhausted, false);
+  assert.equal(a.stopReason, "examined-budget");
+  const b = second.nextPage(5), c = first.nextPage(3);
+  assert.deepEqual([...a.actions, ...c.actions], b.actions);
+  assert.deepEqual(b.actions.map(action => action.payload.target.selections.length), [1, 2, 3, 3, 3]);
+  assert.ok(b.actions.every(action => action.positionId === position.positionId));
+  assert.ok(b.actions.every(action => bounded.apply(position, action, { recordHistory: false }).ok));
+  const legal = bounded.actionStream(position, { cardId: "premove" }).nextPage(3);
+  assert.equal(legal.actions.length, 3); assert.equal(legal.stopReason, "page-limit");
+  const ordinary = bounded.actionStream(initial), paged = [];
+  let page;
+  do { page = ordinary.nextPage(7); paged.push(...page.actions); } while (!page.exhausted);
+  assert.deepEqual(paged, bounded.actions(initial));
+  assert.throws(() => first.nextPage(0), /Page size/);
 });
 test("hidden piece and private RNG changes do not change viewer projection", () => {
   const p = oracle.newGame({ draftDelete: true }, 42), a = contract.jsonCopy(p.state), b = contract.jsonCopy(p.state);

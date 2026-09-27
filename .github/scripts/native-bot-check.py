@@ -64,6 +64,7 @@ def configure():
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONUTF8": "1",
         "ACCELERATE_TEST_ARTIFACTS": str(root / "models" / system / "native-bot-validation"),
+        "ACCELERATE_SITE_BASELINE": str(root / "cache" / "site-baseline-client"),
     }
     with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as file:
         for key, value in values.items():
@@ -104,7 +105,7 @@ def unpack(archive, destination):
             raise RuntimeError("source distribution must have one project root")
         source.extractall(destination, members=members, filter="data")
     project = destination / roots.pop()
-    required = ["Cargo.toml", "Cargo.lock", "pyproject.toml", "rust-engine/src/lib.rs",
+    required = ["Cargo.toml", "Cargo.lock", "pyproject.toml", "NOTICE.md", "rust-engine/src/lib.rs",
                 "bridge/native/src/lib.rs", "bridge/runtime/src/lib.rs"]
     required += [f"bridge/catalog/{name}-20260927.json" for name in
                  ("site", "observation", "initial-state", "draft", "card-definitions")]
@@ -153,18 +154,28 @@ def tests():
     _, _, _, reports, python = locations()
     reports.mkdir(parents=True, exist_ok=True)
     report = reports / "pytest.xml"
-    # These three implemented components form the current checkpoint. Add
-    # search/replay/CLI to this gate when their separate implementation closes.
     run(python, "-m", "pytest", "python/tests/test_native.py", "python/tests/test_model_stack.py",
-        "python/tests/test_inference_runtime.py", "-p", "no:cacheprovider",
+        "python/tests/test_inference_runtime.py", "python/tests/test_search.py", "python/tests/test_session.py",
+        "-p", "no:cacheprovider",
         "--junitxml", report, "-ra")
     suites = ET.parse(report).getroot().findall("testsuite")
     if not suites or any(int(suite.get("skipped", "0")) for suite in suites):
         raise RuntimeError("native bot CI requires real tests with no skips")
     cases = [case for suite in suites for case in suite.findall("testcase")]
-    for module, minimum in (("test_native", 6), ("test_model_stack", 7), ("test_inference_runtime", 4)):
+    for module, minimum in (("test_native", 6), ("test_model_stack", 7), ("test_inference_runtime", 6),
+                            ("test_search", 11), ("test_session", 4)):
         if sum(case.get("classname", "").endswith(module) for case in cases) < minimum:
             raise RuntimeError(f"missing required checks for {module}")
+    for mode in ("normal", "chaos"):
+        required = f"test_native_default_weighted_conditioning_completion_gate[{mode}]"
+        if not any(case.get("name") == required for case in cases):
+            raise RuntimeError(f"missing actual default {mode} conditioning completion check")
+    (reports / "test-scope.json").write_text(json.dumps({
+        "implementation": "installed wheel; native/model/ort/tract/search/replay/CLI",
+        "skips": 0, "default_weighted_conditioning_modes": ["normal", "chaos"],
+        "scope": "code and bounded synthetic checks; full rules/catalog coverage is a separate pending gate",
+        "actual_learning_campaign": False,
+    }, indent=2) + "\n", encoding="utf-8")
     artifact = Path(os.environ["ACCELERATE_TEST_ARTIFACTS"]) / "native-runtime"
     for parity in artifact.glob("*/parity.json"):
         data = json.loads(parity.read_text(encoding="utf-8"))
@@ -183,27 +194,33 @@ def frozen():
     reports.mkdir(parents=True, exist_ok=True)
     catalog = json.loads((REPOSITORY / "bridge/catalog/site-20260927.json").read_text(encoding="utf-8"))
     metadata = catalog["source"]
-    # index.html is provenance only: loadMain/loadWorker never execute it. Its
-    # present-day drift cannot select a newer main asset for this rules version.
-    index = next(file for file in metadata["files"] if file["name"] == "index.html")
-    provenance = {"adopted": index, "executed": False}
-    try:
-        request = urllib.request.Request(index["url"], headers={"User-Agent": "Accelerate-frozen-source-CI"})
-        with urllib.request.urlopen(request, timeout=30) as response:
-            current = response.read(16 * 1024 * 1024 + 1)
-        if len(current) > 16 * 1024 * 1024:
-            raise RuntimeError("current index exceeds the download budget")
-        observed = hashlib.sha256(current).hexdigest()
-        provenance.update({"current_sha256": observed, "current_bytes": len(current),
-                           "drift": observed != index["sha256"]})
-    except (OSError, RuntimeError) as error:
-        provenance["current_fetch_error"] = str(error)
-    (reports / "index-provenance.json").write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
-    files = [file for file in metadata["files"] if file["name"] != "index.html"]
+    # OfflineOracle executes loadMain only. Index and worker keep their original
+    # provenance; their mutable URLs cannot select a new client or worker.
+    for name, label in (("index.html", "index"), ("aiWorker.raw.js", "worker")):
+        adopted = next(file for file in metadata["files"] if file["name"] == name)
+        provenance = {"adopted": adopted, "executed": False,
+                      "reason": "not a dependency of the frozen client oracle"}
+        try:
+            request = urllib.request.Request(adopted["url"], headers={"User-Agent": "Accelerate-frozen-source-CI"})
+            with urllib.request.urlopen(request, timeout=30) as response:
+                current = response.read(16 * 1024 * 1024 + 1)
+            if len(current) > 16 * 1024 * 1024:
+                raise RuntimeError("current provenance source exceeds the download budget")
+            observed = hashlib.sha256(current).hexdigest()
+            provenance.update({"current_sha256": observed, "current_bytes": len(current),
+                               "drift": observed != adopted["sha256"]})
+        except (OSError, RuntimeError) as error:
+            provenance["current_fetch_error"] = str(error)
+        (reports / f"{label}-provenance.json").write_text(
+            json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
+    files = [file for file in metadata["files"] if file["name"].startswith("main-")]
+    if len(files) != 1:
+        raise RuntimeError("the adopted catalog must identify exactly one frozen client")
     files.append({"name": "acorn-8.15.0.js", "url": "https://unpkg.com/acorn@8.15.0/dist/acorn.js",
                   "sha256": "fdb08546776ec6228b03e8d02b40d4ab3255bae5f401adba7ff5dad927ac5c9c",
                   "bytes": 241575})
-    destination = root / "cache" / "site-baseline"
+    # A separate fixed slot preserves existing full baseline/worker snapshots.
+    destination = root / "cache" / "site-baseline-client"
     destination.mkdir(parents=True, exist_ok=True)
     verified = []
     # Download only adopted URLs. Never discover or freeze today's mutable main.
@@ -222,9 +239,14 @@ def frozen():
         path.write_bytes(data)
         verified.append({**file, "bytes": len(data)})
     baseline = {"schemaVersion": 1, "frozenAt": metadata["frozenAt"],
-                "site": "https://augmentchess.org", "files": verified}
-    (destination / "baseline.json").write_text(json.dumps(baseline, indent=2) + "\n", encoding="utf-8")
+                "site": "https://augmentchess.org", "executionScope": "frozen-client", "files": verified}
+    serialized = json.dumps(baseline, indent=2) + "\n"
+    manifest = destination / "baseline.json"
+    if manifest.exists() and manifest.read_text(encoding="utf-8") != serialized:
+        raise RuntimeError("refusing to replace an existing adopted client manifest")
+    manifest.write_text(serialized, encoding="utf-8")
     (reports / "frozen-source.json").write_text(json.dumps(baseline, indent=2) + "\n", encoding="utf-8")
+    os.environ["ACCELERATE_SITE_BASELINE"] = str(destination)
     run("node", "--test", "bridge/tools/runtime-contract.test.js",
         "infra/tools/site-parity/offline-oracle.test.js", timeout=180)
 

@@ -192,6 +192,47 @@ class OfflineOracle {
     // transition code removes rejected selections without mutating the original.
     return raw.filter(candidate => this.apply(position, candidate, { recordHistory: false }).ok);
   }
+  actionStream(position, { cardId = null, legal = true } = {}) {
+    contract.validatePosition(position);
+    if (cardId !== null && !contract.catalog.cards.some(card => card.id === cardId)) throw new TypeError("Unknown stream card filter.");
+    if (typeof legal !== "boolean") throw new TypeError("Stream legal filter must be boolean.");
+    const owned = contract.deepFreeze(contract.jsonCopy(position));
+    this.restore(owned);
+    const state = owned.state;
+    const special = state.mode !== "play" || state.pendingPromotion || state.activeTrolley;
+    let iterator;
+    if (special) iterator = this.candidates(owned).filter(payload => cardId === null || payload.cardId === cardId)[Symbol.iterator]();
+    else {
+      if (state.ruleTicketChoice || state.jokerChoice || state.barricadeDirectionChoice || state.targeting) throw new Error("UI presentation choices must be normalized to the atomic card target before snapshot import.");
+      this.main.context.__streamCardId = cardId;
+      iterator = this.evaluate("iterateCandidatePayloads(state.turn,__streamCardId)");
+    }
+    let exhausted = false;
+    return {
+      nextPage: (limit = 256, { maxExamined = 4096 } = {}) => {
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 4096) throw new TypeError("Page size must be 1..4096.");
+        if (!Number.isSafeInteger(maxExamined) || maxExamined < 1 || maxExamined > 65536) throw new TypeError("Examined-action budget must be 1..65536.");
+        const actions = [];
+        let examined = 0;
+        while (!exhausted && actions.length < limit && examined < maxExamined) {
+          // Other streams, source validation and observations can use this VM
+          // between pages. Resume each owned iterator against its own position.
+          this.restore(owned);
+          let next;
+          if (special) next = iterator.next();
+          else {
+            this.main.context.__candidateIterator = iterator;
+            next = JSON.parse(this.evaluate("JSON.stringify(__candidateIterator.next())"));
+          }
+          if (next.done) { exhausted = true; break; }
+          examined++;
+          const candidate = contract.action(owned, next.value);
+          if (!legal || special || this.apply(owned, candidate, { recordHistory: false }).ok) actions.push(candidate);
+        }
+        return contract.deepFreeze({ actions, exhausted, examined, stopReason: exhausted ? "exhausted" : actions.length === limit ? "page-limit" : "examined-budget" });
+      },
+    };
+  }
   apply(position, candidate, { recordHistory = true } = {}) {
     contract.validateAction(position, candidate);
     this.restore(position);

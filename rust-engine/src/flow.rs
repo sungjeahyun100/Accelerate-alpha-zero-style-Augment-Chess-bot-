@@ -4,6 +4,143 @@ use crate::*;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
+/// The adopted local oracle profile advances rules at the catalog's frozen
+/// logical time. Clock state remains part of the rules snapshot; a wall-clock
+/// scheduler must supply elapsed time separately rather than enter this kernel.
+fn clock_remaining(state: &GameState, color: Color) -> Result<Option<f64>> {
+    let Some(clock) = state.extra.get("clock") else {
+        return Ok(None);
+    };
+    if clock["enabled"] != true {
+        return Ok(None);
+    }
+    let key = format!("{}Ms", color.as_str());
+    let stored = clock[&key]
+        .as_f64()
+        .ok_or_else(|| EngineError::InvalidState("enabled clock has no stored time".into()))?;
+    let runnable = state.mode == "play"
+        && state.turn == color
+        && state.extra.get("activeTrolley").is_none_or(|v| v.is_null())
+        && state
+            .extra
+            .get("pendingPromotion")
+            .is_none_or(|v| v.is_null())
+        && state.extra.get("turnResolving") != Some(&json!(true));
+    let remaining = if runnable
+        && clock["runningColor"] == color.as_str()
+        && clock["lastStartedAt"].as_f64().is_some_and(|v| v != 0.0)
+    {
+        stored
+            - (crate::draft::frozen_timestamp()? as f64 - clock["lastStartedAt"].as_f64().unwrap())
+    } else {
+        stored
+    };
+    Ok(Some(remaining.max(0.0)))
+}
+
+pub(crate) fn pause_clock(state: &mut GameState) -> Result<()> {
+    let Some(clock) = state.extra.get("clock") else {
+        return Ok(());
+    };
+    if clock["enabled"] != true {
+        return Ok(());
+    }
+    let running = clock["runningColor"]
+        .as_str()
+        .and_then(|value| match value {
+            "white" => Some(Color::White),
+            "black" => Some(Color::Black),
+            _ => None,
+        });
+    let remaining = running
+        .map(|color| clock_remaining(state, color))
+        .transpose()?
+        .flatten();
+    let terminal = state.mode == "gameover";
+    let clock = state.extra.get_mut("clock").expect("existing clock");
+    if let (Some(color), Some(remaining)) = (running, remaining) {
+        clock[format!("{}Ms", color.as_str())] = json!(remaining);
+    }
+    if !terminal {
+        clock["runningColor"] = Value::Null;
+        clock["lastStartedAt"] = Value::Null;
+    }
+    Ok(())
+}
+
+pub(crate) fn start_clock(state: &mut GameState) -> Result<()> {
+    if state.mode != "play"
+        || state
+            .extra
+            .get("activeTrolley")
+            .is_some_and(|v| !v.is_null())
+        || state
+            .extra
+            .get("pendingPromotion")
+            .is_some_and(|v| !v.is_null())
+        || state.extra.get("turnResolving") == Some(&json!(true))
+    {
+        return Ok(());
+    }
+    let Some(clock) = state.extra.get_mut("clock") else {
+        return Ok(());
+    };
+    if clock["enabled"] != true
+        || (clock["runningColor"] == state.turn.as_str()
+            && clock["lastStartedAt"]
+                .as_f64()
+                .is_some_and(|value| value != 0.0))
+    {
+        return Ok(());
+    }
+    clock["runningColor"] = json!(state.turn);
+    clock["lastStartedAt"] = json!(crate::draft::frozen_timestamp()?);
+    Ok(())
+}
+
+pub(crate) fn commit_turn_clock(state: &mut GameState, color: Color) -> Result<bool> {
+    let Some(clock) = state.extra.get("clock") else {
+        return Ok(true);
+    };
+    if clock["enabled"] != true
+        || clock["runningColor"] != color.as_str()
+        || !clock["lastStartedAt"]
+            .as_f64()
+            .is_some_and(|value| value != 0.0)
+    {
+        return Ok(true);
+    }
+    let remaining = clock_remaining(state, color)?.expect("enabled clock");
+    let increment = clock["incrementMs"]
+        .as_f64()
+        .filter(|value| [0.0, 3000.0, 5000.0, 7000.0, 10000.0, 15000.0].contains(value))
+        .unwrap_or(10000.0);
+    let clock = state.extra.get_mut("clock").expect("existing clock");
+    clock["lastStartedAt"] = json!(crate::draft::frozen_timestamp()?);
+    clock[format!("{}Ms", color.as_str())] = json!(if remaining > 0.0 {
+        remaining + increment
+    } else {
+        0.0
+    });
+    if remaining > 0.0 {
+        return Ok(true);
+    }
+    clock["runningColor"] = Value::Null;
+    clock["lastStartedAt"] = Value::Null;
+    clock["timeoutLoser"] = json!(color);
+    state.mode = "gameover".into();
+    state.winner = Some(color.opponent().as_str().into());
+    state.extra.insert(
+        "replayEndReason".into(),
+        json!(if color == Color::White {
+            "백 시간패"
+        } else {
+            "흑 시간패"
+        }),
+    );
+    Ok(false)
+}
+
 pub(crate) fn star_total(state: &GameState, color: Color) -> f64 {
     state
         .deck_slots
@@ -97,7 +234,7 @@ fn shotgun_color(state: &GameState) -> Option<Color> {
                 .any(|c| !c.vacant && c.id == "shotgun-king")
     })
 }
-pub(crate) fn resolve_stars(state: &mut GameState) {
+pub(crate) fn resolve_stars(state: &mut GameState) -> Result<()> {
     let winner = shotgun_color(state).map(Color::opponent).or_else(|| {
         let white = star_total(state, Color::White);
         let black = star_total(state, Color::Black);
@@ -109,8 +246,10 @@ pub(crate) fn resolve_stars(state: &mut GameState) {
             None
         }
     });
+    pause_clock(state)?;
     state.mode = "gameover".into();
     state.winner = winner.map(|color| color.as_str().into());
+    Ok(())
 }
 
 pub(crate) fn mark_progress(state: &mut GameState) {
@@ -165,7 +304,7 @@ pub(crate) fn tick_deathmatch(state: &mut GameState, moving_color: Color) -> Res
         .min(interval);
     dm.insert("halfTurnsSinceProgress".into(), json!(count));
     if count >= interval {
-        resolve_stars(state);
+        resolve_stars(state)?;
         Ok(true)
     } else {
         Ok(false)
@@ -177,7 +316,7 @@ pub(crate) fn check_termination(state: &mut GameState) -> Result<bool> {
         return Ok(true);
     }
     if shotgun_color(state).is_none() && record_position(state)? >= 3 {
-        resolve_stars(state);
+        resolve_stars(state)?;
         return Ok(true);
     }
     let active = state
@@ -214,7 +353,7 @@ pub(crate) fn check_termination(state: &mut GameState) -> Result<bool> {
                 .extra
                 .insert("endPhaseStartMove".into(), json!(shared));
         } else {
-            resolve_stars(state);
+            resolve_stars(state)?;
             return Ok(true);
         }
     }

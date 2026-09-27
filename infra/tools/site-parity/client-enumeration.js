@@ -6,6 +6,10 @@ function installEnumerationSource() {
   return `
 ${completeCardTargets.toString()}
 ${completeWizardActions.toString()}
+${orderedSelections.toString()}
+${freeMoveTargetGroups.toString()}
+${iterateFreeMoveTargets.toString()}
+${iterateCandidatePayloads.toString()}
 collectAiCardTargets = completeCardTargets;
 collectAiWizardActions = completeWizardActions;
 `;
@@ -57,27 +61,80 @@ function completeCardTargets(card, color) {
     const ranges = { cleanupPieces: [1, INTERNAL_CLEANUP_LIMIT], chameleonMutation: [1, 3], emergencyEvacuation: [1, 3], panic: [2, 2], spy: [1, 2], pawnStorm: [1, 8] };
     if (ranges[card.effect]) { combinations(uniqueTargetSquaresForCard(card), ...ranges[card.effect], selections => ({ selections })); return targets; }
     if (card.effect === "freeMove") {
-      const groups = [], seen = new Set();
-      forEachSquare((piece, row, col) => {
-        if (!isFreeMovePieceCandidate(piece, color) || seen.has(piece.id)) return;
-        seen.add(piece.id);
-        const from = normalizePieceSquare(row, col);
-        const moves = freeMoveDeclarationMoves(from.row, from.col, piece).map(move => ({ from: { row: from.row, col: from.col }, to: { row: move.row, col: move.col } }));
-        if (moves.length) groups.push(moves);
-      });
-      function visit(selected, used) {
-        if (selected.length) emit({ selections: selected });
-        if (selected.length >= FREE_MOVE_MAX_PLANS) return;
-        // Resolution executes plans in the submitted order. Distinct orderings
-        // must survive even when they contain the same chosen pieces.
-        for (let index = 0; index < groups.length; index++) if (!used.has(index)) for (const move of groups[index]) visit([...selected, move], new Set([...used, index]));
-      }
-      visit([], new Set());
+      for (const target of iterateFreeMoveTargets(color)) emit(target);
       return targets;
     }
     if (!card.target) return [undefined];
     return getTargetSquares(card);
   } finally { state.turn = originalTurn; }
+}
+// At most three submitted plans, with one choice from each distinct piece.
+// Only the current depth-3 prefix is retained; exhaustion covers all orderings.
+function* orderedSelections(groups, maxPlans = 3) {
+  if (!Number.isInteger(maxPlans) || maxPlans < 1 || maxPlans > 3) throw new TypeError("Ordered plan depth must be 1..3.");
+  function* visit(selected, used) {
+    if (selected.length) yield selected.slice();
+    if (selected.length >= maxPlans) return;
+    for (let index = 0; index < groups.length; index++) if (!used.has(index)) {
+      used.add(index);
+      for (const move of groups[index]) {
+        selected.push(move);
+        yield* visit(selected, used);
+        selected.pop();
+      }
+      used.delete(index);
+    }
+  }
+  yield* visit([], new Set());
+}
+function freeMoveTargetGroups(color) {
+  const originalTurn = state.turn, groups = [], seen = new Set();
+  state.turn = color;
+  try {
+    forEachSquare((piece, row, col) => {
+      if (!isFreeMovePieceCandidate(piece, color) || seen.has(piece.id)) return;
+      seen.add(piece.id);
+      const from = normalizePieceSquare(row, col);
+      const moves = freeMoveDeclarationMoves(from.row, from.col, piece).map(move => ({ from: { row: from.row, col: from.col }, to: { row: move.row, col: move.col } }));
+      if (moves.length) groups.push(moves);
+    });
+    return groups;
+  } finally { state.turn = originalTurn; }
+}
+function* iterateFreeMoveTargets(color) {
+  for (const selections of orderedSelections(freeMoveTargetGroups(color), FREE_MOVE_MAX_PLANS)) yield { selections };
+}
+function* iterateCandidatePayloads(color, cardId = null) {
+  let emitted = false;
+  const checked = actions => {
+    if (actions.length > __maxCandidates) throw new Error("Non-lazy action family exceeded its explicit candidate budget.");
+    return actions;
+  };
+  if (cardId === null) for (const action of checked(collectValidAiActions(color, { includeCards: false, allowFriendlyCrush: false }))) {
+    emitted = true; yield action;
+  }
+  // The source collector owns availability, exclusive-turn and forced-window
+  // checks. One card family is selected by its stable execution identity.
+  const cards = playerDeck(color).filter(card => card && (!cardId || card.id === cardId)).map(card => ({ instanceId: card.instanceId, effect: card.effect }));
+  for (const card of cards) {
+    const options = { cardsOnly: true, includeCards: true, exhaustiveCards: true, cardFilter: current => current.instanceId === card.instanceId };
+    if (card.effect === "freeMove") {
+      const originalTargets = collectAiCardTargets;
+      let marker;
+      try {
+        collectAiCardTargets = current => current.effect === "freeMove" ? [undefined] : [];
+        marker = collectValidAiActions(color, options)[0];
+      } finally { collectAiCardTargets = originalTargets; }
+      if (marker) for (const target of iterateFreeMoveTargets(color)) {
+        emitted = true; yield { ...marker, target };
+      }
+    } else for (const action of checked(collectValidAiActions(color, options))) {
+      emitted = true; yield action;
+    }
+  }
+  // Preserve the source's friendly-crush fallback only after all ordinary
+  // piece and card families really proved empty.
+  if (!emitted && cardId === null) for (const action of checked(collectValidAiActions(color, { includeCards: false, allowFriendlyCrush: true }))) yield action;
 }
 function completeWizardActions(piece, row, col, color) {
   if (isWizardSpellBlockedByZugzwang(color)) return [];
@@ -89,4 +146,4 @@ function completeWizardActions(piece, row, col, color) {
   }
   return actions;
 }
-module.exports = { installEnumerationSource };
+module.exports = { installEnumerationSource, orderedSelections };

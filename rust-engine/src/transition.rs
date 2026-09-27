@@ -238,7 +238,9 @@ pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>
         ActionKind::Move => apply_move(state, action)?,
         ActionKind::Card => apply_card(state, action)?,
         ActionKind::PromotionChoice => apply_promotion(state, action)?,
-        ActionKind::DraftPick => crate::draft::apply_pick(state, action)?,
+        ActionKind::DraftPick | ActionKind::DraftBundlePick => {
+            crate::draft::apply_pick(state, action)?
+        }
         other => return Err(EngineError::UnsupportedFeature(format!("action {other:?}"))),
     };
     let transition = |viewer| {
@@ -487,6 +489,16 @@ fn apply_move(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
             recent.remove(0);
         }
     }
+    state.extra.insert(
+        "lastMove".into(),
+        json!({"from":from,"to":to,"pieceId":piece.id,"pieceType":original_type,
+            "soundName":if target.flag("castle"){"castle"}else if captures.is_empty(){"move"}else{"capture"},
+            "soundColor":actor,"hiddenFrom":piece.extra.get("hiddenFrom").and_then(Value::as_str).unwrap_or(""),
+            "idolEncoreEligible":false,"idolEncoreId":"","idolEncorePieceId":"","idolEncoreConsumed":false}),
+    );
+    // queueMoveHistoryNotation creates its identifier before promotion and turn
+    // settlement, sharing the source random stream with later rule draws.
+    state.rng.sample()?;
     if original_type == "pawn" || !captures.is_empty() {
         crate::flow::mark_progress(state);
     }
@@ -497,6 +509,7 @@ fn apply_move(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
     {
         let black_hidden = piece.extra.get("hiddenFrom").and_then(Value::as_str) == Some("black");
         let white_hidden = piece.extra.get("hiddenFrom").and_then(Value::as_str) == Some("white");
+        crate::flow::pause_clock(state)?;
         state.extra.insert("pendingPromotion".into(),json!({"row":to.row,"col":to.col,"color":actor,"choices":["queen","rook","bishop","knight"],"privacy":{"white":{"originVisible":!white_hidden,"typeKnown":!white_hidden},"black":{"originVisible":!black_hidden,"typeKnown":!black_hidden}}}));
         return Ok(captures);
     }
@@ -533,6 +546,7 @@ fn capture(
     state.captures.get_mut(actor).push(victim.clone());
     captures.push(victim.clone());
     if victim.is_defeat_royal() {
+        crate::flow::pause_clock(state)?;
         state.mode = "gameover".into();
         state.winner = Some(attacker.color.as_str().into());
     }
@@ -557,6 +571,9 @@ fn update_piece(state: &mut GameState, piece: &Piece) {
 fn finish_move(state: &mut GameState, actor: Color) -> Result<()> {
     if state.actions_remaining > 1 {
         state.actions_remaining -= 1;
+        return Ok(());
+    }
+    if !crate::flow::commit_turn_clock(state, actor)? {
         return Ok(());
     }
     for piece in state
@@ -618,7 +635,10 @@ fn finish_move(state: &mut GameState, actor: Color) -> Result<()> {
     {
         winter.entry("disabledByLastWarmth").or_insert(json!(false));
     }
-    crate::flow::check_termination(state)?;
+    crate::flow::start_clock(state)?;
+    if crate::flow::check_termination(state)? {
+        crate::flow::pause_clock(state)?;
+    }
     Ok(())
 }
 

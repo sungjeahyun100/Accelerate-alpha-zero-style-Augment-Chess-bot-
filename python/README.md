@@ -49,8 +49,9 @@ assert restored.snapshot() == step.position.snapshot()
 운영 후보의 신경망 입력에는 particle의 `Action.public_intent()`를 사용하고 실제 위치에는
 선택한 intent를 `bind_public_intent()`로 해석해 적용합니다. `as_payload()`와 `bind_action()`은
 실행·replay를 위한 lossless 환경 API입니다. 위 예시의 `draftDelete: True`는 초기 draft를
-비활성화하는 명시적 설정이며, 현재 미지원인 기본 normal/chaos weighted draft의 구현
-완료를 뜻하지 않습니다. 설치 패키지는 `site_catalog()`로 컴파일된 동결 카탈로그를 얻습니다.
+비활성화하는 명시적 설정입니다. 기본 normal/chaos의 weighted 초기화와 초기 공개 관측
+역조건화는 별도 native 통합 검사로 검증하며, 카드 획득·효과의 전체 지원 여부와 구분합니다.
+설치 패키지는 `site_catalog()`로 컴파일된 동결 카탈로그를 얻습니다.
 `position_id`는 저장·stale 검사용 제어 정보이고 신경망 입력이 아닙니다.
 
 `encoding.py`와 `network/`는 공개 관측·후보 행동 인코딩, 잔차 신경망, 그래프 내부 FiLM,
@@ -58,6 +59,37 @@ assert restored.snapshot() == step.position.snapshot()
 유지하고 정적 LoRA 병합은 원본을 복사해 수행합니다. 모델 승률이나 실제 학습 여부는
 코드·형식·수치 검증과 별도로 보고합니다. 이번 구현 검증에서 실제 학습·성능 캠페인은
 실행하지 않습니다.
+
+공개 정보 탐색과 유한 실행 CLI는 설치한 패키지에서 모듈로 실행합니다.
+
+```text
+python -m accelerate_chess.cli --help
+python -m accelerate_chess.cli choose --help
+python -m accelerate_chess.cli selfplay --help
+```
+
+| 명령 | 코드의 역할 |
+|---|---|
+| `init` | 독립 seed로 base checkpoint와 ONNX artifact를 초기화 |
+| `choose` | 공개 trace에서 particle belief를 재구성하고 public intent 선택 |
+| `selfplay` | game·ply·시간 한도가 있는 실행과 양측 공개 trace/replay 보존 |
+| `train` | terminal replay dataset, base/adapter optimizer와 재개 checkpoint 연결 |
+| `export` | base와 선택한 static LoRA 복사 병합 모델을 ONNX로 export |
+| `evaluate` | replay의 제한된 sample에 명시한 실제 backend를 실행하고 수치 기록 |
+| `activate` | 지정한 artifact hash를 검사한 뒤 active 참조를 명시적으로 기록 |
+
+기본 모델은 8 block·128 channel·LoRA rank 8이고 봇 encoding은 public intent와 공개 이력
+요약을 사용합니다. 기본 추론 backend는 `ort`, `tract`는 명시적으로 선택합니다.
+`--threads`는 Torch와 native ort에 적용되며 tract는 1만 허용합니다. artifact 활성화는
+검사한 backend를 provenance로 기록하며 다음 명령의 backend 선택을 자동 변경하지 않습니다.
+Windows 출력은 `%APPDATA%\Accelerate`, 다른 호스트는 명시한 `--artifact-root`에 모읍니다.
+
+현재 설치 wheel 검사는 normal/chaos 초기 공개 조건화와 첫 draft 선택을 확인했습니다.
+실제 CLI 검사에서는 `draftDelete: true`를 명시하고 4 leaf batch 탐색, 1 ply 미완료 replay와
+tract 평가를 실행했습니다. 전체 default mode의 draft 이후 플레이와 카드 효과는 포팅 중입니다.
+미완료 episode에는 승패 target을 만들지 않습니다. SIGINT는 exit 130, 전체 selfplay/train
+deadline은 exit 2로 전달하고 중단 당시 pending decision과 공개 이력을 보존합니다.
+이번 구현 검증에서 `train`을 통한 실제 학습 캠페인은 실행하지 않습니다.
 
 [native API](../bridge/native/README.md)와 [전체 설계](../docs/ARCHITECTURE.md)를 함께
 참고합니다. FFI 검사가 통과해도 사이트의 모든 규칙이나 전체 프로젝트가 완성된 것은

@@ -443,6 +443,7 @@ fn draw_choices(
     Ok(best)
 }
 pub(crate) fn start_draft(state: &mut GameState, color: Color, phase: &str) -> Result<()> {
+    crate::flow::pause_clock(state)?;
     state.mode = "draft".into();
     state.turn = color;
     for field in ["draftLocked", "draftBoardPreview"] {
@@ -549,6 +550,77 @@ pub(crate) fn condition_grand_initial_choices(
     Ok(())
 }
 
+pub(crate) fn condition_initial_offer(state: &mut GameState, public: &[Value]) -> Result<()> {
+    let chaos = state.extra.get("gameStyle").and_then(Value::as_str) == Some("chaos");
+    if public.len() != if chaos { 6 } else { 3 } {
+        return Err(EngineError::InvalidState(
+            "initial public offer count violates source mode".into(),
+        ));
+    }
+    let mut unavailable = acquired_ids(state);
+    let mut identities = BTreeSet::new();
+    let mut conditioned = Vec::new();
+    let mut probe = state.clone();
+    for view in public {
+        let id = view["id"]
+            .as_str()
+            .ok_or_else(|| EngineError::InvalidState("initial offer definition missing".into()))?;
+        let definition = definitions()
+            .definitions
+            .iter()
+            .find(|card| card["id"] == id)
+            .ok_or_else(|| EngineError::InvalidState(format!("unknown initial offer {id}")))?;
+        if id == "shotgun-king"
+            || unavailable.contains(id)
+            || conflicts(id, &unavailable)
+            || !matches!(category(definition), "OPENING" | "MIDDLE" | "PIECE")
+            || weight(definition, true) <= 0.0
+            || !crate::eligibility::draft_drawable(&mut probe, definition, Color::White)?
+        {
+            return Err(EngineError::ConditioningMismatch("initial offer violates source pool availability, categories, weights or exclusives".into()));
+        }
+        let identity = view["instanceId"]
+            .as_str()
+            .ok_or_else(|| EngineError::InvalidState("initial offer identity missing".into()))?;
+        crate::conditioning::validate_initial_identity(id, identity)?;
+        if !identities.insert(identity.to_owned()) {
+            return Err(EngineError::InvalidState(
+                "duplicate initial offer identity".into(),
+            ));
+        }
+        let mut card = definition.clone();
+        card["instanceId"] = json!(identity);
+        conditioned.push(card);
+        unavailable.insert(id.into());
+    }
+    if chaos
+        && conditioned.chunks(2).any(|cards| {
+            forbidden_bundle(&cards[0], &cards[1])
+                || (cards.iter().any(exclusive_opening)
+                    && cards.iter().all(|card| category(card) == "OPENING"))
+        })
+    {
+        return Err(EngineError::ConditioningMismatch(
+            "initial public chaos pair violates source bundle settlement".into(),
+        ));
+    }
+    // Public conditioning changes supported past draw outcomes only. Predicate
+    // probes use a clone; independent future RNG and hidden opposing offers are
+    // not overwritten with actual private metadata.
+    let opening = conditioned.iter().any(|card| category(card) == "OPENING");
+    state
+        .extra
+        .get_mut("draft")
+        .ok_or_else(|| EngineError::InvalidState("initial draft missing".into()))?["choices"] =
+        json!(conditioned);
+    state
+        .extra
+        .get_mut("openingAutoNoticeShown")
+        .ok_or_else(|| EngineError::InvalidState("initial notice state missing".into()))?["white"] =
+        json!(opening);
+    Ok(())
+}
+
 pub(crate) fn initialize(config: GameConfig, seed: u64) -> Result<GameState> {
     if seed > u64::from(u32::MAX)
         || !matches!(config.game_style.as_str(), "normal" | "chaos" | "grand")
@@ -607,6 +679,7 @@ pub(crate) fn initialize(config: GameConfig, seed: u64) -> Result<GameState> {
     if config.draft_delete {
         state.mode = "play".into();
         state.turn = Color::White;
+        crate::flow::start_clock(&mut state)?;
         crate::flow::record_position(&mut state)?;
     } else if config.game_style == "grand" {
         state.mode = "draft".into();
@@ -730,9 +803,7 @@ pub(crate) fn apply_pick(state: &mut GameState, action: &Action) -> Result<Vec<P
         .cloned()
         .ok_or(EngineError::IllegalAction)?;
     if draft["kind"] != "grand" {
-        return Err(EngineError::UnsupportedFeature(
-            "normal draft acquisition".into(),
-        ));
+        return apply_regular_pick(state, action, &draft);
     }
     let card = draft["choices"]
         .as_array()
@@ -861,7 +932,195 @@ pub(crate) fn apply_pick(state: &mut GameState, action: &Action) -> Result<Vec<P
         state.mode = "play".into();
         state.turn = Color::White;
         state.extra.insert("draftLocked".into(), json!(false));
+        crate::flow::start_clock(state)?;
         crate::flow::record_position(state)?;
     }
     Ok(Vec::new())
+}
+
+fn passive_priority(card: &Value) -> u8 {
+    match card["id"].as_str().unwrap_or("") {
+        "london-system" => 0,
+        "horde" => 1,
+        "big-rook" | "big-bishop" => 2,
+        "false-start" => 4,
+        "locust-swarm" => 5,
+        _ => 3,
+    }
+}
+fn apply_regular_pick(state: &mut GameState, action: &Action, draft: &Value) -> Result<Vec<Piece>> {
+    let choices = draft["choices"]
+        .as_array()
+        .ok_or(EngineError::IllegalAction)?;
+    let color = action.color;
+    let selected = if action.kind == ActionKind::DraftBundlePick {
+        let index = action
+            .extra
+            .get("bundleIndex")
+            .and_then(Value::as_u64)
+            .ok_or(EngineError::IllegalAction)?;
+        if index >= 3 {
+            return Err(EngineError::IllegalAction);
+        }
+        choices
+            .get(index as usize * 2..index as usize * 2 + 2)
+            .ok_or(EngineError::IllegalAction)?
+            .to_vec()
+    } else {
+        vec![
+            choices
+                .iter()
+                .find(|card| card["instanceId"].as_str() == action.card_instance_id.as_deref())
+                .cloned()
+                .ok_or(EngineError::IllegalAction)?,
+        ]
+    };
+    if state
+        .deck_slots
+        .get(color)
+        .iter()
+        .filter(|card| card.vacant)
+        .count()
+        < selected.len()
+    {
+        return Err(EngineError::IllegalAction);
+    }
+    let phase = draft["phase"].as_str().ok_or(EngineError::IllegalAction)?;
+    let mut acquired = Vec::new();
+    for card in &selected {
+        let slot = state
+            .deck_slots
+            .get(color)
+            .iter()
+            .position(|card| card.vacant)
+            .ok_or(EngineError::IllegalAction)?;
+        let mut stored = clone_card(state, card)?;
+        let category = category(card);
+        let pending = matches!(phase, "MIDDLE" | "END") && matches!(category, "MIDDLE" | "END");
+        stored["deckCard"] = json!(true);
+        stored["nextTurnPending"] = json!(pending);
+        if pending {
+            stored["nextTurnPendingSinceTurn"] = json!(state.turns_taken.get(color));
+        }
+        stored["firstTurnCard"] =
+            json!(phase == "OPENING" && state.move_count == 0 && category == "OPENING");
+        stored["slot"] = json!(slot);
+        let nonce = state
+            .extra
+            .get("cardAcquisitionNonce")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or_else(|| EngineError::InvalidState("card acquisition order overflow".into()))?;
+        stored["acquiredOrder"] = json!(nonce);
+        state
+            .extra
+            .insert("cardAcquisitionNonce".into(), json!(nonce));
+        state.deck_slots.get_mut(color)[slot] =
+            serde_json::from_value(stored.clone()).map_err(EngineError::serialization)?;
+        // queueCardGainNotation -> createHistoryNotationId consumes one draw.
+        state.rng.sample()?;
+        if selected.len() == 1 && is_passive_definition(card) {
+            crate::transition::apply_draft_passive(state, color, slot)?;
+        }
+        crate::flow::note_card_event(state)?;
+        acquired.push((slot, stored));
+    }
+    if selected.len() > 1 {
+        acquired.sort_by_key(|(_, card)| {
+            (
+                passive_priority(card),
+                card["acquiredOrder"].as_u64().unwrap_or(0),
+            )
+        });
+        for (slot, card) in &acquired {
+            if is_passive_definition(card) {
+                crate::transition::apply_draft_passive(state, color, *slot)?;
+            }
+        }
+        crate::flow::note_card_event(state)?;
+    }
+    state.extra.insert("draftLocked".into(), json!(true));
+    for field in ["draftPreviewCardId", "draftPreviewBundleIndex"] {
+        state.extra.insert(field.into(), Value::Null);
+    }
+    if state.mode == "gameover" {
+        return Ok(Vec::new());
+    }
+    if color == Color::White {
+        let score = average_score(choices)
+            .ok_or_else(|| EngineError::InvalidState("empty completed offer".into()))?;
+        state.extra.insert(
+            "draftBalance".into(),
+            json!({"phase":phase,"averageScore":score,"count":choices.len()}),
+        );
+        start_draft(state, Color::Black, phase)?;
+    } else {
+        state.extra.insert("draftBalance".into(), Value::Null);
+        state
+            .extra
+            .get_mut("draft")
+            .ok_or(EngineError::IllegalAction)?["choices"] = json!([]);
+        state.mode = "play".into();
+        state.turn = state
+            .extra
+            .get("draftResumeTurn")
+            .filter(|turn| !turn.is_null())
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(EngineError::serialization)?
+            .unwrap_or(Color::White);
+        state.extra.insert("draftResumeTurn".into(), Value::Null);
+        state.actions_remaining = if state
+            .extra
+            .get("acceleration")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            2
+        } else {
+            1
+        };
+        state.extra.insert("draftLocked".into(), json!(false));
+        if phase == "MIDDLE" {
+            state.extra.insert("middleDraftDone".into(), json!(true));
+        }
+        if phase == "END" {
+            state.extra.insert("endDraftDone".into(), json!(true));
+            state.extra.insert(
+                "endPhaseStartMove".into(),
+                json!(state.turns_taken.white.min(state.turns_taken.black)),
+            );
+        }
+        if state
+            .extra
+            .get("pendingWhiteBoxes")
+            .and_then(Value::as_array)
+            .is_some_and(|plans| !plans.is_empty())
+        {
+            return Err(EngineError::UnsupportedFeature(
+                "white box delayed play-start settlement".into(),
+            ));
+        }
+        crate::flow::start_clock(state)?;
+        crate::flow::record_position(state)?;
+    }
+    Ok(Vec::new())
+}
+fn is_passive_definition(card: &Value) -> bool {
+    static IDS: OnceLock<BTreeSet<String>> = OnceLock::new();
+    IDS.get_or_init(|| {
+        let catalog: Value =
+            serde_json::from_str(include_str!("../../bridge/catalog/site-20260927.json"))
+                .expect("catalog");
+        catalog["cards"]
+            .as_array()
+            .expect("cards")
+            .iter()
+            .filter(|c| c["activation"] == "PASSIVE")
+            .map(|c| c["id"].as_str().expect("id").into())
+            .collect()
+    })
+    .contains(card["id"].as_str().unwrap_or(""))
 }

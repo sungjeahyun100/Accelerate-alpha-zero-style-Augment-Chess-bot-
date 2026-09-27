@@ -815,7 +815,7 @@ fn find_square(state: &GameState, id: &str) -> Option<Square> {
     }
     None
 }
-fn collapsed(state: &GameState, square: Square) -> bool {
+pub(crate) fn collapsed(state: &GameState, square: Square) -> bool {
     if state
         .extra
         .get("collapsed")
@@ -846,13 +846,18 @@ fn collapsed(state: &GameState, square: Square) -> bool {
             })
         })
 }
-fn landing(state: &GameState, piece: &Piece, square: Square) -> bool {
+pub(crate) fn landing(state: &GameState, piece: &Piece, square: Square) -> bool {
     !collapsed(state, square)
         && state
             .at(square)
             .is_none_or(|target| can_capture(state, piece, target))
 }
-fn leaps(state: &GameState, piece: &Piece, from: Square, deltas: &[(i8, i8)]) -> Vec<MoveTarget> {
+pub(crate) fn leaps(
+    state: &GameState,
+    piece: &Piece,
+    from: Square,
+    deltas: &[(i8, i8)],
+) -> Vec<MoveTarget> {
     deltas
         .iter()
         .filter_map(|&(dr, dc)| from.offset(dr, dc))
@@ -860,7 +865,7 @@ fn leaps(state: &GameState, piece: &Piece, from: Square, deltas: &[(i8, i8)]) ->
         .map(MoveTarget::at)
         .collect()
 }
-fn rays(
+pub(crate) fn rays(
     state: &GameState,
     piece: &Piece,
     from: Square,

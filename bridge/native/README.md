@@ -42,6 +42,9 @@ an independent bounded seed; it receives no actual private position or RNG.
 `condition_public_identities(observation)` delegates source-valid identity
 conditioning of an immutable particle. Unsupported conditional families remain
 explicit engine errors; these helpers do not implement filtering or search.
+Initial weighted normal/chaos conditioning is checked alongside grand and
+explicit `draftDelete` modes. This initial-state boundary does not establish
+support for every later acquisition, effect or hidden-information transition.
 `site_catalog()` returns an owned mapping of the compiled frozen catalog, so an
 installed wheel can construct its encoder specification without a source checkout.
 

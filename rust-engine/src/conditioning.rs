@@ -83,11 +83,24 @@ pub(crate) fn sample_initial(config: GameConfig, expected: Value, seed: u32) -> 
                 .ok_or_else(|| EngineError::InvalidState("public grand pool is missing".into()))?;
             crate::draft::condition_grand_initial_choices(&mut state, choices)?;
         } else {
-            // Normal/chaos source draw and inverse conditioning share the same
-            // weighted predicate kernel. Its incomplete port is explicit.
-            return Err(EngineError::UnsupportedFeature(
-                "conditional normal/chaos initial weighted draw".into(),
-            ));
+            if let Some(draft) = expected.public_state.get("draft") {
+                if draft.get("color").and_then(Value::as_str) != Some(expected.viewer.as_str()) {
+                    return Err(EngineError::InvalidState(
+                        "initial private opposing draft may not be supplied as public".into(),
+                    ));
+                }
+                let choices = draft
+                    .get("choices")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| {
+                        EngineError::InvalidState("own initial draft choices missing".into())
+                    })?;
+                crate::draft::condition_initial_offer(&mut state, choices)?;
+            } else if expected.viewer == state.decision_actor() {
+                return Err(EngineError::InvalidState(
+                    "own initial draft phase must be public".into(),
+                ));
+            }
         }
     }
     let conditioned = sampled.with_state(state)?;

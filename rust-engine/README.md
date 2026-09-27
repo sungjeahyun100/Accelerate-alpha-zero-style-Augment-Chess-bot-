@@ -32,7 +32,7 @@
 공개 초기 조건화는 현재 grand의 공개 28개 pool과 `draftDelete:true`의 세 mode에서
 검사했다. 공개 카드 정의·카테고리 수·서로 배타적인 조합·opaque ID 가능성을 검사하고
 독립 future RNG를 보존한 채 공개 frame 전체와 정보 상태 hash를 다시 비교한다.
-normal·chaos의 초기 weighted draw와 그 역조건화는 진행 중이다. identity 연결은
+normal·chaos의 초기 weighted draw와 공개 offer 역조건화도 같은 경계를 사용한다. identity 연결은
 카드 타입·단계·사용 상태·slot을 바꾸지 않는다. 정상 공개 frame과 샘플의 의미가 맞지
 않으면 `ConditioningMismatch`로 후보를 제외할 수 있으며 잘못된 schema·hash와 미지원
 규칙은 별도 오류다. 이동 intent에는 공개 `from`·`destination` 좌표만 들어가고 앙파상
@@ -66,20 +66,28 @@ private action과 색별 `public` 전이를 함께 저장하고 관측에는 vie
 인 normal·chaos·grand의 32개 초기 piece identity와 RNG 순서, grand의 28개 offer identity·
 정렬 순서는 실제 본체와 비교했다. grand의 초기 선택과 공개 카드 slot 전이도 구현했다.
 카드 획득 표기 ID에 쓰이는 난수도 이후 게임 난수 순서에 영향을 주므로 소비 순서를
-보존한다. 현재 headless oracle의 UI stub은 모든 렌더링의 난수·규칙 부작용까지
-동일하다는 증명이 없어 실제 브라우저 전체 실행과의 parity는 추가 확인이 필요하다.
+보존한다. 비교는 `accelerate-headless-semantic-v1`에서 수행한다. 이 profile은 potion
+정리와 terminal replay microtask·이력 난수를 유지하며 DOM 애니메이션과 update-log
+난수는 제외한다. 실제 브라우저 전체 실행의 future RNG equality 근거로 쓰지 않는다.
 normal·chaos의 초기 weighted draw는 카드 draw predicate의 trolley·black-box shuffle,
 opening weight, 배타적 카드 묶음 교체를 포함해 6개 seed씩 실제 본체와 카드 종류·순서·
 identity 및 RNG 전체가 일치했다. source predicate 자체에 있는 bounded trolley subset
-열거·score당 240개 cap도 유지한다. normal·chaos의 선택 후 획득/자동 패시브/다음 선택자
-전환과 역조건화, grand의 최종 자동 패시브 정산, 전체 카드·RULE·특수 이동·예약 전이
+열거·score당 240개 cap도 유지한다. normal·chaos의 선택 후 인스턴스 복제·slot·획득 순서·
+다음 선택자 전환을 구현했고 지원하는 자동 패시브로 실제 normal 드래프트 종료를
+비교했다. 시계는 해당 profile의 고정 논리 시간에서 시작·일시 정지·완료 턴 increment를
+보존한다. normal seed37의 corner-kick→reaper 획득까지 양측 전체 공개 frame·RNG·시계가
+일치했고 첫 폰 이동 후에는 white 공개 frame·RNG·시계가 일치했다. reaper의 실제 효과와
+black 카드 target hint는 아직 명시적 미지원이다. 초기 public conditioning은 세 mode
+각 viewer에서 독립 future RNG를 유지하고 JCS 숫자 표현을 포함해 공개 frame 전체를
+검증한다. 전체 자동 패시브, grand의 최종 정산, 전체 카드·RULE·특수 이동·예약 전이
 및 큰 조합 행동의 lazy 열거는 진행 중이다. 초기 draw 지원은 그 카드의 효과 지원을
 뜻하지 않으며 기본 normal 설정을 표준 play로 임의 대체하지 않는다. 선택·효과·활성
 상태의 미구현 의미는 명확한 오류이며 전체 256개 지원의 GO 근거로 사용하지 않는다.
 
 동결 metadata는 `bridge/catalog/`에서 compile time에 공유한다. 이 데이터는 초기값,
 카탈로그·공개 정책의 단일 근거이며 실행 결과를 fixture에서 찾아 반환하지 않는다.
-`accelerate-engine-json`은 줄 단위 검증 adapter이며 규칙은 동일 crate API로 실행한다.
+`accelerate-engine-json`은 읽는 중 16 MiB 한도를 적용하는 줄 단위 검증 adapter이며
+규칙은 동일 crate API로 실행한다.
 
 Linux 검사는 저장소 밖 고정 빌드 슬롯을 사용한다.
 

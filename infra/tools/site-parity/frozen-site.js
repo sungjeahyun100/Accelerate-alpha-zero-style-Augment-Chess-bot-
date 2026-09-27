@@ -9,8 +9,13 @@ const crypto = require("node:crypto");
 const SITE = "https://augmentchess.org";
 const PARSER_URL = "https://unpkg.com/acorn@8.15.0/dist/acorn.js";
 const PARSER_SHA256 = "fdb08546776ec6228b03e8d02b40d4ab3255bae5f401adba7ff5dad927ac5c9c";
+const PARSER_BYTES = 241575;
 const sha256 = value => crypto.createHash("sha256").update(value).digest("hex");
 function cacheRoot() {
+  if (process.env.ACCELERATE_SITE_BASELINE) {
+    if (!path.isAbsolute(process.env.ACCELERATE_SITE_BASELINE)) throw new Error("ACCELERATE_SITE_BASELINE must be an absolute external cache path.");
+    return process.env.ACCELERATE_SITE_BASELINE;
+  }
   const parent = process.env.RUNNER_TEMP || process.env.APPDATA;
   if (!parent) throw new Error("APPDATA or RUNNER_TEMP is required; pass an explicit baseline directory on other hosts.");
   return path.join(parent, "Accelerate", "cache", "site-baseline");
@@ -40,11 +45,32 @@ async function freeze(root = cacheRoot()) {
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n", { flag: "wx" });
   return manifest;
 }
-function verify(root = cacheRoot()) {
+function verify(root = cacheRoot(), { scope = "full" } = {}) {
+  if (!["full", "client"].includes(scope)) throw new Error("Unknown frozen source verification scope.");
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "baseline.json"), "utf8"));
   if (manifest.schemaVersion !== 1 || manifest.site !== SITE || !Array.isArray(manifest.files)) throw new Error("Invalid baseline manifest.");
+  const names = new Set();
   for (const file of manifest.files) {
     if (!/^(index\.html|main-[A-Za-z0-9_-]+\.js|aiWorker\.raw\.js|acorn-8\.15\.0\.js)$/.test(file.name)) throw new Error("Unexpected baseline path.");
+    if (names.has(file.name)) throw new Error("Duplicate baseline dependency.");
+    names.add(file.name);
+  }
+  const mains = manifest.files.filter(file => /^main-/.test(file.name));
+  if (mains.length !== 1 || (manifest.executionScope === "frozen-client" && !names.has("acorn-8.15.0.js"))) throw new Error("Frozen client requires exactly one main asset and the pinned parser.");
+  if (scope === "full" && (manifest.executionScope === "frozen-client" || !names.has("aiWorker.raw.js"))) {
+    throw new Error("Full frozen source verification requires the original worker; this cache only supports the frozen client.");
+  }
+  if (manifest.executionScope && !["frozen-client", "full"].includes(manifest.executionScope)) throw new Error("Unknown baseline execution scope.");
+  // The client loader never reads the worker or index. Full verification and
+  // the worker loader still verify every declared file, including the worker.
+  // Earlier full baselines recorded the site files before installing the
+  // separately pinned parser. Preserve that manifest and verify its parser
+  // against the original explicit pin instead of rewriting its provenance.
+  const parser = manifest.files.find(file => file.name === "acorn-8.15.0.js") || {
+    name: "acorn-8.15.0.js", sha256: PARSER_SHA256, bytes: PARSER_BYTES,
+  };
+  const dependencies = scope === "client" ? [mains[0], parser] : manifest.files;
+  for (const file of dependencies) {
     const data = fs.readFileSync(path.join(root, file.name));
     if (data.length !== file.bytes || sha256(data) !== file.sha256) throw new Error(`Frozen source integrity failure: ${file.name}`);
   }
@@ -78,7 +104,7 @@ function browserShell() {
   return vm.createContext(context);
 }
 function loadMain(root = cacheRoot()) {
-  const manifest = verify(root);
+  const manifest = verify(root, { scope: "client" });
   const main = manifest.files.find(file => /^main-/.test(file.name));
   const parser = path.join(root, "acorn-8.15.0.js");
   if (!fs.existsSync(parser)) throw new Error("The offline parser is missing; bootstrap the pinned parser explicitly.");

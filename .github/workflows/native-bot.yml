@@ -69,9 +69,9 @@ jobs:
         run: cargo test --workspace --locked
       - name: Locked dependencies and sdist to installed wheel
         run: python .github/scripts/native-bot-check.py build
-      - name: Native, model and actual ort / tract inference tests
+      - name: Installed native, model, ort / tract, search and bounded CLI tests
         run: python .github/scripts/native-bot-check.py tests
-      - name: Exact frozen source and offline oracle
+      - name: Exact frozen client and pinned parser with offline semantic oracle
         run: python .github/scripts/native-bot-check.py frozen
       - name: Preserve validation reports
         if: always()

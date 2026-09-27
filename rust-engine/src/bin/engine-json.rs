@@ -3,6 +3,32 @@ use accelerate_engine::{Action, Color, GameConfig, Position};
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 
+/// Inspect the reader's bounded buffer before extending a request allocation.
+/// Oversized input closes this transport; it is never drained into a giant
+/// temporary string or passed to the rules kernel.
+fn read_request(reader: &mut impl BufRead, limit: usize) -> io::Result<Option<Vec<u8>>> {
+    let mut line = Vec::with_capacity(limit.min(4096));
+    loop {
+        let chunk = reader.fill_buf()?;
+        if chunk.is_empty() {
+            return Ok((!line.is_empty()).then_some(line));
+        }
+        let newline = chunk.iter().position(|byte| *byte == b'\n');
+        let amount = newline.map_or(chunk.len(), |index| index + 1);
+        if amount > limit.saturating_sub(line.len()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "request exceeds 16 MiB limit",
+            ));
+        }
+        line.extend_from_slice(&chunk[..amount]);
+        reader.consume(amount);
+        if newline.is_some() {
+            return Ok(Some(line));
+        }
+    }
+}
+
 fn execute(request: &Value) -> Result<Value, String> {
     let method = request
         .get("method")
@@ -51,27 +77,27 @@ fn execute(request: &Value) -> Result<Value, String> {
 
 fn main() {
     let input = io::stdin();
+    let mut input = input.lock();
     let mut output = io::BufWriter::new(io::stdout().lock());
-    for line in input.lock().lines() {
-        let response = match line {
-            Ok(line) if line.len() <= 16 * 1024 * 1024 => {
-                match serde_json::from_str::<Value>(&line) {
-                    Ok(request) => {
-                        let id = request.get("id").cloned().unwrap_or(Value::Null);
-                        match execute(&request) {
-                            Ok(mut response) => {
-                                response["id"] = id;
-                                response
-                            }
-                            Err(error) => json!({"id":id,"error":error}),
+    loop {
+        let response = match read_request(&mut input, 16 * 1024 * 1024) {
+            Ok(None) => break,
+            Ok(Some(line)) => match serde_json::from_slice::<Value>(&line) {
+                Ok(request) => {
+                    let id = request.get("id").cloned().unwrap_or(Value::Null);
+                    match execute(&request) {
+                        Ok(mut response) => {
+                            response["id"] = id;
+                            response
                         }
+                        Err(error) => json!({"id":id,"error":error}),
                     }
-                    Err(error) => json!({"error":format!("invalid JSON: {error}")}),
                 }
-            }
-            Ok(_) => json!({"error":"request exceeds 16 MiB limit"}),
+                Err(error) => json!({"error":format!("invalid JSON: {error}")}),
+            },
             Err(error) => {
-                eprintln!("stdin: {error}");
+                let _ = writeln!(output, "{}", json!({"error":error.to_string()}));
+                let _ = output.flush();
                 break;
             }
         };
@@ -81,5 +107,29 @@ fn main() {
         {
             break;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn bounded_requests_accept_multiple_lines_and_reject_before_overflow_copy() {
+        let mut reader = io::Cursor::new(b"{}\n[]\n");
+        assert_eq!(
+            read_request(&mut reader, 4).unwrap(),
+            Some(b"{}\n".to_vec())
+        );
+        assert_eq!(
+            read_request(&mut reader, 4).unwrap(),
+            Some(b"[]\n".to_vec())
+        );
+        assert_eq!(read_request(&mut reader, 4).unwrap(), None);
+        let mut reader = io::Cursor::new(b"123456789\n");
+        assert_eq!(
+            read_request(&mut reader, 8).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(reader.position(), 0);
     }
 }

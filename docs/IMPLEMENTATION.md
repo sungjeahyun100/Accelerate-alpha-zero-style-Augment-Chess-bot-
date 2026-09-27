@@ -31,14 +31,14 @@ Hypernetwork는 향후 extension의 생성·적용·병합 가능 여부만 준�
 | 영역 | 실제 구현/관측 | 코드 완성·의미 coverage의 남은 조건 |
 |---|---|---|
 | 사이트·계약 | 동결 loader, v1 schema/JSON validators, 실제 client 초기/draft/전이/종료 adapter 구현 | 전체 256 효과·선택 순서·특수 phase·관측 분류·lazy action 경계 미완료 |
-| Oracle 검사 | depth0 passive settlement·potion 정리·bounded terminal microtask 포함 Node 계약/통합 14개 통과 | 명시 headless profile의 검사이며 전체 catalog 및 populated browser의 future RNG 동등성은 별도 조건 |
+| Oracle 검사 | depth0 passive settlement·potion 정리·bounded terminal microtask·lazy premove·client 전용 loader 포함 Node 계약/통합 16개 통과 | 명시 headless profile의 검사이며 전체 catalog 및 populated browser의 future RNG 동등성은 별도 조건 |
 | 과거 fixture | 349개, 757 sampled action을 최신 worker에 비교 | worker hash 불일치; 최신 client 전체 정답을 대신할 수 없음 |
-| Rust 규칙 | Rust 1.96 단위 21개와 strict lint 통과; normal/chaos 초기 추첨 12개 source 비교 일치 | 선택 뒤 획득·효과·역조건화와 전체 catalog legal/reject/full-next-state/result/RNG 비교 미완료 |
-| PyO3/maturin | 담당자 Linux wheel/FFI checkpoint 검사 존재 | Windows native 검증과 최종 공통 history/관측 재검증은 별도 확인 필요 |
+| Rust 규칙 | Rust 1.96 단위 22개와 bounded JSON CLI 1개·strict lint 통과; normal/chaos 초기 추첨 12개와 regular draft 선택의 source 비교 일치 | 전체 획득·효과와 catalog legal/reject/full-next-state/result/RNG 비교 미완료 |
+| PyO3/maturin | 804d9f4의 Windows/Linux CI에서 실제 sdist→wheel 설치와 native 경계 검사 성공 | 최종 규칙·탐색과 공통 history/관측의 배포 검증 필요 |
 | Python 모델·encoding | 확정된 EncoderSpec 15개 필드, root Windows 모델 7개 검사 통과 | 최종 공개 관측 allowlist와 실제 탐색 입력 통합 필요 |
-| ort/tract | Linux 실제 두 backend에서 확정 계약의 FP32 base/adapter 48개 수치 비교 통과 | Windows 및 최종 source 규칙/탐색과의 통합 실행을 확인해야 함 |
-| ISMCTS·replay·CLI | 공개 trace/particle filter/availability PUCT 구현 중 | 실제 3개 mode 통합, replay·checkpoint·CLI와 bounded 실행·오류 경로 검증이 남음 |
-| CI | foundation 커밋의 구조/기존 engine 검사 성공; 새 native 두 OS job은 Rust 1.96 lint에서 실패 | lint 수정과 historical harness 연결 수정 후 최종 공통 commit에서 wheel/backend 단계까지 원격 성공을 관측해야 함 |
+| ort/tract | Windows/Linux CI에서 각각 실제 두 backend의 FP32 base/adapter 48개 수치 비교 통과 | 최종 source 규칙·탐색과의 통합 실행을 확인해야 함 |
+| ISMCTS·replay·CLI | 공개 trace/particle filter/availability PUCT와 최대 4 leaf batch 연결; core22 설치 wheel의 native 6 + search/session 15개 검사 통과 | 세 default mode의 전체 draft→play·카드 효과·공개 posterior·최종 source 연결을 확인해야 함 |
+| CI | 804d9f4의 구조·기존 engine·historical JS 검사 성공; 두 OS의 Rust 1.96 lint/test와 배포 wheel·실제 추론 19개 검사 성공 | 두 OS의 동결 worker 다운로드 hash 불일치 해결 및 최종 공통 commit 전체 검증 필요 |
 
 다른 영역의 작은 test count나 compile 성공은 해당 checkpoint이며 전체 GO로 승격하지 않는다.
 CI 요청/관측한 성공, Windows/Linux 확인, 모델 export 수치, 실제 semantic coverage를 따로 기록한다.
@@ -49,10 +49,22 @@ skip 0이다. full history와 summary history의 public-intent 모델을 각각 
 `%APPDATA%\Accelerate\reports\native-bot\Linux`에 보관한다. 이 배포 경로와 수치 검사는
 현재 native 규칙 경계의 checkpoint이며 전체 카드 의미 coverage의 증거는 아니다.
 
+공유 커밋 804d9f4의 원격 native CI에서도 Windows/Linux 각각 19개 검사(skip 0)가
+통과했다. full/summary public-intent의 full ResNet 수치 비교 48개에서 최대 절대 오차는
+Linux 1.043081283569336e-6, Windows 1.1324882507324219e-6이다. 이후 두 job 모두
+현재 사이트의 `aiWorker.js`와 동결 원본의 hash가 달라 다운로드 gate에서 실패했다.
+본체 oracle 검사는 그 실행에서 시작되지 않았으며 workflow 전체를 성공으로 표시하지 않는다.
+
 ## 구현 연결 순서와 완료 기준
 
 작업별 담당자는 하나로 유지하고 공통 계약은 담당자끼리 확인한다. 다음 순서는 의존 관계이며,
 각 단계의 통과를 전체 구현 완료로 보고하지 않는다.
+
+Rust 규칙 작업은 기능 경계로 2A와 2B를 나누어 각 담당자 하나를 둔다. 2A는 초기·draft·
+phase·공통 legality·효과 실행·모듈 연결을 담당한다. 2B는 variant 기물의 기본 이동과
+이동 payload 생성만 `variant_movement.rs`에 구현한다. 공통 이동 파일·상태·전이의 소유권은
+2A에 유지하고, 2B의 반환 flag를 실제 전이에서 처리한 뒤에만 해당 기물을 지원 목록에 넣는다.
+기능별 책임 분리이며 파일 크기를 기준으로 추가 파일을 만들지는 않는다.
 
 | 작업 | 전달할 구현 | 완료를 판단하는 코드 증거 |
 |---|---|---|
@@ -106,9 +118,12 @@ fdb08546776ec6228b03e8d02b40d4ab3255bae5f401adba7ff5dad927ac5c9c로 검사한다
 parser와 raw 사이트 번들을 source에 vendoring하지 않는다. 오프라인 실행은 외부 network와
 background timer를 막고 presentation hooks를 분리한다. VM 자체를 보안 sandbox라고 주장하지 않는다.
 
-CI의 실행 의존 파일은 위 동결 client·worker와 parser다. index는 최초 발견 시점의 provenance로
-보존하며 현재 HTML이 바뀌어도 새 main URL을 따라가거나 baseline을 갱신하지 않는다. oracle이
-읽지 않는 index를 실행 hash gate에서 제외하는 경우 원래 provenance를 유지하고 이유를 보고한다.
+본체 oracle은 `loadMain`을 실행하므로 CI의 실행 의존 파일은 위 동결 client와 pinned parser다.
+CI는 별도 고정 slot `site-baseline-client`에 이 둘의 원래 hash·bytes·동결 시각을 검사한다.
+index와 worker는 최초 발견 시점의 provenance를 보존하고 현재 hash·크기·변경 여부를
+`executed: false` 보고서로 분리한다. 현재 HTML의 새 main URL이나 현재 worker를 실행하지 않는다.
+기존 전체 `site-baseline` cache를 덮어쓰지 않으며, 전체 baseline 검사와 `loadWorker`는
+원래 worker가 있어야 통과한다. client 전용 cache에서 worker 비교를 요청하면 명시적으로 실패한다.
 
 오라클의 실행 profile은 `accelerate-headless-semantic-v1`이다. 원래 `renderAll`이 수행하는
 `pruneBoardPotionEffects`를 실행하고 render-local simulation depth를 즉시 복구한다.
@@ -124,6 +139,17 @@ DOM animation·update-log의 난수와 render probe/UI 상태, editor UI·timer�
 populated browser의 미래 RNG까지 증명했다고 보고하지 않는다. seed 11의 실제 초기 cursor는
 normal 122, chaos 212, grand 112다. trolley와 black-box availability predicate가 각각
 14 draw를 소비하는 것처럼 규칙 availability에 필요한 source RNG는 표시용 RNG와 함께 제거하지 않는다.
+
+core22와 최종 Python 연결의 별도 sdist→설치 wheel에서는 native 6 + search/session 15개가
+통과했다(skip·제외 0). 이어 같은 설치 wheel에서 새 CI의 통합 검사 34개가 52.186초에
+통과했고 full ResNet의 두 history 계약·두 실제 backend 수치 비교 48개도 통과했다.
+normal/chaos는 초기 공개 조건화와 첫 draft 선택·posterior 동기화를
+검사했다. CLI는 명시 `draftDelete: true`에서 실제 Rust ort의 4 leaf batch 탐색과 1 ply
+미완료 replay, tract 평가, 명시적 artifact 선택, 취소·전체 deadline 경계를 확인했다.
+SIGINT는 exit 130, 전체 selfplay/train deadline은 exit 2로 전달하며 완료된 탐색 뒤 취소되면
+pending decision을 보존하고 환경 전이를 실행하지 않는다. 개별 search 시간 예산의 정상
+종료와 전체 작업 deadline은 구분한다. synthetic optimizer 1 step과 RNG·shuffle·optimizer
+복원 검사는 학습 캠페인이 아니다. 세 default mode의 전체 게임 통합 증거로 확장하지 않는다.
 
 실제 본체 resetGame/beginInitialGameFlow는 초기 259개 root field를 만든다. 여러 최신 card 효과는
 root field를 lazily 추가하므로 초기 기본값만으로 전체 field 목록이 완성되지는 않는다.

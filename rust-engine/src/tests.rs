@@ -697,6 +697,23 @@ fn initial_public_conditioning_preserves_observation_and_independent_future_chan
         serde_jcs::to_vec(&canonical_sample.try_observe(Color::White).unwrap()).unwrap(),
         serde_jcs::to_vec(&public).unwrap()
     );
+    for style in ["normal", "chaos"] {
+        let config = GameConfig {
+            game_style: style.into(),
+            ..GameConfig::default()
+        };
+        let actual = Position::new_game(config.clone(), 37).unwrap();
+        for viewer in [Color::White, Color::Black] {
+            let expected = actual.try_observe(viewer).unwrap();
+            let canonical = serde_json::from_slice(&serde_jcs::to_vec(&expected).unwrap()).unwrap();
+            let sampled = Position::sample_initial_public(config.clone(), canonical, 71).unwrap();
+            assert_eq!(
+                serde_jcs::to_vec(&sampled.try_observe(viewer).unwrap()).unwrap(),
+                serde_jcs::to_vec(&expected).unwrap()
+            );
+            assert_ne!(sampled.state().rng.state, actual.state().rng.state);
+        }
+    }
 }
 
 #[test]
@@ -810,4 +827,46 @@ fn draft_pool_predicates_preserve_source_shuffle_side_effects() {
         assert_eq!(initial.state().extra["draft"]["choices"][2]["id"], "roller");
         assert_eq!(initial.legal_actions().unwrap().len(), 3);
     }
+}
+
+#[test]
+fn regular_draft_acquisition_enters_play_and_clock_commits_at_turn_boundary() {
+    let initial = Position::new_game(GameConfig::default(), 37).unwrap();
+    let choose = |position: &Position, card_id: &str| {
+        let id = position.state().extra["draft"]["choices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|card| card["id"] == card_id)
+            .unwrap()["instanceId"]
+            .clone();
+        let action = position
+            .bind_payload(json!({"type":"draftPick","color":position.actor(),"cardInstanceId":id}))
+            .unwrap();
+        position.apply(&action).unwrap().position
+    };
+    let black_offer = choose(&initial, "corner-kick");
+    assert_eq!(black_offer.actor(), Color::Black);
+    assert!(black_offer.state().flag("cornerKick", Color::White));
+    assert!(black_offer.state().deck_slots.white[0].used);
+    assert_eq!(black_offer.state().rng.cursor, 214);
+    let play = choose(&black_offer, "reaper");
+    assert_eq!(play.state().mode, "play");
+    assert_eq!(play.state().rng.cursor, 216);
+    assert_eq!(play.state().extra["clock"]["runningColor"], "white");
+    assert_eq!(play.state().extra["clock"]["whiteMs"], 300000);
+    let action = play.bind_payload(json!({"type":"move","color":"white","from":{"row":6,"col":0},"move":{"row":5,"col":0}})).unwrap();
+    let moved = play.apply(&action).unwrap().position;
+    assert_eq!(moved.actor(), Color::Black);
+    assert_eq!(moved.state().rng.cursor, 217);
+    assert_eq!(moved.state().extra["clock"]["runningColor"], "black");
+    assert_eq!(
+        moved.state().extra["clock"]["whiteMs"].as_f64(),
+        Some(310000.0)
+    );
+    assert_eq!(
+        moved.state().extra["lastMove"]["from"],
+        json!({"row":6,"col":0})
+    );
+    assert_eq!(initial.state().extra["clock"]["runningColor"], Value::Null);
 }
