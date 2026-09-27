@@ -73,6 +73,7 @@ node tools/ci/golden-eval.js   # 평가 함수 회귀 검사
 - [docs/ROADMAP.md](docs/ROADMAP.md): 단계별 구현 순서
 - [docs/DECISIONS.md](docs/DECISIONS.md): 합의된 결정과 이유
 - [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md): 실험 기록
+- [docs/research/TEMPLATE.md](docs/research/TEMPLATE.md): 공동 연구 영수증의 범용 Markdown 템플릿
 - [docs/GAME-RULES.md](docs/GAME-RULES.md): 게임 규칙 요약
 
 ## 프로젝트 목표와 팀
