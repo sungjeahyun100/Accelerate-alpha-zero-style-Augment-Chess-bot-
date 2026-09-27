@@ -48,6 +48,12 @@ def test_direct_calls_match_versioned_json_and_preserve_source_presence():
     assert position.position_id == _digest(content)
     restored = Position.from_json(position.to_json())
     assert restored.snapshot() == snapshot == Position.from_snapshot(snapshot).snapshot()
+    numeric = deepcopy(snapshot)
+    numeric["rng"]["tape"] = [0.0, 0.5]
+    numeric["positionId"] = _digest({k: v for k, v in numeric.items() if k != "positionId"})
+    canonical_snapshot = json.loads(jcs.canonicalize(numeric))
+    canonical_restored = Position.from_snapshot(canonical_snapshot)
+    assert jcs.canonicalize(canonical_restored.snapshot()) == jcs.canonicalize(numeric)
     action = _move(position, (6, 0), (5, 0))
     assert action.action_id == _digest(action.as_payload())
     assert "positionKey" not in action.as_payload()

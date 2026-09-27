@@ -691,6 +691,12 @@ fn initial_public_conditioning_preserves_observation_and_independent_future_chan
     .unwrap();
     assert_eq!(independent.try_observe(Color::White).unwrap(), public);
     assert_ne!(independent.state().rng.state, source.state().rng.state);
+    let canonical = serde_json::from_slice(&serde_jcs::to_vec(&public).unwrap()).unwrap();
+    let canonical_sample = Position::sample_initial_public(kernel_config(), canonical, 91).unwrap();
+    assert_eq!(
+        serde_jcs::to_vec(&canonical_sample.try_observe(Color::White).unwrap()).unwrap(),
+        serde_jcs::to_vec(&public).unwrap()
+    );
 }
 
 #[test]
@@ -740,4 +746,68 @@ fn identity_conditioning_relabels_existing_references_and_rejects_semantic_misma
         conditioned.condition_public_identities(malformed),
         Err(EngineError::InvalidState(_))
     ));
+}
+
+#[test]
+fn draft_pool_predicates_preserve_source_shuffle_side_effects() {
+    let source = Position::new_game(kernel_config(), 11).unwrap();
+    let mut rejected = Vec::new();
+    for card in &crate::draft::definitions().definitions {
+        let mut state = source.state().clone();
+        let accepted = crate::eligibility::draft_drawable(&mut state, card, Color::White).unwrap();
+        let id = card["id"].as_str().unwrap();
+        if !accepted {
+            rejected.push(id);
+        }
+        assert_eq!(
+            state.rng.cursor - source.state().rng.cursor,
+            if matches!(id, "black-box" | "trolley") {
+                14
+            } else {
+                0
+            },
+            "{id}"
+        );
+    }
+    rejected.sort_unstable();
+    assert_eq!(
+        rejected,
+        vec![
+            "conscription",
+            "emergency-evacuation",
+            "exile",
+            "outpost",
+            "schrodinger-pawns",
+            "traitor"
+        ]
+    );
+    for (style, cursor, count) in [("normal", 122, 3), ("chaos", 212, 6)] {
+        let initial = Position::new_game(
+            GameConfig {
+                game_style: style.into(),
+                ..GameConfig::default()
+            },
+            11,
+        )
+        .unwrap();
+        assert_eq!(initial.state().rng.cursor, cursor);
+        assert_eq!(initial.actor(), Color::White);
+        assert_eq!(
+            initial.state().extra["draft"]["choices"]
+                .as_array()
+                .unwrap()
+                .len(),
+            count
+        );
+        assert_eq!(
+            initial.state().extra["draft"]["choices"][0]["id"],
+            "trickster"
+        );
+        assert_eq!(
+            initial.state().extra["draft"]["choices"][1]["id"],
+            "encouragement"
+        );
+        assert_eq!(initial.state().extra["draft"]["choices"][2]["id"], "roller");
+        assert_eq!(initial.legal_actions().unwrap().len(), 3);
+    }
 }

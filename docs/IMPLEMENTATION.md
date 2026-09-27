@@ -31,14 +31,14 @@ Hypernetwork는 향후 extension의 생성·적용·병합 가능 여부만 준�
 | 영역 | 실제 구현/관측 | 코드 완성·의미 coverage의 남은 조건 |
 |---|---|---|
 | 사이트·계약 | 동결 loader, v1 schema/JSON validators, 실제 client 초기/draft/전이/종료 adapter 구현 | 전체 256 효과·선택 순서·특수 phase·관측 분류·lazy action 경계 미완료 |
-| Oracle 검사 | depth0 actual passive settlement 포함 Node 계약/통합 12개 통과 | 짧은 기본 환경 검사. renderAll의 potion 정리, terminal microtask와 presentation RNG 범위의 보완이 필요함 |
+| Oracle 검사 | depth0 passive settlement·potion 정리·bounded terminal microtask 포함 Node 계약/통합 14개 통과 | 명시 headless profile의 검사이며 전체 catalog 및 populated browser의 future RNG 동등성은 별도 조건 |
 | 과거 fixture | 349개, 757 sampled action을 최신 worker에 비교 | worker hash 불일치; 최신 client 전체 정답을 대신할 수 없음 |
-| Rust 규칙 | 순수 Rust 구현 진행, 담당자 로컬 compile/단위 검사 checkpoint 존재 | 전체 catalog legal/reject/full-next-state/result/RNG 비교 미완료 |
+| Rust 규칙 | Rust 1.96 단위 21개와 strict lint 통과; normal/chaos 초기 추첨 12개 source 비교 일치 | 선택 뒤 획득·효과·역조건화와 전체 catalog legal/reject/full-next-state/result/RNG 비교 미완료 |
 | PyO3/maturin | 담당자 Linux wheel/FFI checkpoint 검사 존재 | Windows native 검증과 최종 공통 history/관측 재검증은 별도 확인 필요 |
 | Python 모델·encoding | 확정된 EncoderSpec 15개 필드, root Windows 모델 7개 검사 통과 | 최종 공개 관측 allowlist와 실제 탐색 입력 통합 필요 |
 | ort/tract | Linux 실제 두 backend에서 확정 계약의 FP32 base/adapter 48개 수치 비교 통과 | Windows 및 최종 source 규칙/탐색과의 통합 실행을 확인해야 함 |
 | ISMCTS·replay·CLI | 공개 trace/particle filter/availability PUCT 구현 중 | 실제 3개 mode 통합, replay·checkpoint·CLI와 bounded 실행·오류 경로 검증이 남음 |
-| CI | 기존 구조/fixture validator 실행 경로 유지 | 이번 feature 최종 로컬 검사·원격 CI 관측은 아직 전체 완료 증거가 아님 |
+| CI | foundation 커밋의 구조/기존 engine 검사 성공; 새 native 두 OS job은 Rust 1.96 lint에서 실패 | lint 수정과 historical harness 연결 수정 후 최종 공통 commit에서 wheel/backend 단계까지 원격 성공을 관측해야 함 |
 
 다른 영역의 작은 test count나 compile 성공은 해당 checkpoint이며 전체 GO로 승격하지 않는다.
 CI 요청/관측한 성공, Windows/Linux 확인, 모델 export 수치, 실제 semantic coverage를 따로 기록한다.
@@ -110,11 +110,20 @@ CI의 실행 의존 파일은 위 동결 client·worker와 parser다. index는 �
 보존하며 현재 HTML이 바뀌어도 새 main URL을 따라가거나 baseline을 갱신하지 않는다. oracle이
 읽지 않는 index를 실행 hash gate에서 제외하는 경우 원래 provenance를 유지하고 이유를 보고한다.
 
-현재 presentation hook 분리는 의미 보존 검토가 완료되지 않았다. `renderAll`은
-`pruneBoardPotionEffects`를 통해 실제 기물 상태를 정리하며, terminal replay microtask에는
-추가 정산과 notation ID용 RNG 소비가 있다. DOM 유무에 따라 animation/log의 RNG 소비도 달라진다.
-이 경로를 모두 무조건 no-op으로 처리한 결과는 전체 future RNG/state 동등성의 근거가 될 수 없다.
-후속 adapter는 rule 정리와 queued settlement를 보존하고 presentation RNG의 비교 범위를 명시해야 한다.
+오라클의 실행 profile은 `accelerate-headless-semantic-v1`이다. 원래 `renderAll`이 수행하는
+`pruneBoardPotionEffects`를 실행하고 render-local simulation depth를 즉시 복구한다.
+종료 rule ticket 정리와 원래 queued replay settlement를 보존하며 snapshot 전에 최대 256개
+microtask를 FIFO로 처리한다. 이전 position을 복원하면 그 position의 미실행 callback을 버린다.
+조건부 notation ID 생성의 실제 RNG 소비도 보존한다. 순수 renderer라고 추정해 전체 hook을
+무조건 no-op으로 처리하지 않는다.
+
+DOM animation·update-log의 난수와 render probe/UI 상태, editor UI·timer·network persistence는
+이 profile에서 제외한다. grand insertion은 원래 null-ghost reveal 경로를 실행한다.
+`browserFutureRngEquality: false`를 명시하고 저장된 상태의 난수 ID를 정규화하지 않는다.
+비교는 이 명시 headless profile을 양측에 적용하며 모든 renderer의 전이적 순수성이나
+populated browser의 미래 RNG까지 증명했다고 보고하지 않는다. seed 11의 실제 초기 cursor는
+normal 122, chaos 212, grand 112다. trolley와 black-box availability predicate가 각각
+14 draw를 소비하는 것처럼 규칙 availability에 필요한 source RNG는 표시용 RNG와 함께 제거하지 않는다.
 
 실제 본체 resetGame/beginInitialGameFlow는 초기 259개 root field를 만든다. 여러 최신 card 효과는
 root field를 lazily 추가하므로 초기 기본값만으로 전체 field 목록이 완성되지는 않는다.
@@ -159,10 +168,31 @@ node infra/tools/site-parity/compare-frozen-fixtures.js
 node infra/tools/site-parity/audit-card-surface.js
 ```
 
-최종 checkpoint의 depth0 계약/통합 검사는 12개 통과다. 3종 실제 draft lifecycle, passive
+현재 checkpoint의 depth0 계약/통합 검사는 14개 통과, skip 0이다. 3종 실제 draft lifecycle, passive
 settlement, 초기 20개 이동/공개 hint, RNG snapshot 복원, wrong actor 거부, private RNG/hidden
 기물 변화에 대한 관측 불변성, 실제 킹 포획 terminal을 검사했다. schema 예시는 18 valid+6 invalid,
 전체 8 schemas를 검사한다. 변경된 strict public event·safe integer/depth/node 경계도 기존 검사에 보탰다.
+potion cleanup, terminal chain 정리·replay 기록·conditional notation RNG·중복/stale microtask와
+callback 한도는 기존 검사 파일의 작은 생성 입력으로 확인했다. 전체 게임 fixture를 추가하지 않았다.
+
+foundation native CI는 Windows 2025와 Ubuntu 24.04에서 Rust 1.96의
+`clippy::nonminimal_bool`에 실패해 wheel/backend 단계가 실행되지 않았다. 로컬 Rust 1.97의
+성공을 minimum toolchain의 성공으로 간주하지 않는다. 기존 differential workflow의 Cargo.toml
+자동 탐지는 존재하지 않는 placeholder binary를 실행했으므로 원래 JS 서버를 쓰는
+`Historical JS fixture harness`로 범위를 명시했다. 이 harness의 300개 성공은 과거 fixture와
+JS harness 검증이며 실제 동결 client↔Rust 정답 비교 gate를 대체하지 않는다.
+
+후속 core checkpoint는 실제 Rust 1.96의 단위 검사 21개, strict clippy와 formatting이
+통과했다. source의 availability predicate와 weighted draw를 포팅해 normal/chaos 각각
+seed 0·1·11·37·71·91에서 초기 offer의 종류·순서·instance ID와 RNG 전체가 일치했다.
+chaos seed 0의 금지 묶음 교체는 cursor 242, 다른 검사 chaos는 212, normal은 122다.
+seed 11의 두 모드·양측 viewer 공개 frame 4개도 JCS 및 informationStateKey까지 일치했다.
+이는 초기 draw 경계의 증거이며 선택 뒤 효과, 전체 private state 또는 전체 catalog의 증거가 아니다.
+JCS 기준으로 같은 공개 숫자가 `0.0`/`0`으로 직렬화돼도 conditioning과 native snapshot이
+같은 의미로 복원되도록 비교하며 실제 의미·shape·필드가 바뀐 입력은 계속 거부한다.
+검증한 소스를 캡처한 sdist에서 만든 Rust 1.96 Linux wheel의 native 검사 6개도 통과했고
+skip은 없다. root가 같은 캡처 소스의 workspace 전체에 실행한 Rust 1.96 strict clippy와
+formatting도 통과했다. 진행 중인 live checkout의 이후 변경이나 Windows 검증으로 확대하지 않는다.
 
 과거 fixture는 349개/757 sampled action, 행동 목록 340/349, 행동 수용 757/757,
 result 753/757, full state 0/757이다. 신규 revolvingDoorGuard/september27CopyPools 같은 root

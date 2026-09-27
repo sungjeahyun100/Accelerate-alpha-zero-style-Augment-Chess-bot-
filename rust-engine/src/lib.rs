@@ -1,6 +1,7 @@
 //! Independent rules and immutable snapshots. No language or inference runtime is used here.
 mod conditioning;
 mod draft;
+mod eligibility;
 mod flow;
 mod movement;
 mod state;

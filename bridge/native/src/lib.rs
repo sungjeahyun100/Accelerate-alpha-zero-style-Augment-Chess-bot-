@@ -45,10 +45,12 @@ fn error(error: EngineError) -> PyErr {
 fn value<T: Serialize>(value: &T) -> PyResult<Value> {
     serde_json::to_value(value).map_err(|e| NativeError::new_err(e.to_string()))
 }
-fn digest(value: &Value) -> PyResult<String> {
+fn canonical_bytes(value: &Value) -> PyResult<Vec<u8>> {
     conversion::validate(value)?;
-    let bytes = serde_jcs::to_vec(value).map_err(|e| NativeError::new_err(e.to_string()))?;
-    Ok(format!("{:x}", Sha256::digest(bytes)))
+    serde_jcs::to_vec(value).map_err(|e| NativeError::new_err(e.to_string()))
+}
+fn digest(value: &Value) -> PyResult<String> {
+    Ok(format!("{:x}", Sha256::digest(canonical_bytes(value)?)))
 }
 fn color(color: &str) -> PyResult<Color> {
     match color {
@@ -279,7 +281,7 @@ impl Position {
                 .with_metadata(rng, history)
                 .map_err(error)?,
         )?;
-        if imported.envelope != Arc::new(snapshot) {
+        if canonical_bytes(imported.envelope.as_ref())? != canonical_bytes(&snapshot)? {
             return Err(PyValueError::new_err(
                 "snapshot is not canonical engine state; use from_state for explicit initialization/normalization",
             ));

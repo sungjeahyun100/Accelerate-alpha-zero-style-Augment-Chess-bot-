@@ -5,11 +5,11 @@ use serde_json::{Value, json};
 use std::{collections::BTreeSet, sync::OnceLock};
 
 #[derive(Deserialize)]
-struct Definitions {
-    definitions: Vec<Value>,
-    constants: Value,
+pub(crate) struct Definitions {
+    pub(crate) definitions: Vec<Value>,
+    pub(crate) constants: Value,
 }
-fn definitions() -> &'static Definitions {
+pub(crate) fn definitions() -> &'static Definitions {
     static DATA: OnceLock<Definitions> = OnceLock::new();
     DATA.get_or_init(|| {
         serde_json::from_str(include_str!(
@@ -69,7 +69,7 @@ fn weights() -> &'static Weights {
             .expect("adopted draft weights")
     })
 }
-fn category(card: &Value) -> &str {
+pub(crate) fn category(card: &Value) -> &str {
     weights()
         .weights
         .iter()
@@ -166,7 +166,7 @@ fn weighted_pick<'a>(
     }
     Ok(pool.last().copied())
 }
-fn conflicts(id: &str, unavailable: &BTreeSet<String>) -> bool {
+pub(crate) fn conflicts(id: &str, unavailable: &BTreeSet<String>) -> bool {
     definitions().constants["LATEST_MUTUALLY_EXCLUSIVE_DRAFT_CARD_GROUPS"]
         .as_array()
         .expect("conflict groups")
@@ -227,6 +227,265 @@ fn grand_pool(state: &mut GameState) -> Result<Vec<Value>> {
         choices.extend(picked);
     }
     Ok(choices)
+}
+
+fn acquired_ids(state: &GameState) -> BTreeSet<String> {
+    [Color::White, Color::Black]
+        .into_iter()
+        .flat_map(|color| state.deck_slots.get(color))
+        .filter(|card| !card.vacant)
+        .map(|card| card.id.clone())
+        .collect()
+}
+fn draw_mixed(
+    state: &mut GameState,
+    categories: &[&str],
+    count: usize,
+    color: Color,
+    excluded: &BTreeSet<String>,
+    opening: bool,
+) -> Result<Vec<Value>> {
+    let owned = acquired_ids(state);
+    let mut unavailable = owned.clone();
+    unavailable.extend(excluded.iter().cloned());
+    let mut picked = Vec::new();
+    for _ in 0..count {
+        let mut pool = Vec::new();
+        for card in &definitions().definitions {
+            let id = card["id"].as_str().expect("id");
+            if id == "shotgun-king"
+                || owned.contains(id)
+                || unavailable.contains(id)
+                || conflicts(id, &unavailable)
+                || !categories.contains(&category(card))
+            {
+                continue;
+            }
+            if crate::eligibility::draft_drawable(state, card, color)? {
+                pool.push(card);
+            }
+        }
+        let Some(card) = weighted_pick(state, &pool, opening)? else {
+            break;
+        };
+        picked.push(clone_card(state, card)?);
+        unavailable.insert(card["id"].as_str().expect("id").into());
+    }
+    Ok(picked)
+}
+fn exclusive_opening(card: &Value) -> bool {
+    definitions().constants["EXCLUSIVE_OPENING_CARD_IDS"]
+        .as_array()
+        .expect("ids")
+        .contains(&card["id"])
+}
+fn forbidden_bundle(first: &Value, second: &Value) -> bool {
+    (category(first) == "OPENING" && category(second) == "OPENING")
+        || (first["id"] == "democracy" && second["id"] == "queens-gambit")
+        || (first["id"] == "queens-gambit" && second["id"] == "democracy")
+}
+fn arrange_chaos(
+    state: &mut GameState,
+    mut choices: Vec<Value>,
+    color: Color,
+) -> Result<Vec<Value>> {
+    if choices.len() != 6 {
+        return Ok(choices);
+    }
+    for start in (0..6).step_by(2) {
+        if !forbidden_bundle(&choices[start], &choices[start + 1]) {
+            continue;
+        }
+        let swap = (0..6).find(|&index| {
+            if index / 2 == start / 2 {
+                return false;
+            }
+            let partner = if index % 2 == 0 { index + 1 } else { index - 1 };
+            !forbidden_bundle(&choices[start], &choices[index])
+                && !forbidden_bundle(&choices[start + 1], &choices[partner])
+        });
+        if let Some(swap) = swap {
+            choices.swap(start + 1, swap);
+        } else {
+            let excluded = choices
+                .iter()
+                .filter_map(|c| c["id"].as_str().map(str::to_owned))
+                .collect();
+            if let Some(card) =
+                draw_mixed(state, &["MIDDLE", "PIECE"], 1, color, &excluded, false)?.pop()
+            {
+                choices[start + 1] = card;
+            }
+        }
+    }
+    for start in (0..6).step_by(2) {
+        let Some(exclusive) = (start..start + 2).find(|&index| exclusive_opening(&choices[index]))
+        else {
+            continue;
+        };
+        let partner = if exclusive == start { start + 1 } else { start };
+        if category(&choices[partner]) != "OPENING" {
+            continue;
+        }
+        let partner_exclusive = exclusive_opening(&choices[partner]);
+        let swap = (0..6).find(|&index| {
+            if index / 2 == start / 2 || category(&choices[index]) == "OPENING" {
+                return false;
+            }
+            let source = index / 2 * 2;
+            if choices[source..source + 2].iter().any(exclusive_opening) {
+                return false;
+            }
+            let other = if index % 2 == 0 { index + 1 } else { index - 1 };
+            !partner_exclusive || category(&choices[other]) != "OPENING"
+        });
+        if let Some(swap) = swap {
+            choices.swap(partner, swap);
+        } else {
+            let excluded = choices
+                .iter()
+                .filter_map(|c| c["id"].as_str().map(str::to_owned))
+                .collect();
+            if let Some(card) =
+                draw_mixed(state, &["MIDDLE", "PIECE"], 1, color, &excluded, false)?.pop()
+            {
+                choices[partner] = card;
+            }
+        }
+    }
+    Ok(choices)
+}
+fn draw_raw(state: &mut GameState, phase: &str, count: usize, color: Color) -> Result<Vec<Value>> {
+    let mut excluded = BTreeSet::new();
+    let mut choices = match phase {
+        "OPENING" => draw_mixed(
+            state,
+            &["OPENING", "MIDDLE", "PIECE"],
+            count,
+            color,
+            &excluded,
+            true,
+        )?,
+        "MIDDLE" => {
+            let pieces = ((count as f64 / 3.0).round() as usize).max(1);
+            let mut choices = Vec::new();
+            for (category, count) in [("MIDDLE", count - pieces), ("PIECE", pieces)] {
+                for card in draw_mixed(state, &[category], count, color, &excluded, false)? {
+                    excluded.insert(card["id"].as_str().expect("id").into());
+                    choices.push(card);
+                }
+            }
+            if choices.len() < count {
+                choices.extend(draw_mixed(
+                    state,
+                    &["MIDDLE", "PIECE"],
+                    count - choices.len(),
+                    color,
+                    &excluded,
+                    false,
+                )?);
+            }
+            choices
+        }
+        "END" => draw_mixed(state, &["MIDDLE", "END"], count, color, &excluded, false)?,
+        other => draw_mixed(state, &[other], count, color, &excluded, false)?,
+    };
+    if state.extra.get("gameStyle").and_then(Value::as_str) == Some("chaos") {
+        choices = arrange_chaos(state, choices, color)?;
+    }
+    Ok(choices)
+}
+fn average_score(choices: &[Value]) -> Option<f64> {
+    (!choices.is_empty()).then(|| {
+        choices
+            .iter()
+            .map(|card| (card["stars"].as_f64().unwrap_or(0.0) * 2.0).round())
+            .sum::<f64>()
+            / choices.len() as f64
+    })
+}
+fn draw_choices(
+    state: &mut GameState,
+    phase: &str,
+    count: usize,
+    color: Color,
+) -> Result<Vec<Value>> {
+    let mut best = draw_raw(state, phase, count, color)?;
+    let target = state
+        .extra
+        .get("draftBalance")
+        .filter(|balance| color == Color::Black && balance["phase"] == phase)
+        .and_then(|balance| balance["averageScore"].as_f64());
+    let Some(target) = target else {
+        return Ok(best);
+    };
+    if best.len() < 2 {
+        return Ok(best);
+    }
+    let mut best_gap = (average_score(&best).unwrap_or(target) - target).abs();
+    if best_gap <= 2.0 {
+        return Ok(best);
+    }
+    for _ in 0..2 {
+        let candidate = draw_raw(state, phase, count, color)?;
+        if candidate.is_empty() {
+            continue;
+        }
+        let gap = (average_score(&candidate).unwrap_or(target) - target).abs();
+        if gap < best_gap {
+            best = candidate;
+            best_gap = gap;
+            if best_gap <= 2.0 {
+                break;
+            }
+        }
+    }
+    Ok(best)
+}
+pub(crate) fn start_draft(state: &mut GameState, color: Color, phase: &str) -> Result<()> {
+    state.mode = "draft".into();
+    state.turn = color;
+    for field in ["draftLocked", "draftBoardPreview"] {
+        state.extra.insert(field.into(), json!(false));
+    }
+    for field in [
+        "draftPreviewCardId",
+        "draftPreviewBundleIndex",
+        "selected",
+        "targeting",
+        "wizardSpell",
+    ] {
+        state.extra.insert(field.into(), Value::Null);
+    }
+    for field in ["legalMoves", "wizardPreview", "shotgunPreview"] {
+        state.extra.insert(field.into(), json!([]));
+    }
+    state.extra.insert("shotgunAction".into(), json!("move"));
+    let count = if state.extra.get("gameStyle").and_then(Value::as_str) == Some("chaos") {
+        6
+    } else {
+        3
+    };
+    let choices = draw_choices(state, phase, count, color)?;
+    if choices.is_empty() {
+        return Err(EngineError::UnsupportedFeature(
+            "empty draft skip settlement".into(),
+        ));
+    }
+    if phase == "OPENING"
+        && state.move_count == 0
+        && choices.iter().any(|card| category(card) == "OPENING")
+    {
+        state
+            .extra
+            .entry("openingAutoNoticeShown")
+            .or_insert_with(|| json!({"white":false,"black":false}))[color.as_str()] = json!(true);
+    }
+    state.extra.insert(
+        "draft".into(),
+        json!({"color":color,"phase":phase,"choices":choices,"tutorial":false}),
+    );
+    Ok(())
 }
 pub(crate) fn condition_grand_initial_choices(
     state: &mut GameState,
@@ -358,9 +617,7 @@ pub(crate) fn initialize(config: GameConfig, seed: u64) -> Result<GameState> {
         let choices = grand_pool(&mut state)?;
         state.extra.insert("draft".into(),json!({"kind":"grand","version":1,"phase":"GRAND","color":"black","choices":choices,"picks":[],"pickIndex":0}));
     } else {
-        return Err(EngineError::UnsupportedFeature(
-            "weighted normal/chaos draft eligibility".into(),
-        ));
+        start_draft(&mut state, Color::White, "OPENING")?;
     }
     Ok(state)
 }
@@ -371,9 +628,48 @@ pub(crate) fn legal_actions(state: &GameState) -> Result<Vec<Action>> {
         .get("draft")
         .ok_or_else(|| EngineError::InvalidState("draft phase missing offer".into()))?;
     if draft.get("kind").and_then(Value::as_str) != Some("grand") {
-        return Err(EngineError::UnsupportedFeature(
-            "normal/chaos draft transition".into(),
-        ));
+        let color: Color =
+            serde_json::from_value(draft["color"].clone()).map_err(EngineError::serialization)?;
+        let choices = draft["choices"]
+            .as_array()
+            .ok_or_else(|| EngineError::InvalidState("draft choices missing".into()))?;
+        let chaos = state.extra.get("gameStyle").and_then(Value::as_str) == Some("chaos");
+        let step = if chaos { 2 } else { 1 };
+        return choices
+            .chunks(step)
+            .enumerate()
+            .map(|(index, cards)| {
+                let mut action = Action::movement(
+                    color,
+                    Square { row: 0, col: 0 },
+                    MoveTarget::at(Square { row: 0, col: 0 }),
+                );
+                action.from = None;
+                action.destination = None;
+                if chaos {
+                    action.kind = ActionKind::DraftBundlePick;
+                    action.extra.insert("bundleIndex".into(), json!(index));
+                    action.extra.insert(
+                        "cardInstanceIds".into(),
+                        json!(
+                            cards
+                                .iter()
+                                .map(|c| c["instanceId"].clone())
+                                .collect::<Vec<_>>()
+                        ),
+                    );
+                } else {
+                    action.kind = ActionKind::DraftPick;
+                    action.card_instance_id = Some(
+                        cards[0]["instanceId"]
+                            .as_str()
+                            .ok_or(EngineError::IllegalAction)?
+                            .into(),
+                    );
+                }
+                Ok(action)
+            })
+            .collect();
     }
     let color: Color =
         serde_json::from_value(draft["color"].clone()).map_err(EngineError::serialization)?;
@@ -399,12 +695,13 @@ pub(crate) fn legal_actions(state: &GameState) -> Result<Vec<Action>> {
         .ok_or_else(|| EngineError::InvalidState("grand choices missing".into()))?
         .iter()
         .filter(|card| {
-            !picks
+            let already_picked = picks
                 .iter()
-                .any(|pick| pick["instanceId"] == card["instanceId"])
-                && !conflicts(card["id"].as_str().expect("card id"), &owned)
-                && !(exclusive.contains(&card["id"])
-                    && owned.iter().any(|id| exclusive.contains(&json!(id))))
+                .any(|pick| pick["instanceId"] == card["instanceId"]);
+            let conflicts_with_owned = conflicts(card["id"].as_str().expect("card id"), &owned);
+            let exclusive_opening_conflict = exclusive.contains(&card["id"])
+                && owned.iter().any(|id| exclusive.contains(&json!(id)));
+            !(already_picked || conflicts_with_owned || exclusive_opening_conflict)
         })
         .map(|card| {
             let mut action = Action::movement(

@@ -1,7 +1,7 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { OfflineOracle } = require("./offline-oracle");
+const { OfflineOracle, HEADLESS_PROFILE } = require("./offline-oracle");
 const contract = require("../../../bridge/tools/runtime-contract");
 const { validate, resolveRef } = require("../../../bridge/tools/validate");
 const oracle = new OfflineOracle(); // Deliberately fail when the adopted external baseline is unavailable.
@@ -44,6 +44,60 @@ test("actual draft acquisition applies passive effects outside AI simulation", (
   const acquired = p.state.deckSlots[owner].find(card => card?.id === "d4");
   assert.equal(acquired.passiveApplied, true); assert.equal(acquired.used, true);
   assert.equal(oracle.observe(p, "black").publicState.d4[owner], true);
+  assert.equal(oracle.evaluate("aiSimulationDepth"), 0);
+});
+test("headless render retains source potion cleanup without inventing DOM RNG", () => {
+  const initial = oracle.newGame({ draftDelete: true }, 41), state = contract.jsonCopy(initial.state);
+  const active = state.board[6][0], expired = state.board[0][0];
+  active.potionEffects = ["poisonStun", "poisonStun", "basicTraining", "unknown-effect"];
+  active.poisonStunTurns = 1; active.basicTraining = false;
+  expired.potionEffects = ["poisonStun"]; expired.poisonStunTurns = 0;
+  const input = contract.position(state, initial.rng);
+  oracle.restore(input);
+  oracle.evaluate("renderAll()");
+  const cleaned = oracle.snapshot();
+  assert.deepEqual(cleaned.state.board[6][0].potionEffects, ["poisonStun"]);
+  assert.equal(Object.hasOwn(cleaned.state.board[0][0], "potionEffects"), false);
+  assert.deepEqual(cleaned.rng, input.rng);
+  assert.equal(oracle.evaluate("aiSimulationDepth"), 0);
+  assert.equal(input.state.board[6][0].potionEffects.length, 4);
+  assert.equal(HEADLESS_PROFILE.browserFutureRngEquality, false);
+  oracle.restore(input);
+  oracle.evaluate("pruneBoardPotionEffects(state.board)");
+  assert.deepEqual(oracle.snapshot().state, cleaned.state);
+});
+test("terminal microtasks retain source replay, chain cleanup and conditional notation RNG", () => {
+  const initial = oracle.newGame({ draftDelete: true }, 45), state = contract.jsonCopy(initial.state);
+  state.mode = "gameover"; state.winner = "white";
+  state.chainBonds = [{ id: "distant-bond", aId: state.board[7][4].id, bId: state.board[0][4].id, by: "white" }];
+  state.ruleTicketChoice = { color: "white" };
+  state.pendingNotation = { id: "terminal-known", kind: "special", color: "white", text: "terminal", description: "terminal" };
+  const input = contract.position(state, initial.rng);
+  oracle.restore(input);
+  oracle.evaluate("renderAll();scheduleGameOverReplayRecord();scheduleGameOverReplayRecord()");
+  assert.equal(oracle.evaluate("__microtasks.length"), 1);
+  assert.equal(oracle.state().chainBonds.length, 1, "settlement is queued, not synchronous");
+  const settled = oracle.snapshot();
+  assert.deepEqual(settled.state.chainBonds, []);
+  assert.equal(settled.state.ruleTicketChoice, null);
+  assert.equal(settled.state.pendingNotation, null);
+  assert.equal(settled.state.boardHistory.at(-1).label, "gameover");
+  assert.deepEqual(settled.rng, input.rng, "this terminal record has no conditional card notation draw");
+  assert.deepEqual(oracle.snapshot(), settled, "a second snapshot does not run settlement twice");
+  // The actual recorder conditionally creates card IDs, consuming source RNG
+  // even when an existing pending notation is ultimately selected instead.
+  oracle.restore(input);
+  oracle.evaluate("queueMicrotask(()=>recordBoardHistory('gameover',{cardAnimation:{name:'known-card',color:'white'}}))");
+  const withNotationDraw = oracle.snapshot();
+  assert.deepEqual(withNotationDraw.rng, contract.nextRandom(input.rng).rng);
+  assert.equal(withNotationDraw.state.notationEvent.id, "terminal-known");
+  oracle.restore(input);
+  oracle.evaluate("scheduleGameOverReplayRecord()");
+  oracle.restore(initial);
+  assert.deepEqual(oracle.snapshot(), initial, "restoration discards callbacks owned by the prior candidate");
+  oracle.evaluate("queueMicrotask(function repeat(){queueMicrotask(repeat)})");
+  assert.throws(() => oracle.snapshot(), /microtask budget exceeded/);
+  oracle.restore(initial);
 });
 test("hidden piece and private RNG changes do not change viewer projection", () => {
   const p = oracle.newGame({ draftDelete: true }, 42), a = contract.jsonCopy(p.state), b = contract.jsonCopy(p.state);

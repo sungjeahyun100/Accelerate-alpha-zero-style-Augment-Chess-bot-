@@ -2,9 +2,11 @@
 
 증강체스(augmentchess.org, 카드와 특수 기물이 있는 체스 변형)를 위한 AlphaZero 방식 AI를 만드는 팀 프로젝트입니다.
 
-현재 JS oracle, JSON bridge 초안·예시 검사, 비교 fixture·하네스와 C++ 포팅 참고 초안이 있습니다.
-Rust 엔진·Python AlphaZero·PyO3/maturin 패키지·ResNet/ONNX는 구현 전입니다.
-저장소·에이전트 규약과 새 ML 연동 설계를 추가하며, 설계 채택과 구현 완료를 구분합니다.
+동결 사이트 client를 실행하는 offline oracle, 순수 Rust 규칙 엔진의 일부 기능,
+PyO3/maturin 패키지, 공개 관측 인코딩과 ResNet·FiLM·LoRA·ONNX 추론이 구현됐습니다.
+공개 정보 기반 탐색·replay·유한 CLI를 연결하는 중이며 전체 규칙 coverage와 최종 통합은
+완료되지 않았습니다. 전체 판정은 **NO-GO**이고, 관측한 검사와 남은 코드 조건은
+[docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)에 기록합니다. 실제 학습은 이번 구현 범위에서 제외합니다.
 
 ## 아키텍처
 
@@ -21,11 +23,12 @@ python/ (AI) ──> bridge/ (PyO3 직접 호출, maturin 패키징) ──> rus
 ```
 
 - JavaScript oracle은 Rust 포팅의 정확성을 검증하는 기준이며 실제 AlphaZero 탐색 루프의 엔진이 아닙니다.
-- Rust 엔진은 Python AI를 알지 않는 독립적인 규칙 엔진으로 설계합니다.
-- Python은 공통 bridge 계약을 통해 Rust 엔진을 호출합니다.
-- JSON은 저장·교환·검증 계약으로 보존하고 반복 호출은 PyO3 타입·배열을 사용하도록 설계합니다.
-- ResNet은 FiLM 조건화와 별도 LoRA 적응을 사용하고, 검증용 정적 병합과 ONNX export를 계획합니다. FiLM 조건은 ONNX 입력입니다.
-- differential 하네스는 존재하지만 Rust 후보가 없어 현재 CI는 JS 자체 회귀입니다.
+- Rust 엔진은 Python·PyO3·신경망·ONNX runtime에 의존하지 않습니다.
+- Python은 bridge의 immutable Position/Action과 직접 호출 경계를 통해 Rust 엔진을 사용합니다.
+- JSON은 저장·교환·검증 계약이며 반복 호출은 PyO3 타입·owned 배열을 사용합니다.
+- ResNet의 FiLM 조건은 ONNX 입력/그래프에 남고, static LoRA는 별도 어댑터로 보존하며 복사본에서 병합합니다.
+- 운영 ONNX 추론은 Rust의 기본 `ort`와 명시 선택 `tract`를 사용합니다.
+- 과거 JS fixture harness와 현재 동결 client↔Rust 비교는 범위가 다르며, 전체 Rust 정답 비교는 진행 중입니다.
 
 자세한 내용은 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)와 [docs/DECISIONS.md](docs/DECISIONS.md)를 참고하세요.
 
@@ -33,14 +36,14 @@ python/ (AI) ──> bridge/ (PyO3 직접 호출, maturin 패키징) ──> rus
 
 | 경로 | 책임 | 현재 상태 |
 |---|---|---|
-| `bridge/` | 공통 상태·행동·JSON 계약과 얇은 PyO3 연동 | JSON 초안·스키마·예시 검사 존재, 바인딩 구현 전 |
-| `rust-engine/` | 실제 봇 탐색과 self-play에 사용할 고성능 규칙 엔진 | 구현 전 |
-| `infra/` | 기존 JS oracle과 검증/실험 인프라 | 기존 코드 보존 |
-| `python/` | AlphaZero, MCTS, policy/value network, self-play, training, NNUE 연구 | 문서와 빈 구조만 존재 |
+| `bridge/` | 공통 JSON 계약·얇은 PyO3 연동·독립 ONNX runtime crate | v1 계약, Linux wheel과 실제 ort/tract 검사 checkpoint |
+| `rust-engine/` | 봇 탐색과 self-play용 독립 규칙 엔진 | source 포팅 진행, 전체 catalog coverage 미완료 |
+| `infra/` | JS oracle과 검증/실험 인프라 | 기존 코드와 동결 client adapter |
+| `python/` | 공개 관측·ISMCTS·ResNet·LoRA·FiLM·replay·학습/평가 코드 | 단일 accelerate_chess 패키지에서 구현·통합 진행 |
 | `tests/differential/` | JS oracle과 Rust 엔진의 동등성 검증 | fixture·하네스 존재, 실제 Rust 비교 전 |
 | `pre_cpp_engine_code/` | Rust 포팅 참고용 C++ 초안 | 일부 규칙 골격·자체 검사 존재 |
 | `docs/` | 아키텍처, 로드맵, 결정, 실험, 게임 규칙 문서 | 관리 중 |
-| `.github/workflows/` | 기존 JS oracle과 실험 인프라용 GitHub Actions | 기존 경로 유지 |
+| `.github/workflows/` | 구조·native 패키지·규칙 검증과 기존 실험 Actions | Windows/Linux native CI 추가, 최종 통과 미관측 |
 
 새 생성물은 `%APPDATA%\Accelerate`에 모읍니다. WSL2 일반 개발을 허용하고 재생성
 가능한 Linux 캐시·가상환경·중간 빌드만 별도 루트에 둡니다. 자세한 경로와 실행 기준은
@@ -72,6 +75,7 @@ node tools/ci/golden-eval.js   # 평가 함수 회귀 검사
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): 영역별 책임과 의존성 방향
 - [docs/ROADMAP.md](docs/ROADMAP.md): 단계별 구현 순서
 - [docs/DECISIONS.md](docs/DECISIONS.md): 합의된 결정과 이유
+- [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md): 코드 완료 조건·실제 checkpoint·남은 구현
 - [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md): 실험 기록
 - [docs/GAME-RULES.md](docs/GAME-RULES.md): 게임 규칙 요약
 

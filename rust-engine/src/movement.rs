@@ -892,7 +892,11 @@ fn rays(
     moves
 }
 
-fn piece_moves(state: &GameState, piece: &Piece, from: Square) -> Result<Vec<MoveTarget>> {
+pub(crate) fn piece_moves(
+    state: &GameState,
+    piece: &Piece,
+    from: Square,
+) -> Result<Vec<MoveTarget>> {
     let reversed = state.flag("reversal", piece.color);
     let mut moves = match piece.kind.as_str() {
         "pawn" | "squire" | "standardBearer" => pawn_moves(state, piece, from),

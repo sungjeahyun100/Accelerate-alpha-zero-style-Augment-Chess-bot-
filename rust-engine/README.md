@@ -68,9 +68,14 @@ private action과 색별 `public` 전이를 함께 저장하고 관측에는 vie
 카드 획득 표기 ID에 쓰이는 난수도 이후 게임 난수 순서에 영향을 주므로 소비 순서를
 보존한다. 현재 headless oracle의 UI stub은 모든 렌더링의 난수·규칙 부작용까지
 동일하다는 증명이 없어 실제 브라우저 전체 실행과의 parity는 추가 확인이 필요하다.
-normal·chaos의 weighted eligibility, grand의 최종 자동 패시브 정산, 전체 카드·RULE·특수
-이동·예약 전이 및 큰 조합 행동의 lazy 열거는 진행 중이다. 기본 normal 설정을 표준
-play 상태로 임의 대체하지 않고 미구현 단계에서 오류를 반환한다.
+normal·chaos의 초기 weighted draw는 카드 draw predicate의 trolley·black-box shuffle,
+opening weight, 배타적 카드 묶음 교체를 포함해 6개 seed씩 실제 본체와 카드 종류·순서·
+identity 및 RNG 전체가 일치했다. source predicate 자체에 있는 bounded trolley subset
+열거·score당 240개 cap도 유지한다. normal·chaos의 선택 후 획득/자동 패시브/다음 선택자
+전환과 역조건화, grand의 최종 자동 패시브 정산, 전체 카드·RULE·특수 이동·예약 전이
+및 큰 조합 행동의 lazy 열거는 진행 중이다. 초기 draw 지원은 그 카드의 효과 지원을
+뜻하지 않으며 기본 normal 설정을 표준 play로 임의 대체하지 않는다. 선택·효과·활성
+상태의 미구현 의미는 명확한 오류이며 전체 256개 지원의 GO 근거로 사용하지 않는다.
 
 동결 metadata는 `bridge/catalog/`에서 compile time에 공유한다. 이 데이터는 초기값,
 카탈로그·공개 정책의 단일 근거이며 실행 결과를 fixture에서 찾아 반환하지 않는다.

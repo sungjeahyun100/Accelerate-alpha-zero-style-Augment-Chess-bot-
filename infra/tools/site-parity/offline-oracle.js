@@ -5,15 +5,54 @@ const contract = require("../../../bridge/tools/runtime-contract");
 const readline = require("node:readline");
 const { installEnumerationSource } = require("./client-enumeration");
 
-// These hooks are presentation only. Game/draft transitions remain the site's code.
-const PRESENTATION_HOOKS = ["renderAll", "setStatus", "toast", "playSound", "animateCard", "animateGrandDraftDeckInsertion", "scheduleGameOverReplayRecord", "renderRuleTicketPanel", "renderJokerChoicePanel"];
+// DOM absence is an explicit execution profile. Some source render hooks perform
+// rule cleanup, and queued replay settlement consumes the same source RNG stream.
+// This profile cannot establish future RNG equality with a populated browser DOM.
+const HEADLESS_PROFILE = Object.freeze({
+  version: "accelerate-headless-semantic-v1",
+  retained: Object.freeze(["source-transitions", "draft-availability-predicates", "potion-cleanup", "terminal-rule-ticket-cleanup", "queued-replay-settlement", "history-notation-rng"]),
+  excluded: Object.freeze(["dom-card-animation-rng", "dom-update-log-rng", "dom-render-probes-and-ui-state", "network-persistence", "editor-ui", "timers"]),
+  queryRng: "restored-position-probe-only",
+  decisionMode: "local-explicit-decisions",
+  passiveSimulationDepth: 0,
+  browserFutureRngEquality: false,
+});
+const PRESENTATION_HOOKS = ["setStatus", "toast", "playSound", "renderJokerChoicePanel", "renderHistoryControls"];
 const BOOTSTRAP = `
 aiSimulationDepth = 0;
 ${PRESENTATION_HOOKS.map(name => `${name}=()=>{};`).join("\n")}
+const __sourceRenderAll=renderAll, __sourceRuleTicketPanel=renderRuleTicketPanel;
+renderRuleTicketPanel=()=>{if(state?.mode==="gameover")__sourceRuleTicketPanel();};
+renderAll=()=>{
+  if(state?.simpleBoardEditor?.enabled)throw new Error("Headless editor UI is unsupported.");
+  const previousDepth=aiSimulationDepth;
+  try { aiSimulationDepth=Math.max(1,previousDepth); __sourceRenderAll(); }
+  finally { aiSimulationDepth=previousDepth; }
+  if(previousDepth===0)renderRuleTicketPanel();
+};
+// Launch capture is absent: the source animation returns null before its DOM
+// branch's random draw. Grand insertion still runs its source null-ghost reveal.
+animateCard=()=>null;
 captureDraftChoiceTransition=()=>({}); playDraftChoiceTransition=()=>[];
 captureCardLaunch=()=>null; cardLaunchForDeckCard=()=>null;
 chooseAiPromotion=()=>{};
+// Explicit promotionChoice is a separate decision; the local oracle does not
+// run the site's AI strategy or its usefulness pruning of legal candidates.
 isAiUsefulSpecialMove=()=>true;
+const __microtasks=[];
+queueMicrotask=callback=>{
+  if(typeof callback!=="function")throw new TypeError("Invalid microtask callback.");
+  if(__microtasks.length>=__maxMicrotasks)throw new Error("Headless microtask budget exceeded.");
+  __microtasks.push(callback);
+};
+function __settleMicrotasks(){
+  let executed=0;
+  while(__microtasks.length){
+    if(++executed>__maxMicrotasks)throw new Error("Headless microtask budget exceeded.");
+    __microtasks.shift()();
+  }
+  return executed;
+}
 function __encode(value) { return JSON.stringify(value,(_key,current)=>current instanceof Set?{__simType:"Set",values:[...current]}:current instanceof Map?{__simType:"Map",entries:[...current]}:current); }
 function __decode(value) { return JSON.parse(JSON.stringify(value),(_key,current)=>current?.__simType==="Set"?new Set(current.values):current?.__simType==="Map"?new Map(current.entries):current); }
 `;
@@ -30,13 +69,15 @@ function publicStateValue(value, field) {
 }
 
 class OfflineOracle {
-  constructor(root = cacheRoot(), { maxCandidates = 100000 } = {}) {
+  constructor(root = cacheRoot(), { maxCandidates = 100000, maxMicrotasks = 256 } = {}) {
     if (!Number.isSafeInteger(maxCandidates) || maxCandidates < 1) throw new TypeError("maxCandidates must be positive.");
+    if (!Number.isSafeInteger(maxMicrotasks) || maxMicrotasks < 1 || maxMicrotasks > 4096) throw new TypeError("maxMicrotasks must be between 1 and 4096.");
     this.main = loadMain(root);
     this.maxCandidates = maxCandidates;
     const file = this.main.manifest.files.find(file => /^main-/.test(file.name));
     const frozen = contract.catalog.source.files.find(source => source.name === file.name);
     if (!frozen || file.sha256 !== frozen.sha256) throw new Error("Oracle source is not the adopted frozen rules version.");
+    this.main.context.__maxMicrotasks = maxMicrotasks;
     this.main.evaluate(BOOTSTRAP);
     this.main.context.__maxCandidates = maxCandidates;
     this.main.evaluate(installEnumerationSource());
@@ -53,9 +94,12 @@ class OfflineOracle {
     contract.validatePosition(position);
     this.random = contract.jsonCopy(position.rng);
     this.main.context.__position = position.state;
-    this.evaluate("state=__decode(__position);selectedGameStyle=state.gameStyle||'normal';localPlayMode='local';playMode='local';");
+    this.evaluate("__microtasks.length=0;scheduledGameOverReplayState=null;state=__decode(__position);selectedGameStyle=state.gameStyle||'normal';localPlayMode='local';playMode='local';");
   }
-  snapshot(history = []) { return contract.position(this.state(), this.random, history); }
+  snapshot(history = []) {
+    this.evaluate("__settleMicrotasks()");
+    return contract.position(this.state(), this.random, history);
+  }
   newGame(config = {}, seed = 0, tape = []) {
     const allowed = ["gameStyle", "draftDelete", "ruleCardIds", "starWinLimit", "deathmatchEnabled", "deathmatchLimitTurns"];
     if (Object.keys(config).some(key => !allowed.includes(key))) throw new TypeError("Unknown game configuration field.");
@@ -63,6 +107,7 @@ class OfflineOracle {
     if (!["normal", "chaos", "grand"].includes(style)) throw new TypeError("Only normal, chaos and grand 8x8 are supported.");
     if (config.ruleCardIds && (!Array.isArray(config.ruleCardIds) || config.ruleCardIds.some(id => !contract.catalog.cards.some(card => card.id === id && card.draftCategory === "RULE")))) throw new TypeError("Unknown RULE card.");
     this.random = contract.rng(seed, tape);
+    this.evaluate("__microtasks.length=0;scheduledGameOverReplayState=null;");
     this.main.context.__config = { ...config, gameStyle: style };
     for (const key of ["draftDelete", "deathmatchEnabled"]) if (config[key] !== undefined && typeof config[key] !== "boolean") throw new TypeError(`Invalid ${key}.`);
     for (const key of ["starWinLimit", "deathmatchLimitTurns"]) if (config[key] !== undefined && (!Number.isSafeInteger(config[key]) || config[key] < 1)) throw new TypeError(`Invalid ${key}.`);
@@ -190,7 +235,7 @@ class OfflineOracle {
   }
   rejected(position, message) { return { protocolVersion: contract.VERSIONS.step, ok: false, position, result: this.result(position), error: { code: "ACTION_REJECTED", message } }; }
 }
-module.exports = { OfflineOracle, PRESENTATION_HOOKS, decisionActor };
+module.exports = { OfflineOracle, PRESENTATION_HOOKS, HEADLESS_PROFILE, decisionActor };
 if (require.main === module) {
   const root = process.argv[2] || cacheRoot();
   let oracle;

@@ -5,6 +5,15 @@ use crate::*;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+fn same_content<T: serde::Serialize>(left: &T, right: &T) -> Result<bool> {
+    let canonical = |value| {
+        serde_jcs::to_vec(value).map_err(|error| {
+            EngineError::Serialization(format!("public canonicalization: {error}"))
+        })
+    };
+    Ok(canonical(left)? == canonical(right)?)
+}
+
 fn checked_observation(value: Value) -> Result<Observation> {
     crate::state::validate_json_value(&value, 0)?;
     let object = value
@@ -83,7 +92,7 @@ pub(crate) fn sample_initial(config: GameConfig, expected: Value, seed: u32) -> 
     }
     let conditioned = sampled.with_state(state)?;
     let actual = conditioned.try_observe(expected.viewer)?;
-    if actual != expected {
+    if !same_content(&actual, &expected)? {
         return Err(EngineError::ConditioningMismatch(
             "initial public frame is impossible under the supplied source configuration".into(),
         ));
@@ -126,7 +135,7 @@ fn card_identity_map(
             .as_object_mut()
             .ok_or(EngineError::IllegalAction)?
             .remove("instanceId");
-        if left != right {
+        if !same_content(&left, &right)? {
             return Err(EngineError::ConditioningMismatch(
                 "identity binding cannot alter card type, phase, status, slot or other semantics"
                     .into(),
@@ -213,7 +222,7 @@ pub(crate) fn condition_identities(position: &Position, expected: Value) -> Resu
     raw["rng"] = rng;
     let state: GameState = serde_json::from_value(raw).map_err(EngineError::serialization)?;
     let conditioned = position.with_state(state)?;
-    if conditioned.try_observe(expected.viewer)? != expected {
+    if !same_content(&conditioned.try_observe(expected.viewer)?, &expected)? {
         return Err(EngineError::ConditioningMismatch(
             "public frame differs beyond opaque identities".into(),
         ));

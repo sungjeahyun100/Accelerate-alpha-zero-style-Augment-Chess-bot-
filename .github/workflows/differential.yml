@@ -1,33 +1,22 @@
-name: Differential (JS oracle vs Rust engine)
+name: Historical JS fixture harness
 
-# Runs infra/tools/fixtures/run-differential.js (ported from the Twist project,
-# see its own header comment for the candidate line protocol) against the
-# 2,072 oracle fixtures in tests/differential/fixtures/oracle-v1.jsonl.gz.
-#
-# rust-engine/ has no code yet (README only, 2026-09-23), so there is nothing
-# to differential-test against it for now. Until it exists, this job instead
-# runs the harness against the oracle SERVER itself
-# (`generate-fixtures.js --serve`) as the candidate -- this is not a no-op:
-# it keeps the fixture format and the differential harness itself verified on
-# every push/PR, so nothing is silently broken by the time rust-engine is
-# ready to plug in.
-#
-# When rust-engine gets a real candidate binary, update CANDIDATE_CMD below
-# to point at it (see infra/tools/fixtures/run-differential.js's header for
-# the exact stdin/stdout protocol it must speak) and this job starts doing
-# real cross-language verification with no other changes needed.
+# Checks historical engine-merged.js answer sheets with their original JS
+# line-protocol server. This does not establish frozen-client/Rust parity.
+# That independent gate must use engine-json's actual method protocol and
+# lossless source payloads. It remains pending until the full source port can
+# be compared, without substituting a fallback for Unsupported cases.
 on:
   push:
     branches: [main, develop]
     paths:
-      - "rust-engine/**"
       - "infra/tools/fixtures/**"
+      - "infra/engine-merged.js"
       - "tests/differential/**"
       - ".github/workflows/differential.yml"
   pull_request:
     paths:
-      - "rust-engine/**"
       - "infra/tools/fixtures/**"
+      - "infra/engine-merged.js"
       - "tests/differential/**"
       - ".github/workflows/differential.yml"
   workflow_dispatch: {}
@@ -36,49 +25,37 @@ permissions:
   contents: read
 
 jobs:
-  differential:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+  historical-fixtures:
+    name: Historical JS fixture and harness validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
 
-      - name: Check whether rust-engine has a candidate binary yet
-        id: probe
-        run: |
-          if [ -f rust-engine/Cargo.toml ]; then
-            echo "has_rust=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_rust=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Set up Rust
-        if: steps.probe.outputs.has_rust == 'true'
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build rust-engine
-        if: steps.probe.outputs.has_rust == 'true'
-        working-directory: rust-engine
-        run: cargo build --release
-
-      - name: Run differential test
+      - name: Validate historical fixtures with their original JS server
         env:
-          # Placeholder path -- update once rust-engine names its actual binary.
-          CANDIDATE_CMD: ${{ steps.probe.outputs.has_rust == 'true' && './rust-engine/target/release/oracle_bridge' || format('node {0}/infra/tools/fixtures/generate-fixtures.js --serve', github.workspace) }}
+          CANDIDATE_CMD: node infra/tools/fixtures/generate-fixtures.js --serve
         run: |
+          report_dir="$RUNNER_TEMP/Accelerate/reports/historical-fixtures/Linux"
+          mkdir -p "$report_dir"
           node infra/tools/fixtures/run-differential.js \
             --fixtures=tests/differential/fixtures/oracle-v1.jsonl.gz \
             --candidate="$CANDIDATE_CMD" \
             --limit=300 \
-            --report=differential-report.json
+            --report="$report_dir/report.json"
+          echo "Validated historical JS fixtures and their JS harness. Frozen-client/Rust source parity is a separate pending gate." >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload report
+      - name: Preserve historical harness report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: differential-report
-          path: differential-report.json
-          retention-days: 14
+          name: historical-js-fixture-report
+          path: ${{ runner.temp }}/Accelerate/reports/historical-fixtures/Linux
+          if-no-files-found: warn
+          retention-days: 7
