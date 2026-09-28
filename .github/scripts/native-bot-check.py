@@ -343,8 +343,86 @@ def frozen():
         "infra/tools/site-parity/offline-oracle.test.js", timeout=180)
 
 
+def current_client():
+    """Verify the reviewed v7 client in an isolated slot; reuse the v6 parser."""
+    root, _, _, reports, _ = locations()
+    reports.mkdir(parents=True, exist_ok=True)
+    catalog = json.loads((REPOSITORY / "bridge/catalog/site-20260928.json").read_text(encoding="utf-8"))
+    metadata = catalog["source"]
+    files = metadata["files"]
+    mains = [file for file in files if file["name"].startswith("main-")]
+    if len(mains) != 1 or mains[0] != {
+        "name": "main-OahWs0tU.js",
+        "url": "https://augmentchess.org/assets/main-OahWs0tU.js",
+        "sha256": "e5ed84fcf8e72a24e6a8cfeb9050787387a616c55184e6501fca2077e302c45c",
+        "bytes": 12892256,
+    }:
+        raise RuntimeError("reviewed v7 client identity changed; review the rules baseline")
+    parsers = [file for file in files if file["name"] == "acorn-8.15.0.js"]
+    if len(parsers) != 1 or parsers[0] != {
+        "name": "acorn-8.15.0.js",
+        "url": "https://unpkg.com/acorn@8.15.0/dist/acorn.js",
+        "sha256": "fdb08546776ec6228b03e8d02b40d4ab3255bae5f401adba7ff5dad927ac5c9c",
+        "bytes": 241575,
+    }:
+        raise RuntimeError("reviewed v7 parser identity changed")
+    if metadata["schemaVersion"] != 1 or metadata["site"] != "https://augmentchess.org":
+        raise RuntimeError("reviewed v7 source manifest is invalid")
+
+    destination = root / "cache" / "site-baseline-20260928-e5ed84fc"
+    destination.mkdir(parents=True, exist_ok=True)
+    if not destination.resolve().is_relative_to(root.resolve()) or destination.resolve().is_relative_to(REPOSITORY):
+        raise RuntimeError("v7 client cache slot escapes the CI artifact root")
+    # The old frozen phase runs first in CI. Reuse only its verified parser
+    # bytes; a standalone invocation can fetch the same pinned parser.
+    old_parser = root / "cache" / "site-baseline-client" / "acorn-8.15.0.js"
+    if old_parser.is_file() and not old_parser.is_symlink():
+        if not old_parser.resolve().is_relative_to(root.resolve()):
+            raise RuntimeError("reused parser escapes the CI artifact root")
+        parser_data = old_parser.read_bytes()
+    else:
+        parser_data = None
+
+    def download_exact(file):
+        request = urllib.request.Request(file["url"], headers={"User-Agent": "Accelerate-frozen-source-CI"})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            data = response.read(16 * 1024 * 1024 + 1)
+        if len(data) != file["bytes"] or hashlib.sha256(data).hexdigest() != file["sha256"]:
+            raise RuntimeError(f"adopted v7 source changed or unavailable: {file['name']}")
+        return data
+
+    if parser_data is None:
+        parser_data = download_exact(parsers[0])
+    elif len(parser_data) != parsers[0]["bytes"] or hashlib.sha256(parser_data).hexdigest() != parsers[0]["sha256"]:
+        raise RuntimeError("reused parser does not match the reviewed pin")
+    main_data = download_exact(mains[0])
+    for file, data in ((mains[0], main_data), (parsers[0], parser_data)):
+        target = destination / file["name"]
+        if target.is_symlink() or (target.exists() and (not target.is_file() or target.read_bytes() != data)):
+            raise RuntimeError(f"refusing to replace existing v7 frozen source: {file['name']}")
+        if not target.exists():
+            target.write_bytes(data)
+    baseline = {
+        "schemaVersion": 1, "frozenAt": metadata["frozenAt"],
+        "site": metadata["site"], "executionScope": "frozen-client",
+        "files": [mains[0], parsers[0]],
+    }
+    serialized = json.dumps(baseline, indent=2) + "\n"
+    manifest = destination / "baseline.json"
+    if manifest.is_symlink() or (manifest.exists() and manifest.read_text(encoding="utf-8") != serialized):
+        raise RuntimeError("refusing to replace an existing v7 client manifest")
+    if not manifest.exists():
+        manifest.write_text(serialized, encoding="utf-8")
+    (reports / "current-client-source.json").write_text(serialized, encoding="utf-8")
+    os.environ["ACCELERATE_SITE_BASELINE_LATEST"] = str(destination)
+    run("node", "infra/tools/site-parity/prepare-current-baseline.js", "--verify", destination, timeout=180)
+    run("node", "--test", "bridge/tools/runtime-contract.test.js",
+        "tests/site-adapter/parity/latest-client.test.cjs", timeout=180)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=("configure", "build", "tests", "frozen"))
+    parser.add_argument("phase", choices=("configure", "build", "tests", "frozen", "current-client"))
     phase = parser.parse_args().phase
-    {"configure": configure, "build": build, "tests": tests, "frozen": frozen}[phase]()
+    {"configure": configure, "build": build, "tests": tests, "frozen": frozen,
+     "current-client": current_client}[phase]()

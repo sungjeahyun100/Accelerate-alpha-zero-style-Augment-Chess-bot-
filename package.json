@@ -1,0 +1,10 @@
+{
+  "name": "accelerate-monorepo",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "test:game-adapter": "node --test infra/tools/site-parity/offline-oracle.test.js",
+    "check:repository-policy": "node --test .github/scripts/check-repository-policy.test.mjs"
+  },
+  "engines": { "node": ">=22" }
+}

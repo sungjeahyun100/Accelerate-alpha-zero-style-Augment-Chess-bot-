@@ -1,9 +1,40 @@
 "use strict";
 const crypto = require("node:crypto");
-const catalog = require("../catalog/site-20260927.json");
-const observationPolicy = require("../catalog/observation-20260927.json");
-const ORACLE_PROFILE_VERSION = "accelerate-headless-semantic-v6";
 const { validate } = require("./validate");
+function freezeMetadata(value) {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) freezeMetadata(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+const BASELINES = Object.freeze({
+  "site-20260927": Object.freeze({
+    catalog: freezeMetadata(require("../catalog/site-20260927.json")),
+    observationPolicy: freezeMetadata(require("../catalog/observation-20260927.json")),
+    ORACLE_PROFILE_VERSION: "accelerate-headless-semantic-v6",
+    RUNTIME_SCHEMA_NAME: "runtime-v1.schema.json",
+    mainSha256: "abfe01a035813875772d8eeaf8e300a1df0348888ff48778d4a1789b76ae492f",
+  }),
+  "site-20260928": Object.freeze({
+    catalog: freezeMetadata(require("../catalog/site-20260928.json")),
+    observationPolicy: freezeMetadata(require("../catalog/observation-20260928.json")),
+    ORACLE_PROFILE_VERSION: "accelerate-headless-semantic-v7",
+    RUNTIME_SCHEMA_NAME: "runtime-site-20260928.schema.json",
+    mainSha256: "e5ed84fcf8e72a24e6a8cfeb9050787387a616c55184e6501fca2077e302c45c",
+  }),
+});
+function createRuntimeContract(options = {}) {
+  if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => key !== "baseline")) throw new TypeError("Expected a known runtime baseline selector.");
+  const baseline = options.baseline ?? "site-20260927";
+  const selected = BASELINES[baseline];
+  if (!selected) throw new TypeError(`Unknown runtime baseline ${baseline}.`);
+  const { catalog, observationPolicy, ORACLE_PROFILE_VERSION, RUNTIME_SCHEMA_NAME, mainSha256 } = selected;
+  if (catalog.rulesVersion !== observationPolicy.rulesVersion ||
+      catalog.source.files.filter(file => /^main-/.test(file.name)).length !== 1 ||
+      catalog.source.files.find(file => /^main-/.test(file.name)).sha256 !== mainSha256) {
+    throw new Error(`Runtime baseline ${baseline} metadata mismatch.`);
+  }
 const VERSIONS = Object.freeze({ position: "accelerate-position-v1", action: "accelerate-action-v1", observation: "accelerate-observation-v2", result: "accelerate-result-v1", step: "accelerate-step-v1" });
 const digest = value => crypto.createHash("sha256").update(canonical(value)).digest("hex");
 function canonical(value) {
@@ -111,11 +142,11 @@ function validatePublicPiece(value) {
     else if (typeof field !== "number" || !Number.isFinite(field)) throw new TypeError("Invalid public piece counter.");
   }
   if (!Object.hasOwn(value,"status")) throw new TypeError("Public piece needs an explicit source-derived status surface.");
-  const errors=validate(observationPolicy.publicPieceSchema,value,"piece","runtime-v1.schema.json");
+  const errors=validate(observationPolicy.publicPieceSchema,value,"piece",RUNTIME_SCHEMA_NAME);
   if(errors.length)throw new TypeError(`Invalid public piece schema: ${errors.join("; ")}`);
 }
 function surface(name, value) {
-  const errors = validate(observationPolicy.surfaceSchemas[name], value, name, "runtime-v1.schema.json");
+  const errors = validate(observationPolicy.surfaceSchemas[name], value, name, RUNTIME_SCHEMA_NAME);
   if (errors.length) throw new TypeError(`Invalid source public surface: ${errors.join("; ")}`);
 }
 function validatePublicCard(value) {
@@ -124,7 +155,7 @@ function validatePublicCard(value) {
   for (const [key, field] of Object.entries(value)) {
     if (["id","instanceId","effect","phase"].includes(key)) { if (typeof field !== "string" || !field) throw new TypeError("Invalid public card label."); }
     else if (["slot","stars","ratingHalfStars"].includes(key)) { if (typeof field !== "number" || !Number.isFinite(field) || field < 0) throw new TypeError("Invalid public card number."); }
-    else if (key === "revealed") { const errors=validate(observationPolicy.cardRevelationSchema,field,"card.revealed","runtime-v1.schema.json");if(errors.length)throw new TypeError(`Invalid revealed public card result: ${errors.join("; ")}`); }
+    else if (key === "revealed") { const errors=validate(observationPolicy.cardRevelationSchema,field,"card.revealed",RUNTIME_SCHEMA_NAME);if(errors.length)throw new TypeError(`Invalid revealed public card result: ${errors.join("; ")}`); }
     else if (typeof field !== "boolean") throw new TypeError("Invalid public card flag.");
   }
 }
@@ -194,17 +225,17 @@ function validateObservation(value) {
   if (Object.keys(value.publicState).some(key => !publicKeys.includes(key))) throw new TypeError("Unknown public field requires an observation contract version update.");
   if (value.publicState.projectionVersion !== observationPolicy.projectionVersion || value.publicState.observationPolicyHash !== digest(observationPolicy)) throw new TypeError("Observation projection policy mismatch.");
   if (!Object.hasOwn(value.publicState, "deathmatchStatus")) throw new TypeError("Missing public deathmatch status.");
-  const deathmatchErrors = validate(observationPolicy.deathmatchSchema, value.publicState.deathmatchStatus, "publicState.deathmatchStatus", "runtime-v1.schema.json");
+  const deathmatchErrors = validate(observationPolicy.deathmatchSchema, value.publicState.deathmatchStatus, "publicState.deathmatchStatus", RUNTIME_SCHEMA_NAME);
   if (deathmatchErrors.length) throw new TypeError(`Invalid public deathmatch status: ${deathmatchErrors.join("; ")}`);
   for(const key of observationPolicy.statePublicFields){
     if(!Object.hasOwn(value.publicState,key))continue;
     const shape=observationPolicy.stateValueSchemas?.[key];
     if(!shape)throw new TypeError(`Missing source public value schema ${key}.`);
-    const errors=validate(shape,value.publicState[key],`publicState.${key}`,"runtime-v1.schema.json");
+    const errors=validate(shape,value.publicState[key],`publicState.${key}`,RUNTIME_SCHEMA_NAME);
     if(errors.length)throw new TypeError(`Invalid source public value: ${errors.join("; ")}`);
   }
   if(Object.hasOwn(value.publicState,"selectionPhase")){
-    const errors=validate(observationPolicy.selectionSchema,value.publicState.selectionPhase,"selectionPhase","runtime-v1.schema.json");
+    const errors=validate(observationPolicy.selectionSchema,value.publicState.selectionPhase,"selectionPhase",RUNTIME_SCHEMA_NAME);
     if(errors.length)throw new TypeError(`Invalid public selection surface: ${errors.join("; ")}`);
   }
   for (const name of ["boardMarks", "relationships", "overlays"]) {
@@ -217,4 +248,6 @@ function validateObservation(value) {
   if (informationStateKey !== digest(content)) throw new TypeError("Information state identity mismatch.");
   return value;
 }
-module.exports = { catalog, observationPolicy, ORACLE_PROFILE_VERSION, VERSIONS, canonical, digest, jsonCopy, deepFreeze, rng, nextRandom, validateRng, position, validatePosition, action, validateAction, validatePayload, validateObservation, validateGameEvent, validateResult };
+return Object.freeze({ baseline, catalog, observationPolicy, ORACLE_PROFILE_VERSION, RUNTIME_SCHEMA_NAME, VERSIONS, canonical, digest, jsonCopy, deepFreeze, rng, nextRandom, validateRng, position, validatePosition, action, validateAction, validatePayload, validateObservation, validateGameEvent, validateResult });
+}
+module.exports = Object.freeze({ ...createRuntimeContract(), createRuntimeContract });

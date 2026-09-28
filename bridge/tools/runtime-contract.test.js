@@ -62,4 +62,41 @@ test("runtime schema enforces envelopes, v2 projection provenance and public sur
     assert.throws(() => contract.validateObservation(resign(modifyCopy(observation, modify))));
   }
 });
+test("pinned site baselines bind source, projection and schema without cross-version admission", () => {
+  const latest = contract.createRuntimeContract({ baseline: "site-20260928" });
+  assert.equal(contract.ORACLE_PROFILE_VERSION, "accelerate-headless-semantic-v6");
+  assert.equal(latest.ORACLE_PROFILE_VERSION, "accelerate-headless-semantic-v7");
+  assert.equal(latest.catalog.rulesVersion, "augment-site-20260928-e5ed84fcf8e72a24");
+  assert.equal(latest.catalog.source.files.find(file => /^main-/.test(file.name)).sha256,
+    "e5ed84fcf8e72a24e6a8cfeb9050787387a616c55184e6501fca2077e302c45c");
+  assert.ok(Object.isFrozen(latest.catalog.source.files[1]));
+  assert.ok(Object.isFrozen(latest.catalog.cards[0]));
+  assert.ok(Object.isFrozen(latest.observationPolicy.statePublicFields));
+  assert.throws(() => { latest.catalog.source.files[1].sha256 = "0".repeat(64); }, TypeError);
+  assert.throws(() => { latest.observationPolicy.statePublicFields.push("privateField"); }, TypeError);
+  assert.equal(latest.catalog.source.files[1].sha256,
+    "e5ed84fcf8e72a24e6a8cfeb9050787387a616c55184e6501fca2077e302c45c");
+  assert.throws(() => contract.createRuntimeContract({ baseline: "unknown" }), /Unknown runtime baseline/);
+  assert.throws(() => contract.createRuntimeContract({ baseline: "site-20260928", catalog: contract.catalog }), /known runtime baseline selector/);
+  const oldPosition = contract.position(state(), contract.rng(7));
+  const newPosition = latest.position(state(), latest.rng(7));
+  assert.notEqual(oldPosition.positionId, newPosition.positionId);
+  assert.throws(() => contract.validatePosition(newPosition), /version mismatch/);
+  assert.throws(() => latest.validatePosition(oldPosition), /version mismatch/);
+  const oldSchema = resolveRef(contract.RUNTIME_SCHEMA_NAME + "#", contract.RUNTIME_SCHEMA_NAME);
+  const newSchema = resolveRef(latest.RUNTIME_SCHEMA_NAME + "#", latest.RUNTIME_SCHEMA_NAME);
+  assert.deepEqual(validate(newSchema.schema, newPosition, "$", newSchema.docName), []);
+  assert.ok(validate(newSchema.schema, oldPosition, "$", newSchema.docName).length);
+  assert.ok(validate(oldSchema.schema, newPosition, "$", oldSchema.docName).length);
+  const newObservation = { protocolVersion: latest.VERSIONS.observation, viewer: "white", board: state().board,
+    turn: "white", ownCards: [], opponentHandCount: 0, history: [], publicState: {
+      projectionVersion: latest.observationPolicy.projectionVersion,
+      observationPolicyHash: latest.digest(latest.observationPolicy),
+      deathmatchStatus: { active: false, warning: false }, boardMarks: [], relationships: [], overlays: [] } };
+  newObservation.informationStateKey = latest.digest(newObservation);
+  latest.validateObservation(newObservation);
+  assert.throws(() => contract.validateObservation(newObservation), /projection policy mismatch/);
+  assert.deepEqual(validate(newSchema.schema, newObservation, "$", newSchema.docName), []);
+  assert.ok(validate(oldSchema.schema, newObservation, "$", oldSchema.docName).length);
+});
 function modifyCopy(value, modify) { const copy = contract.jsonCopy(value); modify(copy); return copy; }

@@ -1,0 +1,924 @@
+{
+  "schemaVersion": 1,
+  "rulesVersion": "augment-site-20260928-e5ed84fcf8e72a24",
+  "catalogVersion": "yt63f_Lcq4xUPu4GbbdwAyv5IUTuC079nNxvF3IFrj4",
+  "state": {
+    "board": [
+      [
+        {
+          "color": "black",
+          "type": "rook",
+          "moved": false,
+          "shielded": false,
+          "id": "black-rook-a8",
+          "origin": "a8"
+        },
+        {
+          "color": "black",
+          "type": "knight",
+          "moved": false,
+          "shielded": false,
+          "id": "black-knight-b8",
+          "origin": "b8"
+        },
+        {
+          "color": "black",
+          "type": "bishop",
+          "moved": false,
+          "shielded": false,
+          "id": "black-bishop-c8",
+          "origin": "c8"
+        },
+        {
+          "color": "black",
+          "type": "queen",
+          "moved": false,
+          "shielded": false,
+          "id": "black-queen-d8",
+          "origin": "d8"
+        },
+        {
+          "color": "black",
+          "type": "king",
+          "moved": false,
+          "shielded": false,
+          "id": "black-king-e8",
+          "origin": "e8"
+        },
+        {
+          "color": "black",
+          "type": "bishop",
+          "moved": false,
+          "shielded": false,
+          "id": "black-bishop-f8",
+          "origin": "f8"
+        },
+        {
+          "color": "black",
+          "type": "knight",
+          "moved": false,
+          "shielded": false,
+          "id": "black-knight-g8",
+          "origin": "g8"
+        },
+        {
+          "color": "black",
+          "type": "rook",
+          "moved": false,
+          "shielded": false,
+          "id": "black-rook-h8",
+          "origin": "h8"
+        }
+      ],
+      [
+        {
+          "color": "black",
+          "type": "pawn",
+          "moved": false,
+          "shielded": false,
+          "id": "black-pawn-a7",
+          "origin": "a7"
+        },
+        {
+          "color": "black",
+          "type": "pawn",
+          "moved": false,
+          "shielded": false,
+          "id": "black-pawn-b7",
+          "origin": "b7"
+        },
+        {
+          "color": "black",
+          "type": "pawn",
+          "moved": false,
+          "shielded": false,
+          "id": "black-pawn-c7",
+          "origin": "c7"
+        },
+        {
+          "color": "black",
+          "type": "pawn",
+          "moved": false,
+          "shielded": false,
+          "id": "black-pawn-d7",
+          "origin": "d7"
+        },
+        {
+          "color": "black",
+          "type": "pawn",
+          "moved": false,
+          "shielded": false,
+          "id": "black-pawn-e7",
+          "origin": "e7"
+        },
+        {
+          "color": "black",
+          "type": "pawn",
+          "moved": false,
+          "shielded": false,
+          "id": "black-pawn-f7",
+          "origin": "f7"
+        },
+        {
+          "color": "black",
+          "type": "pawn",
+          "moved": false,
+          "shielded": false,
+          "id": "black-pawn-g7",
+          "origin": "g7"
+        },
+        {
+          "color": "black",
+          "type": "pawn",
+          "moved": false,
+          "shielded": false,
+          "id": "black-pawn-h7",
+          "origin": "h7"
+        }
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        {
+          "color": "white",
+          "type": "pawn",
+          "moved": false,
+          "shielded": false,
+          "id": "white-pawn-a2",
+          "origin": "a2"
+        },
+        {
+          "color": "white",
+          "type": "pawn",
+          "moved": false,
+          "shielded": false,
+          "id": "white-pawn-b2",
+          "origin": "b2"
+        },
+        {
+          "color": "white",
+          "type": "pawn",
+          "moved": false,
+          "shielded": false,
+          "id": "white-pawn-c2",
+          "origin": "c2"
+        },
+        {
+          "color": "white",
+          "type": "pawn",
+          "moved": false,
+          "shielded": false,
+          "id": "white-pawn-d2",
+          "origin": "d2"
+        },
+        {
+          "color": "white",
+          "type": "pawn",
+          "moved": false,
+          "shielded": false,
+          "id": "white-pawn-e2",
+          "origin": "e2"
+        },
+        {
+          "color": "white",
+          "type": "pawn",
+          "moved": false,
+          "shielded": false,
+          "id": "white-pawn-f2",
+          "origin": "f2"
+        },
+        {
+          "color": "white",
+          "type": "pawn",
+          "moved": false,
+          "shielded": false,
+          "id": "white-pawn-g2",
+          "origin": "g2"
+        },
+        {
+          "color": "white",
+          "type": "pawn",
+          "moved": false,
+          "shielded": false,
+          "id": "white-pawn-h2",
+          "origin": "h2"
+        }
+      ],
+      [
+        {
+          "color": "white",
+          "type": "rook",
+          "moved": false,
+          "shielded": false,
+          "id": "white-rook-a1",
+          "origin": "a1"
+        },
+        {
+          "color": "white",
+          "type": "knight",
+          "moved": false,
+          "shielded": false,
+          "id": "white-knight-b1",
+          "origin": "b1"
+        },
+        {
+          "color": "white",
+          "type": "bishop",
+          "moved": false,
+          "shielded": false,
+          "id": "white-bishop-c1",
+          "origin": "c1"
+        },
+        {
+          "color": "white",
+          "type": "queen",
+          "moved": false,
+          "shielded": false,
+          "id": "white-queen-d1",
+          "origin": "d1"
+        },
+        {
+          "color": "white",
+          "type": "king",
+          "moved": false,
+          "shielded": false,
+          "id": "white-king-e1",
+          "origin": "e1"
+        },
+        {
+          "color": "white",
+          "type": "bishop",
+          "moved": false,
+          "shielded": false,
+          "id": "white-bishop-f1",
+          "origin": "f1"
+        },
+        {
+          "color": "white",
+          "type": "knight",
+          "moved": false,
+          "shielded": false,
+          "id": "white-knight-g1",
+          "origin": "g1"
+        },
+        {
+          "color": "white",
+          "type": "rook",
+          "moved": false,
+          "shielded": false,
+          "id": "white-rook-h1",
+          "origin": "h1"
+        }
+      ]
+    ],
+    "cardBanIds": [],
+    "parrotMovement": {
+      "white": null,
+      "black": null
+    },
+    "mediumMovement": null,
+    "campaign": null,
+    "localMode": "single",
+    "aiHumanColor": "white",
+    "madAi": {
+      "enabled": false,
+      "options": {
+        "doubleMove": false,
+        "amazonQueen": false,
+        "fog": false,
+        "takeAllDraft": false,
+        "extraPawnRow": false,
+        "assassinKnights": false,
+        "cardinalBishops": false,
+        "manner": false,
+        "randomSixCards": false,
+        "diceEveryOtherTurn": false
+      },
+      "openingSequenceDone": false,
+      "diceRoutineTurn": 0,
+      "randomCardsUsed": false
+    },
+    "turn": "white",
+    "mode": "idle",
+    "onlineGameStarted": false,
+    "gameStyle": "normal",
+    "selected": null,
+    "legalMoves": [],
+    "deck": [],
+    "deckSlots": {
+      "white": [
+        null,
+        null,
+        null
+      ],
+      "black": [
+        null,
+        null,
+        null
+      ]
+    },
+    "hands": {
+      "white": [],
+      "black": []
+    },
+    "draft": {
+      "color": "white",
+      "choices": []
+    },
+    "draftBalance": null,
+    "draftResumeTurn": null,
+    "draftPreviewCardId": null,
+    "draftPreviewBundleIndex": null,
+    "playerCards": {
+      "white": null,
+      "black": null
+    },
+    "captures": {
+      "white": [],
+      "black": []
+    },
+    "clock": {
+      "enabled": true,
+      "initialMs": 300000,
+      "whiteMs": 300000,
+      "blackMs": 300000,
+      "incrementMs": 10000,
+      "runningColor": null,
+      "lastStartedAt": null,
+      "timeoutLoser": null,
+      "timeoutWinner": null
+    },
+    "draftClock": {
+      "enabled": true,
+      "initialMs": 40000,
+      "whiteStartedAt": null,
+      "blackStartedAt": null,
+      "whiteSelected": false,
+      "blackSelected": false,
+      "whiteAutoSelected": false,
+      "blackAutoSelected": false
+    },
+    "effects": {
+      "pawnReverse": {
+        "white": 0,
+        "black": 0
+      },
+      "pawnQueen": null,
+      "extraMove": 0
+    },
+    "enPassant": null,
+    "enPassantFrenzy": {
+      "white": false,
+      "black": false
+    },
+    "cannonScarecrowScreen": true,
+    "internalSixFixes": true,
+    "overtakeTurnOnly": true,
+    "vanguardDiagonalOnly": true,
+    "parrotRookTarget": true,
+    "extinctionMinorTargets": true,
+    "cannonGhostScreen": true,
+    "unifiedJumpObstacles": true,
+    "parrotBasicMovement": true,
+    "september18Balance": true,
+    "miracleSelectsBishop": true,
+    "thiefQuietJump": true,
+    "thiefRequiredJump": false,
+    "thiefRemake": true,
+    "zugzwangConsumesTurn": true,
+    "revolvingDoorGuard": true,
+    "september27CopyPools": true,
+    "zugzwang": {
+      "white": false,
+      "black": false
+    },
+    "taunt": {
+      "white": 0,
+      "black": 0
+    },
+    "hallucination": {
+      "white": null,
+      "black": null
+    },
+    "pendingPawnStorm": [],
+    "pendingPanic": [],
+    "pendingFreeMoves": [],
+    "freeMoveCaptureLock": {
+      "white": false,
+      "black": false
+    },
+    "chaosNoCaptureUntilHalfTurn": 0,
+    "pendingIcbm": [],
+    "pendingGales": [],
+    "pendingOtherworld": [],
+    "judgmentExiles": [],
+    "pendingTrojanHorse": [],
+    "pendingBearRetaliations": [],
+    "pendingTrolley": [],
+    "pendingScarecrows": [],
+    "pendingLobsters": [],
+    "pendingPortals": [],
+    "pendingRuleTickets": [],
+    "activeTrolley": null,
+    "pendingPromotion": null,
+    "coronation": {
+      "white": false,
+      "black": false
+    },
+    "targeting": null,
+    "devMode": false,
+    "devLibraryOpen": false,
+    "cardArchiveOpen": false,
+    "cardArchiveAvailable": true,
+    "opponentLibraryOpen": false,
+    "bloodMoonEffectLibraryOpen": false,
+    "draftLocked": false,
+    "draftBoardPreview": false,
+    "auctionInventoryOpen": false,
+    "freeCardUsed": false,
+    "regency": {
+      "white": false,
+      "black": false
+    },
+    "earlyPromotion": {
+      "white": false,
+      "black": false
+    },
+    "fastGrowth": {
+      "white": false,
+      "black": false
+    },
+    "pawnSprint": {
+      "white": false,
+      "black": false
+    },
+    "pawnLeap": {
+      "white": false,
+      "black": false
+    },
+    "pawnConversion": {
+      "white": false,
+      "black": false
+    },
+    "retreat": {
+      "white": false,
+      "black": false
+    },
+    "racingKing": {
+      "white": false,
+      "black": false
+    },
+    "radicalCharge": {
+      "white": false,
+      "black": false
+    },
+    "conscription": {
+      "white": false,
+      "black": false
+    },
+    "conscriptionUsed": {
+      "white": false,
+      "black": false
+    },
+    "encouragement": {
+      "white": false,
+      "black": false
+    },
+    "ironMonarch": {
+      "white": false,
+      "black": false
+    },
+    "imperialStudies": {
+      "white": false,
+      "black": false
+    },
+    "religiousVictory": {
+      "white": false,
+      "black": false
+    },
+    "fianchetto": {
+      "white": false,
+      "black": false
+    },
+    "freeCastling": {
+      "white": false,
+      "black": false
+    },
+    "switcheroo": {
+      "white": false,
+      "black": false
+    },
+    "substitution": {
+      "white": false,
+      "black": false
+    },
+    "cornerKick": {
+      "white": false,
+      "black": false
+    },
+    "chainBonds": [],
+    "moving": {
+      "white": {
+        "enabled": false,
+        "pieceId": "",
+        "count": 0
+      },
+      "black": {
+        "enabled": false,
+        "pieceId": "",
+        "count": 0
+      }
+    },
+    "castlingCanceled": {
+      "white": false,
+      "black": false
+    },
+    "castled": {
+      "white": false,
+      "black": false
+    },
+    "bishopSnipe": {
+      "white": false,
+      "black": false
+    },
+    "backwardKnight": {
+      "white": false,
+      "black": false
+    },
+    "trojanHorse": {
+      "white": false,
+      "black": false
+    },
+    "madHorse": {
+      "white": false,
+      "black": false
+    },
+    "clonePassive": {
+      "white": false,
+      "black": false
+    },
+    "clonedPassiveCards": {
+      "white": [],
+      "black": []
+    },
+    "vanishing": {
+      "white": false,
+      "black": false
+    },
+    "knightInjury": {
+      "white": false,
+      "black": false
+    },
+    "fileSurge": {
+      "white": false,
+      "black": false
+    },
+    "rookLift": {
+      "white": false,
+      "black": false
+    },
+    "underpromotion": {
+      "white": false,
+      "black": false
+    },
+    "finalWeapon": {
+      "white": false,
+      "black": false
+    },
+    "afterimageQueen": {
+      "white": false,
+      "black": false
+    },
+    "recycling": false,
+    "breakthroughPawns": {
+      "white": false,
+      "black": false
+    },
+    "quantumPending": {
+      "white": false,
+      "black": false
+    },
+    "highway": false,
+    "highGround": [],
+    "blackHole": [],
+    "winterKingdom": {
+      "enabled": false,
+      "lastCycle": 0,
+      "frozenIds": []
+    },
+    "initiative": {
+      "white": null,
+      "black": null
+    },
+    "machoChess": false,
+    "feudalContracts": [],
+    "pendingFeudalStrike": null,
+    "coolGuy": false,
+    "capturedTypes": {
+      "white": {
+        "__simType": "Set",
+        "values": []
+      },
+      "black": {
+        "__simType": "Set",
+        "values": []
+      }
+    },
+    "turnCaptures": {
+      "white": {
+        "__simType": "Set",
+        "values": []
+      },
+      "black": {
+        "__simType": "Set",
+        "values": []
+      }
+    },
+    "lastTurnCaptures": {
+      "white": {
+        "__simType": "Set",
+        "values": []
+      },
+      "black": {
+        "__simType": "Set",
+        "values": []
+      }
+    },
+    "kingKnight": {
+      "white": false,
+      "black": false
+    },
+    "royalKnightKing": {
+      "white": false,
+      "black": false
+    },
+    "knightmate": {
+      "white": false,
+      "black": false
+    },
+    "monochromeChess": false,
+    "acceleration": false,
+    "accelerationPendingFor": null,
+    "accelerationPendingTurns": 0,
+    "accelerationStartsAfterBlackTurns": null,
+    "socialism": {
+      "white": 0,
+      "black": 0
+    },
+    "ultimatum": null,
+    "prophecy": {
+      "white": null,
+      "black": null
+    },
+    "skipTurn": {
+      "white": false,
+      "black": false
+    },
+    "palaces": [],
+    "collapsePending": null,
+    "collapsed": false,
+    "collapseDepth": 0,
+    "collapsedCells": [],
+    "periodicCollapse": null,
+    "ruleBombs": [],
+    "saturationRule": false,
+    "portalRule": null,
+    "crownRule": null,
+    "conveyorRule": false,
+    "armistice": null,
+    "exhaustion": {
+      "white": {
+        "enabled": false,
+        "pieceId": "",
+        "count": 0
+      },
+      "black": {
+        "enabled": false,
+        "pieceId": "",
+        "count": 0
+      }
+    },
+    "mistakeCard": {
+      "white": false,
+      "black": false
+    },
+    "democracy": {
+      "white": false,
+      "black": false
+    },
+    "hillKing": {
+      "white": false,
+      "black": false
+    },
+    "genevaConvention": {
+      "white": false,
+      "black": false
+    },
+    "frontlineResponse": {
+      "white": false,
+      "black": false
+    },
+    "relay": {
+      "white": false,
+      "black": false
+    },
+    "fieldPromotion": {
+      "white": false,
+      "black": false
+    },
+    "magicGirlSurge": {
+      "white": false,
+      "black": false
+    },
+    "magicGirlSurgeRefreshPending": {
+      "white": false,
+      "black": false
+    },
+    "moveReplay": {
+      "white": null,
+      "black": null
+    },
+    "gomoku": {
+      "white": false,
+      "black": false
+    },
+    "gomokuVictoryCells": [],
+    "sirenExposure": {},
+    "undeadResurrections": [],
+    "platformRule": null,
+    "mistakeRule": false,
+    "transcendenceRule": false,
+    "binaMate": {
+      "white": false,
+      "black": false
+    },
+    "overwhelm": {
+      "white": false,
+      "black": false
+    },
+    "camouflageRule": false,
+    "delayedHazards": [],
+    "wizardSpell": null,
+    "wizardPreview": [],
+    "bigRookPreview": null,
+    "barricadePreview": null,
+    "barricadeDirectionChoice": null,
+    "ruleTicketChoice": null,
+    "jokerChoice": null,
+    "shotgunAction": "move",
+    "shotgunPreview": [],
+    "shotgunDlc": false,
+    "shotgunOpeningColor": null,
+    "completeRandom": false,
+    "draftDelete": false,
+    "ruleOpeningEnabled": true,
+    "ruleSelectionEnabled": false,
+    "selectedRuleCardIds": [],
+    "selectedRuleCardId": "",
+    "queensGambitFiles": {
+      "white": null,
+      "black": null
+    },
+    "ruleOpeningEvent": null,
+    "appliedRuleCard": null,
+    "additionalRuleCards": [],
+    "boardFlip": true,
+    "pieceCardFlip": false,
+    "shotgunOpeningForced": {
+      "white": false,
+      "black": false
+    },
+    "firstMoveCardsForced": {
+      "white": false,
+      "black": false
+    },
+    "openingAutoNoticeShown": {
+      "white": false,
+      "black": false
+    },
+    "diceLocks": {
+      "white": null,
+      "black": null
+    },
+    "repetitionSalt": 0,
+    "positionCounts": {
+      "__simType": "Map",
+      "entries": []
+    },
+    "starWinLimit": 45,
+    "deathmatchEnabled": true,
+    "deathmatchLimitTurns": 10,
+    "deathmatch": null,
+    "checkAlertEnabled": true,
+    "turnsTaken": {
+      "white": 0,
+      "black": 0
+    },
+    "cardsUsedThisTurn": {
+      "white": 0,
+      "black": 0
+    },
+    "royalCommand": {
+      "white": null,
+      "black": null
+    },
+    "middleDraftDone": false,
+    "endDraftDone": false,
+    "endPhaseStartMove": null,
+    "actionsRemaining": 1,
+    "idolEncoreUsedByPiece": {},
+    "temporaryQueens": [],
+    "necromancy": [],
+    "accelerationTrail": null,
+    "dragging": null,
+    "turnResolving": false,
+    "animatedPieceIds": {
+      "__simType": "Set",
+      "values": []
+    },
+    "forceAnimatedPieceIds": {
+      "__simType": "Set",
+      "values": []
+    },
+    "timeErasingPieceIds": {
+      "__simType": "Set",
+      "values": []
+    },
+    "timeErasedPieceIds": {
+      "__simType": "Set",
+      "values": []
+    },
+    "timeIsMineSequence": null,
+    "brilliantMove": null,
+    "lastMove": null,
+    "notationEvent": null,
+    "notationEvents": [],
+    "pendingNotation": null,
+    "pendingNotations": [],
+    "pendingReplayVisuals": [],
+    "onlineEvents": [],
+    "onlineEventNonce": 0,
+    "boardHistory": [],
+    "replayBaseFrame": null,
+    "replayEvents": [],
+    "replayEventNonce": 0,
+    "replayTailFrame": null,
+    "notationTimeline": [],
+    "replayTimelineReady": true,
+    "historyViewIndex": null,
+    "replayStartedAt": "",
+    "replayEndedAt": "",
+    "replayEndReason": "",
+    "replayHistoryComplete": true,
+    "replayCardHistoryComplete": true,
+    "cardAcquisitionNonce": 0,
+    "drawOffer": null,
+    "logHidden": false,
+    "kingDead": {
+      "white": false,
+      "black": false
+    },
+    "winner": null,
+    "moveCount": 0,
+    "fullMove": 1,
+    "logs": []
+  }
+}
