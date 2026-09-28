@@ -172,6 +172,13 @@ def _validate_decision(record, trackers, spec):
     observation = trackers[record["actor"]].frame_at(record["trace_step"])
     if observation["informationStateKey"] != record["information_state_key"]:
         raise ValueError("replay decision information identity mismatch")
+    if record["transition_completed"]:
+        actor_trace = trackers[record["actor"]]
+        if record["trace_step"] >= actor_trace.steps:
+            raise ValueError("completed replay decision lacks its public transition")
+        selected = actor_trace._steps[record["trace_step"]].own_intent
+        if selected is None or canonical_json(selected) != canonical_json(record["chosen_intent"]):
+            raise ValueError("completed replay decision selected intent differs from the actor trace")
     candidates = record["candidates"]
     if not isinstance(candidates, list) or not candidates or len(candidates) > 4096:
         raise ValueError("replay candidates must be a nonempty finite list")

@@ -331,6 +331,20 @@ maturin sdist `892c4926...`→wheel `7b415230...` 설치·정책 검증과 CI �
 통과했다. 이 결과는 Linux 로컬 검사이며 최종 커밋의 Windows/Linux 원격 CI와
 전체 규칙·카드 coverage를 대신하지 않는다. 고정 source manifest와 JUnit·packaging
 보고서는 Git 밖 `reports/full-stack-implementation/ci-perf-v1`에 보존한다.
+실제 `85854c1`의 [두 OS native CI](https://github.com/sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-/actions/runs/36378523934)는
+wheel 설치까지 성공했지만 Ubuntu 33/34(CHAOS), Windows 32/34(CHAOS·GRAND)에서
+같은 5초 belief 한도를 초과했다. skip은 0이며 policy·engine·historical JS workflow는
+성공했다. 실패 JUnit은 Git 밖 `reports/full-stack-implementation/ci-85854c1`에
+보존했다. 추가 native 성능 수정과 두 OS 재검증이 필요하다.
+
+다음 공개 계약 수정은 완료된 replay 결정의 `chosen_intent`를 해당 actor trace의
+`ownIntent`와 대조하고, Python ONNX manifest loader도 Rust와 같은 2 MiB 한도를
+읽기 전에 검사하며 실제 읽기를 `2 MiB + 1` 바이트로 제한한다. 상대 viewer에게
+숨겨진 의도와 실행 전 중단된 결정은 계속 허용한다. `85854c1` 코드에 이 두 수정만
+추가한 고정 소스의 maturin sdist `113cbd09...`→wheel `d1259935...`를 설치해
+CI 범위 34/34·skip 0을 확인했다. 거대 manifest fixture와 실제 학습은 만들지 않았다.
+이 Linux 로컬 설치 검사는 최종 커밋의 두 OS CI와 전체 코드 GO를 대신하지 않으며,
+보고서는 Git 밖 `reports/full-stack-implementation/ci-contract-v1`에 보존한다.
 
 ## 구현 연결 순서와 완료 기준
 

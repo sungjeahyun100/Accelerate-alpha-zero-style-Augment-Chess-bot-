@@ -70,6 +70,13 @@ def test_public_replay_terminal_labels_and_streamed_dataset(session_directory, m
     examples = list(episode.examples())
     assert len(examples) == 2 and all(example.value == 1. for example in examples)
     assert examples[1].observation["turn"] == "black" and examples[1].actor == "white"
+    assert completed.snapshot()["traces"]["black"]["steps"][0]["ownIntent"] is None
+    for missing_or_wrong in (None, TestAction(1, 1).public_intent()):
+        altered = deepcopy(completed.snapshot())
+        altered["traces"]["white"]["steps"][0]["ownIntent"] = missing_or_wrong
+        altered["replay_hash"] = hashlib.sha256(canonical_json({key: value for key, value in altered.items() if key != "replay_hash"}).encode()).hexdigest()
+        with pytest.raises(ValueError, match="selected intent"):
+            ReplayEpisode(altered, spec())
     assert list(ReplayEpisode.load(session_directory / "unfinished.json", spec()).examples()) == []
     dataset = ReplayDataset([session_directory / "episode.json", session_directory / "unfinished.json"], spec())
     assert len(dataset) == 2 and dataset[1].value == 1.

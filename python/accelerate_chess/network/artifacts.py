@@ -27,6 +27,7 @@ from .model import AdapterDescriptor, ModelConfig, PolicyValueNetwork, tensor_st
 CHECKPOINT_VERSION = "model-checkpoint-v2"
 BUNDLE_VERSION = "onnx-policy-value-v2"
 MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
+MAX_MANIFEST_BYTES = 2 * 1024 * 1024
 
 
 def _onnx_contract() -> dict[str, Any]:
@@ -268,7 +269,15 @@ def export_onnx(model: PolicyValueNetwork, spec: EncoderSpec, directory: str | P
 
 def load_manifest(path: str | Path, expected_spec: EncoderSpec | None = None, *, inspect_graph: bool = True) -> dict[str, Any]:
     path = Path(path)
-    manifest = json.loads(path.read_text(encoding="utf-8"))
+    if path.stat().st_size > MAX_MANIFEST_BYTES:
+        raise ValueError("artifact exceeds byte limit")
+    # The file may grow or be replaced after stat. Keep the actual read bounded
+    # to the Rust loader's 2 MiB contract, with one excess byte for rejection.
+    with path.open("rb") as source:
+        encoded = source.read(MAX_MANIFEST_BYTES + 1)
+    if len(encoded) > MAX_MANIFEST_BYTES:
+        raise ValueError("artifact exceeds byte limit")
+    manifest = json.loads(encoded.decode("utf-8"))
     required = {"version", "model_file", "model_sha256", "base_hash", "adapter_hash", "adapter", "model_config", "model_config_hash", "encoder", "encoder_hash", "onnx", "numerical_tolerance"}
     if not isinstance(manifest, dict) or set(manifest) != required or manifest["version"] != BUNDLE_VERSION or manifest["model_file"] != "model.onnx":
         raise ValueError("unsupported deployment manifest")

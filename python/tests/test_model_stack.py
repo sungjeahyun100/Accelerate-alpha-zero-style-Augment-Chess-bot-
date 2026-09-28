@@ -1,18 +1,20 @@
 """Small contract scenarios; no trained weights or large fixtures in Git."""
 
 from dataclasses import replace
+from io import BytesIO
 import json
 import hashlib
 import os
 from pathlib import Path
 from functools import lru_cache
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import torch
 
 from accelerate_chess.encoding import EncoderSpec, PublicEncoder, PublicObservation, batch_positions, canonical_json, decode_json_tail
-from accelerate_chess.network.artifacts import OnnxEvaluator, _validate_graph, export_onnx, load_adapter, load_base, load_manifest, save_adapter, save_base
+from accelerate_chess.network.artifacts import MAX_MANIFEST_BYTES, OnnxEvaluator, _validate_graph, export_onnx, load_adapter, load_base, load_manifest, save_adapter, save_base
 from accelerate_chess.network.model import AdapterDescriptor, ModelConfig, PolicyValueNetwork, is_adapter_parameter, masked_policy, tensor_state_hash
 
 torch.set_num_threads(1)
@@ -312,7 +314,7 @@ def test_base_adapter_checkpoint_roundtrip_and_failed_load_preserves_model(artif
         load_base(policy_path, contract)
 
 
-def test_onnx_dynamic_batch_actions_film_merge_and_manifest(artifact_directory):
+def test_onnx_dynamic_batch_actions_film_merge_and_manifest(artifact_directory, monkeypatch):
     torch.set_num_threads(1)
     contract = spec()
     model = tiny_model()
@@ -323,6 +325,28 @@ def test_onnx_dynamic_batch_actions_film_merge_and_manifest(artifact_directory):
     descriptor = model.adapter_descriptor(contract.digest)
     original_hash = tensor_state_hash(model.state_dict())
     manifest = export_onnx(model, contract, artifact_directory / "deployment", descriptor=descriptor)
+    original_stat, original_open = Path.stat, Path.open
+    apparent_size = MAX_MANIFEST_BYTES + 1
+    allow_open = False
+    def manifest_stat(path, *args, **kwargs):
+        return SimpleNamespace(st_size=apparent_size) if path == manifest else original_stat(path, *args, **kwargs)
+    class GrowingReader(BytesIO):
+        def read(self, size=-1):
+            assert size == MAX_MANIFEST_BYTES + 1
+            return super().read(size)
+    def manifest_open(path, *args, **kwargs):
+        if path == manifest:
+            assert allow_open
+            return GrowingReader(b"{}" + b" " * (MAX_MANIFEST_BYTES - 1))
+        return original_open(path, *args, **kwargs)
+    with monkeypatch.context() as limit:
+        limit.setattr(Path, "stat", manifest_stat)
+        limit.setattr(Path, "open", manifest_open)
+        with pytest.raises(ValueError, match="artifact exceeds byte limit"):
+            load_manifest(manifest)
+        apparent_size, allow_open = 2, True
+        with pytest.raises(ValueError, match="artifact exceeds byte limit"):
+            load_manifest(manifest)
     evaluator = OnnxEvaluator(manifest, contract)
     generator = np.random.default_rng(2)
     for batch_size, candidate_count in ((1, 1), (2, 5), (3, 2)):
