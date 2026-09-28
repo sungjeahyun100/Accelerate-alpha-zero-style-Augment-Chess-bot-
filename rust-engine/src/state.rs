@@ -809,8 +809,10 @@ fn one() -> u32 {
 fn play() -> String {
     "play".into()
 }
+pub const RULES_VERSION_V6: &str = "augment-site-20260927-abfe01a035813875";
+pub const RULES_VERSION_V7: &str = "augment-site-20260928-e5ed84fcf8e72a24";
 fn default_ruleset() -> String {
-    "augment-site-20260927-abfe01a035813875".into()
+    RULES_VERSION_V6.into()
 }
 fn default_rng() -> RngState {
     RngState::seeded(0)
@@ -1073,6 +1075,13 @@ impl GameState {
         }
     }
     pub fn validate_and_identify(&mut self) -> Result<()> {
+        if self.ruleset_id != RULES_VERSION_V6 {
+            return Err(if self.ruleset_id == RULES_VERSION_V7 {
+                EngineError::UnsupportedFeature("v7 rules profile is not executable".into())
+            } else {
+                EngineError::InvalidState("unknown rules version".into())
+            });
+        }
         for value in self.extra.values() {
             validate_json_value(value, 1)?;
         }

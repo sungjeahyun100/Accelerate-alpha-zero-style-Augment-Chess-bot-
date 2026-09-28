@@ -300,12 +300,13 @@ fn apply_democracy(state: &mut GameState, color: Color) -> Result<bool> {
     Ok(true)
 }
 
-pub(crate) fn apply(
-    state: &mut GameState,
-    action: &Action,
-    before: &Sides<Observation>,
-) -> Result<(Vec<Piece>, Sides<Observation>)> {
+pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
     let actor = action.color;
+    let before = Sides {
+        white: state.observe(Color::White),
+        black: state.observe(Color::Black),
+        white_first: true,
+    };
     let captures = match action.kind {
         ActionKind::Move => apply_move(state, action, false)?,
         ActionKind::Card => apply_card(state, action)?,
@@ -317,25 +318,20 @@ pub(crate) fn apply(
     };
     prune_board_potion_effects(state)?;
     crate::replay::settle(state)?;
-    let mut after = Sides {
-        white: state.observe(Color::White),
-        black: state.observe(Color::Black),
-        white_first: true,
-    };
     let transition = |viewer| {
-        let view = after.get(viewer);
+        let after = state.observe(viewer);
         let before = before.get(viewer);
         let mut board_changes = Vec::new();
         for row in 0..8 {
             for col in 0..8 {
-                if before.board[row][col] != view.board[row][col] {
+                if before.board[row][col] != after.board[row][col] {
                     board_changes.push(BoardChange {
                         square: Square {
                             row: row as u8,
                             col: col as u8,
                         },
                         before: before.board[row][col].clone(),
-                        after: view.board[row][col].clone(),
+                        after: after.board[row][col].clone(),
                     });
                 }
             }
@@ -351,8 +347,8 @@ pub(crate) fn apply(
             next_actor: state.decision_actor(),
             phase: state.mode.clone(),
             board_changes,
-            own_cards: view.own_cards.clone(),
-            revealed_opponent_cards: view
+            own_cards: after.own_cards,
+            revealed_opponent_cards: after
                 .public_state
                 .get("revealedOpponentCards")
                 .and_then(Value::as_array)
@@ -375,20 +371,10 @@ pub(crate) fn apply(
             white_first: true,
         },
     };
-    after
-        .white
-        .history
-        .push(serde_json::to_value(&event.public.white).expect("public transition serializes"));
-    after
-        .black
-        .history
-        .push(serde_json::to_value(&event.public.black).expect("public transition serializes"));
-    after.white.refresh_key();
-    after.black.refresh_key();
     state
         .history
         .push(serde_json::to_value(event).expect("game event serializes"));
-    Ok((captures, after))
+    Ok(captures)
 }
 
 pub(crate) fn execute_threat_move(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
@@ -404,6 +390,14 @@ fn apply_move(state: &mut GameState, action: &Action, threat_probe: bool) -> Res
     let to = target.square();
     let mut piece = state.at(from).cloned().ok_or(EngineError::IllegalAction)?;
     let original_piece = piece.clone();
+    // movePiece stores this immediately before changing the first board move.
+    // The automatic OPENING card may restore only these fields if that move
+    // made its effect impossible. It deliberately leaves clock, RNG and move
+    // bookkeeping at their post-move values.
+    if !threat_probe && should_store_first_move_undo(state, action.color) {
+        let undo = capture_first_move_undo(state, action.color);
+        state.extra.insert("firstMoveUndo".into(), undo);
+    }
     let replay_before = crate::replay::begin_move(state, action.color)?;
     let actor = piece.color.owner().ok_or(EngineError::WrongActor)?;
     let original_type = piece.kind.clone();
@@ -1266,6 +1260,11 @@ fn finish_move(state: &mut GameState, actor: Color) -> Result<()> {
         state.set_flag("reversal", actor, false);
     }
     state.turn = actor.opponent();
+    let incoming = state.turn;
+    // main93664-93667 resolves incoming-turn reservations after the actor
+    // switch. VIP and ICBM pending contexts remain explicit unsupported
+    // movement states; ordinary Portal Gun reservations settle here.
+    crate::card_effects::resolve_pending_portals_for_turn(state, incoming)?;
     clear_coronation_protection(state, state.turn);
     state.actions_remaining = if state.flag("acceleration", state.turn) {
         2
@@ -1280,36 +1279,151 @@ fn finish_move(state: &mut GameState, actor: Color) -> Result<()> {
     Ok(())
 }
 
+fn first_move_auto_card(card: &CardSlot) -> bool {
+    if card.vacant || card.used || !crate::observation::truth(card.extra.get("firstTurnCard")) {
+        return false;
+    }
+    // libraryCardPhase prefers the frozen definition over the stored card's
+    // mutable phase. The two exceptional IDs are also accepted by the source.
+    let phase = crate::draft::definitions()
+        .definitions
+        .iter()
+        .find(|definition| definition["id"] == card.id)
+        .and_then(|definition| definition["phase"].as_str())
+        .or_else(|| card.extra.get("phase").and_then(Value::as_str))
+        .unwrap_or("END");
+    phase == "OPENING"
+        || matches!(
+            card.id.as_str(),
+            "shotgun-king" | "black-tower-legacy-magic"
+        )
+}
+
+fn should_store_first_move_undo(state: &GameState, actor: Color) -> bool {
+    !state.flag("firstMoveCardsForced", actor)
+        && *state.turns_taken.get(actor) == 0
+        && state.deck_slots.get(actor).iter().any(first_move_auto_card)
+}
+
+// main88121 captures exactly the fields restored by main90846. The remaining
+// state (including the clock, RNG, moveCount, logs and replay capture) stays
+// advanced even when the first board move is canceled.
+fn capture_first_move_undo(state: &GameState, actor: Color) -> Value {
+    let field = |name: &str, fallback: Value| state.extra.get(name).cloned().unwrap_or(fallback);
+    let player_map = |name: &str| {
+        let source = state.extra.get(name).unwrap_or(&Value::Null);
+        let mut rebuilt = serde_json::Map::new();
+        for color in [Color::White, Color::Black] {
+            rebuilt.insert(color.as_str().into(), source[color.as_str()].clone());
+        }
+        Value::Object(rebuilt)
+    };
+    let mut captures = serde_json::Map::new();
+    captures.insert("white".into(), json!(state.captures.white));
+    captures.insert("black".into(), json!(state.captures.black));
+    json!({
+        "color": actor,
+        "board": state.board,
+        "captures": captures,
+        "enPassant": state.en_passant,
+        "selected": field("selected", Value::Null),
+        "legalMoves": field("legalMoves", json!([])),
+        "kingDead": field("kingDead", json!({})),
+        "castled": field("castled", json!({"white":false,"black":false})),
+        "capturedTypes": player_map("capturedTypes"),
+        "turnCaptures": player_map("turnCaptures"),
+    })
+}
+
+fn restore_first_move_undo(state: &mut GameState, undo: &Value) -> Result<()> {
+    let field = |name: &str| {
+        undo.get(name)
+            .cloned()
+            .ok_or_else(|| EngineError::InvalidState(format!("firstMoveUndo.{name} missing")))
+    };
+    let board: Vec<Vec<Option<Piece>>> =
+        serde_json::from_value(field("board")?).map_err(EngineError::serialization)?;
+    if board.len() != 8 || board.iter().any(|row| row.len() != 8) {
+        return Err(EngineError::InvalidState(
+            "firstMoveUndo.board must be 8x8".into(),
+        ));
+    }
+    let mut captures: Sides<Vec<Piece>> =
+        serde_json::from_value(field("captures")?).map_err(EngineError::serialization)?;
+    // restoreFirstMoveUndo reconstructs these maps white-then-black even when
+    // the admitted position was JCS-sorted black-then-white. Replay compares
+    // JSON.stringify, so this order change is an observable delta.
+    captures.white_first = true;
+    let en_passant =
+        serde_json::from_value(field("enPassant")?).map_err(EngineError::serialization)?;
+    let selected = field("selected")?;
+    let legal_moves = field("legalMoves")?;
+    if !legal_moves.is_array() {
+        return Err(EngineError::InvalidState(
+            "firstMoveUndo.legalMoves must be an array".into(),
+        ));
+    }
+    let king_dead = field("kingDead")?;
+    let castled = field("castled")?;
+    let captured_types = field("capturedTypes")?;
+    let turn_captures = field("turnCaptures")?;
+    for (name, value) in [
+        ("kingDead", &king_dead),
+        ("castled", &castled),
+        ("capturedTypes", &captured_types),
+        ("turnCaptures", &turn_captures),
+    ] {
+        if !value.is_object() {
+            return Err(EngineError::InvalidState(format!(
+                "firstMoveUndo.{name} must be an object"
+            )));
+        }
+    }
+    state.board = board;
+    state.captures = captures;
+    state.en_passant = en_passant;
+    for (name, value) in [
+        ("selected", selected),
+        ("legalMoves", legal_moves),
+        ("kingDead", king_dead),
+        ("castled", castled),
+        ("capturedTypes", captured_types),
+        ("turnCaptures", turn_captures),
+    ] {
+        state.extra.insert(name.into(), value);
+    }
+    Ok(())
+}
+
+fn automatic_card_failure_message(effect: &str) -> Result<&'static str> {
+    match effect {
+        "guard" => Ok("킹 바로 앞에 근위병으로 바꿀 아군 폰이 없습니다."),
+        "otherworld" => Ok("이세계로 보낼 아군 폰이 없습니다."),
+        _ => Err(EngineError::UnsupportedFeature(format!(
+            "first-move automatic failure message for {effect}"
+        ))),
+    }
+}
+
 // main87905: this happens after a successful first board move and before the
 // owner-turn counter advances. It is separate from finishCard: an automatic
 // card is marked used, but does not consume a card action or add progress.
 fn resolve_first_move_cards(state: &mut GameState, actor: Color) -> Result<()> {
-    if !state.extra.contains_key("firstMoveCardsForced")
-        || state.flag("firstMoveCardsForced", actor)
-        || *state.turns_taken.get(actor) != 0
-    {
+    if state.flag("firstMoveCardsForced", actor) || *state.turns_taken.get(actor) != 0 {
         return Ok(());
     }
     let cards = state
         .deck_slots
         .get(actor)
         .iter()
-        .filter(|card| {
-            !card.vacant
-                && !card.used
-                && crate::observation::truth(card.extra.get("firstTurnCard"))
-                && (card.extra.get("phase").and_then(Value::as_str) == Some("OPENING")
-                    || matches!(
-                        card.id.as_str(),
-                        "shotgun-king" | "black-tower-legacy-magic"
-                    ))
-        })
+        .filter(|card| first_move_auto_card(card))
         .cloned()
         .collect::<Vec<_>>();
     if cards.is_empty() {
         state.set_flag("firstMoveCardsForced", actor, true);
         return Ok(());
     }
+    let mut resolved_card_count = 0usize;
     for card in cards {
         // The targeted cards, shotgun opening and failed-effect move rollback
         // have distinct source branches. Do not count them as successful uses.
@@ -1335,17 +1449,58 @@ fn resolve_first_move_cards(state: &mut GameState, actor: Color) -> Result<()> {
             .collect::<BTreeMap<_, _>>();
         let previous_turn = state.turn;
         state.turn = actor;
-        let effect = apply_card_raw(state, &card, &Action::card(actor, &card, None));
+        let mut effect = apply_card_raw(state, &card, &Action::card(actor, &card, None));
         state.turn = previous_turn;
-        match effect {
-            Ok(_) => {}
-            Err(EngineError::IllegalAction) => {
-                return Err(EngineError::UnsupportedFeature(
-                    "first-move automatic opening card rollback".into(),
-                ));
+        if matches!(effect, Err(EngineError::IllegalAction)) {
+            let undo = (resolved_card_count == 0)
+                .then(|| state.extra.get("firstMoveUndo"))
+                .flatten()
+                .filter(|undo| undo["color"] == json!(actor))
+                .cloned();
+            let name = card
+                .extra
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("undefined");
+            if let Some(undo) = undo {
+                let completed_first_move = capture_first_move_undo(state, actor);
+                restore_first_move_undo(state, &undo)?;
+                state.turn = actor;
+                effect = apply_card_raw(state, &card, &Action::card(actor, &card, None));
+                state.turn = previous_turn;
+                if effect.is_ok() {
+                    crate::replay::add_log(
+                        state,
+                        format!(
+                            "{} {name} 카드가 첫 이동에 막혀, 첫 이동을 취소하고 강제로 발동되었습니다.",
+                            crate::replay::label(actor)
+                        ),
+                    )?;
+                } else if matches!(effect, Err(EngineError::IllegalAction)) {
+                    restore_first_move_undo(state, &completed_first_move)?;
+                    crate::replay::add_log(
+                        state,
+                        format!(
+                            "{} {name} 자동 발동 실패: {}",
+                            crate::replay::label(actor),
+                            automatic_card_failure_message(&card.effect)?
+                        ),
+                    )?;
+                    continue;
+                }
+            } else {
+                crate::replay::add_log(
+                    state,
+                    format!(
+                        "{} {name} 자동 발동 실패: {}",
+                        crate::replay::label(actor),
+                        automatic_card_failure_message(&card.effect)?
+                    ),
+                )?;
+                continue;
             }
-            Err(error) => return Err(error),
         }
+        effect?;
         // main5244/87943 restores the pre-card opening capture lock of every
         // surviving piece. A transformed guard keeps its pawn's former lock.
         for piece in state.board.iter_mut().flatten().flatten() {
@@ -1390,6 +1545,7 @@ fn resolve_first_move_cards(state: &mut GameState, actor: Color) -> Result<()> {
                     .unwrap_or("undefined")
             ),
         )?;
+        resolved_card_count += 1;
     }
     state.extra.insert("firstMoveUndo".into(), Value::Null);
     state.set_flag("firstMoveCardsForced", actor, true);

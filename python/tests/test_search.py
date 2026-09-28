@@ -19,7 +19,7 @@ from accelerate_chess.encoding import EncoderSpec, PublicEncoder, canonical_json
 from accelerate_chess.inference import ProductionEvaluator
 from accelerate_chess.search import (BeliefLimits, InformationMismatchError, InformationSetSearch,
     MissingHistoryError, NativeSourceFactory, ParticleBelief, ParticleExhaustedError,
-    PublicTracker, SearchBudgetError, SearchLimits, TransitionProposal)
+    PublicTracker, SearchBudgetError, SearchLimits, TransitionProposal, _stream)
 from test_model_stack import observation_policy
 
 
@@ -49,7 +49,7 @@ class TestStream:
     def next_page(self, limit):
         page = self.actions[self.offset:self.offset + limit]
         self.offset += len(page)
-        return {"actions": page, "exhausted": self.offset == len(self.actions)}
+        return {"actions": page, "examined": len(page), "exhausted": self.offset == len(self.actions)}
 
 
 class TestPosition:
@@ -130,6 +130,42 @@ def belief(*, chance=False, reaction=False, particles=16):
         limits=BeliefLimits(particles=particles, proposals=particles * 2, elapsed_ms=1000))
 
 
+def test_action_stream_counts_examined_candidates_and_rejects_zero_progress():
+    class ScriptedStream:
+        def __init__(self, pages):
+            self.pages = iter(pages)
+            self.requests = []
+
+        def next_page(self, limit):
+            self.requests.append(limit)
+            return next(self.pages)
+
+    def consume(pages):
+        stream = ScriptedStream(pages)
+        position = TestPosition()
+        position.action_stream = lambda: stream
+        return list(_stream(position, 2, 3)), stream.requests
+
+    action = TestAction(0, 0)
+    pages, requests = consume([
+        {"actions": (), "exhausted": False, "examined": 2},
+        {"actions": (action,), "exhausted": True, "examined": 1},
+    ])
+    assert pages == [((), False), ((action,), True)]
+    assert requests == [2, 1]
+    assert consume([{"actions": (), "exhausted": True, "examined": 0}])[0] == [((), True)]
+
+    for invalid in (
+        {"actions": (), "exhausted": False, "examined": 3},
+        {"actions": (), "exhausted": False, "examined": 0},
+        {"actions": (), "exhausted": False},
+        {"actions": (action,), "exhausted": True},
+        {"actions": (action,), "exhausted": True, "examined": 0},
+    ):
+        with pytest.raises(InformationMismatchError, match="invalid page"):
+            consume([invalid])
+
+
 def test_public_trace_identity_complete_history_and_belief_filter():
     initial = TestPosition().observe("white")
     tracker = PublicTracker(initial)
@@ -139,6 +175,7 @@ def test_public_trace_identity_complete_history_and_belief_filter():
     tracker.append(child.observe("white"), own_intent=action.public_intent())
     step, frame = next(tracker.frames())
     assert frame == tracker.latest and step.own_intent == action.public_intent()
+    assert list(tracker._frames_since(0)) == list(tracker.frames())
     snapshot = tracker.snapshot()
     assert "history" not in {change["path"][0] for change in snapshot["steps"][0]["patch"]}
     reconstructed = ParticleBelief(tracker, TestFactory(), seed=9, limits=BeliefLimits(particles=4, proposals=8))
@@ -395,11 +432,14 @@ def _native_mode_flow(mode, draft_delete, encoder, Position):
         observation = trackers[actor].latest
         mode_before = observation["publicState"]["mode"]
         sampled = posterior.draw()
-        page = sampled.action_stream().next_page(1)
-        assert page["actions"]
-        intent = page["actions"][0].public_intent()
+        streamed = None
+        for actions, _ in _stream(sampled, 1, 4096):
+            if actions:
+                streamed = actions[0]
+                break
+        assert streamed is not None
+        intent = streamed.public_intent()
         if mode_before == "draft" and trackers[actor].steps == 0:
-            streamed = page["actions"][0]
             assert posterior.factory.bind_streamed_public_intent(sampled, streamed, intent) is streamed
             assert canonical_json(streamed.as_payload()) == canonical_json(
                 sampled.bind_public_intent(intent).as_payload())

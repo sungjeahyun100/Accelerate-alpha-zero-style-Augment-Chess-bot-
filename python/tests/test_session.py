@@ -10,7 +10,7 @@ from pathlib import Path
 import random
 import signal
 from tempfile import TemporaryDirectory
-from threading import Barrier
+from threading import Barrier, Lock
 
 import numpy as np
 import pytest
@@ -71,10 +71,15 @@ def test_atomic_public_json_saves_do_not_share_a_temporary_file(session_director
     path = session_directory / "concurrent-public.json"
     barrier = Barrier(2)
     replace = os.replace
+    replace_lock = Lock()
+    temporary_sources = []
 
     def simultaneous_replace(source, target):
+        with replace_lock:
+            temporary_sources.append(Path(source))
         barrier.wait(timeout=10)
-        replace(source, target)
+        with replace_lock:
+            replace(source, target)
 
     monkeypatch.setattr("accelerate_chess.replay.os.replace", simultaneous_replace)
     with ThreadPoolExecutor(max_workers=2) as workers:
@@ -82,6 +87,7 @@ def test_atomic_public_json_saves_do_not_share_a_temporary_file(session_director
         for future in futures:
             future.result(timeout=15)
 
+    assert len(temporary_sources) == 2 and temporary_sources[0] != temporary_sources[1]
     assert read_json(path) in ({"writer": 0}, {"writer": 1})
     assert not list(session_directory.glob(".concurrent-public.json.*.tmp"))
 

@@ -69,13 +69,18 @@ fn standard_initial_moves_branch_without_mutation() {
     loop {
         let page = stream.next_page(3).unwrap();
         assert!(page.actions.len() <= 3);
+        assert!(page.actions.len() <= page.examined && page.examined <= 3);
+        assert!(page.exhausted || page.examined > 0);
         streamed.extend(page.actions);
         if page.exhausted {
             break;
         }
     }
     assert_eq!(streamed, root.legal_actions().unwrap());
-    assert!(stream.next_page(3).unwrap().actions.is_empty());
+    let terminal_page = stream.next_page(3).unwrap();
+    assert!(terminal_page.actions.is_empty());
+    assert_eq!(terminal_page.examined, 0);
+    assert!(terminal_page.exhausted);
     assert!(stream.next_page(0).is_err());
     let mut semantic = streamed[0].clone();
     semantic.position_key = None;
@@ -105,6 +110,252 @@ fn standard_initial_moves_branch_without_mutation() {
     assert_eq!(
         step.position.apply(&action).unwrap_err(),
         EngineError::StaleAction
+    );
+}
+
+#[test]
+fn ordered_cleanup_stream_is_bounded_and_publicly_bindable() {
+    let mut state = empty();
+    state.mode = "play".into();
+    put(&mut state, "king", Color::White, 7, 7);
+    put(&mut state, "king", Color::Black, 0, 7);
+    let a = Square { row: 3, col: 2 };
+    let b = Square { row: 4, col: 5 };
+    put(&mut state, "pawn", Color::White, a.row, a.col);
+    put(&mut state, "pawn", Color::White, b.row, b.col);
+    let mut cleanup: CardSlot = serde_json::from_value(
+        crate::draft::definitions()
+            .definitions
+            .iter()
+            .find(|card| card["id"] == "cleanup")
+            .unwrap()
+            .clone(),
+    )
+    .unwrap();
+    cleanup.instance_id = "cleanup-stream".into();
+    state.deck_slots.white = vec![cleanup];
+    let position = Position::from_state(state).unwrap();
+    assert!(matches!(
+        position.legal_actions(),
+        Err(EngineError::UnsupportedFeature(_))
+    ));
+    let before = position.to_json().unwrap();
+    let mut stream = position.action_stream().unwrap();
+    let mut cards = Vec::new();
+    let mut empty_nonterminal = false;
+    let mut reached_end = false;
+    for _ in 0..256 {
+        let page = stream.next_page(1).unwrap();
+        assert!(page.actions.len() <= page.examined && page.examined <= 1);
+        if page.actions.is_empty() && !page.exhausted {
+            empty_nonterminal = true;
+        }
+        assert!(page.exhausted || page.examined == 1);
+        for action in page.actions {
+            if action.kind == ActionKind::Card {
+                let intent = position.public_intent(&action).unwrap();
+                assert_eq!(position.bind_public_intent(intent).unwrap(), action);
+                cards.push(action);
+            }
+        }
+        if page.exhausted {
+            reached_end = true;
+            break;
+        }
+    }
+    assert!(reached_end && empty_nonterminal);
+    assert_eq!(
+        cards
+            .iter()
+            .map(|action| action.target.as_ref().unwrap()["selections"].clone())
+            .collect::<Vec<_>>(),
+        vec![json!([a]), json!([b]), json!([a, b]), json!([b, a])]
+    );
+    assert!(position.apply(&cards[3]).is_ok());
+    assert_eq!(position.to_json().unwrap(), before);
+}
+
+#[test]
+fn ordered_hypocrisy_stream_resumes_without_materializing_the_family() {
+    let mut state = empty();
+    state.mode = "play".into();
+    put(&mut state, "king", Color::White, 7, 7);
+    put(&mut state, "king", Color::Black, 0, 7);
+    let mut hypocrisy: CardSlot = serde_json::from_value(
+        crate::draft::definitions()
+            .definitions
+            .iter()
+            .find(|card| card["id"] == "hypocrisy")
+            .unwrap()
+            .clone(),
+    )
+    .unwrap();
+    hypocrisy.instance_id = "hypocrisy-stream".into();
+    state.deck_slots.white = vec![hypocrisy];
+    let position = Position::from_state(state).unwrap();
+    let mut stream = position.action_stream().unwrap();
+    let mut cards = Vec::new();
+    for _ in 0..128 {
+        let page = stream.next_page(2).unwrap();
+        assert!(page.actions.len() <= page.examined && page.examined <= 2);
+        assert!(page.exhausted || page.examined > 0);
+        cards.extend(
+            page.actions
+                .into_iter()
+                .filter(|action| action.kind == ActionKind::Card),
+        );
+        if cards.len() >= 2 {
+            assert!(!page.exhausted);
+            break;
+        }
+    }
+    assert!(cards.len() >= 2);
+    assert_eq!(
+        cards[0].target.as_ref().unwrap()["selections"],
+        json!([
+            {"row":0,"col":0},
+            {"row":0,"col":1},
+            {"row":0,"col":2},
+            {"row":0,"col":3}
+        ])
+    );
+    assert_eq!(
+        cards[1].target.as_ref().unwrap()["selections"],
+        json!([
+            {"row":0,"col":0},
+            {"row":0,"col":1},
+            {"row":0,"col":2},
+            {"row":0,"col":4}
+        ])
+    );
+}
+
+#[test]
+fn portal_stream_remains_unsupported_without_its_future_rule() {
+    let mut state = empty();
+    state.mode = "play".into();
+    put(&mut state, "king", Color::White, 7, 7);
+    put(&mut state, "king", Color::Black, 0, 7);
+    let mut portal: CardSlot = serde_json::from_value(
+        crate::draft::definitions()
+            .definitions
+            .iter()
+            .find(|card| card["id"] == "portal-gun")
+            .unwrap()
+            .clone(),
+    )
+    .unwrap();
+    portal.instance_id = "portal-stream".into();
+    state.deck_slots.white = vec![portal];
+    let position = Position::from_state(state).unwrap();
+    let before = position.to_json().unwrap();
+    let mut stream = position.action_stream().unwrap();
+    for _ in 0..2 {
+        assert!(matches!(
+            stream.next_page(4096),
+            Err(EngineError::UnsupportedFeature(_))
+        ));
+    }
+    assert_eq!(position.to_json().unwrap(), before);
+}
+
+#[test]
+fn portal_card_then_move_preserves_source_replay_frame_boundary() {
+    let mut state = empty();
+    state.mode = "play".into();
+    put(&mut state, "king", Color::White, 7, 7);
+    put(&mut state, "king", Color::Black, 0, 7);
+    let mut portal: CardSlot = serde_json::from_value(
+        crate::draft::definitions()
+            .definitions
+            .iter()
+            .find(|card| card["id"] == "portal-gun")
+            .unwrap()
+            .clone(),
+    )
+    .unwrap();
+    portal.instance_id = "portal-replay-boundary".into();
+    state.deck_slots.white = vec![portal];
+    let position = Position::from_state(state).unwrap();
+    let action = position
+        .bind_payload(json!({"type":"card","color":"white","cardId":"portal-gun","cardInstanceId":"portal-replay-boundary","target":{"selections":[{"row":1,"col":1},{"row":2,"col":2}]}}))
+        .unwrap();
+    let after_card = position.apply(&action).unwrap().position;
+    let after_move = after_card
+        .apply(&movement(
+            &after_card,
+            Square { row: 7, col: 7 },
+            Square { row: 6, col: 7 },
+        ))
+        .unwrap()
+        .position;
+    let keys = after_move.state().extra["replayEvents"][1]["delta"]["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|field| field["key"].as_str())
+        .collect::<Vec<_>>();
+    assert!(keys.contains(&"cardState"));
+    assert!(keys.contains(&"pendingPortals"));
+    assert_eq!(after_move.state().turn, Color::Black);
+    assert_eq!(
+        after_move.state().rng.cursor,
+        after_card.state().rng.cursor + 1
+    );
+}
+
+#[test]
+fn direct_guard_card_cannot_explain_a_first_move_that_auto_uses_guard() {
+    let mut state = GameState::new(kernel_config(), 37).unwrap();
+    let mut guard: CardSlot = serde_json::from_value(
+        crate::draft::definitions()
+            .definitions
+            .iter()
+            .find(|card| card["id"] == "guard")
+            .unwrap()
+            .clone(),
+    )
+    .unwrap();
+    guard.instance_id = "guard-first-move".into();
+    guard.extra.insert("firstTurnCard".into(), json!(true));
+    state.deck_slots.white[0] = guard;
+    state.extra.insert(
+        "firstMoveCardsForced".into(),
+        json!({"white":false,"black":false}),
+    );
+    let position = Position::from_state(state).unwrap();
+    let card = position
+        .bind_payload(json!({"type":"card","color":"white",
+            "cardId":"guard","cardInstanceId":"guard-first-move"}))
+        .unwrap();
+    let direct = position.apply(&card).unwrap().position;
+    assert_eq!(
+        (direct.state().turn, direct.state().move_count),
+        (Color::White, 0)
+    );
+    let direct_public = serde_json::to_value(direct.try_observe(Color::Black).unwrap()).unwrap();
+    assert!(
+        position
+            .public_transition_compatible(&card, direct_public)
+            .unwrap()
+    );
+
+    let first_move = movement(
+        &position,
+        Square { row: 6, col: 0 },
+        Square { row: 5, col: 0 },
+    );
+    let moved = position.apply(&first_move).unwrap().position;
+    assert_eq!(
+        (moved.state().turn, moved.state().move_count),
+        (Color::Black, 1)
+    );
+    assert!(moved.state().deck_slots.white[0].used);
+    let moved_public = serde_json::to_value(moved.try_observe(Color::Black).unwrap()).unwrap();
+    assert!(
+        !position
+            .public_transition_compatible(&card, moved_public)
+            .unwrap()
     );
 }
 
@@ -845,6 +1096,51 @@ fn raw_card_acceptance_does_not_expand_public_source_selection() {
 }
 
 #[test]
+fn ordered_card_clicks_bind_without_materializing_incomplete_action_lists() {
+    let mut state = empty();
+    let first = Square { row: 3, col: 2 };
+    let second = Square { row: 4, col: 5 };
+    put(&mut state, "pawn", Color::White, first.row, first.col);
+    put(&mut state, "pawn", Color::White, second.row, second.col);
+    let mut card: CardSlot = serde_json::from_value(
+        crate::draft::definitions()
+            .definitions
+            .iter()
+            .find(|candidate| candidate["id"] == "cleanup")
+            .unwrap()
+            .clone(),
+    )
+    .unwrap();
+    card.instance_id = "cleanup-order-test".into();
+    state.deck_slots.white[0] = card;
+    let position = Position::from_state(state).unwrap();
+    let before = position.to_json().unwrap();
+    let reversed = json!({
+        "type":"card","color":"white","cardId":"cleanup",
+        "cardInstanceId":"cleanup-order-test",
+        "target":{"selections":[second,first]}
+    });
+    let bound = position.bind_public_intent(reversed.clone()).unwrap();
+    assert_eq!(position.public_intent(&bound).unwrap(), reversed);
+    assert!(matches!(
+        position.legal_actions(),
+        Err(EngineError::UnsupportedFeature(_))
+    ));
+
+    let duplicate = json!({
+        "type":"card","color":"white","cardId":"cleanup",
+        "cardInstanceId":"cleanup-order-test",
+        "target":{"selections":[first,first]}
+    });
+    assert!(position.bind_payload(duplicate.clone()).is_ok());
+    assert_eq!(
+        position.bind_public_intent(duplicate).unwrap_err(),
+        EngineError::IllegalAction
+    );
+    assert_eq!(position.to_json().unwrap(), before);
+}
+
+#[test]
 fn seeded_rng_and_tape_are_reproducible_and_bounded() {
     let mut first = RngState::seeded(5);
     let mut second = RngState::seeded(5);
@@ -892,11 +1188,7 @@ fn source_snapshot_preserves_presence_null_slots_and_outer_metadata() {
     );
     let mut changed = imported.state().clone();
     changed.extra.remove("activeTrolley");
-    let changed = Position(
-        std::sync::Arc::new(changed),
-        imported.1.clone(),
-        std::sync::Arc::new(std::sync::OnceLock::new()),
-    );
+    let changed = Position(std::sync::Arc::new(changed), imported.1.clone());
     let exported = changed.export_state().unwrap();
     assert!(exported.get("activeTrolley").is_none());
     let restored = Position::from_snapshot_value(exported).unwrap();
@@ -1193,6 +1485,46 @@ fn neutral_obstacle_has_no_player_allegiance_and_is_public_but_not_capturable() 
             .board,
         position.state().board
     );
+}
+
+#[test]
+fn explicit_rules_version_preserves_v6_and_refuses_unported_v7() {
+    let source = Position::new_game(kernel_config(), 11).unwrap();
+    let raw = source.export_state().unwrap();
+    assert!(raw.get("rulesetId").is_none());
+    let imported =
+        Position::from_snapshot_value_with_rules_version(raw.clone(), RULES_VERSION_V6).unwrap();
+    assert_eq!(imported.rules_version(), RULES_VERSION_V6);
+    assert_eq!(imported.export_state().unwrap(), raw);
+    assert_eq!(
+        imported.try_observe(Color::White).unwrap(),
+        source.try_observe(Color::White).unwrap()
+    );
+
+    assert!(matches!(
+        Position::from_snapshot_value_with_rules_version(raw.clone(), RULES_VERSION_V7),
+        Err(EngineError::UnsupportedFeature(_))
+    ));
+    assert!(matches!(
+        Position::from_snapshot_value_with_rules_version(raw.clone(), "unknown-rules"),
+        Err(EngineError::InvalidConfig(_))
+    ));
+    let mut marked = raw;
+    marked["rulesetId"] = json!(RULES_VERSION_V7);
+    assert!(matches!(
+        Position::from_snapshot_value_with_rules_version(marked.clone(), RULES_VERSION_V6),
+        Err(EngineError::InvalidState(_))
+    ));
+    assert!(matches!(
+        Position::from_snapshot_value_with_rules_version(marked, RULES_VERSION_V7),
+        Err(EngineError::UnsupportedFeature(_))
+    ));
+    let mut state = source.state().clone();
+    state.ruleset_id = RULES_VERSION_V7.into();
+    assert!(matches!(
+        Position::from_state(state),
+        Err(EngineError::UnsupportedFeature(_))
+    ));
 }
 
 #[test]
@@ -1781,90 +2113,4 @@ fn royal_sound_probes_execute_owned_captures_and_source_protection_window() {
         Square { row: 4, col: 3 },
         &[Square { row: 3, col: 4 }]
     ));
-}
-
-#[test]
-fn direct_guard_card_cannot_explain_a_first_move_that_auto_uses_guard() {
-    let mut state = GameState::new(kernel_config(), 37).unwrap();
-    let mut guard: CardSlot = serde_json::from_value(
-        crate::draft::definitions()
-            .definitions
-            .iter()
-            .find(|card| card["id"] == "guard")
-            .unwrap()
-            .clone(),
-    )
-    .unwrap();
-    guard.instance_id = "guard-first-move".into();
-    guard.extra.insert("firstTurnCard".into(), json!(true));
-    state.deck_slots.white[0] = guard;
-    state.extra.insert(
-        "firstMoveCardsForced".into(),
-        json!({"white":false,"black":false}),
-    );
-    let position = Position::from_state(state).unwrap();
-    let card = position
-        .bind_payload(json!({"type":"card","color":"white",
-            "cardId":"guard","cardInstanceId":"guard-first-move"}))
-        .unwrap();
-    let direct = position.apply(&card).unwrap().position;
-    assert_eq!(
-        (direct.state().turn, direct.state().move_count),
-        (Color::White, 0)
-    );
-    let direct_public = serde_json::to_value(direct.try_observe(Color::Black).unwrap()).unwrap();
-    assert!(
-        position
-            .public_transition_compatible(&card, direct_public)
-            .unwrap()
-    );
-
-    let first_move = movement(
-        &position,
-        Square { row: 6, col: 0 },
-        Square { row: 5, col: 0 },
-    );
-    let moved = position.apply(&first_move).unwrap().position;
-    assert_eq!(
-        (moved.state().turn, moved.state().move_count),
-        (Color::Black, 1)
-    );
-    assert!(moved.state().deck_slots.white[0].used);
-    let moved_public = serde_json::to_value(moved.try_observe(Color::Black).unwrap()).unwrap();
-    assert!(
-        !position
-            .public_transition_compatible(&card, moved_public)
-            .unwrap()
-    );
-}
-
-#[test]
-fn cached_position_views_track_recorded_history() {
-    for style in ["normal", "chaos", "grand"] {
-        let mut position = Position::new_game(
-            GameConfig {
-                game_style: style.into(),
-                ..GameConfig::default()
-            },
-            37,
-        )
-        .unwrap();
-        for _ in 0..13 {
-            let step = position
-                .legal_actions()
-                .unwrap()
-                .into_iter()
-                .take(30)
-                .find_map(|action| position.apply(&action).ok())
-                .expect("selected source action progresses");
-            position = step.position;
-            for viewer in [Color::White, Color::Black] {
-                assert_eq!(position.observe(viewer), position.state().observe(viewer));
-                assert_eq!(
-                    position.try_observe(viewer).unwrap(),
-                    position.state().try_observe(viewer).unwrap()
-                );
-            }
-        }
-    }
 }

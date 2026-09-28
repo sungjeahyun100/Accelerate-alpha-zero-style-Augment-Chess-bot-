@@ -5,25 +5,6 @@ use crate::*;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-fn with_trace(position: &Position, probability: Option<f64>) -> Position {
-    let mut state = position.state().clone();
-    state.semantic_chance_probability = probability;
-    Position(
-        std::sync::Arc::new(state),
-        position.1.clone(),
-        position.2.clone(),
-    )
-}
-fn with_seed(position: &Position, seed: u32) -> Position {
-    let mut state = position.state().clone();
-    state.rng = RngState::seeded(u64::from(seed));
-    Position(
-        std::sync::Arc::new(state),
-        position.1.clone(),
-        position.2.clone(),
-    )
-}
-
 fn same_content<T: serde::Serialize>(left: &T, right: &T) -> Result<bool> {
     let canonical = |value| {
         serde_jcs::to_vec(value).map_err(|error| {
@@ -240,13 +221,17 @@ pub(crate) fn apply_weighted_conditioned(
             ));
         }
     }
-    let mut step = with_trace(position, Some(1.0)).apply(action)?;
+    let mut traced_state = position.state().clone();
+    traced_state.semantic_chance_probability = Some(1.0);
+    let mut step = position.with_state(traced_state)?.apply(action)?;
     let semantic_probability = step
         .position
         .state()
         .semantic_chance_probability
         .ok_or_else(|| EngineError::InvalidState("missing owned semantic chance trace".into()))?;
-    step.position = with_trace(&step.position, None);
+    let mut completed = step.position.state().clone();
+    completed.semantic_chance_probability = None;
+    step.position = step.position.with_state(completed)?;
     let old_draft = position.state().extra.get("draft");
     let new_draft = step.position.state().extra.get("draft");
     let visible_draft = expected.public_state.get("draft");
@@ -327,7 +312,9 @@ pub(crate) fn apply_weighted_conditioned(
         )
     };
     let importance_weight = checked_density(source_probability, proposal_probability)?;
-    step.position = with_seed(&conditioned, seed);
+    let mut state = conditioned.state().clone();
+    state.rng = RngState::seeded(u64::from(seed));
+    step.position = conditioned.with_state(state)?;
     Ok(ConditionedStepProposal {
         step,
         importance_weight,

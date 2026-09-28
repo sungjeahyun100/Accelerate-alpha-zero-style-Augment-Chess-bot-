@@ -19,7 +19,7 @@ pub use movement::implemented_piece_types;
 pub use state::*;
 
 use serde_json::{Map, Value};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 struct SnapshotShape {
@@ -28,11 +28,7 @@ struct SnapshotShape {
 }
 
 #[derive(Clone, Debug)]
-pub struct Position(
-    Arc<GameState>,
-    Option<Arc<SnapshotShape>>,
-    Arc<OnceLock<Sides<Observation>>>,
-);
+pub struct Position(Arc<GameState>, Option<Arc<SnapshotShape>>);
 
 /// Importance proposal for a previously hidden source OPENING offer.
 /// Probabilities refer to the ordered weighted-choice chance kernel; opaque
@@ -58,11 +54,7 @@ pub struct ConditionedStepProposal {
 impl Position {
     pub(crate) fn with_state(&self, mut state: GameState) -> Result<Self> {
         state.validate_and_identify()?;
-        Ok(Self(
-            Arc::new(state),
-            self.1.clone(),
-            Arc::new(OnceLock::new()),
-        ))
+        Ok(Self(Arc::new(state), self.1.clone()))
     }
     pub fn sample_initial_public(
         config: GameConfig,
@@ -179,7 +171,13 @@ impl Position {
                 .ok_or(EngineError::IllegalAction)?;
             let mut semantic = action.clone();
             semantic.position_key = None;
-            if !transition::card_ui_actions(self.state(), card)?.contains(&semantic) {
+            let selected =
+                if let Some(selected) = card_effects::ui_validate(self.state(), card, &semantic)? {
+                    selected
+                } else {
+                    transition::card_ui_actions(self.state(), card)?.contains(&semantic)
+                };
+            if !selected {
                 return Err(EngineError::IllegalAction);
             }
         }
@@ -197,18 +195,44 @@ impl Position {
     }
     pub fn from_state(mut state: GameState) -> Result<Self> {
         state.validate_and_identify()?;
-        Ok(Self(Arc::new(state), None, Arc::new(OnceLock::new())))
+        Ok(Self(Arc::new(state), None))
     }
     /// Import a source snapshot without inventing fields at its serialization
     /// boundary. Typed defaults remain internal until a rule changes them.
     pub fn from_snapshot_value(value: Value) -> Result<Self> {
+        Self::from_snapshot_value_with_rules_version(value, RULES_VERSION_V6)
+    }
+    /// Select the source rules version from the outer Position envelope, not
+    /// from card metadata or an absent state.rulesetId. v7 is recognized but
+    /// cannot create an executable Position until its rules are ported.
+    pub fn from_snapshot_value_with_rules_version(
+        value: Value,
+        rules_version: &str,
+    ) -> Result<Self> {
+        if !matches!(rules_version, RULES_VERSION_V6 | RULES_VERSION_V7) {
+            return Err(EngineError::InvalidConfig("unknown rules version".into()));
+        }
         state::validate_json_value(&value, 0)?;
         let original = value
             .as_object()
             .ok_or_else(|| EngineError::InvalidState("snapshot state must be an object".into()))?
             .clone();
+        if original
+            .get("rulesetId")
+            .is_some_and(|version| version.as_str() != Some(rules_version))
+        {
+            return Err(EngineError::InvalidState(
+                "state rulesetId does not match Position rulesVersion".into(),
+            ));
+        }
+        if rules_version == RULES_VERSION_V7 {
+            return Err(EngineError::UnsupportedFeature(
+                "v7 rules profile is not executable".into(),
+            ));
+        }
         let mut state: GameState =
             serde_json::from_value(value).map_err(EngineError::serialization)?;
+        state.ruleset_id = rules_version.into();
         state.validate_and_identify()?;
         let baseline = serde_json::to_value(&state)
             .map_err(EngineError::serialization)?
@@ -218,7 +242,6 @@ impl Position {
         Ok(Self(
             Arc::new(state),
             Some(Arc::new(SnapshotShape { original, baseline })),
-            Arc::new(OnceLock::new()),
         ))
     }
     /// RNG and public history are position metadata in the v1 transport.
@@ -227,11 +250,7 @@ impl Position {
         state.rng = rng;
         state.history = history;
         state.validate_and_identify()?;
-        Ok(Self(
-            Arc::new(state),
-            self.1.clone(),
-            Arc::new(OnceLock::new()),
-        ))
+        Ok(Self(Arc::new(state), self.1.clone()))
     }
     pub fn export_state(&self) -> Result<Value> {
         let current = serde_json::to_value(self.state()).map_err(EngineError::serialization)?;
@@ -268,6 +287,9 @@ impl Position {
     }
     pub fn state(&self) -> &GameState {
         &self.0
+    }
+    pub fn rules_version(&self) -> &str {
+        &self.state().ruleset_id
     }
     /// Player making the current decision. Board turn and decision actor differ in
     /// draft, promotion and reaction windows; search must use this value.
@@ -325,33 +347,6 @@ impl Position {
         )?;
         movement::validate_action(self.state(), &semantic)
     }
-    fn raw_observations(&self) -> &Sides<Observation> {
-        self.2.get_or_init(|| Sides {
-            white: self.state().observe(Color::White),
-            black: self.state().observe(Color::Black),
-            white_first: true,
-        })
-    }
-    fn validated_after_cache(
-        state: &mut GameState,
-        after: Sides<Observation>,
-    ) -> Result<Arc<OnceLock<Sides<Observation>>>> {
-        // Validation can normalize an empty winner and assign IDs to board
-        // pieces. Observations made during the transition precede both edits.
-        let normalized_after_observation = state.winner.as_deref() == Some("")
-            || state
-                .board
-                .iter()
-                .flatten()
-                .flatten()
-                .any(|piece| piece.id.is_empty());
-        state.validate_and_identify()?;
-        let cache = Arc::new(OnceLock::new());
-        if !normalized_after_observation {
-            cache.set(after).expect("fresh observation cache");
-        }
-        Ok(cache)
-    }
     pub fn apply(&self, action: &Action) -> Result<StepResult> {
         if let Some(key) = &action.position_key
             && key != &format!("{:016x}", self.key())
@@ -366,13 +361,13 @@ impl Position {
         self.validate_action(action)?;
         let actor = self.actor();
         let mut state = self.state().clone();
-        let (captures, after) =
-            transition::apply(&mut state, &comparable, self.raw_observations())?;
-        let cache = Self::validated_after_cache(&mut state, after)?;
+        let captures = transition::apply(&mut state, &comparable)?;
+        state.validate_and_identify()?;
+        replay::canonicalize_position_frames(&mut state)?;
         let turn_changed = self.state().turn != state.turn;
         let result = state.result();
         Ok(StepResult {
-            position: Self(Arc::new(state), self.1.clone(), cache),
+            position: Self(Arc::new(state), self.1.clone()),
             actor,
             turn_changed,
             captures,
@@ -383,15 +378,10 @@ impl Position {
         self.state().result()
     }
     pub fn observe(&self, viewer: Color) -> Observation {
-        self.raw_observations().get(viewer).clone()
+        self.state().observe(viewer)
     }
     pub fn try_observe(&self, viewer: Color) -> Result<Observation> {
-        let hints = movement::public_hints(self.state(), viewer)?;
-        let mut observation = self.raw_observations().get(viewer).clone();
-        observation.public_state.insert("legalHints".into(), hints);
-        observation::validate_projection(&observation)?;
-        observation.refresh_key();
-        Ok(observation)
+        self.state().try_observe(viewer)
     }
 }
 
@@ -403,6 +393,9 @@ pub struct ActionStream {
 pub struct ActionPage {
     pub actions: Vec<Action>,
     pub exhausted: bool,
+    /// Raw candidates and scanned slots consumed in this page. Rejected
+    /// ordered selections count even when `actions` is empty.
+    pub examined: usize,
 }
 impl ActionStream {
     pub fn next_page(&mut self, limit: usize) -> Result<ActionPage> {
@@ -412,14 +405,37 @@ impl ActionStream {
             ));
         }
         let mut actions = Vec::with_capacity(limit);
+        let mut examined = 0;
+        let mut cursor = self.cursor.clone();
         let key = format!("{:016x}", self.position.key());
-        while actions.len() < limit && self.cursor.fill(self.position.state())? {
-            let mut action = self.cursor.pop().expect("filled cursor");
-            action.position_key = Some(key.clone());
-            actions.push(action);
+        while examined < limit && !cursor.is_exhausted(self.position.state()) {
+            let work = cursor.examine(self.position.state(), limit - examined)?;
+            if let Some(page) = work.staged {
+                examined += page.examined;
+                actions.extend(page.actions.into_iter().map(|mut action| {
+                    action.position_key = Some(key.clone());
+                    action
+                }));
+            } else {
+                examined += 1;
+                if let Some(mut action) = work.action {
+                    action.position_key = Some(key.clone());
+                    actions.push(action);
+                }
+            }
         }
-        let exhausted = !self.cursor.fill(self.position.state())?;
-        Ok(ActionPage { actions, exhausted })
+        let exhausted = cursor.is_exhausted(self.position.state());
+        if actions.len() > examined || examined > limit || !exhausted && examined == 0 {
+            return Err(EngineError::InvalidState(
+                "action page examination budget invariant".into(),
+            ));
+        }
+        self.cursor = cursor;
+        Ok(ActionPage {
+            actions,
+            exhausted,
+            examined,
+        })
     }
 }
 
@@ -436,38 +452,4 @@ pub(crate) fn stable_hash(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf29ce484222325u64, |hash, byte| {
         (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
     })
-}
-
-#[cfg(test)]
-mod cache_normalization_tests {
-    use super::*;
-
-    fn before_validation(state: &GameState) -> Sides<Observation> {
-        Sides {
-            white: state.observe(Color::White),
-            black: state.observe(Color::Black),
-            white_first: true,
-        }
-    }
-
-    #[test]
-    fn after_observations_are_discarded_when_validation_assigns_a_piece_id() {
-        let mut state = GameState::new(GameConfig::default(), 11).unwrap();
-        state.board[4][4] = Some(Piece::new("pawn", Color::White, ""));
-        let after = before_validation(&state);
-        let cache = Position::validated_after_cache(&mut state, after).unwrap();
-        assert!(cache.get().is_none());
-        assert_eq!(state.board[4][4].as_ref().unwrap().id, "white-4-4");
-        let position = Position(Arc::new(state.clone()), None, cache);
-        for viewer in [Color::White, Color::Black] {
-            assert_eq!(
-                serde_json::to_value(position.observe(viewer)).unwrap(),
-                serde_json::to_value(state.observe(viewer)).unwrap()
-            );
-        }
-
-        let ordinary_after = before_validation(&state);
-        let ordinary_cache = Position::validated_after_cache(&mut state, ordinary_after).unwrap();
-        assert!(ordinary_cache.get().is_some());
-    }
 }

@@ -84,9 +84,10 @@ pub(crate) fn base_moves(
         )));
     }
     let mut moves = match kind {
-        "reaper" | "hedgehog" | "undead" | "vip" | "crown" => leaps(state, piece, from, KING),
-        "octopus" => leaps(state, piece, from, QUEEN),
-        "paladin" => leaps(
+        "reaper" => source_jump_moves(state, piece, from, KING),
+        "hedgehog" | "undead" | "vip" | "crown" => leaps(state, piece, from, KING),
+        "octopus" => source_jump_moves(state, piece, from, QUEEN),
+        "paladin" => source_jump_moves(
             state,
             piece,
             from,
@@ -227,6 +228,32 @@ fn owner(piece: &Piece) -> Result<Color> {
             piece.kind
         ))
     })
+}
+
+/// Source jumpMoves97585 accepts a directly concealed enemy square before
+/// canCaptureTarget and does not inspect collapsed squares. Later move
+/// restrictions discard collapsed landings, and Paladin's threeMoveAllowed
+/// may reject other candidates. This function represents only the raw kernel.
+fn source_jump_moves(
+    state: &GameState,
+    piece: &Piece,
+    from: Square,
+    deltas: &[(i8, i8)],
+) -> Vec<MoveTarget> {
+    deltas
+        .iter()
+        .filter_map(|&(dr, dc)| from.offset(dr, dc))
+        .filter(|&to| {
+            state.at(to).is_none_or(|target| {
+                piece.color.owner().is_some_and(|actor| {
+                    target.color != piece.color
+                        && target.extra.get("hiddenFrom").and_then(Value::as_str)
+                            == Some(actor.as_str())
+                }) || can_capture(state, piece, target)
+            })
+        })
+        .map(MoveTarget::at)
+        .collect()
 }
 
 fn nonempty(value: &Value) -> bool {
@@ -563,7 +590,7 @@ fn herald(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget> {
     let lock = piece
         .extra
         .get("heraldJumpLockTurn")
-        .and_then(Value::as_f64);
+        .and_then(herald_lock_number);
     let locked = if let Some(turn) = lock {
         piece.color == state.turn && turn == *state.turns_taken.get(state.turn) as f64
     } else {
@@ -575,14 +602,76 @@ fn herald(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget> {
             let Some(to) = from.offset(dr * distance, dc * distance) else {
                 break;
             };
-            if state.at(to).is_none() {
-                moves.push(MoveTarget::at(to));
-            } else if locked {
-                break;
+            match state.at(to) {
+                None => moves.push(MoveTarget::at(to)),
+                Some(target)
+                    if target.color != piece.color
+                        && target.extra.get("hiddenFrom").and_then(Value::as_str)
+                            == Some(piece.color.as_str()) =>
+                {
+                    // movementOccupant treats directly concealed enemies as empty.
+                    moves.push(MoveTarget::at(to));
+                }
+                Some(target)
+                    if target.color == piece.color
+                        && target.extra.get("ghost").is_some_and(nonempty) =>
+                {
+                    // Herald is ranged, so allied Ghost is transparent even
+                    // when the jump lock would stop at a normal occupant.
+                }
+                Some(_) if locked => break,
+                Some(_) => {}
             }
         }
     }
     moves
+}
+
+// Number.isFinite(Number(heraldJumpLockTurn)) in isHeraldJumpLocked72082.
+// JSON arrays stringify to their one element (or an empty string), while
+// Boolean/object members stringify to nonnumeric words. A bounded walk avoids
+// recursion on arbitrary input without widening the movement contract.
+fn herald_lock_number(mut value: &Value) -> Option<f64> {
+    for _ in 0..64 {
+        match value {
+            Value::Array(items) => match items.as_slice() {
+                [] | [Value::Null] => return Some(0.0),
+                [Value::Bool(_) | Value::Object(_)] => return None,
+                [single] => value = single,
+                _ => return None,
+            },
+            Value::String(text) => return herald_lock_string_number(text),
+            _ => return crate::observation::number(Some(value)),
+        }
+    }
+    None
+}
+
+fn herald_lock_string_number(text: &str) -> Option<f64> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Some(0.0);
+    }
+    let radix = [
+        ("0x", 16),
+        ("0X", 16),
+        ("0b", 2),
+        ("0B", 2),
+        ("0o", 8),
+        ("0O", 8),
+    ]
+    .into_iter()
+    .find_map(|(prefix, radix)| text.strip_prefix(prefix).map(|digits| (digits, radix)));
+    if let Some((digits, radix)) = radix {
+        if digits.is_empty() {
+            return None;
+        }
+        let value = digits.chars().try_fold(0.0, |value, digit| {
+            Some(value * f64::from(radix) + f64::from(digit.to_digit(radix)?))
+        })?;
+        return value.is_finite().then_some(value);
+    }
+    text.parse::<f64>().ok().filter(|value| value.is_finite())
 }
 
 fn log(state: &GameState, from: Square) -> Vec<MoveTarget> {
@@ -1535,6 +1624,68 @@ mod tests {
 
     #[test]
     fn source_quiet_and_jump_paths_preserve_blockers_and_identity() {
+        for (kind, delta) in [
+            ("reaper", (-1, -1)),
+            ("octopus", (-1, -1)),
+            ("paladin", (-2, 1)),
+        ] {
+            let (mut state, piece, from) = empty(kind);
+            let target = from.offset(delta.0, delta.1).unwrap();
+            state.extra.insert(
+                "collapsedCells".into(),
+                json!([{"row":target.row,"col":target.col}]),
+            );
+            assert!(
+                moves(&state, &piece, from)
+                    .iter()
+                    .any(|to| to.square() == target)
+            );
+            state.extra.remove("collapsedCells");
+            let mut hidden = Piece::new("rook", Color::Black, "hidden");
+            hidden.extra.insert("submerged".into(), json!(true));
+            hidden.extra.insert("hiddenFrom".into(), json!("white"));
+            state.board[target.row as usize][target.col as usize] = Some(hidden);
+            assert!(
+                moves(&state, &piece, from)
+                    .iter()
+                    .any(|to| to.square() == target)
+            );
+            state.board[target.row as usize][target.col as usize]
+                .as_mut()
+                .unwrap()
+                .extra
+                .insert("hiddenFrom".into(), json!({"viewer":"white"}));
+            assert!(
+                !moves(&state, &piece, from)
+                    .iter()
+                    .any(|to| to.square() == target)
+            );
+        }
+        let (mut state, mut herald, from) = empty("herald");
+        herald.extra.insert("heraldJumpLockTurn".into(), json!("0"));
+        state.board[from.row as usize][from.col as usize] = Some(herald.clone());
+        let target = Square { row: 3, col: 3 };
+        let beyond = Square { row: 2, col: 3 };
+        put(&mut state, target, "rook", Color::Black);
+        state.board[3][3]
+            .as_mut()
+            .unwrap()
+            .extra
+            .insert("hiddenFrom".into(), json!("white"));
+        assert!(
+            moves(&state, &herald, from)
+                .iter()
+                .any(|to| to.square() == target)
+        );
+        put(&mut state, target, "rook", Color::White);
+        state.board[3][3]
+            .as_mut()
+            .unwrap()
+            .extra
+            .insert("ghost".into(), json!(true));
+        let herald_moves = moves(&state, &herald, from);
+        assert!(!herald_moves.iter().any(|to| to.square() == target));
+        assert!(herald_moves.iter().any(|to| to.square() == beyond));
         let (mut state, wizard, from) = empty("wizard");
         let target = Square { row: 3, col: 3 };
         put(&mut state, target, "pawn", Color::Black);

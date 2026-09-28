@@ -206,14 +206,34 @@ pub(crate) fn legal_move_actions(state: &GameState) -> Result<Vec<Action>> {
 /// A cursor stores one piece/card family at a time. Enumeration never allocates
 /// the complete Cartesian action space; a family's dedicated cursor can replace
 /// its bounded batch as compound cards are ported.
+#[derive(Clone)]
 pub(crate) struct ActionCursor {
     pending: VecDeque<Action>,
+    active_staged: Option<(usize, crate::card_effects::OrderedSelectionCursor)>,
     board_index: usize,
     card_index: usize,
     seen: BTreeSet<String>,
     forced_id: Option<String>,
     checker_capture: bool,
     finished: bool,
+}
+pub(crate) struct CursorWork {
+    pub(crate) action: Option<Action>,
+    pub(crate) staged: Option<crate::card_effects::StagedActionPage>,
+}
+impl CursorWork {
+    fn one(action: Option<Action>) -> Self {
+        Self {
+            action,
+            staged: None,
+        }
+    }
+    fn staged(page: crate::card_effects::StagedActionPage) -> Self {
+        Self {
+            action: None,
+            staged: Some(page),
+        }
+    }
 }
 impl ActionCursor {
     pub(crate) fn new(state: &GameState) -> Result<Self> {
@@ -226,6 +246,7 @@ impl ActionCursor {
         if special {
             return Ok(Self {
                 pending: legal_actions(state)?.into(),
+                active_staged: None,
                 board_index: 64,
                 card_index: state.deck_slots.get(state.decision_actor()).len(),
                 seen: BTreeSet::new(),
@@ -237,6 +258,7 @@ impl ActionCursor {
         ensure_supported(state)?;
         Ok(Self {
             pending: VecDeque::new(),
+            active_staged: None,
             board_index: 0,
             card_index: 0,
             seen: BTreeSet::new(),
@@ -245,48 +267,88 @@ impl ActionCursor {
             finished: false,
         })
     }
-    pub(crate) fn fill(&mut self, state: &GameState) -> Result<bool> {
-        while self.pending.is_empty() && !self.finished {
-            if self.board_index < 64 {
-                let from = Square {
-                    row: (self.board_index / 8) as u8,
-                    col: (self.board_index % 8) as u8,
-                };
-                self.board_index += 1;
-                let Some(piece) = state.at(from) else {
-                    continue;
-                };
-                if piece.color != state.turn
-                    || !self.seen.insert(piece.id.clone())
-                    || !mobile(piece)
-                    || self.forced_id.as_ref().is_some_and(|id| id != &piece.id)
-                {
-                    continue;
-                }
+    /// This is a structural check only. It does not probe another candidate
+    /// outside the caller's examination budget to determine exhaustion.
+    pub(crate) fn is_exhausted(&self, state: &GameState) -> bool {
+        self.pending.is_empty()
+            && self.active_staged.is_none()
+            && (self.finished
+                || self.board_index >= 64
+                    && (self.checker_capture
+                        || self.forced_id.is_some()
+                        || self.card_index >= state.deck_slots.get(state.turn).len()))
+    }
+
+    /// A normal piece, pending action, or deck slot consumes one unit of work.
+    /// An ordered card family may consume a bounded batch of raw UI tuples;
+    /// rejected tuples still count toward the caller's budget.
+    pub(crate) fn examine(&mut self, state: &GameState, budget: usize) -> Result<CursorWork> {
+        if let Some(action) = self.pending.pop_front() {
+            return Ok(CursorWork::one(Some(action)));
+        }
+        if let Some((slot, cursor)) = &mut self.active_staged {
+            let page = cursor.next_public_page(state, *slot, budget, budget)?;
+            if page.examined == 0 || page.examined > budget || page.actions.len() > page.examined {
+                return Err(EngineError::InvalidState(
+                    "staged action cursor exceeded or failed its examination budget".into(),
+                ));
+            }
+            if page.exhausted {
+                self.active_staged = None;
+            }
+            return Ok(CursorWork::staged(page));
+        }
+        if self.board_index < 64 {
+            let from = Square {
+                row: (self.board_index / 8) as u8,
+                col: (self.board_index % 8) as u8,
+            };
+            self.board_index += 1;
+            if let Some(piece) = state.at(from)
+                && piece.color == state.turn
+                && self.seen.insert(piece.id.clone())
+                && mobile(piece)
+                && self.forced_id.as_ref().is_none_or(|id| id == &piece.id)
+            {
                 self.pending.extend(
                     piece_moves(state, piece, from)?
                         .into_iter()
                         .filter(|target| !self.checker_capture || target.flag("checkerCapture"))
                         .map(|target| Action::movement(state.turn, from, target)),
                 );
-            } else if !self.checker_capture
-                && self.forced_id.is_none()
-                && self.card_index < state.deck_slots.get(state.turn).len()
-            {
-                let card = &state.deck_slots.get(state.turn)[self.card_index];
-                self.card_index += 1;
-                if usable_card(card) {
+            }
+            return Ok(CursorWork::one(self.pending.pop_front()));
+        }
+        if !self.checker_capture
+            && self.forced_id.is_none()
+            && self.card_index < state.deck_slots.get(state.turn).len()
+        {
+            let slot = self.card_index;
+            let card = &state.deck_slots.get(state.turn)[slot];
+            self.card_index += 1;
+            if usable_card(card) {
+                if matches!(card.effect.as_str(), "cleanupPieces" | "hypocrisy") {
+                    if let Some(cursor) = crate::card_effects::staged_cursor_for_slot(state, slot)?
+                    {
+                        if !cursor.is_exhausted() {
+                            self.active_staged = Some((slot, cursor));
+                        }
+                    } else {
+                        self.pending
+                            .extend(crate::transition::card_actions(state, card)?);
+                    }
+                } else {
+                    // Portal Gun still needs its future rule lifecycle before
+                    // its staged candidates can be exposed as legal actions.
                     self.pending
                         .extend(crate::transition::card_actions(state, card)?);
                 }
-            } else {
-                self.finished = true;
             }
+            return Ok(CursorWork::one(self.pending.pop_front()));
         }
-        Ok(!self.pending.is_empty())
-    }
-    pub(crate) fn pop(&mut self) -> Option<Action> {
-        self.pending.pop_front()
+        Err(EngineError::InvalidState(
+            "action cursor examined after exhaustion".into(),
+        ))
     }
 }
 fn mobile(piece: &Piece) -> bool {
@@ -667,7 +729,6 @@ fn ensure_supported_interactions(state: &GameState, require_execution_support: b
         "conveyorRule",
         "periodicCollapse",
         "ruleBombs",
-        "pendingPortals",
         "exhaustion",
         "camouflageRule",
         "transcendenceRule",
@@ -691,6 +752,28 @@ fn ensure_supported_interactions(state: &GameState, require_execution_support: b
         "taunt",
         "monsterRule",
     ];
+    if let Some(pending) = state
+        .extra
+        .get("pendingPortals")
+        .filter(|value| active(value))
+    {
+        let entries = pending.as_array().ok_or_else(|| {
+            EngineError::UnsupportedFeature("non-array portal movement ledger".into())
+        })?;
+        if entries.len() > 4096 {
+            return Err(EngineError::UnsupportedFeature(
+                "portal pending ledger capacity".into(),
+            ));
+        }
+        if entries
+            .iter()
+            .any(|entry| entry.get("blocksMovement") == Some(&Value::Bool(true)))
+        {
+            return Err(EngineError::UnsupportedFeature(
+                "movement-blocking portal reservation".into(),
+            ));
+        }
+    }
     for name in PENDING {
         if state.extra.get(*name).is_some_and(active) {
             return Err(EngineError::UnsupportedFeature(format!(
@@ -818,6 +901,71 @@ pub(crate) fn open_alibaba_placement(
     }
     Ok(true)
 }
+/// main68010 canReservePortalSquare first rejects every occupied board cell,
+/// so the concealed-occupant branch of isSquareOpenForInstallation cannot
+/// admit a portal reservation. Installation reservations and crown ground are
+/// still distinct from ordinary piece placement.
+pub(crate) fn open_portal_reservation(
+    state: &GameState,
+    square: Square,
+    _owner: Color,
+) -> Result<bool> {
+    if square.row >= 8
+        || square.col >= 8
+        || state.at(square).is_some()
+        || quantum_occupied(state, square)?
+        || reserved(state, square, false)?
+    {
+        return Ok(false);
+    }
+    Ok(!portal_installation_hazard(state, square))
+}
+/// The due Portal Gun callback checks only terrain hazards. Occupancy,
+/// quantum bodies and other reservations matter when selecting the cells,
+/// but are not checked again when the portal is installed (main74148-63).
+pub(crate) fn portal_installation_hazard(state: &GameState, square: Square) -> bool {
+    if square.row >= 8 || square.col >= 8 || collapsed(state, square) {
+        return true;
+    }
+    let crown = state.extra.get("crownRule").unwrap_or(&Value::Null);
+    let entries = crown
+        .get("crowns")
+        .and_then(Value::as_array)
+        .filter(|entries| !entries.is_empty());
+    let crown_ground = |entry: &Value| {
+        if !crate::observation::truth(Some(entry))
+            || crate::observation::truth(entry.get("removed"))
+        {
+            return false;
+        }
+        if entry == &Value::Bool(true) {
+            return square == (Square { row: 3, col: 3 });
+        }
+        let ground = entry.get("ground");
+        let row = ground
+            .and_then(|ground| ground.get("row"))
+            .and_then(Value::as_f64);
+        let col = ground
+            .and_then(|ground| ground.get("col"))
+            .and_then(Value::as_f64);
+        row == Some(f64::from(square.row)) && col == Some(f64::from(square.col))
+    };
+    if entries.is_some_and(|entries| entries.iter().any(crown_ground))
+        || entries.is_none() && crown_ground(crown)
+    {
+        return true;
+    }
+    state
+        .extra
+        .get("blackHole")
+        .and_then(Value::as_array)
+        .is_some_and(|holes| {
+            holes.iter().any(|cell| {
+                crate::observation::number(cell.get("row")) == Some(f64::from(square.row))
+                    && crate::observation::number(cell.get("col")) == Some(f64::from(square.col))
+            })
+        })
+}
 fn quantum_occupied(state: &GameState, square: Square) -> Result<bool> {
     for piece in state.board.iter().flatten().flatten() {
         let Some(quantum) = piece.extra.get("quantum").filter(|q| !q.is_null()) else {
@@ -845,9 +993,16 @@ fn reserved(state: &GameState, square: Square, relocation: bool) -> Result<bool>
         let Some(entries) = state.extra.get(name).filter(|v| !v.is_null()) else {
             continue;
         };
-        let entries = entries
-            .as_array()
-            .ok_or_else(|| EngineError::InvalidState(format!("{name} must be an array")))?;
+        let Some(entries) = entries.as_array() else {
+            if name == "pendingPortals" {
+                // main67957 treats a non-array portal ledger as no active
+                // reservations; portalGun later replaces it with an array.
+                continue;
+            }
+            return Err(EngineError::InvalidState(format!(
+                "{name} must be an array"
+            )));
+        };
         for entry in entries {
             let matches = match name {
                 "pendingScarecrows" => {
@@ -1310,7 +1465,13 @@ pub(crate) fn piece_moves(
         "pawn" | "squire" | "standardBearer" => pawn_moves(state, piece, from),
         "rook" => rays(state, piece, from, if reversed { DIAG } else { ORTHO }, 7),
         "bishop" => rays(state, piece, from, if reversed { ORTHO } else { DIAG }, 7),
-        "queen" => rays(state, piece, from, KING, 7),
+        "queen" => {
+            // Source queenDirections emits every diagonal ray before the
+            // orthogonal rays. KING is row-major and is only the king order.
+            let mut moves = rays(state, piece, from, DIAG, 7);
+            moves.extend(rays(state, piece, from, ORTHO, 7));
+            moves
+        }
         "king" => {
             let mut moves = leaps(state, piece, from, KING);
             moves.extend(castling(state, piece, from));

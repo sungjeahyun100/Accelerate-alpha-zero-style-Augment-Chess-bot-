@@ -156,6 +156,7 @@ impl ActionStream {
         let result = PyDict::new(py);
         result.set_item("actions", PyTuple::new(py, actions)?)?;
         result.set_item("exhausted", page.exhausted)?;
+        result.set_item("examined", page.examined)?;
         Ok(result)
     }
 }
@@ -297,11 +298,17 @@ impl Position {
         }
         let history: Vec<Value> = serde_json::from_value(snapshot["history"].clone())
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let rules_version = snapshot["rulesVersion"]
+            .as_str()
+            .ok_or_else(|| PyValueError::new_err("snapshot rules version must be text"))?;
         let imported = Self::wrap(
-            EnginePosition::from_snapshot_value(Value::Object(state.clone()))
-                .map_err(error)?
-                .with_metadata(rng, history)
-                .map_err(error)?,
+            EnginePosition::from_snapshot_value_with_rules_version(
+                Value::Object(state.clone()),
+                rules_version,
+            )
+            .map_err(error)?
+            .with_metadata(rng, history)
+            .map_err(error)?,
         )?;
         if canonical_bytes(imported.envelope.as_ref())? != canonical_bytes(&snapshot)? {
             return Err(PyValueError::new_err(

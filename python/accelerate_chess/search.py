@@ -185,6 +185,18 @@ class PublicTracker:
             _public(frame)
             yield step, frame
 
+    def _frames_since(self, revision: int):
+        if type(revision) is not int or not 0 <= revision <= self.steps:
+            raise InformationMismatchError("public tracker revision is invalid")
+        if revision + 1 == self.steps:
+            # append already validated this full frame and its history. Check
+            # the owned current frame once, without replaying every old patch.
+            yield self._steps[-1], _public({**self._body, "history": self._events})
+            return
+        for index, frame in enumerate(self.frames()):
+            if index >= revision:
+                yield frame
+
     def snapshot(self) -> dict[str, Any]:
         return _copy({"protocolVersion": TRACE_VERSION, "viewer": self.viewer, "initial": self._initial,
                       "steps": [{"patch": step.patch, "events": step.events, "ownIntent": step.own_intent} for step in self._steps]})
@@ -363,11 +375,18 @@ def _stream(position: Any, limit: int, maximum: int):
     stream = position.action_stream()
     examined = 0
     while examined < maximum:
-        page = stream.next_page(min(limit, maximum - examined))
-        actions, exhausted = page["actions"], page["exhausted"]
-        if not isinstance(actions, (tuple, list)) or type(exhausted) is not bool or len(actions) > min(limit, maximum - examined) or (not actions and not exhausted):
+        requested = min(limit, maximum - examined)
+        page = stream.next_page(requested)
+        if not isinstance(page, Mapping) or set(page) != {"actions", "exhausted", "examined"}:
             raise InformationMismatchError("native action stream returned an invalid page")
-        examined += len(actions)
+        actions, exhausted = page["actions"], page["exhausted"]
+        if not isinstance(actions, (tuple, list)) or type(exhausted) is not bool or len(actions) > requested:
+            raise InformationMismatchError("native action stream returned an invalid page")
+        page_examined = page["examined"]
+        if (type(page_examined) is not int or not len(actions) <= page_examined <= requested
+                or (page_examined == 0 and not exhausted)):
+            raise InformationMismatchError("native action stream returned an invalid page")
+        examined += page_examined
         yield actions, exhausted
         if exhausted:
             return
@@ -470,6 +489,8 @@ class ParticleBelief:
         seen: set[str] = set()
         bind_streamed = getattr(self.factory, "bind_streamed_public_intent", None)
         for actions, exhausted in _stream(position, self.limits.page_size, self.limits.actions_per_transition):
+            if not actions:
+                self._check(started)
             for action in actions:
                 self._check(started)
                 intent = _intent(action)
@@ -548,9 +569,7 @@ class ParticleBelief:
             raise InformationMismatchError("public tracker revision went backwards")
         started = time.monotonic()
         surviving = self._particles
-        for index, (step, frame) in enumerate(self.tracker.frames()):
-            if index < self._revision:
-                continue
+        for step, frame in self.tracker._frames_since(self._revision):
             weighted = [child for position in surviving if (child := self._advance(position, step, frame, started)) is not None]
             if not weighted:
                 self.rebuild()

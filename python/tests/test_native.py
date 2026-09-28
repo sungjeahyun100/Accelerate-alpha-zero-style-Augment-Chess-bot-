@@ -66,12 +66,15 @@ def test_direct_calls_match_versioned_json_and_preserve_source_presence():
     paged = []
     while True:
         page = stream.next_page(3)
-        assert set(page) == {"actions", "exhausted"} and len(page["actions"]) <= 3
+        assert set(page) == {"actions", "exhausted", "examined"}
+        assert type(page["examined"]) is int
+        assert len(page["actions"]) <= page["examined"] <= 3
+        assert page["examined"] > 0 or page["exhausted"]
         paged.extend(action.snapshot() for action in page["actions"])
         if page["exhausted"]:
             break
     assert paged == [a.snapshot() for a in position.legal_actions()]
-    assert stream.next_page(3) == {"actions": (), "exhausted": True}
+    assert stream.next_page(3) == {"actions": (), "exhausted": True, "examined": 0}
     with pytest.raises(ValueError, match="page size"):
         stream.next_page(4097)
     del stream

@@ -15,10 +15,18 @@ duplication and normalization that would change that persisted identity.
 
 `legal_actions()` returns immutable `Action` objects attached to that private
 position identity. `action_stream().next_page(limit=256)` returns
-`{"actions": tuple[Action, ...], "exhausted": bool}` in the same order, with a
-bounded page size of 1–4096. The stream owns its immutable position and
-serializes concurrent cursor access; its pages survive the stream's lifetime.
-Use it to enumerate large candidate sets without building a full action list.
+`{"actions": tuple[Action, ...], "examined": int, "exhausted": bool}` in a
+deterministic order, with a bounded page size of 1–4096. Ordinary families
+retain `legal_actions()` order. Cleanup and Hypocrisy enumerate ordered UI
+selections lazily by selection length, then row-major depth-first order;
+their eager `legal_actions()` remains explicitly unsupported. `examined` counts
+cursor work units, including scanned board squares, deck slots and rejected
+ordered card selections, so `len(actions) <= examined <= limit`.
+A non-exhausted page may contain no actions when its work units emitted none;
+a subsequent call resumes the same cursor. The stream owns its
+immutable position and serializes concurrent cursor access; its pages survive
+the stream's lifetime. Use it to enumerate large candidate sets without
+building a full action list.
 `bind_action(payload)` asks the engine to validate a single exact semantic payload;
 it does not invent flags or targets. `bind_snapshot(action_v1)` also validates
 the persisted action's version, position identity and semantic SHA-256 before

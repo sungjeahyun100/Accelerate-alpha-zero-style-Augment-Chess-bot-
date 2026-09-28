@@ -130,6 +130,20 @@ fn clone_replay(value: &Value) -> Value {
         _ => value.clone(),
     }
 }
+
+/// Each immutable source Position passes through contract.position, whose JCS
+/// copy sorts nested object keys. The next action restores that copy before
+/// createReplayDelta compares frames with JSON.stringify (key-order sensitive).
+/// Keep this frame-order boundary after an action without changing rule values.
+pub(crate) fn canonicalize_position_frames(state: &mut GameState) -> Result<()> {
+    for key in ["replayBaseFrame", "replayTailFrame"] {
+        if let Some(frame) = state.extra.get_mut(key) {
+            let bytes = serde_jcs::to_vec(frame).map_err(EngineError::serialization)?;
+            *frame = serde_json::from_slice(&bytes).map_err(EngineError::serialization)?;
+        }
+    }
+    Ok(())
+}
 pub(crate) fn normalize_color_booleans(state: &mut GameState, key: &str) {
     let current = state.extra.get(key);
     let truthy = |color: &str| {

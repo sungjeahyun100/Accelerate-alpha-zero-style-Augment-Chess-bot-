@@ -167,6 +167,13 @@ enum Mutation {
     Twins,
     LastResistance,
     Coronation,
+    Spy,
+    Wanted,
+    Brainwash,
+    Taboo,
+    Cleanup,
+    Hypocrisy,
+    PortalGun,
 }
 #[derive(Clone, Copy)]
 struct Plan {
@@ -313,7 +320,14 @@ fn plan(state: &GameState, card: &CardSlot) -> Option<Plan> {
         "parrot" => (NonRoyal("rook"), InternalTransform("parrot")),
         "brutus" => (NonRoyal("rook"), RandomBrutus),
         "metal" => (Exact(""), Metal),
+        "wanted" => (Exact(""), Wanted),
+        "brainwash" => (Exact(""), Brainwash),
+        "taboo" => (Exact(""), Taboo),
         _ => match card.effect.as_str() {
+            "cleanupPieces" => (Exact(""), Cleanup),
+            "hypocrisy" => (Exact(""), Hypocrisy),
+            "portalGun" => (Exact(""), PortalGun),
+            "spy" => (Exact("pawn"), Spy),
             "reaper" => (QueenIdentity, Transform("reaper")),
             "idol" => (QueenIdentity, Transform("idol")),
             "herald" => (Exact("rook"), Transform("herald")),
@@ -596,6 +610,52 @@ pub(crate) fn ranged_piece(state: &GameState, piece: &Piece) -> bool {
         _ => false,
     }
 }
+
+// main:1435-1505. The client compares combat values after the historical
+// type aliases and balance flags; unknown values are not eligible sacrifices.
+pub(crate) fn combat_value(state: &GameState, piece: &Piece) -> Option<f64> {
+    let kind = match piece.kind.as_str() {
+        "alibaba" => "eagle",
+        "unicorn" => "pegasus",
+        "logRolling" => "log",
+        "windmillBishop" | "windmillRook" => "windmill",
+        "big-rook" => "bigRook",
+        "big-bishop" => "bigBishop",
+        other => other,
+    };
+    if !september18(state) {
+        match kind {
+            "grasshopper" | "campfire" => return Some(5.0),
+            "checker" => return Some(2.0),
+            "checkerKing" => return Some(4.0),
+            _ => {}
+        }
+    }
+    if kind == "checkerKing" && !september26(state) {
+        return Some(3.0);
+    }
+    Some(match kind {
+        "queen" | "primeMinister" | "jester" | "reaper" | "recruiter" | "wizard" | "idol"
+        | "siren" | "thief" | "hedgehog" => 9.0,
+        "rook" | "herald" | "pegasus" | "dragon" | "siegeRam" | "slime" | "trickster"
+        | "paladin" | "octopus" | "clockwork" | "parrot" | "revolvingDoor" | "donQuixote" => 5.0,
+        "bishop" | "knight" | "protestant" | "knightmaster" | "medium" => 3.0,
+        "missionary" | "camel" | "log" | "standardBearer" | "guard" | "lobster" | "checkerKing"
+        | "eagle" => 2.0,
+        "pawn" | "fanatic" | "squire" | "checker" | "alfil" => 1.0,
+        "cannon" | "grasshopper" | "man" | "assassin" | "babyBear" | "undead" | "windmill"
+        | "campfire" => 4.0,
+        "amazon" | "grappler" => 13.0,
+        "cardinal" | "berserker" => 7.0,
+        "hook" => 15.0,
+        "bear" => 17.0,
+        "magicGirl" | "princess" => 6.0,
+        "brutus" => 10.0,
+        "colossus" => 12.0,
+        "bigRook" | "bigBishop" => 8.0,
+        _ => return None,
+    })
+}
 fn staked(piece: &Piece) -> bool {
     truthy(piece.extra.get("staked"))
         && js_number(
@@ -851,6 +911,15 @@ fn matches_plan(state: &GameState, piece: &Piece, square: Square, plan: Plan) ->
                 && ranged_piece(state, piece)
         }
         Mutation::Twins => twin_target(state, piece),
+        Mutation::Spy => piece.color == state.turn.opponent() && piece.kind == "pawn",
+        Mutation::Brainwash => brainwash_source(state, piece),
+        Mutation::Taboo => {
+            piece.color == state.turn
+                && piece.kind == "queen"
+                && !piece.id.is_empty()
+                && !state.royal_identity(piece)
+        }
+        Mutation::Cleanup => cleanup_target(state, piece),
         Mutation::Evacuation => {
             return evacuation_candidate(state, piece, square);
         }
@@ -976,7 +1045,233 @@ pub(crate) fn target_squares(state: &GameState, card: &CardSlot) -> Result<Optio
         }));
     }
     validate_profile(state, plan)?;
+    if matches!(plan.mutation, Mutation::Hypocrisy | Mutation::PortalGun) {
+        return Ok(Some(if matches!(plan.mutation, Mutation::PortalGun) {
+            portal_squares(state)?
+        } else {
+            hypocrisy_squares(state)?
+        }));
+    }
     Ok(Some(ui_targets(state, plan, false)?))
+}
+
+/// Enumerate source UI click sequences without allocating their Cartesian
+/// action space. A candidate is only a distinct ordered selection; the shared
+/// action stream must validate it and count it against its examination budget.
+#[derive(Clone)]
+pub(crate) struct OrderedSelectionCursor {
+    color: Color,
+    card: CardSlot,
+    squares: Vec<Square>,
+    indices: [usize; 4],
+    length: usize,
+    maximum: usize,
+    exhausted: bool,
+}
+
+/// One bounded portion of a card's complete ordered UI selection space.
+/// `examined` includes rejected candidates, so an empty non-exhausted page
+/// still proves progress without claiming the family has no legal actions.
+pub(crate) struct StagedActionPage {
+    pub(crate) actions: Vec<Action>,
+    pub(crate) examined: usize,
+    pub(crate) exhausted: bool,
+}
+
+fn active_staged_card(state: &GameState, slot_index: usize) -> Result<&CardSlot> {
+    if state.result().is_some() {
+        return Err(EngineError::Terminal);
+    }
+    if state.mode != "play"
+        || state
+            .extra
+            .get("pendingPromotion")
+            .is_some_and(|pending| !pending.is_null())
+    {
+        return Err(EngineError::IllegalAction);
+    }
+    let card = state
+        .deck_slots
+        .get(state.turn)
+        .get(slot_index)
+        .ok_or(EngineError::IllegalAction)?;
+    if card.vacant
+        || card.used
+        || card.recovering
+        || card
+            .extra
+            .get("nextTurnPending")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    {
+        return Err(EngineError::IllegalAction);
+    }
+    Ok(card)
+}
+
+impl OrderedSelectionCursor {
+    fn new(
+        color: Color,
+        card: &CardSlot,
+        squares: Vec<Square>,
+        minimum: usize,
+        maximum: usize,
+    ) -> Self {
+        let mut indices = [0; 4];
+        for (index, slot) in indices.iter_mut().take(minimum).enumerate() {
+            *slot = index;
+        }
+        let exhausted = squares.len() < minimum;
+        Self {
+            color,
+            card: card.clone(),
+            squares,
+            indices,
+            length: minimum,
+            maximum,
+            exhausted,
+        }
+    }
+
+    pub(crate) fn next_candidate(&mut self) -> Option<Action> {
+        if self.exhausted {
+            return None;
+        }
+        let selections = self.indices[..self.length]
+            .iter()
+            .map(|index| self.squares[*index])
+            .collect::<Vec<_>>();
+        self.advance();
+        Some(Action::card(
+            self.color,
+            &self.card,
+            Some(json!({"selections":selections})),
+        ))
+    }
+
+    /// The shared page cursor can report exhaustion without consuming an
+    /// extra candidate outside its per-page examination budget.
+    pub(crate) fn is_exhausted(&self) -> bool {
+        self.exhausted
+    }
+
+    /// Examine at most `max_examined` source UI selections from one owned
+    /// deck slot. The shared ActionCursor owns board/card ordering, global
+    /// checker/forced-turn gates and its page stop reason.
+    pub(crate) fn next_public_page(
+        &mut self,
+        state: &GameState,
+        slot_index: usize,
+        limit: usize,
+        max_examined: usize,
+    ) -> Result<StagedActionPage> {
+        if !(1..=4096).contains(&limit) || !(1..=4096).contains(&max_examined) {
+            return Err(EngineError::InvalidConfig(
+                "staged action page size and examination budget must be in 1..=4096".into(),
+            ));
+        }
+        let card = active_staged_card(state, slot_index)?;
+        if self.color != state.turn || card != &self.card {
+            return Err(EngineError::IllegalAction);
+        }
+        let mut cursor = self.clone();
+        let mut actions = Vec::with_capacity(limit.min(max_examined));
+        let mut examined = 0;
+        while actions.len() < limit && examined < max_examined {
+            let Some(candidate) = cursor.next_candidate() else {
+                break;
+            };
+            examined += 1;
+            match ui_validate(state, card, &candidate)? {
+                Some(true) => actions.push(candidate),
+                Some(false) => {}
+                None => {
+                    return Err(EngineError::InvalidState(
+                        "staged card family changed during enumeration".into(),
+                    ));
+                }
+            }
+        }
+        *self = cursor;
+        Ok(StagedActionPage {
+            actions,
+            examined,
+            exhausted: self.exhausted,
+        })
+    }
+
+    fn advance(&mut self) {
+        let count = self.squares.len();
+        for pivot in (0..self.length).rev() {
+            for replacement in self.indices[pivot] + 1..count {
+                if self.indices[..pivot].contains(&replacement) {
+                    continue;
+                }
+                self.indices[pivot] = replacement;
+                for index in pivot + 1..self.length {
+                    let next = (0..count)
+                        .find(|candidate| !self.indices[..index].contains(candidate))
+                        .expect("enough distinct squares for selection");
+                    self.indices[index] = next;
+                }
+                return;
+            }
+        }
+        if self.length < self.maximum && count > self.length {
+            self.length += 1;
+            for (index, slot) in self.indices.iter_mut().take(self.length).enumerate() {
+                *slot = index;
+            }
+        } else {
+            self.exhausted = true;
+        }
+    }
+}
+
+/// `None` means another card family owns enumeration. The exact first-click
+/// surface supplies row-major candidates; source UI toggles repeated clicks,
+/// so ordered tuples never repeat a square. Raw effect legality is checked
+/// separately by `ui_validate` before a candidate becomes a public action.
+pub(crate) fn staged_cursor(
+    state: &GameState,
+    card: &CardSlot,
+) -> Result<Option<OrderedSelectionCursor>> {
+    let Some(plan) = plan(state, card) else {
+        return Ok(None);
+    };
+    let (minimum, maximum) = match plan.mutation {
+        Mutation::Cleanup => (1, 3),
+        Mutation::PortalGun => (2, 2),
+        Mutation::Hypocrisy => (4, 4),
+        _ => return Ok(None),
+    };
+    let squares = target_squares(state, card)?.ok_or(EngineError::IllegalAction)?;
+    Ok(Some(OrderedSelectionCursor::new(
+        state.turn, card, squares, minimum, maximum,
+    )))
+}
+
+/// Bind the staged family to an actual deck position. Callers must traverse
+/// deck slots in their source order rather than sorting by card identity.
+pub(crate) fn staged_cursor_for_slot(
+    state: &GameState,
+    slot_index: usize,
+) -> Result<Option<OrderedSelectionCursor>> {
+    let card = state
+        .deck_slots
+        .get(state.turn)
+        .get(slot_index)
+        .ok_or(EngineError::IllegalAction)?;
+    if !plan(state, card).is_some_and(|plan| {
+        matches!(
+            plan.mutation,
+            Mutation::Cleanup | Mutation::PortalGun | Mutation::Hypocrisy
+        )
+    }) {
+        return Ok(None);
+    }
+    let card = active_staged_card(state, slot_index)?;
+    staged_cursor(state, card)
 }
 
 pub(crate) fn actions(state: &GameState, card: &CardSlot) -> Result<Option<Vec<Action>>> {
@@ -984,6 +1279,38 @@ pub(crate) fn actions(state: &GameState, card: &CardSlot) -> Result<Option<Vec<A
         return Ok(None);
     };
     validate_profile(state, plan)?;
+    if matches!(plan.mutation, Mutation::Cleanup) {
+        let targets = ui_targets(state, plan, true)?;
+        if targets.len() > 1 {
+            // Both [a,b] and [b,a] are selectable and can produce distinct
+            // ordered source results. The common ActionCursor needs a staged
+            // family before it can represent this full legal space lazily.
+            return Err(EngineError::UnsupportedFeature(
+                "cleanup ordered public action stream".into(),
+            ));
+        }
+        return Ok(Some(selection_actions(state, card, &targets, false)));
+    }
+    if matches!(plan.mutation, Mutation::Hypocrisy) {
+        // Four ordered choices can exceed fifteen million Actions on an
+        // empty board. Direct staged validation does not enumerate that list.
+        return Err(EngineError::UnsupportedFeature(
+            "hypocrisy staged four-square public actions".into(),
+        ));
+    }
+    if matches!(plan.mutation, Mutation::PortalGun) {
+        // Direct public binding validates a chosen ordered pair. Full public
+        // enumeration can produce 3,782 Actions with only two kings on the
+        // board, so it remains unavailable until ActionCursor consumes the
+        // staged family with a per-page examination budget.
+        let cursor = staged_cursor(state, card)?.ok_or(EngineError::IllegalAction)?;
+        if !cursor.is_exhausted() {
+            return Err(EngineError::UnsupportedFeature(
+                "portal ordered public action stream".into(),
+            ));
+        }
+        return Ok(Some(Vec::new()));
+    }
     if matches!(plan.mutation, Mutation::SideFlag(..) | Mutation::Coronation) {
         return Ok(Some(vec![Action::card(state.turn, card, None)]));
     }
@@ -994,6 +1321,7 @@ pub(crate) fn actions(state: &GameState, card: &CardSlot) -> Result<Option<Vec<A
             | Mutation::Alekhine
             | Mutation::Evasion
             | Mutation::LastResistance
+            | Mutation::Wanted
     ) {
         let available = match plan.mutation {
             Mutation::Guard => guard_pawn_square(state).is_some(),
@@ -1001,6 +1329,7 @@ pub(crate) fn actions(state: &GameState, card: &CardSlot) -> Result<Option<Vec<A
             Mutation::Alekhine => alekhine_formation(state).is_some(),
             Mutation::Evasion => !evasion_candidates(state).is_empty(),
             Mutation::LastResistance => king_augment_square(state).is_some(),
+            Mutation::Wanted => !wanted_candidates(state).is_empty(),
             _ => unreachable!(),
         };
         return Ok(Some(if available {
@@ -1019,9 +1348,55 @@ pub(crate) fn actions(state: &GameState, card: &CardSlot) -> Result<Option<Vec<A
                 | Mutation::Evacuation
                 | Mutation::Chain
                 | Mutation::Twins
+                | Mutation::Spy
+                | Mutation::Brainwash
+                | Mutation::Taboo
         ),
     )?;
     let actions = match plan.mutation {
+        Mutation::Spy => {
+            let required = spy_candidates(state).len().min(2);
+            if required == 1 {
+                targets
+                    .iter()
+                    .map(|square| {
+                        Action::card(state.turn, card, Some(json!({"selections":[square]})))
+                    })
+                    .collect()
+            } else if required == 2 {
+                selection_actions(state, card, &targets, true)
+            } else {
+                Vec::new()
+            }
+        }
+        Mutation::Brainwash => {
+            let mut result = Vec::new();
+            for source in targets {
+                let offered = state.at(source).ok_or(EngineError::IllegalAction)?;
+                for victim in brainwash_victims(state, offered) {
+                    result.push(Action::card(
+                        state.turn,
+                        card,
+                        Some(json!({"selections":[source,victim]})),
+                    ));
+                }
+            }
+            result
+        }
+        Mutation::Taboo => {
+            let destinations = taboo_destinations(state)?;
+            let mut result = Vec::new();
+            for source in targets {
+                for destination in &destinations {
+                    result.push(Action::card(
+                        state.turn,
+                        card,
+                        Some(json!({"selections":[source,destination]})),
+                    ));
+                }
+            }
+            result
+        }
         Mutation::Selection(field) => selection_actions(state, card, &targets, field == "panic"),
         Mutation::Evacuation => selection_actions(state, card, &targets, false),
         Mutation::Twins => selection_actions(state, card, &targets, true),
@@ -1538,6 +1913,653 @@ fn apply_twins(state: &mut GameState, action: &Action) -> Result<()> {
         write_piece(state, piece);
     }
     Ok(())
+}
+
+// main:639-655,67935,104702-104723. Counts use source IDs while UI cells
+// remain in board order; the raw handler consumes only its first two choices.
+fn spy_candidates(state: &GameState) -> Vec<Square> {
+    let mut seen = BTreeSet::new();
+    let mut pawns = Vec::new();
+    for row in 0..8 {
+        for col in 0..8 {
+            let square = Square { row, col };
+            if let Some(piece) = state
+                .at(square)
+                .filter(|piece| piece.color == state.turn.opponent() && piece.kind == "pawn")
+                && seen.insert(piece.id.clone())
+            {
+                pawns.push(square);
+            }
+        }
+    }
+    pawns
+}
+
+fn apply_spy(state: &mut GameState, action: &Action) -> Result<()> {
+    let target = action.target.as_ref().ok_or(EngineError::IllegalAction)?;
+    let cells = if let Some(selections) = target.get("selections").and_then(Value::as_array) {
+        selections.as_slice()
+    } else {
+        std::slice::from_ref(target)
+    };
+    let required = spy_candidates(state).len().min(2);
+    if required == 0 {
+        return Err(EngineError::IllegalAction);
+    }
+    let mut selected = Vec::with_capacity(2);
+    let mut seen = BTreeSet::new();
+    for cell in cells {
+        let integer = |field: &str| {
+            cell.get(field)
+                .and_then(Value::as_f64)
+                .filter(|number| number.is_finite() && number.fract() == 0.0)
+        };
+        let (Some(row), Some(col)) = (integer("row"), integer("col")) else {
+            continue;
+        };
+        let square = loose_square(cell);
+        let key = square
+            .and_then(|square| state.at(square))
+            .filter(|piece| !piece.id.is_empty())
+            .map_or_else(
+                || format!("square:{row}:{col}"),
+                |piece| format!("piece:{}", piece.id),
+            );
+        if seen.insert(key) {
+            selected.push(square);
+            if selected.len() == 2 {
+                break;
+            }
+        }
+    }
+    if selected.len() != required {
+        return Err(EngineError::IllegalAction);
+    }
+    let mut pieces = Vec::with_capacity(required);
+    for square in selected {
+        let piece = square
+            .and_then(|square| state.at(square))
+            .filter(|piece| piece.color == state.turn.opponent() && piece.kind == "pawn")
+            .cloned()
+            .ok_or(EngineError::IllegalAction)?;
+        pieces.push(piece);
+    }
+    for mut piece in pieces {
+        piece.extra.insert("spyOwner".into(), json!(state.turn));
+        write_piece(state, &piece);
+    }
+    Ok(())
+}
+
+// main:724-736 and100066. Source picks one distinct enemy ranged identity.
+fn wanted_candidates(state: &GameState) -> Vec<Square> {
+    let mut result = Vec::new();
+    let mut seen = BTreeSet::new();
+    for row in 0..8 {
+        for col in 0..8 {
+            let square = Square { row, col };
+            if let Some(piece) = state.at(square)
+                && piece.color == state.turn.opponent()
+                && !truthy(piece.extra.get("wanted"))
+                && ranged_piece(state, piece)
+                && seen.insert(if piece.id.is_empty() {
+                    format!("square:{row}:{col}")
+                } else {
+                    format!("piece:{}", piece.id)
+                })
+            {
+                result.push(square);
+            }
+        }
+    }
+    result
+}
+
+fn apply_wanted(state: &mut GameState) -> Result<()> {
+    let candidates = wanted_candidates(state);
+    if candidates.is_empty() {
+        return Err(EngineError::IllegalAction);
+    }
+    let index = crate::transition::sample_choice(state, candidates.len())?;
+    let mut piece = state
+        .at(candidates[index])
+        .cloned()
+        .ok_or(EngineError::IllegalAction)?;
+    piece.extra.insert("submerged".into(), json!(true));
+    piece
+        .extra
+        .insert("wanted".into(), json!({"by":state.turn}));
+    write_piece(state, &piece);
+    Ok(())
+}
+
+// main:748-760. The source requires a finite priced sacrifice and a strictly
+// lower-priced enemy; expansionBoardEntries makes each ID one candidate.
+fn brainwash_victims(state: &GameState, offered: &Piece) -> Vec<Square> {
+    let Some(value) = combat_value(state, offered) else {
+        return Vec::new();
+    };
+    let mut victims = Vec::new();
+    let mut seen = BTreeSet::new();
+    for row in 0..8 {
+        for col in 0..8 {
+            let square = Square { row, col };
+            if let Some(piece) = state.at(square)
+                && piece.color == state.turn.opponent()
+                && !state.royal_identity(piece)
+                && combat_value(state, piece).is_some_and(|worth| worth < value)
+                && seen.insert(if piece.id.is_empty() {
+                    format!("square:{row}:{col}")
+                } else {
+                    format!("piece:{}", piece.id)
+                })
+            {
+                victims.push(square);
+            }
+        }
+    }
+    victims
+}
+
+fn brainwash_source(state: &GameState, piece: &Piece) -> bool {
+    piece.color == state.turn
+        && !state.royal_identity(piece)
+        && !brainwash_victims(state, piece).is_empty()
+}
+
+fn selected_pair(action: &Action) -> Result<(Square, Square)> {
+    let selections = action
+        .target
+        .as_ref()
+        .and_then(|target| target.get("selections"))
+        .and_then(Value::as_array)
+        .filter(|cells| cells.len() == 2)
+        .ok_or(EngineError::IllegalAction)?;
+    Ok((
+        loose_square(&selections[0]).ok_or(EngineError::IllegalAction)?,
+        loose_square(&selections[1]).ok_or(EngineError::IllegalAction)?,
+    ))
+}
+
+fn apply_brainwash(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
+    let (source, target) = selected_pair(action)?;
+    let offered = state
+        .at(source)
+        .cloned()
+        .ok_or(EngineError::IllegalAction)?;
+    let victim = state
+        .at(target)
+        .cloned()
+        .ok_or(EngineError::IllegalAction)?;
+    if !brainwash_source(state, &offered)
+        || !brainwash_victims(state, &offered)
+            .into_iter()
+            .any(|square| state.at(square).is_some_and(|piece| piece.id == victim.id))
+    {
+        return Err(EngineError::IllegalAction);
+    }
+    let sacrificed = crate::transition::expansion_sacrifice(state, source, state.turn.opponent())?
+        .ok_or(EngineError::IllegalAction)?;
+    if state.mode != "gameover"
+        && let Some(mut converted) = state
+            .at(target)
+            .cloned()
+            .filter(|piece| piece.id == victim.id)
+    {
+        converted.color = state.turn.into();
+        converted.moved = true;
+        converted.extra.insert("defected".into(), json!(true));
+        let health = match converted.kind.as_str() {
+            "colossus" => Some(3),
+            "bigRook" | "bigBishop" | "big-rook" | "big-bishop" => Some(2),
+            _ => None,
+        };
+        if let Some(health) = health {
+            converted.extra.insert("hp".into(), json!(health));
+            converted.extra.insert("maxHp".into(), json!(health));
+        }
+        mark_transformed_origin_with_options(state, &mut converted, target, true)?;
+        converted.extra.shift_remove("freshNoCaptureUntil");
+        converted
+            .extra
+            .insert("coolGuyCapturedLast".into(), json!(false));
+        mark_animation(state, &converted)?;
+        write_piece(state, &converted);
+    }
+    Ok(vec![sacrificed])
+}
+
+fn taboo_destinations(state: &GameState) -> Result<Vec<Square>> {
+    let mut squares = Vec::with_capacity(64);
+    for row in 0..8 {
+        for col in 0..8 {
+            let square = Square { row, col };
+            if crate::movement::open_placement(state, square, None)? {
+                squares.push(square);
+            }
+        }
+    }
+    Ok(squares)
+}
+
+// main:761-769. The ordered reservation is consumed at a later turn boundary.
+fn apply_taboo(state: &mut GameState, action: &Action) -> Result<()> {
+    let (from, to) = selected_pair(action)?;
+    let piece = state.at(from).ok_or(EngineError::IllegalAction)?;
+    if piece.color != state.turn
+        || piece.id.is_empty()
+        || piece.kind != "queen"
+        || state.royal_identity(piece)
+        || !crate::movement::open_placement(state, to, None)?
+    {
+        return Err(EngineError::IllegalAction);
+    }
+    let entry = json!({"color":state.turn,"pieceId":piece.id,"square":to});
+    if !truthy(state.extra.get("tabooPending")) {
+        state.extra.insert("tabooPending".into(), json!([]));
+    }
+    let pending = state
+        .extra
+        .get_mut("tabooPending")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| EngineError::UnsupportedFeature("non-array taboo pending".into()))?;
+    if pending.len() >= 4096 {
+        return Err(EngineError::UnsupportedFeature(
+            "taboo pending capacity".into(),
+        ));
+    }
+    pending.push(entry);
+    Ok(())
+}
+
+// main:73807-73813,99988-100002,105846. Cleanup removes each selected
+// identity directly; source does not treat this as a capture or sacrifice.
+fn cleanup_target(state: &GameState, piece: &Piece) -> bool {
+    piece.color == state.turn
+        && !state.royal_identity(piece)
+        && !piece.is_large()
+        && !["wall", "football", "blackHole", "monster", "coffin"].contains(&piece.kind.as_str())
+}
+
+fn apply_cleanup(state: &mut GameState, action: &Action) -> Result<()> {
+    let cells = action
+        .target
+        .as_ref()
+        .and_then(|target| target.get("selections"))
+        .and_then(Value::as_array)
+        .ok_or(EngineError::IllegalAction)?;
+    let mut selected = Vec::with_capacity(3);
+    let mut seen = BTreeSet::new();
+    for cell in cells {
+        let integer = |field: &str| {
+            cell.get(field)
+                .and_then(Value::as_f64)
+                .filter(|number| number.is_finite() && number.fract() == 0.0)
+        };
+        let (Some(row), Some(col)) = (integer("row"), integer("col")) else {
+            continue;
+        };
+        // uniqueSelectionCellsByPiece discards non-integers, but retains an
+        // integer outside the board and then rejects it in the target check.
+        if !(0.0..8.0).contains(&row) || !(0.0..8.0).contains(&col) {
+            return Err(EngineError::IllegalAction);
+        }
+        let square = Square {
+            row: row as u8,
+            col: col as u8,
+        };
+        let key = state
+            .at(square)
+            .filter(|piece| !piece.id.is_empty())
+            .map_or_else(
+                || format!("square:{}:{}", square.row, square.col),
+                |piece| format!("piece:{}", piece.id),
+            );
+        if seen.insert(key) {
+            selected.push(square);
+            if selected.len() > 3 {
+                return Err(EngineError::IllegalAction);
+            }
+        }
+    }
+    if selected.is_empty()
+        || selected.iter().any(|square| {
+            !state
+                .at(*square)
+                .is_some_and(|piece| cleanup_target(state, piece))
+        })
+    {
+        return Err(EngineError::IllegalAction);
+    }
+    for square in selected {
+        let piece = state
+            .at(square)
+            .cloned()
+            .ok_or(EngineError::IllegalAction)?;
+        if piece.id.is_empty() {
+            state.board[square.row as usize][square.col as usize] = None;
+        } else {
+            crate::transition::clear_piece(state, &piece.id);
+        }
+        crate::transition::grant_vigilance_protection(state, &piece)?;
+    }
+    Ok(())
+}
+
+// main:73815-73822 and99969-99986. Only the raw four-cell mutation and
+// first-click surface live here until public staged actions can be lazy.
+fn hypocrisy_squares(state: &GameState) -> Result<Vec<Square>> {
+    let mut cells = Vec::with_capacity(64);
+    for row in 0..8 {
+        for col in 0..8 {
+            let square = Square { row, col };
+            if crate::movement::open_alibaba_placement(state, square, state.turn.opponent())? {
+                cells.push(square);
+            }
+        }
+    }
+    Ok(cells)
+}
+
+fn apply_hypocrisy(state: &mut GameState, action: &Action) -> Result<()> {
+    let cells = action
+        .target
+        .as_ref()
+        .and_then(|target| target.get("selections"))
+        .and_then(Value::as_array)
+        .ok_or(EngineError::IllegalAction)?;
+    let mut selected = Vec::with_capacity(4);
+    let mut seen = BTreeSet::new();
+    for cell in cells {
+        let square = loose_square(cell).ok_or(EngineError::IllegalAction)?;
+        if seen.insert(square) {
+            selected.push(square);
+            if selected.len() > 4 {
+                return Err(EngineError::IllegalAction);
+            }
+        }
+    }
+    if selected.len() != 4 {
+        return Err(EngineError::IllegalAction);
+    }
+    for square in &selected {
+        if !crate::movement::open_alibaba_placement(state, *square, state.turn.opponent())? {
+            return Err(EngineError::IllegalAction);
+        }
+    }
+    let enemy = state.turn.opponent();
+    for (index, square) in selected.into_iter().enumerate() {
+        let suffix = crate::draft::random_suffix(state.rng.sample()?)?
+            .chars()
+            .take(5)
+            .collect::<String>();
+        let piece: Piece = serde_json::from_value(json!({
+            "id":format!("hypocrisy-{}-{index}-{suffix}", crate::draft::frozen_timestamp()?),
+            "type":"pawn",
+            "color":enemy,
+            "moved":true,
+            "origin":format!("{}{}",char::from(b'a'+square.col),8-square.row),
+        }))
+        .map_err(EngineError::serialization)?;
+        state.board[square.row as usize][square.col as usize] = Some(piece.clone());
+        mark_animation(state, &piece)?;
+    }
+    Ok(())
+}
+
+// main:67957-67977,68010-68020,100597-100611. The two clicks are ordered:
+// source keeps the first insertion order in pendingPortals.cells.
+fn portal_squares(state: &GameState) -> Result<Vec<Square>> {
+    let mut cells = Vec::with_capacity(64);
+    for row in 0..8 {
+        for col in 0..8 {
+            let square = Square { row, col };
+            if crate::movement::open_portal_reservation(state, square, state.turn)? {
+                cells.push(square);
+            }
+        }
+    }
+    Ok(cells)
+}
+
+fn apply_portal_gun(state: &mut GameState, action: &Action) -> Result<()> {
+    let cells = action
+        .target
+        .as_ref()
+        .and_then(|target| target.get("selections"))
+        .and_then(Value::as_array)
+        .ok_or(EngineError::IllegalAction)?;
+    let mut selected = Vec::with_capacity(2);
+    let mut seen = BTreeSet::new();
+    for cell in cells {
+        let square = loose_square(cell).ok_or(EngineError::IllegalAction)?;
+        if seen.insert(square) {
+            selected.push(square);
+            if selected.len() > 2 {
+                return Err(EngineError::IllegalAction);
+            }
+        }
+    }
+    if selected.len() != 2 {
+        return Err(EngineError::IllegalAction);
+    }
+    for square in &selected {
+        if !crate::movement::open_portal_reservation(state, *square, state.turn)? {
+            return Err(EngineError::IllegalAction);
+        }
+    }
+    let trigger_turn = state
+        .turns_taken
+        .get(state.turn)
+        .checked_add(1)
+        .ok_or_else(|| EngineError::UnsupportedFeature("portal trigger turn overflow".into()))?;
+    let timestamp = crate::draft::frozen_timestamp()?;
+    let suffix = crate::draft::random_suffix(state.rng.sample()?)?
+        .chars()
+        .take(5)
+        .collect::<String>();
+    let entry = json!({
+        "id":format!("portal-gun-{timestamp}-{suffix}"),
+        "color":state.turn,
+        "cells":selected,
+        "triggerTurn":trigger_turn,
+    });
+    if !state
+        .extra
+        .get("pendingPortals")
+        .is_some_and(Value::is_array)
+    {
+        state.extra.insert("pendingPortals".into(), json!([]));
+    }
+    let pending = state
+        .extra
+        .get_mut("pendingPortals")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| EngineError::InvalidState("pendingPortals must be an array".into()))?;
+    if pending.len() >= 4096 {
+        return Err(EngineError::UnsupportedFeature(
+            "portal pending capacity".into(),
+        ));
+    }
+    pending.push(entry);
+    Ok(())
+}
+
+// main:2502-2517. The source normalizes the complete ledger at turn entry,
+// including entries that are not yet due. Keep insertion order because the
+// last due entry wins even when several reservations share a trigger turn.
+fn normalize_pending_portals(state: &GameState) -> Result<Vec<Value>> {
+    let Some(entries) = state.extra.get("pendingPortals").and_then(Value::as_array) else {
+        return Ok(Vec::new());
+    };
+    if entries.len() > 4096 {
+        return Err(EngineError::UnsupportedFeature(
+            "portal pending ledger capacity".into(),
+        ));
+    }
+    let mut normalized = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let Some(color @ ("white" | "black")) = entry.get("color").and_then(Value::as_str) else {
+            continue;
+        };
+        let mut cells = Vec::with_capacity(2);
+        if let Some(source_cells) = entry.get("cells").and_then(Value::as_array) {
+            if source_cells.len() > 4096 {
+                return Err(EngineError::UnsupportedFeature(
+                    "portal pending cells capacity".into(),
+                ));
+            }
+            for cell in source_cells {
+                let Some(row) = js_number(cell.get("row"), 0) else {
+                    continue;
+                };
+                let Some(col) = js_number(cell.get("col"), 0) else {
+                    continue;
+                };
+                if row.fract() != 0.0
+                    || col.fract() != 0.0
+                    || !(0.0..8.0).contains(&row)
+                    || !(0.0..8.0).contains(&col)
+                {
+                    continue;
+                }
+                let square = Square {
+                    row: row as u8,
+                    col: col as u8,
+                };
+                if !cells.contains(&square) {
+                    cells.push(square);
+                }
+            }
+        }
+        if cells.len() != 2 {
+            continue;
+        }
+        let id = match entry.get("id").filter(|value| truthy(Some(value))) {
+            None => format!("pending-portal-{index}"),
+            Some(Value::String(value)) => value.clone(),
+            Some(Value::Bool(value)) => value.to_string(),
+            Some(Value::Number(value)) => {
+                let number = value.as_f64().ok_or_else(|| {
+                    EngineError::UnsupportedFeature("portal pending id number".into())
+                })?;
+                if number.fract() == 0.0 && number.abs() < (1u64 << 53) as f64 {
+                    format!("{number:.0}")
+                } else {
+                    return Err(EngineError::UnsupportedFeature(
+                        "portal pending noninteger id number".into(),
+                    ));
+                }
+            }
+            Some(_) => {
+                return Err(EngineError::UnsupportedFeature(
+                    "portal pending compound id".into(),
+                ));
+            }
+        };
+        let trigger = js_number(entry.get("triggerTurn"), 0)
+            .filter(|number| number.is_finite())
+            .unwrap_or(0.0)
+            .floor()
+            .max(0.0);
+        if trigger >= (1u64 << 53) as f64 {
+            return Err(EngineError::UnsupportedFeature(
+                "portal trigger turn exceeds safe integer".into(),
+            ));
+        }
+        let mut value = serde_json::Map::new();
+        value.insert("id".into(), json!(id));
+        if entry.get("blocksMovement") == Some(&Value::Bool(true)) {
+            value.insert("blocksMovement".into(), Value::Bool(true));
+        }
+        value.insert("color".into(), json!(color));
+        value.insert("cells".into(), json!(cells));
+        value.insert("triggerTurn".into(), json!(trigger as u64));
+        normalized.push(Value::Object(value));
+    }
+    Ok(normalized)
+}
+
+/// Resolve portal reservations after `endMove` switches the actor (main:
+/// 93664-93666,74148-74163). This kernel intentionally does not advance
+/// turnsTaken, settle replay, or execute later turn-start callbacks.
+pub(crate) fn resolve_pending_portals_for_turn(
+    state: &mut GameState,
+    color: Color,
+) -> Result<bool> {
+    let normalized = normalize_pending_portals(state)?;
+    let current_turn = u64::from(*state.turns_taken.get(color));
+    let mut selected = None;
+    let mut due_ids = BTreeSet::new();
+    for entry in &normalized {
+        if entry.get("color").and_then(Value::as_str) == Some(color.as_str())
+            && entry
+                .get("triggerTurn")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                <= current_turn
+        {
+            if let Some(id) = entry.get("id").and_then(Value::as_str) {
+                due_ids.insert(id.to_owned());
+            }
+            selected = Some(entry.clone());
+        }
+    }
+    if let Some(selected) = &selected
+        && selected.get("blocksMovement") == Some(&Value::Bool(true))
+    {
+        // The legacy movement-blocking path may crush a concealed occupant,
+        // trigger royal capture, and add a vanish replay visual. The ordinary
+        // Portal Gun never writes this flag.
+        return Err(EngineError::UnsupportedFeature(
+            "movement-blocking portal installation".into(),
+        ));
+    }
+    let remaining = normalized
+        .into_iter()
+        .filter(|entry| {
+            !entry
+                .get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| due_ids.contains(id))
+        })
+        .collect::<Vec<_>>();
+    state
+        .extra
+        .insert("pendingPortals".into(), json!(remaining));
+    let Some(selected) = selected else {
+        return Ok(false);
+    };
+    let cells = selected
+        .get("cells")
+        .and_then(Value::as_array)
+        .ok_or_else(|| EngineError::InvalidState("normalized portal cells missing".into()))?;
+    let cells = cells
+        .iter()
+        .map(|cell| {
+            serde_json::from_value::<Square>(cell.clone()).map_err(EngineError::serialization)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if cells
+        .iter()
+        .any(|square| crate::movement::portal_installation_hazard(state, *square))
+    {
+        crate::replay::add_log(
+            state,
+            "포탈 건: 설치 예정 칸이 막혀 포탈 설치가 취소되었습니다.".into(),
+        )?;
+        return Ok(false);
+    }
+    state
+        .extra
+        .insert("portalRule".into(), json!({"enabled":true,"cells":cells}));
+    let names = cells
+        .iter()
+        .map(|square| format!("{}{}", char::from(b'a' + square.col), 8 - square.row))
+        .collect::<Vec<_>>()
+        .join("·");
+    crate::replay::add_log(state, format!("포탈 건: {names}에 포탈이 설치되었습니다."))?;
+    Ok(true)
 }
 // main:67810 and103287. This is the first actual royal identity in board
 // order, including the source's active regency heir.
@@ -3279,6 +4301,57 @@ fn grant(state: &mut GameState, piece: &mut Piece, field: &str) -> Result<()> {
     Ok(())
 }
 
+/// Validate a completed UI selection without materializing its ordered action
+/// space. Source click handlers (main:87542-87584) toggle an existing choice;
+/// duplicates cannot appear in a submitted selection even though some raw
+/// effect helpers silently deduplicate them. `None` preserves the existing
+/// single-selection public binder.
+pub(crate) fn ui_validate(
+    state: &GameState,
+    card: &CardSlot,
+    action: &Action,
+) -> Result<Option<bool>> {
+    let Some(plan) = plan(state, card) else {
+        return Ok(None);
+    };
+    let (minimum, maximum) = match plan.mutation {
+        Mutation::Cleanup => (1, 3),
+        Mutation::Hypocrisy => (4, 4),
+        Mutation::PortalGun => (2, 2),
+        _ => return Ok(None),
+    };
+    let Some(target) = action.target.as_ref().and_then(Value::as_object) else {
+        return Ok(Some(false));
+    };
+    if target.len() != 1 {
+        return Ok(Some(false));
+    }
+    let Some(cells) = target.get("selections").and_then(Value::as_array) else {
+        return Ok(Some(false));
+    };
+    if !(minimum..=maximum).contains(&cells.len()) {
+        return Ok(Some(false));
+    }
+    let candidates = target_squares(state, card)?.ok_or(EngineError::IllegalAction)?;
+    let mut seen_squares = BTreeSet::new();
+    let mut seen_piece_ids = BTreeSet::new();
+    for cell in cells {
+        let Some(square) = loose_square(cell) else {
+            return Ok(Some(false));
+        };
+        if *cell != json!(square) || !candidates.contains(&square) || !seen_squares.insert(square) {
+            return Ok(Some(false));
+        }
+        if matches!(plan.mutation, Mutation::Cleanup) {
+            let piece = state.at(square).ok_or(EngineError::IllegalAction)?;
+            if !piece.id.is_empty() && !seen_piece_ids.insert(piece.id.as_str()) {
+                return Ok(Some(false));
+            }
+        }
+    }
+    validate(state, card, action)
+}
+
 /// Source apply acceptance is broader than some UI selection surfaces. Probe
 /// the canonical effect on an owned state so validation consumes no live RNG
 /// and cannot change the caller's board, collections or pending replay state.
@@ -3341,6 +4414,33 @@ pub(crate) fn apply(
         }
         Mutation::Twins => {
             apply_twins(state, action)?;
+            return Ok(Some(Vec::new()));
+        }
+        Mutation::Spy => {
+            apply_spy(state, action)?;
+            return Ok(Some(Vec::new()));
+        }
+        Mutation::Wanted => {
+            apply_wanted(state)?;
+            return Ok(Some(Vec::new()));
+        }
+        Mutation::Brainwash => {
+            return Ok(Some(apply_brainwash(state, action)?));
+        }
+        Mutation::Taboo => {
+            apply_taboo(state, action)?;
+            return Ok(Some(Vec::new()));
+        }
+        Mutation::Cleanup => {
+            apply_cleanup(state, action)?;
+            return Ok(Some(Vec::new()));
+        }
+        Mutation::Hypocrisy => {
+            apply_hypocrisy(state, action)?;
+            return Ok(Some(Vec::new()));
+        }
+        Mutation::PortalGun => {
+            apply_portal_gun(state, action)?;
             return Ok(Some(Vec::new()));
         }
         Mutation::Metal => {
@@ -3790,6 +4890,346 @@ mod tests {
     }
     fn action(card: &CardSlot, square: Square) -> Action {
         Action::card(Color::White, card, Some(json!(square)))
+    }
+
+    #[test]
+    fn staged_cursor_preserves_ordered_click_sequences() {
+        let squares = [
+            Square { row: 1, col: 1 },
+            Square { row: 2, col: 2 },
+            Square { row: 3, col: 3 },
+            Square { row: 4, col: 4 },
+        ];
+        let sequences = |mut cursor: OrderedSelectionCursor| {
+            let mut result = Vec::new();
+            while let Some(action) = cursor.next_candidate() {
+                result.push(
+                    serde_json::from_value::<Vec<Square>>(
+                        action.target.unwrap()["selections"].clone(),
+                    )
+                    .unwrap(),
+                );
+            }
+            result
+        };
+        let cleanup = sequences(OrderedSelectionCursor::new(
+            Color::White,
+            &card("cleanup"),
+            squares[..3].to_vec(),
+            1,
+            3,
+        ));
+        assert_eq!(cleanup.len(), 15); // P(3,1) + P(3,2) + P(3,3)
+        assert_eq!(cleanup.first().unwrap(), &vec![squares[0]]);
+        assert!(cleanup.contains(&vec![squares[1], squares[0]]));
+        assert_eq!(
+            cleanup.last().unwrap(),
+            &vec![squares[2], squares[1], squares[0]]
+        );
+
+        let portal = sequences(OrderedSelectionCursor::new(
+            Color::White,
+            &card("portal-gun"),
+            squares.to_vec(),
+            2,
+            2,
+        ));
+        assert_eq!(portal.len(), 12); // P(4,2)
+        assert_eq!(portal.first().unwrap(), &vec![squares[0], squares[1]]);
+        assert_eq!(portal.last().unwrap(), &vec![squares[3], squares[2]]);
+
+        let hypocrisy = sequences(OrderedSelectionCursor::new(
+            Color::White,
+            &card("hypocrisy"),
+            squares.to_vec(),
+            4,
+            4,
+        ));
+        assert_eq!(hypocrisy.len(), 24); // P(4,4)
+        assert_eq!(hypocrisy.first().unwrap(), &squares.to_vec());
+        assert_eq!(
+            hypocrisy.last().unwrap(),
+            &squares.iter().rev().copied().collect::<Vec<_>>()
+        );
+        assert_eq!(hypocrisy.iter().collect::<BTreeSet<_>>().len(), 24);
+
+        // A full empty-board Hypocrisy family has P(64,4) = 15,249,024
+        // ordered candidates. Advancing one bounded page must not construct
+        // or consume the entire family.
+        let board = (0..8)
+            .flat_map(|row| (0..8).map(move |col| Square { row, col }))
+            .collect::<Vec<_>>();
+        let mut large = OrderedSelectionCursor::new(Color::White, &card("hypocrisy"), board, 4, 4);
+        for _ in 0..4096 {
+            assert!(large.next_candidate().is_some());
+        }
+        assert!(!large.is_exhausted());
+    }
+
+    #[test]
+    fn portal_staged_page_keeps_slot_identity_order_and_examination_budget() {
+        let mut state = empty();
+        state.mode = "play".into();
+        put(&mut state, "king", Color::White, Square { row: 7, col: 7 });
+        put(&mut state, "king", Color::Black, Square { row: 0, col: 7 });
+        let mut first = card("portal-gun");
+        first.instance_id = "portal-staged-0".into();
+        let mut second = first.clone();
+        second.instance_id = "portal-staged-1".into();
+        state.deck_slots.white = vec![first.clone(), second.clone()];
+        let before = state.clone();
+
+        assert!(matches!(
+            actions(&state, &first),
+            Err(EngineError::UnsupportedFeature(_))
+        ));
+        let mut cursor = staged_cursor_for_slot(&state, 0).unwrap().unwrap();
+        assert_eq!(cursor.squares.len(), 62);
+        let one = cursor.next_public_page(&state, 0, 2, 1).unwrap();
+        assert_eq!(one.examined, 1);
+        assert!(!one.exhausted);
+        assert_eq!(one.actions.len(), 1);
+        assert_eq!(
+            one.actions[0].target,
+            Some(json!({"selections":[{"row":0,"col":0},{"row":0,"col":1}]}))
+        );
+        assert_eq!(
+            one.actions[0].card_instance_id.as_deref(),
+            Some(first.instance_id.as_str())
+        );
+
+        let next = cursor.next_public_page(&state, 0, 2, 2).unwrap();
+        assert_eq!(next.examined, 2);
+        assert_eq!(next.actions.len(), 2);
+        assert!(!next.exhausted);
+        assert_eq!(
+            next.actions
+                .iter()
+                .map(|action| action.target.as_ref().unwrap()["selections"].clone())
+                .collect::<Vec<_>>(),
+            vec![
+                json!([{"row":0,"col":0},{"row":0,"col":2}]),
+                json!([{"row":0,"col":0},{"row":0,"col":3}]),
+            ]
+        );
+        assert!(matches!(
+            cursor.next_public_page(&state, 1, 1, 1),
+            Err(EngineError::IllegalAction)
+        ));
+        let resumed = cursor.next_public_page(&state, 0, 1, 1).unwrap();
+        assert_eq!(
+            resumed.actions[0].target,
+            Some(json!({"selections":[{"row":0,"col":0},{"row":0,"col":4}]}))
+        );
+
+        let mut second_cursor = staged_cursor_for_slot(&state, 1).unwrap().unwrap();
+        let second_page = second_cursor.next_public_page(&state, 1, 1, 1).unwrap();
+        assert_eq!(second_page.actions[0].target, one.actions[0].target);
+        assert_eq!(
+            second_page.actions[0].card_instance_id.as_deref(),
+            Some(second.instance_id.as_str())
+        );
+        assert_eq!(state, before);
+
+        // A candidate rejected by the public click predicate still consumes
+        // one examination and leaves the family available for the next page.
+        let mut rejected = OrderedSelectionCursor::new(
+            Color::White,
+            &first,
+            vec![
+                Square { row: 0, col: 7 },
+                Square { row: 0, col: 0 },
+                Square { row: 0, col: 1 },
+            ],
+            2,
+            2,
+        );
+        let empty_page = rejected.next_public_page(&state, 0, 1, 1).unwrap();
+        assert!(empty_page.actions.is_empty());
+        assert_eq!(empty_page.examined, 1);
+        assert!(!empty_page.exhausted);
+        let next_rejected = rejected.next_public_page(&state, 0, 1, 1).unwrap();
+        assert!(next_rejected.actions.is_empty());
+        assert_eq!(next_rejected.examined, 1);
+        assert!(!next_rejected.exhausted);
+
+        state.deck_slots.white[0].used = true;
+        assert!(matches!(
+            staged_cursor_for_slot(&state, 0),
+            Err(EngineError::IllegalAction)
+        ));
+        assert!(matches!(
+            cursor.next_public_page(&state, 0, 1, 1),
+            Err(EngineError::IllegalAction)
+        ));
+        state.deck_slots.white[0].used = false;
+        state.deck_slots.white[0].recovering = true;
+        assert!(matches!(
+            staged_cursor_for_slot(&state, 0),
+            Err(EngineError::IllegalAction)
+        ));
+        state.deck_slots.white[0].recovering = false;
+        state.deck_slots.white[0]
+            .extra
+            .insert("nextTurnPending".into(), Value::Bool(true));
+        assert!(matches!(
+            staged_cursor_for_slot(&state, 0),
+            Err(EngineError::IllegalAction)
+        ));
+    }
+
+    #[test]
+    fn pending_portals_choose_last_due_and_cancel_only_on_installation_hazard() {
+        let mut state = empty();
+        state.turns_taken.white = 1;
+        let occupied = Square { row: 5, col: 1 };
+        put(&mut state, "rook", Color::White, occupied);
+        let rng_before = state.rng.clone();
+        let history_before = state.history.clone();
+        state.extra.insert("logs".into(), json!([]));
+        state.extra.insert(
+            "pendingPortals".into(),
+            json!([
+                {"id":"discard","color":"white","cells":[{"row":8,"col":1}],"triggerTurn":0},
+                {"id":"first","color":"white","cells":[{"row":1,"col":1},{"row":2,"col":2}],"triggerTurn":1},
+                {"id":"future","color":"black","cells":[{"row":3,"col":3},{"row":4,"col":4}],"triggerTurn":1},
+                {"id":"last","color":"white","cells":[{"row":5,"col":1},{"row":5,"col":2}],"triggerTurn":1}
+            ]),
+        );
+        assert!(resolve_pending_portals_for_turn(&mut state, Color::White).unwrap());
+        assert_eq!(
+            state.extra.get("pendingPortals"),
+            Some(
+                &json!([{"id":"future","color":"black","cells":[{"row":3,"col":3},{"row":4,"col":4}],"triggerTurn":1}])
+            )
+        );
+        assert_eq!(
+            state.extra.get("portalRule"),
+            Some(&json!({"enabled":true,"cells":[{"row":5,"col":1},{"row":5,"col":2}]}))
+        );
+        assert_eq!(state.at(occupied).unwrap().kind, "rook");
+        assert_eq!(
+            state.extra.get("logs").and_then(Value::as_array).unwrap()[0],
+            json!("포탈 건: b3·c3에 포탈이 설치되었습니다.")
+        );
+        state
+            .extra
+            .insert("collapsedCells".into(), json!([{"row":3,"col":3}]));
+        state.turns_taken.black = 1;
+        assert!(!resolve_pending_portals_for_turn(&mut state, Color::Black).unwrap());
+        assert_eq!(state.extra.get("pendingPortals"), Some(&json!([])));
+        assert_eq!(
+            state.extra.get("portalRule"),
+            Some(&json!({"enabled":true,"cells":[{"row":5,"col":1},{"row":5,"col":2}]}))
+        );
+        assert_eq!(
+            state.extra.get("logs").and_then(Value::as_array).unwrap()[0],
+            json!("포탈 건: 설치 예정 칸이 막혀 포탈 설치가 취소되었습니다.")
+        );
+        assert_eq!(state.rng, rng_before);
+        assert_eq!(state.history, history_before);
+    }
+
+    #[test]
+    fn ordered_public_selection_is_direct_and_does_not_change_raw_acceptance() {
+        let a = Square { row: 3, col: 2 };
+        let b = Square { row: 4, col: 5 };
+        let mut state = empty();
+        put(&mut state, "pawn", Color::White, a);
+        put(&mut state, "pawn", Color::White, b);
+        let cleanup = card("cleanup");
+        let reversed = Action::card(Color::White, &cleanup, Some(json!({"selections":[b,a]})));
+        let duplicate = Action::card(Color::White, &cleanup, Some(json!({"selections":[a,a]})));
+        let before = state.clone();
+        assert!(matches!(
+            actions(&state, &cleanup),
+            Err(EngineError::UnsupportedFeature(_))
+        ));
+        assert_eq!(
+            ui_validate(&state, &cleanup, &reversed).unwrap(),
+            Some(true)
+        );
+        assert_eq!(validate(&state, &cleanup, &duplicate).unwrap(), Some(true));
+        assert_eq!(
+            ui_validate(&state, &cleanup, &duplicate).unwrap(),
+            Some(false)
+        );
+        assert_eq!(state, before);
+
+        let mut cursor = staged_cursor(&state, &cleanup).unwrap().unwrap();
+        let mut emitted = Vec::new();
+        while let Some(candidate) = cursor.next_candidate() {
+            assert_eq!(
+                ui_validate(&state, &cleanup, &candidate).unwrap(),
+                Some(true)
+            );
+            emitted.push(candidate.target.unwrap()["selections"].clone());
+        }
+        assert_eq!(
+            emitted,
+            vec![json!([a]), json!([b]), json!([a, b]), json!([b, a])]
+        );
+
+        // The frozen source accepts all 15 ordered applications for these
+        // three coordinates; the first-click surface is row-major.
+        let ordered = [
+            Square { row: 2, col: 2 },
+            Square { row: 3, col: 4 },
+            Square { row: 4, col: 3 },
+        ];
+        let mut three = empty();
+        for (square, kind) in ordered.into_iter().zip(["rook", "bishop", "knight"]) {
+            put(&mut three, kind, Color::White, square);
+        }
+        let mut cursor = staged_cursor(&three, &cleanup).unwrap().unwrap();
+        let mut selected = Vec::new();
+        while let Some(candidate) = cursor.next_candidate() {
+            assert_eq!(
+                ui_validate(&three, &cleanup, &candidate).unwrap(),
+                Some(true)
+            );
+            selected.push(candidate.target.unwrap()["selections"].clone());
+        }
+        assert_eq!(selected.len(), 15);
+        assert_eq!(selected.first().unwrap(), &json!([ordered[0]]));
+        assert_eq!(
+            selected.last().unwrap(),
+            &json!([ordered[2], ordered[1], ordered[0]])
+        );
+
+        let portal = card("portal-gun");
+        let portal_action = Action::card(Color::White, &portal, Some(json!({"selections":[b,a]})));
+        // The occupied squares above are not portal candidates, regardless of
+        // the raw target's syntactic shape.
+        assert_eq!(
+            ui_validate(&state, &portal, &portal_action).unwrap(),
+            Some(false)
+        );
+
+        let vacant = empty();
+        assert!(matches!(
+            actions(&vacant, &portal),
+            Err(EngineError::UnsupportedFeature(_))
+        ));
+        assert_eq!(
+            ui_validate(&vacant, &portal, &portal_action).unwrap(),
+            Some(true)
+        );
+        let repeated = Action::card(Color::White, &portal, Some(json!({"selections":[a,a]})));
+        assert_eq!(
+            ui_validate(&vacant, &portal, &repeated).unwrap(),
+            Some(false)
+        );
+        let hypocrisy = card("hypocrisy");
+        let four = Action::card(
+            Color::White,
+            &hypocrisy,
+            Some(json!({"selections":[
+                a,b,Square {row:1,col:2},Square {row:6,col:5}
+            ]})),
+        );
+        assert_eq!(ui_validate(&vacant, &hypocrisy, &four).unwrap(), Some(true));
+        assert_eq!(vacant, empty());
     }
 
     #[test]
