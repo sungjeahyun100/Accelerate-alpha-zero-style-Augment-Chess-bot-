@@ -80,9 +80,11 @@ def atomic_json(path: str | Path, payload: Any) -> None:
 
 def read_json(path: str | Path) -> Any:
     path = Path(path)
-    if path.stat().st_size > MAX_REPLAY_BYTES:
+    with path.open("rb") as source:
+        encoded = source.read(MAX_REPLAY_BYTES + 1)
+    if len(encoded) > MAX_REPLAY_BYTES:
         raise ValueError("public JSON input exceeds the storage boundary")
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = json.loads(encoded.decode("utf-8"))
     canonical_json(value)
     return value
 

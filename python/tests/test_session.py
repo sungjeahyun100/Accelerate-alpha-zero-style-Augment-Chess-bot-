@@ -3,6 +3,7 @@ from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import hashlib
+from io import BytesIO
 import json
 import os
 from pathlib import Path
@@ -18,7 +19,7 @@ from accelerate_chess import cli
 from accelerate_chess.encoding import PublicEncoder, batch_positions, canonical_json
 from accelerate_chess.network.artifacts import export_onnx, load_manifest, save_base
 from accelerate_chess.network.model import ModelConfig, PolicyValueNetwork, tensor_state_hash
-from accelerate_chess.replay import EpisodeRecorder, ReplayEpisode, atomic_json, read_json
+from accelerate_chess.replay import MAX_REPLAY_BYTES, EpisodeRecorder, ReplayEpisode, atomic_json, read_json
 from accelerate_chess.search import PublicTracker, SearchResult
 from accelerate_chess.training import (DatasetCursor, ReplayDataset, TrainingLimits, _rng_snapshot,
     _tree_hash, create_optimizer, load_training_checkpoint, optimize, save_training_checkpoint)
@@ -80,6 +81,15 @@ def test_atomic_public_json_saves_do_not_share_a_temporary_file(session_director
 
     assert read_json(path) in ({"writer": 0}, {"writer": 1})
     assert not list(session_directory.glob(".concurrent-public.json.*.tmp"))
+
+    # The on-disk size is small, but the opened input can grow after stat.
+    original_open = Path.open
+    oversized = b"{}" + b" " * (MAX_REPLAY_BYTES - 1)
+    with monkeypatch.context() as grown:
+        grown.setattr(Path, "open", lambda candidate, *args, **kwargs:
+                      BytesIO(oversized) if candidate == path else original_open(candidate, *args, **kwargs))
+        with pytest.raises(ValueError, match="storage boundary"):
+            read_json(path)
 
 
 def test_public_replay_terminal_labels_and_streamed_dataset(session_directory, monkeypatch):
@@ -241,6 +251,34 @@ def test_cli_defaults_are_explicit_intent_summary_and_full_resnet():
     assert contract.history_encoding == "public-history-summary-v1" and contract.action_encoding == "public-decision-intent-v1"
     assert cli.parser().parse_args(["evaluate", "--replay", "episode.json"]).backend == "ort"
     assert cli.parser().parse_args(["selfplay"]).max_plies == 2
+
+
+def test_train_existing_run_slot_requires_matching_explicit_resume(session_directory, monkeypatch):
+    root = session_directory / "train-slot-guard"
+    checkpoint = root / "runs" / "training" / "training.pt"
+    checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint.write_bytes(b"prior checkpoint must survive")
+    loaded = []
+
+    def load_base_after_slot_check(*args):
+        loaded.append(True)
+        raise RuntimeError("model load reached")
+
+    monkeypatch.setattr(cli, "load_base", load_base_after_slot_check)
+    command = ["train", "--base", "base.pt", "--replay", "episode.json"]
+    run = lambda options: cli.train(cli.parser().parse_args(command + options), root, spec(), lambda: False)
+
+    with pytest.raises(FileExistsError, match="pass --resume"):
+        run([])  # The default run ID must not silently replace prior training.
+    with pytest.raises(FileExistsError, match="different checkpoint"):
+        run(["--resume", str(root / "other-training.pt")])
+    assert loaded == [] and checkpoint.read_bytes() == b"prior checkpoint must survive"
+
+    with pytest.raises(RuntimeError, match="model load reached"):
+        run(["--resume", str(checkpoint)])
+    with pytest.raises(RuntimeError, match="model load reached"):
+        run(["--resume", str(checkpoint), "--run-id", "continued"])
+    assert loaded == [True, True] and checkpoint.read_bytes() == b"prior checkpoint must survive"
 
 
 def test_evaluation_report_identifies_complete_limited_and_cancelled_samples(session_directory, monkeypatch):

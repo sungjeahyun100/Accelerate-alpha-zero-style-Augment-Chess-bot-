@@ -154,6 +154,13 @@ def selfplay(args, root, spec, cancelled):
 
 
 def train(args, root, spec, cancelled):
+    directory = slot(root, "runs", args.run_id)
+    checkpoint = directory / "training.pt"
+    if checkpoint.exists() or checkpoint.is_symlink():
+        if not args.resume:
+            raise FileExistsError("training run slot already contains a checkpoint; pass --resume for this checkpoint or choose a new --run-id")
+        if Path(args.resume).expanduser().resolve() != checkpoint.resolve():
+            raise FileExistsError("training run slot contains a different checkpoint; choose a new --run-id to resume from another checkpoint")
     model, _ = load_base(args.base, spec)
     if args.adapter:
         if args.mode != "adapter":
@@ -166,8 +173,6 @@ def train(args, root, spec, cancelled):
     dataset = ReplayDataset(args.replay, spec)
     cursor = DatasetCursor(dataset, args.seed)
     previous = load_training_checkpoint(model, optimizer, spec, cursor, args.resume) if args.resume else 0
-    directory = slot(root, "runs", args.run_id)
-    checkpoint = directory / "training.pt"
     limits = TrainingLimits(steps=args.steps, batch_size=args.batch_size, elapsed_ms=args.elapsed_ms,
                   max_parameter_state_bytes=args.memory_mib * 1024 * 1024)
     if not 1 <= args.checkpoint_every <= 1_000_000:
@@ -301,7 +306,7 @@ def parser():
     command.add_argument("--adapter")
     command.add_argument("--mode", choices=("base", "adapter"), default="base")
     command.add_argument("--replay", nargs="+", required=True)
-    command.add_argument("--resume")
+    command.add_argument("--resume", help="existing training checkpoint; must be this slot's checkpoint when the run ID already exists")
     command.add_argument("--checkpoint-every", type=int, default=100)
     command.add_argument("--run-id", default="training")
     command.add_argument("--seed", type=int, default=19)
