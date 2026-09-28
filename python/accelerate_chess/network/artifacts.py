@@ -194,19 +194,31 @@ def _validate_graph(path: Path, config: ModelConfig) -> None:
         if tensor.data_type == onnx.TensorProto.FLOAT and not np.isfinite(onnx.numpy_helper.to_array(tensor)).all():
             raise ValueError("non-finite ONNX weights")
 
+    input_names = {entry.name for entry in graph.graph.input}
+    initializer_names: set[str] = set()
     for initializer in graph.graph.initializer:
+        if not initializer.name or initializer.name in input_names or initializer.name in initializer_names:
+            raise ValueError("ONNX initializer name is empty, duplicate, or shadows an input")
+        initializer_names.add(initializer.name)
         validate_tensor(initializer)
     producers = {}
     for node in graph.graph.node:
         if node.domain not in ("", "ai.onnx") or not node.op_type:
             raise ValueError("unsupported ONNX node domain")
         for output in node.output:
+            if not output:
+                # ONNX permits an omitted optional output with an empty name.
+                continue
+            if output in input_names or output in initializer_names:
+                raise ValueError("ONNX node output shadows an input or initializer")
             if output in producers:
                 raise ValueError("duplicate ONNX producer")
             producers[output] = node
         for attribute in node.attribute:
+            if attribute.HasField("sparse_tensor") or attribute.sparse_tensors:
+                raise ValueError("unsupported sparse graph attribute")
             if attribute.HasField("g") or attribute.graphs or not math.isfinite(attribute.f) or any(not math.isfinite(value) for value in attribute.floats):
-                raise ValueError("nested graph or non-finite ONNX attribute unsupported")
+                raise ValueError("nested graph or non-finite attribute unsupported")
             if attribute.HasField("t"):
                 validate_tensor(attribute.t)
             for tensor in attribute.tensors:

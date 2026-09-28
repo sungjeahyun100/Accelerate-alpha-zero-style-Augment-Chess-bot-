@@ -13,7 +13,7 @@ import torch
 
 from accelerate_chess import InferenceSession, ProductionEvaluator
 from accelerate_chess.encoding import EncoderSpec
-from accelerate_chess.network.artifacts import export_onnx
+from accelerate_chess.network.artifacts import export_onnx, load_manifest
 from accelerate_chess.network.model import ModelConfig, PolicyValueNetwork, tensor_state_hash
 
 torch.set_num_threads(1)
@@ -201,6 +201,8 @@ def test_runtime_rejects_manifest_semantics_hashes_and_graph_corruption(small_bu
         for backend in ("ort", "tract"):
             with pytest.raises(ValueError, match=message):
                 InferenceSession(invalid_path, backend)
+        with pytest.raises(ValueError, match=message):
+            load_manifest(invalid_path, spec)
 
     def nonfinite_repeated_attribute(graph):
         attribute = graph.node[0].attribute.add()

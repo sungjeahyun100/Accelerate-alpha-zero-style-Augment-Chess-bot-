@@ -468,7 +468,7 @@ def test_onnx_dynamic_batch_actions_film_merge_and_manifest(artifact_directory, 
         bad_attribute = deepcopy(original_graph)
         bad_attribute.graph.node[0].attribute.append(onnx.helper.make_attribute("bad-float", float("inf")))
         onnx.save(bad_attribute, model_path)
-        with pytest.raises(ValueError, match="non-finite ONNX attribute"):
+        with pytest.raises(ValueError, match="non-finite.*attribute"):
             _validate_graph(model_path, model.config)
         shape_only = deepcopy(original_graph)
         for node in shape_only.graph.node:
