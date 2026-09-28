@@ -394,9 +394,15 @@ def _native_mode_flow(mode, draft_delete, encoder, Position):
         posterior.synchronize()
         observation = trackers[actor].latest
         mode_before = observation["publicState"]["mode"]
-        page = posterior.draw().action_stream().next_page(1)
+        sampled = posterior.draw()
+        page = sampled.action_stream().next_page(1)
         assert page["actions"]
         intent = page["actions"][0].public_intent()
+        if mode_before == "draft" and trackers[actor].steps == 0:
+            streamed = page["actions"][0]
+            assert posterior.factory.bind_streamed_public_intent(sampled, streamed, intent) is streamed
+            assert canonical_json(streamed.as_payload()) == canonical_json(
+                sampled.bind_public_intent(intent).as_payload())
         feature = encoder.encode(observation, [intent], belief_summary=posterior.summary)
         assert feature.action_keys == (canonical_json(intent),)
         stepped = actual.apply(actual.bind_public_intent(intent)).position

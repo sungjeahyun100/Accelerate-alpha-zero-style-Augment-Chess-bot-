@@ -263,7 +263,8 @@ class NativeSourceFactory:
         if set(public_config) - {"gameStyle", "draftDelete", "ruleCardIds", "starWinLimit", "deathmatchEnabled", "deathmatchLimitTurns"}:
             raise ValueError("source factory configuration contains fields outside the public GameConfig contract")
         self._config = _copy(public_config)
-        from ._native import Position
+        from ._native import Action, Position
+        self._action_type = Action
         self._position_type = Position
 
     def sample_initial(self, public_initial: Mapping[str, Any], independent_seed: int):
@@ -326,6 +327,16 @@ class NativeSourceFactory:
         if type(result) is not bool:
             raise InformationMismatchError("native public transition compatibility must be boolean")
         return result
+
+    def bind_streamed_public_intent(self, position, action, intent):
+        # A native draft stream already returns the exact current-position
+        # Action. Compatibility and apply retain the native ownership check.
+        # Other families still need source UI intent resolution (move flags,
+        # targets and ordered choices must not be guessed in Python).
+        if (type(position) is self._position_type and type(action) is self._action_type
+                and intent.get("type") in ("draftPick", "draftBundlePick")):
+            return action
+        return position.bind_public_intent(intent)
 
 
 def _actor(position: Any) -> str:
@@ -457,6 +468,7 @@ class ParticleBelief:
             return child[0], log_weight + child[1]
         selected, log_mass, exhausted = None, -math.inf, False
         seen: set[str] = set()
+        bind_streamed = getattr(self.factory, "bind_streamed_public_intent", None)
         for actions, exhausted in _stream(position, self.limits.page_size, self.limits.actions_per_transition):
             for action in actions:
                 self._check(started)
@@ -465,7 +477,8 @@ class ParticleBelief:
                 if key in seen:
                     continue
                 seen.add(key)
-                bound = position.bind_public_intent(intent)
+                bound = (bind_streamed(position, action, intent) if bind_streamed is not None
+                         else position.bind_public_intent(intent))
                 # Provably incompatible actions retain their prior mass in the
                 # denominator. Source rules, rather than Python heuristics,
                 # decide whether their effects need to be evaluated.

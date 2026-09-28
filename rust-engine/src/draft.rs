@@ -2,7 +2,10 @@
 use crate::*;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::{collections::BTreeSet, sync::OnceLock};
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::OnceLock,
+};
 
 #[derive(Deserialize)]
 pub(crate) struct Definitions {
@@ -69,19 +72,29 @@ fn weights() -> &'static Weights {
             .expect("adopted draft weights")
     })
 }
+fn weights_by_id() -> &'static HashMap<&'static str, &'static Weight> {
+    static DATA: OnceLock<HashMap<&'static str, &'static Weight>> = OnceLock::new();
+    DATA.get_or_init(|| {
+        let mut by_id = HashMap::with_capacity(weights().weights.len());
+        for weight in &weights().weights {
+            // The source lookup uses find(), so duplicate IDs keep their first entry.
+            by_id.entry(weight.id.as_str()).or_insert(weight);
+        }
+        by_id
+    })
+}
+fn weight_for(card: &Value) -> Option<&'static Weight> {
+    card.get("id")
+        .and_then(Value::as_str)
+        .and_then(|id| weights_by_id().get(id).copied())
+}
 pub(crate) fn category(card: &Value) -> &str {
-    weights()
-        .weights
-        .iter()
-        .find(|weight| card.get("id").and_then(Value::as_str) == Some(&weight.id))
+    weight_for(card)
         .map(|weight| weight.phase.as_str())
         .unwrap_or("")
 }
 fn weight(card: &Value, opening: bool) -> f64 {
-    weights()
-        .weights
-        .iter()
-        .find(|weight| card.get("id").and_then(Value::as_str) == Some(&weight.id))
+    weight_for(card)
         .map(|weight| {
             if opening {
                 weight.opening_weight

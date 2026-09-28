@@ -309,8 +309,28 @@ sdist `e699232d...`→wheel `3203ded4...` 설치, foundation 19/19·skip 0을 �
 최종 검사 결과에 맞춰 갱신했으며 wheel을 만든 실행 소스의 코드 바이트는 그대로다.
 고정 소스와 설치·JUnit·mode 보고서는 Git 밖
 `reports/full-stack-implementation/opening-v6-guard-final-native` 및
-`reports/full-stack-implementation/opening-v6-guard-final-verification`에 있다. 새 커밋의
-Windows/Linux 원격 CI와 전체 256 카드·변형기물 의미 coverage는 별도 남은 조건이다.
+`reports/full-stack-implementation/opening-v6-guard-final-verification`에 있다. 전체 256 카드·
+변형기물 의미 coverage는 별도 남은 조건이다.
+
+커밋 `5d3ff9c`의 [원격 native CI](https://github.com/sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-/actions/runs/36375077487)는
+두 OS 모두 Rust 검사·sdist→wheel 설치까지 통과했지만 설치본 테스트에서 실패했다.
+Ubuntu는 34개 중 CHAOS belief 재구성 1개, Windows는 CHAOS·GRAND 재구성 2개가
+기존 5초 한도에 걸렸다. 각각 33/34, 32/34이며 오류·skip은 0이다. 같은 커밋의
+repository policy·engine·historical JS workflow는 성공했다. 다운로드한 양측 JUnit과
+실패 분류는 Git 밖 `reports/full-stack-implementation/ci-5d3ff9c`에 보존했다.
+따라서 로컬 34/34 통과를 원격 성공으로 승격하지 않고, 한도나 검사를 완화하지 않은
+성능 수정과 두 OS 재검증을 진행한다.
+
+후속 성능 수정은 동결 draft 가중치의 첫 ID 일치 결과를 읽기 전용으로 캐시하고,
+native 드래프트 스트림에서 이미 현재 Position에 묶인 Action의 중복 재바인딩을
+생략한다. 일반 이동·카드·synthetic factory는 기존 경로를 사용한다. 캐시는 100개
+seed의 NORMAL·CHAOS 전체 GameState가 수정 전후 일치했고, 드래프트 Action 282개는
+재바인딩 payload와 모두 같았다. 두 수정만 `5d3ff9c`에 overlay한 고정 소스에서
+maturin sdist `892c4926...`→wheel `7b415230...` 설치·정책 검증과 CI 범위 설치본
+34/34·skip 0이 통과했다. 기존 5초 한도의 CHAOS·GRAND 사례는 추가 3회씩 모두
+통과했다. 이 결과는 Linux 로컬 검사이며 최종 커밋의 Windows/Linux 원격 CI와
+전체 규칙·카드 coverage를 대신하지 않는다. 고정 source manifest와 JUnit·packaging
+보고서는 Git 밖 `reports/full-stack-implementation/ci-perf-v1`에 보존한다.
 
 ## 구현 연결 순서와 완료 기준
 
