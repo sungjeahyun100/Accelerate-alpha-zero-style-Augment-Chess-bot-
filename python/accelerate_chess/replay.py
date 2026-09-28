@@ -1,12 +1,15 @@
 """Public replay, terminal-only targets and fixed external artifact storage."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import hashlib
 import json
 import math
 import os
 from pathlib import Path
+import platform
 import re
 import subprocess
 import tempfile
@@ -48,13 +51,32 @@ def artifact_root(explicit: str | Path | None = None) -> Path:
     return root
 
 
-def slot(root: Path, category: str, name: str) -> Path:
+def _slot_path(root: Path, category: str, name: str) -> Path:
     if category not in {"models", "datasets", "runs", "reports", "tmp", "build", "cache"} or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}", name):
         raise ValueError("artifact slots need an allowed category and stable safe name")
     target = (root / category / name).resolve()
     if root.resolve() not in target.parents:
         raise ValueError("artifact slot escapes its owned external root")
+    return target
+
+
+def slot(root: Path, category: str, name: str) -> Path:
+    target = _slot_path(root, category, name)
     target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def reserve_slot(root: Path, category: str, name: str) -> Path:
+    """Atomically reserve a fresh persistent output slot; an interrupted run stays reserved."""
+    target = _slot_path(root, category, name)
+    raw = root / category / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if raw.is_symlink():
+        raise FileExistsError(f"artifact slot already exists: {raw}; choose a new --run-id")
+    try:
+        target.mkdir()
+    except FileExistsError as error:
+        raise FileExistsError(f"artifact slot already exists: {raw}; choose a new --run-id") from error
     return target
 
 
@@ -76,6 +98,27 @@ def atomic_json(path: str | Path, payload: Any) -> None:
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+@contextmanager
+def writer_claim(directory: Path):
+    """Keep a cross-process claim for a mutable run; a crashed owner's claim stays."""
+    claim = directory / ".writer-claim"
+    try:
+        claim.mkdir()
+    except FileExistsError as error:
+        raise FileExistsError(
+            f"writer claim exists at {claim}; inspect owner.json if present, verify its process has stopped, "
+            "then remove the stale claim manually before retrying"
+        ) from error
+    owner = claim / "owner.json"
+    try:
+        atomic_json(owner, {"pid": os.getpid(), "host": platform.node(),
+                            "started_utc": datetime.now(timezone.utc).isoformat()})
+        yield
+    finally:
+        owner.unlink(missing_ok=True)
+        claim.rmdir()
 
 
 def read_json(path: str | Path) -> Any:

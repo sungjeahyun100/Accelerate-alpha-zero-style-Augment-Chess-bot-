@@ -1,7 +1,7 @@
 # ONNX CPU runtime
 
 `accelerate-runtime` is independent of the rules engine and Python. It loads
-one verified `onnx-policy-value-v1` bundle and creates exactly the selected
+one verified `onnx-policy-value-v2` bundle and creates exactly the selected
 CPU backend: `ort` by default, or explicitly `tract`. Errors propagate; a
 rejected backend or model does not trigger a different implementation.
 

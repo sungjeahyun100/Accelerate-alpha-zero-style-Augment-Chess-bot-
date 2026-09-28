@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import random
 import signal
+from tempfile import TemporaryDirectory
 from threading import Barrier
 
 import numpy as np
@@ -19,7 +20,7 @@ from accelerate_chess import cli
 from accelerate_chess.encoding import PublicEncoder, batch_positions, canonical_json
 from accelerate_chess.network.artifacts import export_onnx, load_manifest, save_base
 from accelerate_chess.network.model import ModelConfig, PolicyValueNetwork, tensor_state_hash
-from accelerate_chess.replay import MAX_REPLAY_BYTES, EpisodeRecorder, ReplayEpisode, atomic_json, read_json
+from accelerate_chess.replay import MAX_REPLAY_BYTES, EpisodeRecorder, ReplayEpisode, atomic_json, read_json, reserve_slot, writer_claim
 from accelerate_chess.search import PublicTracker, SearchResult
 from accelerate_chess.training import (DatasetCursor, ReplayDataset, TrainingLimits, _rng_snapshot,
     _tree_hash, create_optimizer, load_training_checkpoint, optimize, save_training_checkpoint)
@@ -40,7 +41,9 @@ def session_directory():
     else:
         directory = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "accelerate" / "test" / "session"
     directory.mkdir(parents=True, exist_ok=True)
-    return directory
+    # A fresh owned case directory makes immutable run IDs safe across repeated test runs.
+    with TemporaryDirectory(prefix="case-", dir=directory) as temporary:
+        yield Path(temporary)
 
 
 def synthetic_episode(*, terminal=True):
@@ -279,6 +282,170 @@ def test_train_existing_run_slot_requires_matching_explicit_resume(session_direc
     with pytest.raises(RuntimeError, match="model load reached"):
         run(["--resume", str(checkpoint), "--run-id", "continued"])
     assert loaded == [True, True] and checkpoint.read_bytes() == b"prior checkpoint must survive"
+    assert not (checkpoint.parent / ".writer-claim").exists()
+
+
+def test_selfplay_reserves_a_fresh_run_before_search_and_keeps_prior_outputs(session_directory, monkeypatch):
+    with TemporaryDirectory(prefix="selfplay-slot-", dir=session_directory) as temporary:
+        root = Path(temporary)
+        episode = root / "datasets" / "verification" / "episode-0000.json"
+        report = root / "reports" / "verification" / "selfplay.json"
+        episode.parent.mkdir(parents=True)
+        report.parent.mkdir(parents=True)
+        episode.write_bytes(b"prior replay")
+        report.write_bytes(b"prior report")
+
+        def fail_search_setup(*args):
+            raise RuntimeError("search setup failed")
+
+        monkeypatch.setattr(cli, "_search", fail_search_setup)
+        args = cli.parser().parse_args(["selfplay", "--run-id", "verification"])
+        with pytest.raises(FileExistsError, match="new --run-id"):
+            cli.selfplay(args, root, spec(), lambda: False)
+        assert episode.read_bytes() == b"prior replay" and report.read_bytes() == b"prior report"
+
+        monkeypatch.setattr(cli, "_manifest", lambda *args: root / "unused-manifest.json")
+        setup = cli.parser().parse_args(["selfplay", "--run-id", "setup-failure"])
+        with pytest.raises(RuntimeError, match="search setup failed"):
+            cli.selfplay(setup, root, spec(), lambda: False)
+        failure = read_json(root / "reports" / "setup-failure" / "failure.json")
+        assert failure["status"] == "initialization-failed" and failure["episode"] is None
+        assert (root / "datasets" / "setup-failure").is_dir()
+
+        barrier = Barrier(2)
+        def reserve():
+            barrier.wait(timeout=10)
+            try:
+                reserve_slot(root, "datasets", "new-run")
+                return True
+            except FileExistsError:
+                return False
+
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            results = [future.result(timeout=15) for future in (workers.submit(reserve), workers.submit(reserve))]
+        assert sorted(results) == [False, True]
+
+
+def test_train_writer_claim_blocks_resume_and_stale_claim_requires_manual_recovery(session_directory, monkeypatch):
+    with TemporaryDirectory(prefix="training-claim-", dir=session_directory) as temporary:
+        root = Path(temporary)
+        checkpoint = root / "runs" / "training" / "training.pt"
+        checkpoint.parent.mkdir(parents=True)
+        checkpoint.write_bytes(b"prior checkpoint")
+        model_loaded = []
+        monkeypatch.setattr(cli, "load_base", lambda *args: model_loaded.append(True))
+        args = cli.parser().parse_args(["train", "--base", "base.pt", "--replay", "episode.json",
+                                        "--resume", str(checkpoint)])
+        with writer_claim(checkpoint.parent):
+            owner = read_json(checkpoint.parent / ".writer-claim" / "owner.json")
+            assert owner["pid"] == os.getpid()
+            with pytest.raises(FileExistsError, match="verify its process has stopped"):
+                cli.train(args, root, spec(), lambda: False)
+        assert not (checkpoint.parent / ".writer-claim").exists()
+        def fail_owner_metadata(*args):
+            raise OSError("owner metadata write failed")
+        with monkeypatch.context() as failing_metadata:
+            failing_metadata.setattr("accelerate_chess.replay.atomic_json", fail_owner_metadata)
+            with pytest.raises(OSError, match="owner metadata write failed"):
+                with writer_claim(checkpoint.parent):
+                    pytest.fail("writer should not enter without owner metadata")
+        assert not (checkpoint.parent / ".writer-claim").exists()
+        (checkpoint.parent / ".writer-claim").mkdir()  # Simulate an interrupted writer.
+        with pytest.raises(FileExistsError, match="remove the stale claim manually"):
+            cli.train(args, root, spec(), lambda: False)
+        assert model_loaded == [] and checkpoint.read_bytes() == b"prior checkpoint"
+        alias = root / "runs" / "aliased"
+        try:
+            alias.symlink_to(checkpoint.parent, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pass  # The stale-claim checks above still run on hosts without symlink support.
+        else:
+            aliased = cli.parser().parse_args(["train", "--base", "base.pt", "--replay", "episode.json",
+                                                "--resume", str(checkpoint), "--run-id", "aliased"])
+            with pytest.raises(ValueError, match="slot is a symlink"):
+                cli.train(aliased, root, spec(), lambda: False)
+            assert checkpoint.read_bytes() == b"prior checkpoint"
+
+
+def test_export_refuses_existing_bundle_before_loading_and_blocks_concurrent_writer(session_directory, monkeypatch):
+    with TemporaryDirectory(prefix="export-slot-", dir=session_directory) as temporary:
+        root = Path(temporary)
+        directory = root / "models" / "deployment"
+        directory.mkdir(parents=True)
+        model = directory / "model.onnx"
+        manifest = directory / "manifest.json"
+        model.write_bytes(b"prior onnx")
+        manifest.write_bytes(b"prior manifest")
+        loaded = []
+        monkeypatch.setattr(cli, "load_base", lambda *args: loaded.append(True))
+        args = cli.parser().parse_args(["export", "--base", "base.pt"])
+        with pytest.raises(FileExistsError, match="new --slot"):
+            cli.export(args, root, spec())
+        with writer_claim(directory):
+            with pytest.raises(FileExistsError, match="writer claim exists"):
+                cli.export(args, root, spec())
+        assert loaded == [] and model.read_bytes() == b"prior onnx" and manifest.read_bytes() == b"prior manifest"
+
+
+def test_export_refuses_existing_file_or_link_and_aliased_slot(session_directory, monkeypatch):
+    with TemporaryDirectory(prefix="export-link-", dir=session_directory) as temporary:
+        root = Path(temporary)
+        directory = root / "models" / "deployment"
+        directory.mkdir(parents=True)
+        target = root / "other-model.onnx"
+        target.write_bytes(b"outside target")
+        link = directory / "model.onnx"
+        linked = True
+        try:
+            link.symlink_to(target)
+        except (OSError, NotImplementedError):
+            linked = False
+            if link.is_symlink():
+                link.unlink()
+            link.write_bytes(b"prior onnx")
+        def unexpected_load(*args):
+            raise AssertionError("occupied or aliased slots must be rejected before model load")
+        monkeypatch.setattr(cli, "load_base", unexpected_load)
+        args = cli.parser().parse_args(["export", "--base", "base.pt"])
+        with pytest.raises(FileExistsError, match="new --slot"):
+            cli.export(args, root, spec())
+        assert link.is_symlink() == linked and target.read_bytes() == b"outside target"
+        assert link.read_bytes() == (b"outside target" if linked else b"prior onnx")
+
+        alias = root / "models" / "aliased"
+        alias_args = cli.parser().parse_args(["export", "--base", "base.pt", "--slot", "aliased"])
+        try:
+            alias.symlink_to(directory, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            original_is_symlink = Path.is_symlink
+            with monkeypatch.context() as aliased_path:
+                aliased_path.setattr(Path, "is_symlink", lambda candidate: candidate == alias or original_is_symlink(candidate))
+                with pytest.raises(ValueError, match="slot is a symlink"):
+                    cli.export(alias_args, root, spec())
+        else:
+            with pytest.raises(ValueError, match="slot is a symlink"):
+                cli.export(alias_args, root, spec())
+        assert not (directory / ".writer-claim").exists()
+        assert target.read_bytes() == b"outside target" and link.is_symlink() == linked
+
+
+def test_selfplay_failed_replay_save_is_not_retried_and_writes_failure_report(session_directory):
+    with TemporaryDirectory(prefix="selfplay-failure-", dir=session_directory) as temporary:
+        root = Path(temporary)
+        path = root / "datasets" / "oversize" / "episode-0000.json"
+        class Recorder:
+            saves = 0
+            def save(self, path):
+                self.saves += 1
+                raise ValueError("public JSON artifact exceeds its 16 MiB storage boundary")
+
+        recorder = Recorder()
+        original = ValueError("public JSON artifact exceeds its 16 MiB storage boundary")
+        cli._record_selfplay_failure(root, "oversize", path, recorder, original,
+                                     save_attempted=True, replay_saved=False)
+        report = read_json(root / "reports" / "oversize" / "failure.json")
+        assert recorder.saves == 0 and report["error"] == "ValueError"
+        assert report["replay_saved"] is False and report["episode"] == str(path)
 
 
 def test_evaluation_report_identifies_complete_limited_and_cancelled_samples(session_directory, monkeypatch):

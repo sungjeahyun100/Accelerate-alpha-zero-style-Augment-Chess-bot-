@@ -22,7 +22,7 @@ from .encoding import EncoderSpec, PublicEncoder, canonical_json
 from .inference import ProductionEvaluator
 from .network.artifacts import export_onnx, file_sha256, load_adapter, load_base, load_manifest, save_adapter, save_base
 from .network.model import ModelConfig, PolicyValueNetwork
-from .replay import EpisodeRecorder, ReplayEpisode, artifact_root, atomic_json, read_json, slot
+from .replay import EpisodeRecorder, ReplayEpisode, artifact_root, atomic_json, read_json, reserve_slot, slot, writer_claim
 from .search import BeliefLimits, InformationSetSearch, NativeSourceFactory, ParticleBelief, PublicTracker, SearchLimits
 from .training import DatasetCursor, ReplayDataset, TrainingLimits, create_optimizer, load_training_checkpoint, optimize, save_training_checkpoint
 
@@ -88,19 +88,42 @@ def choose(args, root, spec, cancelled):
     return asdict(search.run(belief, cancelled=cancelled))
 
 
+def _record_selfplay_failure(root, run_id, path, recorder, error, *, save_attempted, replay_saved):
+    failure = {"status": "unfinished" if recorder is not None else "initialization-failed",
+               "episode": str(path) if recorder is not None else None,
+               "replay_saved": replay_saved, "error": type(error).__name__, "reason": str(error)}
+    if recorder is not None and not save_attempted:
+        try:
+            recorder.finish(None, f"{type(error).__name__}: {error}")
+            recorder.save(path)
+            failure["replay_saved"] = True
+        except (Exception, KeyboardInterrupt) as salvage_error:
+            failure["replay_save_error"] = f"{type(salvage_error).__name__}: {salvage_error}"
+    try:
+        atomic_json(slot(root, "reports", run_id) / "failure.json", failure)
+    except (Exception, KeyboardInterrupt) as report_error:
+        error.add_note(f"selfplay failure report could not be saved: {type(report_error).__name__}: {report_error}")
+
+
 def selfplay(args, root, spec, cancelled):
-    from ._native import Position
     if not 1 <= args.games <= 64 or not 1 <= args.max_plies <= 4096 or not 1 <= args.elapsed_ms <= 86_400_000:
         raise ValueError("selfplay needs finite games, plies and elapsed time limits")
     config = _configuration(args)
-    output = slot(root, "datasets", args.run_id)
-    search = _search(args, spec, _manifest(args, root, spec), args.backend)
+    output = reserve_slot(root, "datasets", args.run_id)
+    try:
+        search = _search(args, spec, _manifest(args, root, spec), args.backend)
+        from ._native import Position
+    except (Exception, KeyboardInterrupt) as error:
+        _record_selfplay_failure(root, args.run_id, output / "episode-0000.json", None, error,
+                                 save_attempted=False, replay_saved=False)
+        raise
     started = time.monotonic()
     episodes = []
     for game in range(args.games):
         if cancelled() or (time.monotonic() - started) * 1000 >= args.elapsed_ms:
             break
         recorder = None
+        save_attempted = replay_saved = False
         path = output / f"episode-{game:04d}.json"
         try:
             position = Position.new_game(config, (args.seed + game) % 2**32)
@@ -135,17 +158,15 @@ def selfplay(args, root, spec, cancelled):
                 recorder.advance({viewer: child.observe(viewer) for viewer in ("white", "black")}, actor=actor, intent=result.intent)
                 position = child
             recorder.finish(position.result, "source-terminal" if position.result is not None else reason)
+            save_attempted = True
             recorder.save(path)
+            replay_saved = True
             episodes.append({"path": str(path), **recorder.outcome})
             if reason in ("cancelled", "elapsed"):
                 break
         except (Exception, KeyboardInterrupt) as error:
-            if recorder is not None:
-                recorder.finish(None, f"{type(error).__name__}: {error}")
-                recorder.save(path)
-            atomic_json(slot(root, "reports", args.run_id) / "failure.json",
-                {"status": "unfinished" if recorder is not None else "initialization-failed", "episode": str(path) if recorder is not None else None,
-                 "error": type(error).__name__, "reason": str(error)})
+            _record_selfplay_failure(root, args.run_id, path, recorder, error,
+                                     save_attempted=save_attempted, replay_saved=replay_saved)
             raise
     report = {"episodes": episodes, "stop_reason": "cancelled" if cancelled() else ("elapsed" if (time.monotonic() - started) * 1000 >= args.elapsed_ms else "games"),
               "games_requested": args.games, "evidence_kind": "bounded-verification" if args.verification else "selfplay"}
@@ -154,58 +175,71 @@ def selfplay(args, root, spec, cancelled):
 
 
 def train(args, root, spec, cancelled):
+    if (root / "runs" / args.run_id).is_symlink():
+        raise ValueError("training run slot is a symlink; choose a new --run-id")
     directory = slot(root, "runs", args.run_id)
-    checkpoint = directory / "training.pt"
-    if checkpoint.exists() or checkpoint.is_symlink():
-        if not args.resume:
-            raise FileExistsError("training run slot already contains a checkpoint; pass --resume for this checkpoint or choose a new --run-id")
-        if Path(args.resume).expanduser().resolve() != checkpoint.resolve():
-            raise FileExistsError("training run slot contains a different checkpoint; choose a new --run-id to resume from another checkpoint")
-    model, _ = load_base(args.base, spec)
-    if args.adapter:
-        if args.mode != "adapter":
-            raise ValueError("adapter checkpoint cannot be used in base training mode")
-        load_adapter(model, spec, args.adapter)
-    if args.device == "cuda" and not torch.cuda.is_available():
-        raise ValueError("requested CUDA device is unavailable")
-    model.to(args.device)
-    optimizer = create_optimizer(model, mode=args.mode, learning_rate=args.learning_rate)
-    dataset = ReplayDataset(args.replay, spec)
-    cursor = DatasetCursor(dataset, args.seed)
-    previous = load_training_checkpoint(model, optimizer, spec, cursor, args.resume) if args.resume else 0
-    limits = TrainingLimits(steps=args.steps, batch_size=args.batch_size, elapsed_ms=args.elapsed_ms,
-                  max_parameter_state_bytes=args.memory_mib * 1024 * 1024)
-    if not 1 <= args.checkpoint_every <= 1_000_000:
-        raise ValueError("checkpoint interval must be finite and positive")
-    last_saved = previous
-    def checkpoint_progress(completed):
-        nonlocal last_saved
-        if completed % args.checkpoint_every == 0:
-            save_training_checkpoint(model, optimizer, spec, cursor, checkpoint, completed_steps=previous + completed)
-            last_saved = previous + completed
-    try:
-        report = optimize(model, optimizer, PublicEncoder(spec), cursor, limits=limits, cancelled=cancelled, on_step=checkpoint_progress)
-        save_training_checkpoint(model, optimizer, spec, cursor, checkpoint, completed_steps=previous + report["steps"])
-    except (Exception, KeyboardInterrupt) as error:
-        # Do not retry, lower resources or relabel data. A prior valid checkpoint
-        # remains intact; a non-finite failed state cannot overwrite it.
-        atomic_json(slot(root, "reports", args.run_id) / "training-failure.json",
-                    {"status": "failed", "error": type(error).__name__, "reason": str(error), "last_checkpointed_step": last_saved})
-        raise
-    if args.mode == "base":
-        save_base(model, spec, directory / "base.pt")
-    else:
-        save_adapter(model, spec, directory / "adapter.pt")
-    report.update({"checkpoint": str(checkpoint), "completed_steps": previous + report["steps"], "mode": args.mode})
-    atomic_json(slot(root, "reports", args.run_id) / "training.json", report)
-    return report
+    with writer_claim(directory):
+        checkpoint = directory / "training.pt"
+        if checkpoint.exists() or checkpoint.is_symlink():
+            if not args.resume:
+                raise FileExistsError("training run slot already contains a checkpoint; pass --resume for this checkpoint or choose a new --run-id")
+            if Path(args.resume).expanduser().resolve() != checkpoint.resolve():
+                raise FileExistsError("training run slot contains a different checkpoint; choose a new --run-id to resume from another checkpoint")
+        model, _ = load_base(args.base, spec)
+        if args.adapter:
+            if args.mode != "adapter":
+                raise ValueError("adapter checkpoint cannot be used in base training mode")
+            load_adapter(model, spec, args.adapter)
+        if args.device == "cuda" and not torch.cuda.is_available():
+            raise ValueError("requested CUDA device is unavailable")
+        model.to(args.device)
+        optimizer = create_optimizer(model, mode=args.mode, learning_rate=args.learning_rate)
+        dataset = ReplayDataset(args.replay, spec)
+        cursor = DatasetCursor(dataset, args.seed)
+        previous = load_training_checkpoint(model, optimizer, spec, cursor, args.resume) if args.resume else 0
+        limits = TrainingLimits(steps=args.steps, batch_size=args.batch_size, elapsed_ms=args.elapsed_ms,
+                      max_parameter_state_bytes=args.memory_mib * 1024 * 1024)
+        if not 1 <= args.checkpoint_every <= 1_000_000:
+            raise ValueError("checkpoint interval must be finite and positive")
+        last_saved = previous
+        def checkpoint_progress(completed):
+            nonlocal last_saved
+            if completed % args.checkpoint_every == 0:
+                save_training_checkpoint(model, optimizer, spec, cursor, checkpoint, completed_steps=previous + completed)
+                last_saved = previous + completed
+        try:
+            report = optimize(model, optimizer, PublicEncoder(spec), cursor, limits=limits, cancelled=cancelled, on_step=checkpoint_progress)
+            save_training_checkpoint(model, optimizer, spec, cursor, checkpoint, completed_steps=previous + report["steps"])
+        except (Exception, KeyboardInterrupt) as error:
+            # Do not retry, lower resources or relabel data. A prior valid checkpoint
+            # remains intact; a non-finite failed state cannot overwrite it.
+            atomic_json(slot(root, "reports", args.run_id) / "training-failure.json",
+                        {"status": "failed", "error": type(error).__name__, "reason": str(error), "last_checkpointed_step": last_saved})
+            raise
+        if args.mode == "base":
+            save_base(model, spec, directory / "base.pt")
+        else:
+            save_adapter(model, spec, directory / "adapter.pt")
+        report.update({"checkpoint": str(checkpoint), "completed_steps": previous + report["steps"], "mode": args.mode})
+        atomic_json(slot(root, "reports", args.run_id) / "training.json", report)
+        return report
 
 
 def export(args, root, spec):
-    model, _ = load_base(args.base, spec)
-    descriptor = load_adapter(model, spec, args.adapter) if args.adapter else None
-    manifest = export_onnx(model, spec, slot(root, "models", args.slot), descriptor=descriptor)
-    return {"manifest": str(manifest), "model_sha256": load_manifest(manifest, spec)["model_sha256"], "activated": False}
+    raw_slot = root / "models" / args.slot
+    if raw_slot.is_symlink():
+        raise ValueError("deployment slot is a symlink; choose a new --slot")
+    directory = slot(root, "models", args.slot)
+    with writer_claim(directory):
+        outputs = (directory / "model.onnx", directory / "manifest.json")
+        if any(path.is_dir() and not path.is_symlink() for path in outputs):
+            raise IsADirectoryError("deployment output path is a directory; choose a new --slot")
+        if any(path.exists() or path.is_symlink() for path in outputs):
+            raise FileExistsError("deployment slot already contains model.onnx or manifest.json; choose a new --slot")
+        model, _ = load_base(args.base, spec)
+        descriptor = load_adapter(model, spec, args.adapter) if args.adapter else None
+        manifest = export_onnx(model, spec, directory, descriptor=descriptor)
+        return {"manifest": str(manifest), "model_sha256": load_manifest(manifest, spec)["model_sha256"], "activated": False}
 
 
 def evaluate(args, root, spec, cancelled):
