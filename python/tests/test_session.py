@@ -243,6 +243,66 @@ def test_cli_defaults_are_explicit_intent_summary_and_full_resnet():
     assert cli.parser().parse_args(["selfplay"]).max_plies == 2
 
 
+def test_evaluation_report_identifies_complete_limited_and_cancelled_samples(session_directory, monkeypatch):
+    replay_path = session_directory / "evaluation-episode.json"
+    synthetic_episode().save(replay_path)
+    episode = ReplayEpisode.load(replay_path, spec())
+
+    class Evaluator:
+        def __init__(self, manifest, contract, backend, *, threads):
+            self.session = self
+            self.model_sha256 = "a" * 64
+
+        def evaluate(self, board, condition, action_features):
+            return np.zeros((1, action_features.shape[1]), np.float32), np.zeros((1, 1), np.float32)
+
+    monkeypatch.setattr(cli, "ProductionEvaluator", Evaluator)
+
+    def run(name, limit, cancelled):
+        args = cli.parser().parse_args(["evaluate", "--manifest", str(session_directory / "model.json"),
+            "--replay", str(replay_path), "--max-samples", str(limit), "--run-id", name])
+        report = cli.evaluate(args, session_directory, spec(), cancelled)
+        assert read_json(session_directory / "reports" / name / "evaluation.json") == report
+        assert report["version"] == "accelerate-evaluation-v1"
+        assert report["replay_hash"] == episode.replay_hash
+        assert report["encoder_hash"] == spec().digest
+        assert report["model_sha256"] == "a" * 64
+        assert report["decisions_available"] == 2 and report["sample_limit"] == limit
+        return report
+
+    complete = run("evaluation-complete", 2, lambda: False)
+    assert complete["stop_reason"] == "complete" and complete["samples"] == 2
+    assert all("value_mse" in metric for metric in complete["metrics"])
+    limited = run("evaluation-limited", 1, lambda: False)
+    assert limited["stop_reason"] == "sample-limit" and limited["samples"] == 1
+
+    def signal_after_processed_samples(count):
+        checks = 0
+
+        def cancelled():
+            nonlocal checks
+            checks += 1
+            return checks > count
+
+        return cancelled
+
+    late_complete_signal = signal_after_processed_samples(2)
+    assert run("evaluation-late-complete", 2, late_complete_signal)["stop_reason"] == "complete"
+    assert late_complete_signal()
+    late_limited_signal = signal_after_processed_samples(1)
+    assert run("evaluation-late-limited", 1, late_limited_signal)["stop_reason"] == "sample-limit"
+    assert late_limited_signal()
+    checks = 0
+
+    def cancelled_after_first():
+        nonlocal checks
+        checks += 1
+        return checks > 1
+
+    interrupted = run("evaluation-cancelled", 2, cancelled_after_first)
+    assert interrupted["stop_reason"] == "cancelled" and interrupted["samples"] == 1
+
+
 def test_actual_native_cli_choose_bounded_episode_evaluate_and_explicit_activation(session_directory, capsys, monkeypatch):
     """Requires actual installed Rust rules/ort/tract; no production fallback."""
     from accelerate_chess import Position

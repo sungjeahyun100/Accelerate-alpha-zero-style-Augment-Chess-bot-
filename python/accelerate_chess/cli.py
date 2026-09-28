@@ -211,8 +211,10 @@ def evaluate(args, root, spec, cancelled):
     episode = ReplayEpisode.load(args.replay, spec)
     encoder = PublicEncoder(spec)
     metrics = []
+    interrupted = False
     for record in episode.decisions[:args.max_samples]:
         if cancelled():
+            interrupted = True
             break
         observation = episode.trackers[record["actor"]].frame_at(record["trace_step"])
         candidates = record["candidates"]
@@ -227,7 +229,13 @@ def evaluate(args, root, spec, cancelled):
             target = 0. if winner == "draw" else (1. if winner == record["actor"] else -1.)
             metric["value_mse"] = (metric["value_prediction"] - target)**2
         metrics.append(metric)
-    report = {"samples": len(metrics), "metrics": metrics, "backend": args.backend, "episode_status": episode.outcome["status"], "activated": False}
+    stop_reason = "cancelled" if interrupted else ("sample-limit" if len(episode.decisions) > args.max_samples else "complete")
+    report = {"version": "accelerate-evaluation-v1", "samples": len(metrics),
+              "decisions_available": len(episode.decisions), "sample_limit": args.max_samples,
+              "stop_reason": stop_reason, "metrics": metrics, "backend": args.backend,
+              "episode_status": episode.outcome["status"], "replay_hash": episode.replay_hash,
+              "encoder_hash": spec.digest, "model_sha256": evaluator.session.model_sha256,
+              "activated": False}
     atomic_json(slot(root, "reports", args.run_id) / "evaluation.json", report)
     return report
 
