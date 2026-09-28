@@ -1,5 +1,6 @@
 """Public replay and one synthetic optimizer step with deterministic resume."""
 from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import hashlib
 import json
@@ -7,6 +8,7 @@ import os
 from pathlib import Path
 import random
 import signal
+from threading import Barrier
 
 import numpy as np
 import pytest
@@ -59,6 +61,25 @@ def synthetic_episode(*, terminal=True):
         position = child
     recorder.finish("white" if terminal else None, "synthetic-source-terminal" if terminal else "verification-limit")
     return recorder
+
+
+def test_atomic_public_json_saves_do_not_share_a_temporary_file(session_directory, monkeypatch):
+    path = session_directory / "concurrent-public.json"
+    barrier = Barrier(2)
+    replace = os.replace
+
+    def simultaneous_replace(source, target):
+        barrier.wait(timeout=10)
+        replace(source, target)
+
+    monkeypatch.setattr("accelerate_chess.replay.os.replace", simultaneous_replace)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        futures = [workers.submit(atomic_json, path, {"writer": writer}) for writer in (0, 1)]
+        for future in futures:
+            future.result(timeout=15)
+
+    assert read_json(path) in ({"writer": 0}, {"writer": 1})
+    assert not list(session_directory.glob(".concurrent-public.json.*.tmp"))
 
 
 def test_public_replay_terminal_labels_and_streamed_dataset(session_directory, monkeypatch):

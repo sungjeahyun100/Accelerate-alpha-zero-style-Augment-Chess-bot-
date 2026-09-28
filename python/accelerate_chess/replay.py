@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 from typing import Any, Mapping
 
 from .encoding import EncoderSpec, PublicEncoder, canonical_json
@@ -60,18 +61,21 @@ def slot(root: Path, category: str, name: str) -> Path:
 def atomic_json(path: str | Path, payload: Any) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
     text = canonical_json(payload) + "\n"
     if len(text.encode()) > MAX_REPLAY_BYTES:
         raise ValueError("public JSON artifact exceeds its 16 MiB storage boundary")
+    temporary = None
     try:
-        with temporary.open("w", encoding="utf-8", newline="\n") as output:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", newline="\n", dir=path.parent,
+                                        prefix=f".{path.name}.", suffix=".tmp", delete=False) as output:
+            temporary = Path(output.name)
             output.write(text)
             output.flush()
             os.fsync(output.fileno())
         os.replace(temporary, path)
     finally:
-        temporary.unlink(missing_ok=True)
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def read_json(path: str | Path) -> Any:
