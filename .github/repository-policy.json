@@ -4,7 +4,7 @@
     ".gitignore", "AGENTS.md", "CHANGELOG.md", "CONTRIBUTING.md", "NOTICE.md", "README.md"
   ],
   "allowedRootDirectories": [
-    ".github", "bridge", "docs", "infra", "pre_cpp_engine_code", "python", "rust-engine", "tests"
+    ".github", "bridge", "docs", "infra", "pre_cpp_engine_code", "python", "rust-engine", "tests", "monitoring"
   ],
   "forbiddenDirectoryNames": [
     ".cache", ".venv", "__pycache__", "build", "checkpoints", "coverage", "dist",
