@@ -1,6 +1,7 @@
 """Small contract scenarios; no trained weights or large fixtures in Git."""
 
 from dataclasses import replace
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 import json
 import hashlib
@@ -8,6 +9,7 @@ import os
 from pathlib import Path
 from functools import lru_cache
 from types import SimpleNamespace
+from threading import Barrier
 
 import numpy as np
 import pytest
@@ -16,6 +18,8 @@ import torch
 from accelerate_chess.encoding import EncoderSpec, PublicEncoder, PublicObservation, batch_positions, canonical_json, decode_json_tail
 from accelerate_chess.network.artifacts import MAX_MANIFEST_BYTES, OnnxEvaluator, _validate_graph, export_onnx, load_adapter, load_base, load_manifest, save_adapter, save_base
 from accelerate_chess.network.model import AdapterDescriptor, ModelConfig, PolicyValueNetwork, is_adapter_parameter, masked_policy, tensor_state_hash
+import accelerate_chess.training as training_module
+from accelerate_chess.training import DatasetCursor, create_optimizer, load_training_checkpoint, save_training_checkpoint
 
 torch.set_num_threads(1)
 
@@ -75,6 +79,29 @@ def tensors(batch):
     return tuple(torch.from_numpy(value) for value in (batch.board, batch.condition, batch.action_features))
 
 
+def test_dataset_cursor_preserves_shuffle_state_when_batch_read_fails():
+    class FlakyDataset:
+        digest = "synthetic-dataset"
+        fail_once = True
+
+        def __len__(self):
+            return 2
+
+        def __getitem__(self, index):
+            if index == 0 and self.fail_once:
+                self.fail_once = False
+                raise OSError("replay input changed during batch read")
+            return index
+
+    dataset = FlakyDataset()
+    cursor = DatasetCursor(dataset, 19)
+    before = cursor.snapshot()
+    with pytest.raises(OSError, match="replay input changed"):
+        cursor.next_batch(3)
+    assert cursor.snapshot() == before
+    assert cursor.next_batch(3) == DatasetCursor(dataset, 19).next_batch(3)
+
+
 def test_public_encoder_preserves_attributes_action_identity_and_orientation():
     assert canonical_json({"value": 1.0, "zero": -0., "tiny": 1e-7}) == '{"tiny":1e-7,"value":1,"zero":0}'
     assert canonical_json({"\uffff": 2, "\U0001f600": 1}) == '{"\U0001f600":1,"\uffff":2}'
@@ -123,6 +150,13 @@ def test_public_encoder_preserves_attributes_action_identity_and_orientation():
 
 def test_public_boundary_capacity_and_catalog_fail_closed():
     encoder = PublicEncoder(spec())
+    altered_policy = PublicEncoder(spec())
+    altered_policy.policy["derivedPublicFields"].append("unreviewedHand")
+    unreviewed = observation()
+    unreviewed["publicState"]["unreviewedHand"] = ["hidden-card"]
+    resign(unreviewed)
+    with pytest.raises(ValueError, match="unknown public state"):
+        altered_policy.encode(unreviewed, actions())
     leaked = observation()
     leaked["rngState"] = 17
     with pytest.raises(ValueError, match="exact public"):
@@ -223,6 +257,11 @@ def test_padding_terminal_rows_and_model_input_checks():
     probabilities = masked_policy(logits, torch.from_numpy(encoded.action_mask))
     torch.testing.assert_close(probabilities[0].sum(), torch.tensor(1.))
     assert not probabilities[1].any()
+    first = encoder.encode(observation(), actions())
+    with pytest.raises(ValueError, match="action feature count"):
+        batch_positions([replace(first, action_features=first.action_features[:1])])
+    with pytest.raises(ValueError, match="finite float32"):
+        batch_positions([replace(first, condition=np.full_like(first.condition, np.nan))])
     invalid = list(tensors(encoded))
     invalid[1] = invalid[1].clone()
     invalid[1][0, 0] = float("nan")
@@ -312,6 +351,43 @@ def test_base_adapter_checkpoint_roundtrip_and_failed_load_preserves_model(artif
     torch.save(incompatible_policy, policy_path)
     with pytest.raises(ValueError, match="policy"):
         load_base(policy_path, contract)
+
+
+def test_parallel_training_checkpoint_saves_use_distinct_temp_files(artifact_directory, monkeypatch):
+    contract = spec()
+
+    class SingleExampleDataset:
+        spec = contract
+        digest = "synthetic-checkpoint-dataset"
+
+        def __len__(self):
+            return 1
+
+    dataset = SingleExampleDataset()
+    model = tiny_model(contract)
+    optimizer = create_optimizer(model, mode="base")
+    cursor = DatasetCursor(dataset, 7)
+    checkpoint = artifact_directory / "training-concurrent.pt"
+    original_save = torch.save
+    barrier = Barrier(2)
+    temp_paths = []
+
+    def concurrent_save(state, path):
+        temp_paths.append(Path(path))
+        barrier.wait(timeout=10)
+        original_save(state, path)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(training_module.torch, "save", concurrent_save)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = [pool.submit(save_training_checkpoint, model, optimizer, contract, cursor,
+                                   checkpoint, completed_steps=step) for step in (1, 2)]
+            for result in results:
+                result.result(timeout=15)
+    assert len(temp_paths) == 2 and temp_paths[0] != temp_paths[1]
+    restored = tiny_model(contract)
+    restored_optimizer = create_optimizer(restored, mode="base")
+    assert load_training_checkpoint(restored, restored_optimizer, contract, DatasetCursor(dataset, 8), checkpoint) in (1, 2)
 
 
 def test_onnx_dynamic_batch_actions_film_merge_and_manifest(artifact_directory, monkeypatch):

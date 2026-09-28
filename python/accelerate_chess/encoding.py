@@ -8,6 +8,7 @@ encoder has no API accepting a full Position or its hidden RNG state.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 import hashlib
 import json
@@ -403,53 +404,59 @@ def _coordinates(value: Any, player: str) -> list[float]:
 class PublicEncoder:
     def __init__(self, spec: EncoderSpec):
         self.spec = spec
-        self.policy = spec.observation_policy
+        self._policy = spec.observation_policy
         # This encoder owns a verified policy snapshot. Its frozen public
         # spec and snapshot do not change per leaf; avoid hashing the full
         # renderer schema again on every inference input.
         self._spec_digest = spec.digest
 
+    @property
+    def policy(self) -> dict[str, Any]:
+        """Expose policy metadata without allowing callers to alter validation."""
+        return deepcopy(self._policy)
+
     def _validate_surface(self, observation: PublicObservation) -> None:
+        policy = self._policy
         public = observation.public["publicState"]
         if public.get("observationPolicyHash") != self.spec.observation_policy_hash or public.get("projectionVersion") != PROJECTION_VERSION:
             raise ValueError("observation and encoder policy compatibility mismatch")
-        allowed = set(self.policy["statePublicFields"]) | set(self.policy["derivedPublicFields"])
+        allowed = set(policy["statePublicFields"]) | set(policy["derivedPublicFields"])
         if set(public) - allowed:
             raise ValueError("unknown public state fields require a source visibility review")
         if "deathmatchStatus" not in public:
             raise ValueError("public observation needs source-derived deathmatch status")
-        _surface_shape(self.policy["deathmatchSchema"], public["deathmatchStatus"], "publicState.deathmatchStatus")
-        for key in self.policy["statePublicFields"]:
+        _surface_shape(policy["deathmatchSchema"], public["deathmatchStatus"], "publicState.deathmatchStatus")
+        for key in policy["statePublicFields"]:
             if key in public:
-                _surface_shape(self.policy["stateValueSchemas"][key], public[key], f"publicState.{key}")
+                _surface_shape(policy["stateValueSchemas"][key], public[key], f"publicState.{key}")
         if "selectionPhase" in public:
-            _surface_shape(self.policy["selectionSchema"], public["selectionPhase"], "publicState.selectionPhase")
+            _surface_shape(policy["selectionSchema"], public["selectionPhase"], "publicState.selectionPhase")
         for key in ("boardMarks", "relationships", "overlays"):
             if key not in public:
                 raise ValueError("public observation needs the source-derived board surface")
-            _surface_shape(self.policy["surfaceSchemas"][key], public[key], key)
+            _surface_shape(policy["surfaceSchemas"][key], public[key], key)
         cards = [*observation.public["ownCards"], *public.get("revealedOpponentCards", [])]
         for card in cards:
-            if not isinstance(card, Mapping) or set(card) - set(self.policy["cardPublicFields"]):
+            if not isinstance(card, Mapping) or set(card) - set(policy["cardPublicFields"]):
                 raise ValueError("unknown public card fields require a source visibility review")
             if "revealed" in card:
-                _surface_shape(self.policy["cardRevelationSchema"], card["revealed"], "card.revealed")
+                _surface_shape(policy["cardRevelationSchema"], card["revealed"], "card.revealed")
         for row in observation.board:
             for piece in row:
                 if piece is None:
                     continue
-                if not isinstance(piece, Mapping) or set(piece) - set(self.policy["piecePublicFields"]):
+                if not isinstance(piece, Mapping) or set(piece) - set(policy["piecePublicFields"]):
                     raise ValueError("unknown public piece fields require a source visibility review")
                 if "status" not in piece:
                     raise ValueError("public pieces need an explicit source-derived status surface")
-                _surface_shape(self.policy["publicPieceSchema"], piece, "piece")
+                _surface_shape(policy["publicPieceSchema"], piece, "piece")
         # Historical frames are separate public observations, not a way to
         # smuggle raw piece attributes around the current-board boundary.
         for event in observation.history:
             for change in event.get("boardChanges", ()):
                 for key in ("before", "after"):
                     if change.get(key) is not None:
-                        _surface_shape(self.policy["publicPieceSchema"], change[key], f"history.{key}")
+                        _surface_shape(policy["publicPieceSchema"], change[key], f"history.{key}")
 
     def validate_observation(self, observation: PublicObservation | Mapping[str, Any], *, belief_summary: Mapping[str, Any] | None = None) -> PublicObservation:
         """Own and validate a public frame without allocating feature tensors.
@@ -576,8 +583,24 @@ class PublicEncoder:
 def batch_positions(positions: Sequence[EncodedPosition]) -> EncodedBatch:
     if not positions:
         raise ValueError("an inference batch must contain positions")
+    if any(not isinstance(position, EncodedPosition) for position in positions):
+        raise ValueError("an inference batch needs encoded positions")
     if len({position.spec_digest for position in positions}) != 1:
         raise ValueError("cannot combine incompatible feature contracts")
+    expected_shapes = None
+    for position in positions:
+        board, condition, actions = position.board, position.condition, position.action_features
+        if any(not isinstance(value, np.ndarray) or value.dtype != np.float32 or not np.isfinite(value).all()
+               for value in (board, condition, actions)):
+            raise ValueError("batch features must be finite float32 arrays")
+        if board.ndim != 3 or board.shape[0] < 1 or board.shape[1:] != (8, 8) or condition.ndim != 1 or condition.shape[0] < 1 or actions.ndim != 2 or actions.shape[1] < 1:
+            raise ValueError("invalid encoded position feature shapes")
+        if actions.shape[0] != len(position.actions) or len(position.action_keys) != len(position.actions):
+            raise ValueError("action feature count differs from candidate count")
+        shapes = (board.shape, condition.shape, actions.shape[1])
+        if expected_shapes is not None and shapes != expected_shapes:
+            raise ValueError("incompatible encoded position feature shapes")
+        expected_shapes = shapes
     largest = max(len(position.actions) for position in positions)
     # Terminal positions have no candidates; one masked placeholder keeps tensor
     # dimensions usable while value remains meaningful.

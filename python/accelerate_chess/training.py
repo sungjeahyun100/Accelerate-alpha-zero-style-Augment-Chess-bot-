@@ -13,6 +13,7 @@ import math
 import os
 from pathlib import Path
 import random
+import tempfile
 import time
 from typing import Any, Callable, Sequence
 
@@ -88,15 +89,23 @@ class DatasetCursor:
     def next_batch(self, count: int):
         if type(count) is not int or not 1 <= count <= 64:
             raise ValueError("training batches must contain 1..64 examples")
-        indices = []
-        for _ in range(count):
-            if self.offset == len(self.order):
-                self.order = self.rng.permutation(len(self.dataset)).tolist()
-                self.offset = 0
-                self.epoch += 1
-            indices.append(self.order[self.offset])
-            self.offset += 1
-        return [self.dataset[index] for index in indices]
+        # A replay may become unreadable after the index was built. Do not
+        # consume a shuffle position until the whole requested batch is read.
+        before = (self.order, self.offset, self.epoch, deepcopy(self.rng.bit_generator.state))
+        try:
+            indices = []
+            for _ in range(count):
+                if self.offset == len(self.order):
+                    self.order = self.rng.permutation(len(self.dataset)).tolist()
+                    self.offset = 0
+                    self.epoch += 1
+                indices.append(self.order[self.offset])
+                self.offset += 1
+            return [self.dataset[index] for index in indices]
+        except Exception:
+            self.order, self.offset, self.epoch = before[:3]
+            self.rng.bit_generator.state = before[3]
+            raise
 
     def snapshot(self):
         state = deepcopy(self.rng.bit_generator.state)
@@ -326,8 +335,10 @@ def save_training_checkpoint(model, optimizer, spec: EncoderSpec, cursor: Datase
     state["checkpoint_hash"] = _tree_hash(state)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
+    temporary = None
     try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False) as output:
+            temporary = Path(output.name)
         torch.save(state, temporary)
         if temporary.stat().st_size > MAX_ARTIFACT_BYTES:
             raise ValueError("training checkpoint exceeds the 512 MiB artifact budget")
@@ -335,7 +346,8 @@ def save_training_checkpoint(model, optimizer, spec: EncoderSpec, cursor: Datase
             os.fsync(saved.fileno())
         os.replace(temporary, path)
     finally:
-        temporary.unlink(missing_ok=True)
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return state["checkpoint_hash"]
 
 
