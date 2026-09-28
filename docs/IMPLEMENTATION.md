@@ -40,6 +40,38 @@ Hypernetwork는 향후 extension의 생성·적용·병합 가능 여부만 준�
 | ISMCTS·replay·CLI | BFB+Potion2 및 후속 5e17/v6 Guard 수정 고정 wheel에서 각각 weighted search/session 15/15·skip 0과 세 모드 bounded 실제 ort 실행 통과 | 전체 hidden chance·카드·변형기물 coverage와 최종 두 OS 검증 필요 |
 | CI | dcc0667의 구조·기존 engine·historical JS와 Windows/Linux native workflow 전체 성공; 실제 설치 검사 각 34/34·skip 0 | 후속 default-flow·weighted 탐색·관측 revision과 전체 규칙을 완성한 최종 공통 commit 검증 필요 |
 
+### 2026-09-28 통합 checkpoint
+
+[PR #29](https://github.com/sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-/pull/29)의
+고정 v7 게임 어댑터는 일반 merge commit `f7d7d896`으로 [PR #28](https://github.com/sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-/pull/28)에
+세 원본 커밋 그대로 들어갔다. PR #28은 `develop` 대상 draft로 유지한다. 이 head의
+[원격 CI](https://github.com/sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-/actions/runs/36402517741)에서
+v7 어댑터는 Ubuntu·Windows 모두 성공했다. 256장·768개 bounded probe cell 중 27개는
+후보가 없고 모든 shard가 `completeRuleCoverage=false`다. 같은 CI의 native 설치 검사는
+각 OS 44개 중 1개 실패했다. Ubuntu는 CHAOS belief의 5초 한도, Windows는 동일 JSON
+대상에 대한 동시 `os.replace` 테스트의 `WinError 5`였다. 이 실행을 전체 통합 성공으로
+표시하지 않는다.
+
+후속 구현은 공개 관측 인코더와 ONNX manifest에 고정 v6·v7 규칙/정책 조합을 명시하고
+혼합 입력을 거부한다. 실제 v7 어댑터의 normal·chaos·grand 양측 관측 6개는 별도 로컬
+실행에서 인코딩했고, 작은 v7 ONNX 모델은 ort·tract 양쪽에서 수치 검사를 통과했다.
+저장된 단위 테스트의 v7 관측은 v6 입력의 메타데이터를 바꾼 synthetic 사례이므로 이
+수동 6개 관측이나 전체 규칙 동등성의 자동 회귀 증거로 취급하지 않는다. 로컬 고정
+sdist에서 세 crate를 다시 빌드한 Linux wheel의 native/model/runtime/search/session
+검사는 47/47 통과했다. 이 로컬 결과는 최종 head의 양 OS 원격 CI와 별개다.
+
+고정 v6 원문과 독립 대조한 seed 12345의 세 모드 상태 8개 중 draft 6개는 합법 행동
+집합 67개가 일치했다. play 2개는 Rust의 `fanatic` 미지원으로 비교가 중단됐고, draft
+적용에서도 5개 시도 중 2개만 전체 state·RNG·history가 일치했다. 세 모드의 새 게임
+초기 full state는 draft/replay frame/clock 차이로 불일치한다. 이 부분 결과를 전체
+규칙 parity나 v7 실행 근거로 확대하지 않는다.
+
+Rust의 기본 실행은 계속 v6이며 v7 Position 생성은 명시적으로 거부한다. 현재 Portal
+Gun은 직접 행동 결합·적용과 예약 전이 일부가 있지만 행동 스트림이 미지원이다. 고정 v6
+원문은 포탈 두 칸의 양방향 클릭을 모두 허용하고 결과가 달라지는 반면, 병합된 어댑터의
+후보 열거는 순서 없는 조합만 내므로 이 경계의 수정과 원문 대조가 남아 있다. v7 규칙
+포팅, 전체 카드/이동·상태·RNG 동등성, 최종 두 OS 통합 검증 전까지 판정은 **NO-GO**다.
+
 다른 영역의 작은 test count나 compile 성공은 해당 checkpoint이며 전체 GO로 승격하지 않는다.
 CI 요청/관측한 성공, Windows/Linux 확인, 모델 export 수치, 실제 semantic coverage를 따로 기록한다.
 
@@ -356,8 +388,15 @@ CHAOS·GRAND 기본 사례 추가 3회씩 모두 통과했다. 정확한 소스 
 `reports/full-stack-implementation/ci-perf-v5`에 고정했다. 로컬 Windows에서는 같은
 후보보다 이전 고정 소스의 sdist까지 생성했으나, 이 호스트의 긴 MSVC 출력 경로와
 애플리케이션 제어 정책으로 wheel·설치 검사를 실행하지 못했다. 이를 코드 실패나
-Windows 원격 CI 결과로 계산하지 않는다. 최종 커밋의 두 OS 원격 CI와 전체 규칙·카드
-coverage는 여전히 별도 완료 조건이며 실제 학습은 시작하지 않았다.
+Windows 원격 CI 결과로 계산하지 않는다. 실제 커밋 `1aff4b3`의
+[원격 native CI](https://github.com/sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-/actions/runs/36384650640)는
+Ubuntu 설치본 34/34·skip 0으로 성공했고 Windows는 wheel 설치 후 32/34·skip 0으로
+실패했다. Windows 실패 두 건은 CHAOS·GRAND의 기존 5초 belief 재구성 한도 초과이며,
+각 테스트 전체 시간 12.830초·10.670초를 한도 검사 순간의 경과 시간으로 해석하지
+않는다. 같은 head의 policy·engine·JS/Rust differential workflow는 성공했다. 양측
+JUnit과 분류는 Git 밖 `reports/full-stack-implementation/ci-1aff4b3`에 보존했다.
+최종 두 OS native 성공과 전체 규칙·카드 coverage는 별도 완료 조건이며 실제 학습은
+시작하지 않았다.
 
 ## 구현 연결 순서와 완료 기준
 

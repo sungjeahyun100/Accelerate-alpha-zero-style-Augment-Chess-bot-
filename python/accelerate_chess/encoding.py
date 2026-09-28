@@ -23,7 +23,11 @@ ENCODER_VERSION = "public-utf8-v2"
 ACTION_VERSION = "candidate-payload-v1"
 CONDITION_VERSION = "public-film-v2"
 OBSERVATION_VERSION = "accelerate-observation-v2"
-PROJECTION_VERSION = "source-visible-20260927-v3"
+LEGACY_RULES_VERSION = "augment-site-20260927-abfe01a035813875"
+SOURCE_PROJECTIONS = {
+    LEGACY_RULES_VERSION: "source-visible-20260927-v3",
+    "augment-site-20260928-e5ed84fcf8e72a24": "source-visible-20260928-v1",
+}
 HISTORY_SUMMARY_VERSION = "public-history-summary-v1"
 ACTION_TYPES = ("move", "card", "promotion", "promotionChoice", "shotgunReload", "wizardSpell", "fileSurgeSkip", "draftPick", "draftBundlePick", "trolleyChoice")
 
@@ -196,7 +200,10 @@ class EncoderSpec:
         once alongside the serialized 16-field spec; tensor modules stay
         independent of the native rule engine.
         """
-        if not isinstance(policy, Mapping) or policy.get("schemaVersion") != 2 or policy.get("protocolVersion") != OBSERVATION_VERSION or policy.get("projectionVersion") != PROJECTION_VERSION or policy.get("rulesVersion") != self.rules_version:
+        if (not isinstance(policy, Mapping) or self.rules_version not in SOURCE_PROJECTIONS
+                or policy.get("schemaVersion") != 2 or policy.get("protocolVersion") != OBSERVATION_VERSION
+                or policy.get("projectionVersion") != SOURCE_PROJECTIONS[self.rules_version]
+                or policy.get("rulesVersion") != self.rules_version):
             raise ValueError("unsupported observation policy version or rules provenance")
         encoded = canonical_json(policy)
         if len(encoded.encode("utf-8")) > 1024 * 1024 or hashlib.sha256(encoded.encode("utf-8")).hexdigest() != self.observation_policy_hash:
@@ -279,7 +286,13 @@ class PublicObservation:
             raise ValueError("observation public state, cards and history are invalid")
         projection = observation["publicState"]
         policy_hash = projection.get("observationPolicyHash")
-        if projection.get("projectionVersion") != PROJECTION_VERSION or not isinstance(policy_hash, str) or len(policy_hash) != 64 or any(character not in "0123456789abcdef" for character in policy_hash):
+        projection_version = projection.get("projectionVersion")
+        rules_version = projection.get("rulesVersion")
+        if (projection_version not in SOURCE_PROJECTIONS.values()
+                or rules_version is None and projection_version != SOURCE_PROJECTIONS[LEGACY_RULES_VERSION]
+                or rules_version is not None and projection_version != SOURCE_PROJECTIONS.get(rules_version)
+                or not isinstance(policy_hash, str) or len(policy_hash) != 64
+                or any(character not in "0123456789abcdef" for character in policy_hash)):
             raise ValueError("public observation projection provenance mismatch")
         if any(not isinstance(card, Mapping) for card in observation["ownCards"]) or any(not isinstance(event, Mapping) for event in observation["history"]):
             raise ValueError("public cards and history must contain JSON objects")
@@ -418,7 +431,9 @@ class PublicEncoder:
     def _validate_surface(self, observation: PublicObservation) -> None:
         policy = self._policy
         public = observation.public["publicState"]
-        if public.get("observationPolicyHash") != self.spec.observation_policy_hash or public.get("projectionVersion") != PROJECTION_VERSION:
+        if (public.get("observationPolicyHash") != self.spec.observation_policy_hash
+                or public.get("projectionVersion") != policy["projectionVersion"]
+                or "rulesVersion" in public and public["rulesVersion"] != self.spec.rules_version):
             raise ValueError("observation and encoder policy compatibility mismatch")
         allowed = set(policy["statePublicFields"]) | set(policy["derivedPublicFields"])
         if set(public) - allowed:

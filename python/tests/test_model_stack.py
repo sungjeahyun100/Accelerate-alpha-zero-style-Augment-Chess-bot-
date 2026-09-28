@@ -148,6 +148,44 @@ def test_public_encoder_preserves_attributes_action_identity_and_orientation():
     assert encoder.encode(moved, actions()).board[len(contract.piece_ids) + 2, 1, 6] == 0
 
 
+def test_frozen_v7_public_projection_is_explicit_and_incompatible_with_v6():
+    catalog_root = Path(__file__).resolve().parents[2] / "bridge/catalog"
+    catalog = json.loads((catalog_root / "site-20260928.json").read_text(encoding="utf-8"))
+    policy = json.loads((catalog_root / "observation-20260928.json").read_text(encoding="utf-8"))
+    latest = EncoderSpec.from_catalog(catalog, observation_policy=policy,
+                                      action_encoding="public-decision-intent-v1")
+    assert latest.rules_version == "augment-site-20260928-e5ed84fcf8e72a24"
+    assert policy["projectionVersion"] == "source-visible-20260928-v1"
+    with pytest.raises(ValueError, match="policy version or rules provenance"):
+        EncoderSpec.from_catalog(catalog, observation_policy=observation_policy())
+
+    public = observation()
+    public["publicState"].update(projectionVersion=policy["projectionVersion"],
+                                  rulesVersion=catalog["rulesVersion"],
+                                  observationPolicyHash=latest.observation_policy_hash)
+    resign(public)
+    intent = {"type": "move", "color": "white", "from": {"row": 6, "col": 1},
+              "destination": {"row": 5, "col": 1}}
+    assert PublicEncoder(latest).encode(public, [intent]).action_features.shape == (1, latest.action_dim)
+    with pytest.raises(ValueError, match="policy compatibility"):
+        PublicEncoder(spec()).encode(public, actions())
+    wrong_rules = json.loads(canonical_json(public))
+    wrong_rules["publicState"]["rulesVersion"] = spec().rules_version
+    resign(wrong_rules)
+    with pytest.raises(ValueError, match="projection provenance"):
+        PublicEncoder(latest).encode(wrong_rules, [intent])
+    missing_rules = json.loads(canonical_json(public))
+    del missing_rules["publicState"]["rulesVersion"]
+    resign(missing_rules)
+    with pytest.raises(ValueError, match="projection provenance"):
+        PublicEncoder(latest).encode(missing_rules, [intent])
+    wrong_policy = json.loads(canonical_json(public))
+    wrong_policy["publicState"]["observationPolicyHash"] = spec().observation_policy_hash
+    resign(wrong_policy)
+    with pytest.raises(ValueError, match="policy compatibility"):
+        PublicEncoder(latest).encode(wrong_policy, [intent])
+
+
 def test_public_boundary_capacity_and_catalog_fail_closed():
     encoder = PublicEncoder(spec())
     altered_policy = PublicEncoder(spec())

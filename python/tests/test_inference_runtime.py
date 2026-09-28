@@ -29,9 +29,10 @@ def _root():
     return Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "accelerate" / "native-runtime"
 
 
-def _spec(full=False, history_encoding="full", action_encoding="exact-payload"):
-    catalog = json.loads((Path(__file__).resolve().parents[2] / "bridge/catalog/site-20260927.json").read_text(encoding="utf-8"))
-    policy = json.loads((Path(__file__).resolve().parents[2] / "bridge/catalog/observation-20260927.json").read_text(encoding="utf-8"))
+def _spec(full=False, history_encoding="full", action_encoding="exact-payload", baseline="20260927"):
+    catalog_root = Path(__file__).resolve().parents[2] / "bridge/catalog"
+    catalog = json.loads((catalog_root / f"site-{baseline}.json").read_text(encoding="utf-8"))
+    policy = json.loads((catalog_root / f"observation-{baseline}.json").read_text(encoding="utf-8"))
     return EncoderSpec.from_catalog(catalog, observation_policy=policy, history_encoding=history_encoding, action_encoding=action_encoding, **({} if full else dict(piece_payload_bytes=32, public_payload_bytes=64, action_payload_bytes=48)))
 
 
@@ -46,6 +47,27 @@ def _arrays(spec, batch, actions):
     return (generator.normal(size=(batch, spec.board_channels, 8, 8)).astype(np.float32),
             generator.normal(size=(batch, spec.condition_dim)).astype(np.float32),
             generator.normal(size=(batch, actions, spec.action_dim)).astype(np.float32))
+
+
+def test_v7_explicit_bundle_runs_both_backends_and_rejects_v6_spec():
+    latest = _spec(history_encoding="public-history-summary-v1",
+                   action_encoding="public-decision-intent-v1", baseline="20260928")
+    previous = _spec(history_encoding="public-history-summary-v1",
+                     action_encoding="public-decision-intent-v1")
+    assert latest.digest != previous.digest
+    model = _model(latest)
+    manifest = export_onnx(model, latest, _root() / "v7-contract")
+    assert load_manifest(manifest, latest)["encoder_hash"] == latest.digest
+    with pytest.raises(ValueError, match="encoder contract mismatch"):
+        load_manifest(manifest, previous)
+    arrays = _arrays(latest, 1, 2)
+    expected = model.evaluate(*(torch.from_numpy(value) for value in arrays))
+    for backend in ("ort", "tract"):
+        session = InferenceSession(manifest, backend, latest.digest)
+        for actual, reference in zip(session.evaluate(*arrays), expected, strict=True):
+            np.testing.assert_allclose(actual, reference.detach().numpy(), atol=1e-5, rtol=1e-4)
+    with pytest.raises(ValueError, match="compatibility"):
+        InferenceSession(manifest, expected_encoder_hash=previous.digest)
 
 
 @pytest.mark.parametrize("full", [False, True], ids=["small", "resnet8x128"])

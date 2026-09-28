@@ -116,6 +116,27 @@ fn catalog_ids(catalog: &Value, key: &str) -> Result<Vec<String>> {
     Ok(ids)
 }
 
+fn frozen_baseline(rules_version: &str) -> Result<(Value, Value, &'static str)> {
+    let (catalog, policy, projection) = match rules_version {
+        "augment-site-20260927-abfe01a035813875" => (
+            include_str!("../../catalog/site-20260927.json"),
+            include_str!("../../catalog/observation-20260927.json"),
+            "source-visible-20260927-v3",
+        ),
+        "augment-site-20260928-e5ed84fcf8e72a24" => (
+            include_str!("../../catalog/site-20260928.json"),
+            include_str!("../../catalog/observation-20260928.json"),
+            "source-visible-20260928-v1",
+        ),
+        _ => anyhow::bail!("unsupported frozen rules version"),
+    };
+    Ok((
+        serde_json::from_str(catalog)?,
+        serde_json::from_str(policy)?,
+        projection,
+    ))
+}
+
 impl Bundle {
     pub fn load(path: &Path, expected_encoder_hash: Option<&str>) -> Result<(Self, Vec<u8>)> {
         ensure!(
@@ -173,10 +194,6 @@ impl Bundle {
             parameters <= 64_000_000,
             "model aggregate parameter budget exceeds 64 million"
         );
-        let catalog: Value =
-            serde_json::from_str(include_str!("../../catalog/site-20260927.json"))?;
-        let policy: Value =
-            serde_json::from_str(include_str!("../../catalog/observation-20260927.json"))?;
         let spec = &bundle.encoder["spec"];
         fields(
             spec,
@@ -199,6 +216,11 @@ impl Bundle {
                 "observation_policy_hash",
             ],
         )?;
+        let (catalog, policy, projection) = frozen_baseline(
+            spec["rules_version"]
+                .as_str()
+                .context("encoder rules version missing")?,
+        )?;
         ensure!(
             spec["rules_version"] == catalog["rulesVersion"]
                 && spec["catalog_version"] == catalog["catalogVersion"]
@@ -206,7 +228,7 @@ impl Bundle {
                 && spec["observation_policy_hash"].as_str() == Some(&canonical_hash(&policy)?)
                 && policy["schemaVersion"] == 2
                 && policy["protocolVersion"] == "accelerate-observation-v2"
-                && policy["projectionVersion"] == "source-visible-20260927-v3"
+                && policy["projectionVersion"] == projection
                 && policy["rulesVersion"] == catalog["rulesVersion"],
             "frozen rules/catalog compatibility mismatch"
         );
