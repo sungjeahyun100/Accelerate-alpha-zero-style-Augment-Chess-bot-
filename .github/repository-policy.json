@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "allowedRootFiles": [
+    ".gitignore", "AGENTS.md", "CHANGELOG.md", "CONTRIBUTING.md", "NOTICE.md", "README.md"
+  ],
+  "allowedRootDirectories": [
+    ".github", "bridge", "docs", "infra", "pre_cpp_engine_code", "python", "rust-engine", "tests"
+  ],
+  "forbiddenDirectoryNames": [
+    ".cache", ".venv", "__pycache__", "build", "checkpoints", "coverage", "dist",
+    "dist-server", "models", "node_modules", "runs", "target", "venv"
+  ],
+  "forbiddenFileNames": ["engine_test", "engine_test_human"],
+  "forbiddenFileSuffixes": [
+    ".bin", ".ckpt", ".dll", ".dylib", ".egg", ".exe", ".o", ".obj", ".onnx",
+    ".pt", ".pt.tar", ".pth", ".pth.tar", ".pyc", ".pyo", ".safetensors", ".so", ".whl"
+  ],
+  "maxTrackedFileBytes": 10485760,
+  "exceptions": []
+}

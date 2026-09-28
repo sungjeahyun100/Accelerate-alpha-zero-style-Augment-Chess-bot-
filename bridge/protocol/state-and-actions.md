@@ -4,6 +4,9 @@
 
 ## 1. 왜 "핵심 + extra" 구조인가
 
+이 JSON 초안의 의미는 기록·교환·검증에 유지합니다. D-004의 PyO3 직접 호출 타입은
+향후 별도로 구현하고 동일한 상태·행동·결과를 해석하는지 검사합니다.
+
 fixture 349개의 상태를 모으면 사이트 worker 상태의 최상위 키가 **156개**입니다(README에는 "약 156개"). 이 중 보드, 카드 슬롯, 턴 같은 것은 명확하지만, 나머지는 규칙 플래그와 예약 효과(`pendingPortals`, `crownRule`, `freeCastling` 등 카드별 장부)입니다. 어느 것이 Rust 엔진에 꼭 필요한지 이 시점에는 판단할 수 없어서 다음과 같이 나눴습니다.
 
 - **핵심(이름 있는 필드)**: `turn`, `mode`, `winner`, `actionsRemaining`, `moveCount`, `fullMove`, `turnsTaken`, `cardsUsedThisTurn`, `board`, `deckSlots`, `captures`, `enPassant`.

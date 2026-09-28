@@ -1,13 +1,15 @@
 # 미결정 사항과 확신 없는 필드 (DRAFT bridge-draft-0)
 
-> 이 문서는 초안이 **결정하지 않은 것**을 모아 둔 목록입니다. 번호 `B-Q*`는 이 초안 안에서만 쓰는 임시 번호이며, 팀이 다룰 가치가 있다고 보면 `docs/DECISIONS.md`의 열린 질문(O-XXX)으로 옮기면 됩니다(이 PR은 DECISIONS.md를 수정하지 않았습니다).
+> 이 문서는 초안의 **미결정 사항과 이후 결정 연결**을 모은 목록입니다. 번호 `B-Q*`는
+> 이 초안의 임시 번호입니다. D-004의 직접 호출 방식만 반영하며, 다른 필드·상태 방식을
+> 확정하거나 구현하지 않습니다. 새 결정의 적용 시점은 `docs/DECISIONS.md`를 따릅니다.
 
 ## A. 이미 열려 있는 결정과의 관계
 
 | 항목 | 이 초안의 처리 |
 |---|---|
 | **O-001** encoding을 Rust와 Python 중 어디서 하나 | 결정하지 않음. 기본 메시지는 원문 상태만 다룹니다. 확장 지점으로 요청의 선택 필드 `encode`, 응답의 선택 필드 `encoded`(`schemas/encoded.schema.json`)만 열어 두었습니다. Python이 인코딩하기로 하면 이 두 필드는 쓰지 않으면 됩니다. sparse(인덱스+값) 모양은 `docs/ENCODING-EVIDENCE.md`(별도 PR)의 제안을 예시로 따랐을 뿐입니다. |
-| **D-003** 카드 정의 1회 + 매 턴 상태, JSON | 그대로 따름: `new_game`에서 `cards` 1회, 이후 요청에 `GameState`. |
+| **D-003/D-004** 카드 정의 1회 + 위치별 상태 | JSON 기록·검증의 논리 의미를 유지. 반복 호출은 PyO3 타입·배열, 패키징은 maturin. |
 | **D-001** 책임 분리 | 영향 없음. bridge에는 규칙 로직을 넣지 않았습니다. |
 
 ## B. 프로토콜 설계에서 열어 둔 질문
@@ -21,7 +23,7 @@
 | B-Q5 | 행동의 정규화 키(중복 제거와 비교에 쓰는 문자열)를 bridge에서 정할지 | 정하지 않음 | fixture는 `id`/`instanceId`/`pieceId`를 뺀 JSON 문자열을 사용 |
 | B-Q6 | `apply_action` 응답에 종료 정보(`terminal`, `winner`)를 별도로 넣을지, `get_result`를 따로 둘지 | 둘 다 가능(상태에 `mode`/`winner`가 있고 `get_result`도 있음) | MCTS에선 호출 횟수를 줄이려면 합치는 편이 유리할 수 있음 |
 | B-Q7 | 합법 목록의 정렬과 중복 제거를 엔진이 보장할지 | 보장하지 않음 | fixture는 정렬, 중복 제거본 |
-| B-Q8 | 전송 수단(FFI, 표준입출력, 소켓 등)과 직렬화 최적화 | 정하지 않음 | ARCHITECTURE.md: Phase 1 결정 사항 |
+| B-Q8 | 호출 방식과 직렬화 최적화 | D-004: PyO3 직접 타입·배열 호출 + maturin 패키징, JSON 기록·검증 | 방식은 결정. 구체 API·수명/소유권·GIL·batch·zero-copy·JSON 동등성은 Phase 5 구현/검증 사항 |
 | B-Q9 | 확률 요소가 있는 행동(예: brutus의 룩 선택, randomRoulette)의 난수/시드 처리 | `new_game.seed` 선택 필드만 둠 | fixture는 난수 결과가 갈리는 경우를 별도로 다룸(`nondeterministic`)하며 이 초안은 다루지 않음 |
 | B-Q10 | 프로토콜 버전 표기 | 문자열 `"bridge-draft-0"` | 확정 시 변경 |
 | B-Q11 | 정책 출력(행동 인덱스) 연결 | 다루지 않음 | Phase 6 |

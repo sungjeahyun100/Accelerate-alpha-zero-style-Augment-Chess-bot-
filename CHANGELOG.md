@@ -4,6 +4,17 @@
 
 ## 미배포
 
+- 개발 환경의 정확한 경고·오류 전달, 제품 메시지와 상세 진단 구분, Fail-Operational 복구·영향 보고 기준 강화
+- CI의 job·matrix 병렬화·자원 예산과 빌드·성공 검사 재사용, SHA 간 영향 입력 비교·변경 검사 재실행 기준 추가
+- 일회성 CI의 공동 목표당 workflow·동시 실행 각 1개, 소유·정리 책임과 관측 근거 보존 기준 추가
+- 일회성 CI의 일반 종료 run 최근 5개와 임시 artifact 기본 14일, 연구 근거의 별도 보존 기준 명시
+- 작업 브랜치 재사용, 원격 보존된 완료 로컬 브랜치 정리와 PR 병합 후 원격 head 삭제 기준 명시
+- 공동 연구 영수증의 GitHub 작성자·이름·공유·보존 기준과 범용 Markdown 템플릿 추가
+- 저장소·에이전트 작업 규약, NASA/JPL 원칙 조정표와 메타데이터 구조 검사/CI 추가
+- 논리 커밋·원격 공유 빈도, 기능 단위 SRP와 회귀 검사·fixture 유지비 기준 명시
+- Windows 생성물 `%APPDATA%\Accelerate`, WSL2 재생성 캐시 예외와 실행 소유권 기준 정의
+- PyO3/maturin 직접 호출·JSON 기록 계약과 ResNet/LoRA/FiLM·ONNX·Hypernetwork 확장 방향 문서화(구현 전)
+
 - JS oracle, Rust engine, Python AI, bridge로 책임을 나눈 프로젝트 구조와 아키텍처 문서 추가
 - `bridge/`, `rust-engine/`, `python/`, `tests/differential/`의 구현 전 skeleton 추가
 - `infra/` 추가(기존 엔진 프로젝트의 재사용 도구)

@@ -1,6 +1,6 @@
 # site-reference-v1: 사이트 규칙 코드 기준 reference fixture
 
-Rust 포팅(ROADMAP Phase 2 "기준 fixture", Phase 4 differential test)의 정답지입니다. **사이트가 실제로 쓰는 규칙 코드**(AI worker의 `generateActions` / `applyAction`)에서 뽑은 값이며, `engine-merged.js`(JS oracle 복제본)에서 뽑은 값이 아닙니다. 기존 `../oracle-v1.jsonl.gz`(engine-merged 기준)와 형식이 같아서 `infra/tools/fixtures/run-differential.js`에 그대로 넣을 수 있습니다.
+규칙 차이 분석과 Rust 포팅(ROADMAP Phase 2 "기준 fixture", Phase 4 differential test)의 참고 데이터입니다. **사이트가 실제로 쓰는 규칙 코드**(AI worker의 `generateActions` / `applyAction`)에서 뽑은 값이며, `engine-merged.js`(JS oracle 복제본)에서 뽑은 값이 아닙니다. 기존 `../oracle-v1.jsonl.gz`(engine-merged 기준)와 형식이 같아서 `infra/tools/fixtures/run-differential.js`에 넣을 수 있습니다. 사이트와 JS가 다를 때의 최종 처리 기준은 [O-002](../../../../docs/DECISIONS.md#o-002-정답-기준을-사이트-원본으로-명시할지)에서 별도로 결정합니다.
 
 **이 폴더에는 사이트 코드가 들어 있지 않습니다.** 데이터(JSON)만 있습니다. 생성기는 Twist 저장소에 있고, 사이트 코드 사용에 대한 운영자 동의 증빙이 NOTICE.md에 아직 없으므로 이 저장소에는 복사하지 않았습니다.
 
@@ -104,4 +104,4 @@ node tools/site-parity/gen-reference-fixtures.js --out=out --seed=20260926      
 
 ## Twist `engine-merged.js`와의 알려진 차이
 
-`known-differences.json` 참고. 요약: 무작위 표본에서 카드 액션 목록 불일치 2.8%(400개 중 11개), 단일 액션 적용 불일치 6/297, 40~60수 대국에서 25/60 게임이 어딘가에서 갈라짐. 이 저장소 develop(`16cf318`)의 `infra/engine-merged.js`를 후보(`generate-fixtures.js --serve`)로 이 fixture를 돌리면 349개 중 328개 일치, 21개 불일치입니다(Twist `b297ab3`로 동기화한 작업본으로 잠깐 돌렸을 때는 330/19였으나 그 브랜치는 이 PR과 무관하고 고정된 값이 아니므로 참고치입니다). **fixture는 언제나 사이트 기준**이며 engine-merged와 다르면 fixture가 맞습니다.
+`known-differences.json` 참고. 요약: 무작위 표본에서 카드 액션 목록 불일치 2.8%(400개 중 11개), 단일 액션 적용 불일치 6/297, 40~60수 대국에서 25/60 게임이 어딘가에서 갈라짐. 수집 당시 이 저장소 develop(`16cf318`)의 `infra/engine-merged.js`를 후보(`generate-fixtures.js --serve`)로 돌린 결과는 349개 중 328개 일치, 21개 불일치였습니다(Twist `b297ab3` 동기화 작업본의 330/19는 별도 참고치입니다). **이 데이터의 expected는 수집 버전의 사이트 기준**입니다. 불일치 자체는 JS나 Rust의 수정 방향을 확정하지 않으며 최종 처리 기준은 O-002에 남아 있습니다.

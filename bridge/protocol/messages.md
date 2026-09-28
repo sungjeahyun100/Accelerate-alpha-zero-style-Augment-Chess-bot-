@@ -4,6 +4,10 @@
 
 ## 공통 규칙
 
+이 문서는 JSON 기록·교환·검증 예시입니다. D-004의 PyO3 반복 호출은 타입·배열로
+직접 전달하며 아래 JSON envelope를 모든 노드에서 직렬화할 의무는 없습니다.
+필드·결과의 논리 의미를 두 경로에서 맞추는 검사는 Phase 5에서 수행합니다.
+
 - 모든 메시지: `protocol`(현재 `"bridge-draft-0"`), `type`, `id`(요청이 정하고 응답이 그대로 되돌려 줌).
 - 응답 `type`은 요청 `type` + `_response`. 실패는 `type: "error"`, `ok: false`.
 - 좌표는 `{row, col}`이고 `board[row][col]`입니다. fixture에서 row 0이 흑의 뒷줄, 백 폰이 row 6에서 시작합니다.
@@ -38,7 +42,7 @@
 }
 ```
 
-- `cards`의 항목 모양은 [state-and-actions.md](state-and-actions.md#카드-정의)에 있습니다. fixture에서 확실히 얻은 것은 `id`, `effect`뿐이라 예시도 그 두 개만 채웠습니다.
+- `cards`의 항목 모양은 [state-and-actions.md](state-and-actions.md#4-카드-정의)에 있습니다. fixture에서 확실히 얻은 것은 `id`, `effect`뿐이라 예시도 그 두 개만 채웠습니다.
 - `initialState`를 생략했을 때 엔진이 기본 시작 상태를 만드는지, 덱 배정과 드래프트를 누가 하는지는 미정입니다(open-questions).
 
 ## 2. get_legal_actions: 합법 행동 목록
@@ -89,7 +93,7 @@
 { "protocol": "bridge-draft-0", "type": "apply_action_response", "id": 3, "ok": true, "state": { "...": "적용 후 GameState" } }
 ```
 
-- 응답 상태는 fixture의 `stateDelta`를 입력 상태에 적용해 만든 값이라, 사이트 규칙 코드가 실제로 낸 결과입니다(`apply_action.*.response.json`).
+- 응답 상태는 fixture의 `stateDelta`를 입력 상태에 적용해 재구성한 예시입니다(`apply_action.*.response.json`). 별도의 엔진이 반환한 전체 응답을 직접 채집한 기록은 아닙니다.
 - 카드 행동은 `target`이 있을 수도 없을 수도 있습니다(`apply_action.card-no-target.*`, `apply_action.card-cell-target.*`).
 - 게임을 끝내는 행동을 적용하면 `state.mode`가 `"gameover"`, `state.winner`가 승자가 됩니다(`apply_action.ends-game.*`).
 - 엔진이 합법 목록에 낸 행동인데도 적용이 실패한 경우가 fixture에 37개 있어서, 실패 응답을 규약에 넣었습니다.

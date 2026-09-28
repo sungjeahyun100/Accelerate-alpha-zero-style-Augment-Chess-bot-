@@ -12,6 +12,10 @@
 
 동작은 `infra/`의 JS oracle을 기준으로 differential test에서 검증합니다. Python AI는 `bridge/`의 계약을 통해 이 엔진을 사용하며, Rust 엔진은 Python을 알거나 의존하지 않습니다.
 
+얇은 PyO3 바인딩은 향후 `bridge/` 아래 독립 crate에 두고 maturin으로 패키징합니다.
+이 규칙 crate는 PyO3·신경망·ort/tract를 의존하지 않습니다. JSON 기록·검증 경로와
+직접 호출의 논리 의미를 일치시킵니다. 소유권·오류·GIL 검사 등은 Phase 5의 완료 기준입니다.
+
 ## 포함하지 않는 코드
 
 Python 학습 코드, MCTS, 신경망, JS oracle, 언어별 orchestration을 두지 않습니다.

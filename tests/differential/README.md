@@ -18,9 +18,9 @@
 
 ## 현재 상태
 
-하네스는 구현됨: `infra/tools/fixtures/run-differential.js` + `.github/workflows/differential.yml`(push/PR마다 자동 실행). `rust-engine/`에 아직 후보 코드가 없어서 지금은 오라클 서버 자신을 후보로 돌려 하네스/정답지 자체만 검증 중이다. `rust-engine/`이 `run-differential.js` 헤더에 적힌 stdin/stdout 프로토콜을 구현한 바이너리를 내놓으면, 워크플로의 `CANDIDATE_CMD` 한 줄만 바꾸면 실제 교차 검증이 시작된다.
+하네스는 구현됨: `infra/tools/fixtures/run-differential.js` + `.github/workflows/differential.yml`(관련 경로의 push/PR에 실행). `rust-engine/`에 아직 후보 코드가 없어서 지금은 오라클 서버 자신을 후보로 돌려 하네스/기존 fixture를 검증 중이다. CI는 기존 2,072개 중 300개를 검사한다. Rust 후보가 해당 stdin/stdout 프로토콜을 구현하면 빌드 산출물 경로와 `CANDIDATE_CMD`를 함께 연결한다. 이때 [생성물 경로 규약](../../AGENTS.md#생성물-경로)도 적용한다. 현재의 성공을 JS↔Rust 동등성으로 보고하지 않는다.
 
 ## Fixture 종류
 
 - `fixtures/oracle-v1.jsonl.gz`: JS oracle(`engine-merged.js`) 기준 2,072개.
-- `fixtures/site-reference-v1/`: **사이트 규칙 코드 기준** reference fixture 349개(약 5.5 MB). Rust 포팅의 정답지로 쓸 것. 형식은 oracle-v1의 상위 호환이며 생성 방법·커버리지·한계는 그 폴더의 README.md 참고.
+- `fixtures/site-reference-v1/`: **사이트 규칙 코드 기준** reference fixture 349개(약 5.5 MB). 규칙 차이 분석과 Rust 포팅의 참고 데이터. JS와 사이트가 다를 때의 최종 처리 기준은 [O-002](../../docs/DECISIONS.md#o-002-정답-기준을-사이트-원본으로-명시할지)에 남아 있다. 형식은 oracle-v1의 상위 호환이며 생성 방법·커버리지·한계는 그 폴더의 README.md 참고.
