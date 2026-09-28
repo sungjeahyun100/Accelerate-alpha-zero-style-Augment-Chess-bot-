@@ -21,7 +21,8 @@ const sourceValue = (main, name) => JSON.parse(main.evaluate(`JSON.stringify(${n
 function materialize(target, value, write) {
   const content = JSON.stringify(value, null, 2) + "\n";
   if (write) fs.writeFileSync(target, content, { flag: "wx" });
-  else assert.equal(fs.readFileSync(target, "utf8"), content, `Frozen baseline metadata differs: ${path.basename(target)}`);
+  else assert.equal(fs.readFileSync(target, "utf8").replace(/\r\n/g, "\n"), content,
+    `Frozen baseline metadata differs: ${path.basename(target)}`);
 }
 
 function prepare(root, { write = false } = {}) {
