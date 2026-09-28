@@ -254,13 +254,17 @@ def tests():
                             ("test_search", 11), ("test_session", 4)):
         if sum(case.get("classname", "").endswith(module) for case in cases) < minimum:
             raise RuntimeError(f"missing required checks for {module}")
-    for mode in ("normal", "chaos"):
-        required = f"test_native_default_weighted_conditioning_completion_gate[{mode}]"
+    default_checks = {
+        "normal": "test_native_default_weighted_conditioning_completion_gate[normal]",
+        "chaos": "test_native_default_weighted_conditioning_completion_gate[chaos]",
+        "grand": "test_native_supported_conditioned_modes_and_public_intent_integration[grand-False]",
+    }
+    for mode, required in default_checks.items():
         if not any(case.get("name") == required for case in cases):
             raise RuntimeError(f"missing actual default {mode} conditioning completion check")
     (reports / "test-scope.json").write_text(json.dumps({
         "implementation": "installed wheel; native/model/ort/tract/search/replay/CLI",
-        "skips": 0, "default_weighted_conditioning_modes": ["normal", "chaos"],
+        "skips": 0, "default_weighted_conditioning_modes": list(default_checks),
         "scope": "code and bounded synthetic checks; full rules/catalog coverage is a separate pending gate",
         "actual_learning_campaign": False,
     }, indent=2) + "\n", encoding="utf-8")

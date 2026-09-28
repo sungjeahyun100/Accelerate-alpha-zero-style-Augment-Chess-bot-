@@ -104,6 +104,21 @@ def test_lifetime_branching_and_stale_actions_are_immutable():
         branch.public_transition_compatible(action, expected_public)
     with pytest.raises(StaleActionError):
         branch.apply_weighted_conditioned_public(action, expected_public, 71)
+    assert position.public_transition_compatible(action, expected_public)
+    proposal = position.apply_weighted_conditioned_public(action, expected_public, 71)
+    assert set(proposal) == {"step", "importance_weight", "source_probability", "proposal_probability"}
+    assert proposal["importance_weight"] == proposal["source_probability"] / proposal["proposal_probability"] == 1.
+    proposed = proposal["step"].position
+    assert proposed.observe("white") == expected_public
+    # Returned control mappings and caller-owned observations cannot mutate
+    # either immutable native branch, even when the Python owners are released.
+    proposed_before = proposed.snapshot()
+    proposal["source_probability"] = 0.
+    expected_public["board"][5][0]["type"] = "queen"
+    assert proposed.snapshot() == proposed_before and branch.observe("white")["board"][5][0]["type"] == "rook"
+    del proposal
+    assert proposed.snapshot() == proposed_before
+    expected_public = branch.observe("white")
     with pytest.raises(OverflowError):
         position.apply_conditioned_public(action, expected_public, 2**32)
     with pytest.raises(OverflowError):

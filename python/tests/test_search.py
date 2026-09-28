@@ -8,7 +8,9 @@ from functools import lru_cache
 from dataclasses import replace
 import hashlib
 import json
+import math
 from pathlib import Path
+import time
 
 import numpy as np
 import pytest
@@ -17,7 +19,7 @@ from accelerate_chess.encoding import EncoderSpec, PublicEncoder, canonical_json
 from accelerate_chess.inference import ProductionEvaluator
 from accelerate_chess.search import (BeliefLimits, InformationMismatchError, InformationSetSearch,
     MissingHistoryError, NativeSourceFactory, ParticleBelief, ParticleExhaustedError,
-    PublicTracker, SearchBudgetError, SearchLimits)
+    PublicTracker, SearchBudgetError, SearchLimits, TransitionProposal)
 from test_model_stack import observation_policy
 
 
@@ -66,7 +68,7 @@ class TestPosition:
         return sign({"protocolVersion": "accelerate-observation-v2", "viewer": viewer,
             "board": board, "turn": "white" if self.stage == 0 else "black",
             "ownCards": [], "opponentHandCount": 1, "history": deepcopy(self.history),
-            "publicState": {"projectionVersion": observation_policy()["projectionVersion"], "observationPolicyHash": spec().observation_policy_hash, "boardMarks": [], "relationships": [], "overlays": [], "gameStyle": "normal", "phase": "play", "revealedOpponentCards": [{"id": "slime", "instanceId": "revealed", "used": False}],
+            "publicState": {"projectionVersion": observation_policy()["projectionVersion"], "observationPolicyHash": spec().observation_policy_hash, "deathmatchStatus": {"active": False, "warning": False}, "boardMarks": [], "relationships": [], "overlays": [], "gameStyle": "normal", "phase": "play", "revealedOpponentCards": [{"id": "slime", "instanceId": "revealed", "used": False}],
                 "legalHints": {"moves": [{"from": move["from"], "destinations": [move["move"]]}], "cardTargets": []}}, "informationStateKey": ""})
 
     def action_stream(self):
@@ -100,7 +102,7 @@ class TestFactory:
         return TestPosition(seed % 2, chance=self.chance, reaction=self.reaction)
 
     def apply_conditioned(self, position, action, expected, seed):
-        return position.apply(action).position
+        return TransitionProposal(position.apply(action).position, 1., 1., 1., "synthetic-deterministic-step-v1")
 
 
 class TestEvaluator(ProductionEvaluator):
@@ -158,6 +160,78 @@ def test_public_trace_identity_complete_history_and_belief_filter():
     wrong_viewer = child.observe("black")
     with pytest.raises(InformationMismatchError, match="viewer"):
         tracker.append(wrong_viewer)
+    # A known two-world proposal over-samples the less likely source world.
+    # The density correction must affect filtering, rather than turn into
+    # unweighted duplicate particles. No chess rules are implemented here.
+    class WeightedFactory(TestFactory):
+        def __init__(self, mode):
+            super().__init__()
+            self.generated, self.mode = 0, mode
+
+        def sample_initial(self, initial, seed):
+            self.generated += 1
+            return TestPosition(self.generated % 2)
+
+        def prepare_transition(self, position, expected, seed):
+            if self.mode == "step":
+                return TransitionProposal(position)
+            source_probability = .75 if position.latent else .25
+            return TransitionProposal(position, source_probability / .5,
+                source_probability, .5, "synthetic-known-density-v1")
+
+        def apply_conditioned(self, position, action, expected, seed):
+            step = super().apply_conditioned(position, action, expected, seed)
+            if self.mode == "proposal":
+                return step
+            # A forced observed event has proposal probability one, while its
+            # source probability depends on the hidden world. This likelihood
+            # must multiply the latent proposal correction, not replace it.
+            probability = .75 if position.latent else .25
+            return TransitionProposal(step.position, probability, probability, 1., "synthetic-observed-chance-v1")
+
+    for mode, frequency in [("proposal", .75), ("step", .75), ("both", .9)]:
+        observed = PublicTracker(TestPosition().observe("black"))
+        weighted = ParticleBelief(observed, WeightedFactory(mode), seed=17,
+            limits=BeliefLimits(particles=128, proposals=128, elapsed_ms=3000))
+        observed.append(child.observe("black"))
+        weighted.synchronize()
+        assert sum(position.latent for position in weighted._particles) / 128 == pytest.approx(frequency, abs=.05)
+        assert weighted.summary["effective_sample_size"] < 128
+    assert weighted.summary["version"] == "public-particle-summary-v3"
+    assert weighted.summary["chance_prior"] == "independent-source-draws"
+    assert weighted.summary["conditional_steps"] == "source-weighted-conditional-step-v1"
+    # Different hidden opponent intents can carry different observed-event
+    # likelihoods. The child reservoir must use those masses, while the prior
+    # denominator still counts both choices (mass (.25+.75)/2).
+    class BranchFactory(TestFactory):
+        def sample_initial(self, initial, seed):
+            position = TestPosition()
+            actions = [TestAction(0, index) for index in (0, 1)]
+            for index, candidate in enumerate(actions):
+                candidate.public_intent = lambda index=index: {"type": "move", "color": "white", "from": {"row": 6, "col": 1}, "move": {"row": 5, "col": index + 1}}
+            position.action_stream = lambda: TestStream(actions)
+            position.bind_public_intent = lambda intent: next(action for action in actions if action.public_intent() == intent)
+            return position
+
+        def apply_conditioned(self, position, action, expected, seed):
+            child = position.apply(TestAction(0, position.latent)).position
+            child.latent = action.latent
+            probability = .75 if action.latent else .25
+            return TransitionProposal(child, probability, probability, 1., "synthetic-observed-intent-chance-v1")
+
+    branch_tracker = PublicTracker(TestPosition().observe("black"))
+    branches = ParticleBelief(branch_tracker, BranchFactory(), seed=23,
+        limits=BeliefLimits(particles=1, proposals=1, elapsed_ms=3000))
+    branch_position = branches.draw()
+    branch_tracker.append(child.observe("black"))
+    transition, expected = next(branch_tracker.frames())
+    samples = [branches._advance(branch_position, transition, expected, time.monotonic()) for _ in range(256)]
+    assert all(log_weight == pytest.approx(math.log(.5)) for _, log_weight in samples)
+    assert sum(position.latent for position, _ in samples) / 256 == pytest.approx(.75, abs=.07)
+    with pytest.raises(InformationMismatchError, match="does not equal"):
+        TransitionProposal(TestPosition(), 1., .75, .5)
+    with pytest.raises(InformationMismatchError, match="finite and positive"):
+        TransitionProposal(TestPosition(), float("nan"))
 
 
 def test_unmatched_public_trace_and_empty_belief_fail_explicitly():
@@ -180,6 +254,15 @@ def test_unmatched_public_trace_and_empty_belief_fail_explicitly():
     with pytest.raises(ParticleExhaustedError):
         ParticleBelief(PublicTracker(TestPosition().observe("white")), RejectedFactory(), seed=1,
                       limits=BeliefLimits(particles=1, proposals=2))
+    class UnweightedFactory(TestFactory):
+        def apply_conditioned(self, position, action, expected, seed):
+            return position.apply(action).position
+    unweighted = ParticleBelief(PublicTracker(TestPosition().observe("white")), UnweightedFactory(), seed=1,
+        limits=BeliefLimits(particles=1, proposals=1))
+    unweighted.tracker.append(TestPosition().apply(TestAction(0, 0)).position.observe("white"),
+        own_intent=TestAction(0, 0).public_intent())
+    with pytest.raises(InformationMismatchError, match="carry validated density"):
+        unweighted.synchronize()
 
 
 def test_puct_value_sign_uses_decision_actor_and_chance_is_sampled():
@@ -289,7 +372,7 @@ def test_native_supported_conditioned_modes_and_public_intent_integration(mode, 
 
 @pytest.mark.parametrize("mode", ["normal", "chaos"])
 def test_native_default_weighted_conditioning_completion_gate(mode):
-    """No skip/xfail: this gate stays red until real inverse source sampling exists."""
+    """No skip: default draft-to-play requires both public posteriors."""
     from accelerate_chess import Position, site_observation_policy
     catalog = json.loads((Path(__file__).parents[2] / "bridge/catalog/site-20260927.json").read_text(encoding="utf-8"))
     encoder = PublicEncoder(EncoderSpec.from_catalog(catalog, observation_policy=site_observation_policy(), history_encoding="public-history-summary-v1", action_encoding="public-decision-intent-v1"))
@@ -299,18 +382,31 @@ def test_native_default_weighted_conditioning_completion_gate(mode):
 def _native_mode_flow(mode, draft_delete, encoder, Position):
     config = {"gameStyle": mode, "draftDelete": draft_delete}
     actual = Position.new_game(config, 37)
-    observation = actual.observe(actual.decision_actor)
-    tracker = PublicTracker(observation)
-    posterior = ParticleBelief(tracker, NativeSourceFactory(config), seed=71,
-        limits=BeliefLimits(particles=2, proposals=4, actions_per_transition=4096, elapsed_ms=3000))
-    sampled = posterior.draw()
-    page = sampled.action_stream().next_page(1)
-    assert page["actions"]
-    intent = page["actions"][0].public_intent()
-    feature = encoder.encode(observation, [intent], belief_summary=posterior.summary)
-    assert feature.action_keys == (canonical_json(intent),)
-    selected = actual.bind_public_intent(intent)
-    stepped = actual.apply(selected).position
-    tracker.append(stepped.observe(tracker.viewer), own_intent=intent)
-    posterior.synchronize()
-    assert posterior.draw().observe(tracker.viewer) == tracker.latest
+    trackers = {viewer: PublicTracker(actual.observe(viewer)) for viewer in ("white", "black")}
+    beliefs = {viewer: ParticleBelief(tracker, NativeSourceFactory(config), seed=71 + index,
+        limits=BeliefLimits(particles=2, proposals=16, actions_per_transition=4096, elapsed_ms=5000))
+        for index, (viewer, tracker) in enumerate(trackers.items())}
+    # At most twelve grand picks and one actual play action. Candidates come
+    # only from a sampled source world; the actual environment binds afterward.
+    for _ in range(13):
+        actor = actual.decision_actor
+        posterior = beliefs[actor]
+        posterior.synchronize()
+        observation = trackers[actor].latest
+        mode_before = observation["publicState"]["mode"]
+        page = posterior.draw().action_stream().next_page(1)
+        assert page["actions"]
+        intent = page["actions"][0].public_intent()
+        feature = encoder.encode(observation, [intent], belief_summary=posterior.summary)
+        assert feature.action_keys == (canonical_json(intent),)
+        stepped = actual.apply(actual.bind_public_intent(intent)).position
+        for viewer, tracker in trackers.items():
+            tracker.append(stepped.observe(viewer), own_intent=intent if viewer == actor else None)
+        actual = stepped
+        for viewer, belief in beliefs.items():
+            belief.synchronize()
+            assert canonical_json(belief.draw().observe(viewer)) == canonical_json(trackers[viewer].latest)
+        if mode_before == "play":
+            assert trackers[actor].steps == (1 if draft_delete else 13 if mode == "grand" else 3)
+            return
+    pytest.fail("finite native default flow did not complete draft and one play transition")

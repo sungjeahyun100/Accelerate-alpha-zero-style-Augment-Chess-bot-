@@ -238,6 +238,15 @@ pub(crate) fn validate_projection(observation: &Observation) -> Result<()> {
         "selectionPhase",
         0,
     )?;
+    validate_surface(
+        &policy.deathmatch_schema,
+        observation
+            .public_state
+            .get("deathmatchStatus")
+            .ok_or_else(|| EngineError::InvalidState("missing deathmatch status surface".into()))?,
+        "deathmatchStatus",
+        0,
+    )?;
     for row in &observation.board {
         for piece in row.iter().flatten() {
             validate_public_piece(piece, "board.piece")?;
@@ -299,6 +308,31 @@ pub(crate) fn number(value: Option<&Value>) -> Option<f64> {
             _ => None,
         })
         .filter(|v| v.is_finite())
+}
+
+/// Local warning eligibility from main94747/94868/94923. This is the source
+/// predicate, not a prediction of the next winner or DOM-toast lifetime.
+pub(crate) fn deathmatch_status(state: &GameState) -> Value {
+    let deathmatch = state.extra.get("deathmatch");
+    let active = truth(deathmatch.and_then(|value| value.get("active")));
+    let limit = number(state.extra.get("deathmatchLimitTurns"))
+        .filter(|value| *value > 0.0)
+        .map(|value| (value + 0.5).floor().max(1.0))
+        .unwrap_or(10.0);
+    let interval = number(deathmatch.and_then(|value| value.get("intervalHalfTurns")))
+        .filter(|value| *value != 0.0)
+        .unwrap_or(limit * 2.0)
+        .max(1.0);
+    let count = number(deathmatch.and_then(|value| value.get("halfTurnsSinceProgress")))
+        .unwrap_or(0.0)
+        .clamp(0.0, interval);
+    let remaining = (interval - count).max(0.0);
+    let warning = deathmatch.and_then(|value| value.get("active")) == Some(&Value::Bool(true))
+        && state.mode == "play"
+        && !truth(deathmatch.and_then(|value| value.get("progressThisTurn")))
+        && remaining > 0.0
+        && remaining <= 2.0;
+    json!({"active":active,"warning":warning})
 }
 fn nested<'a>(value: Option<&'a Value>, key: &str) -> Option<&'a Value> {
     value.and_then(|v| v.get(key))

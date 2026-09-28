@@ -159,19 +159,109 @@ D-001~D-003은 기존 결정입니다. D-004~D-006과 D-003 보완은 2026-09-27
   full next state·result·RNG를 비교한다. signature·몇 개 기본 기물·구조 검사만으로 GO를
   선언하지 않는다. 아직 실패·미구현·근거 부족인 항목은 실행 보고에 유지한다.
 
-## D-010: immutable snapshot 비교의 renderer 실행 context 명시
+## D-010: immutable snapshot 비교의 headless 실행 context 명시
 
 - **날짜**: 2026-09-28
 - **상태**: 기존 immutable Position 요구를 위한 구현 선택 채택; 전체 카드 재검증 진행 중
-- **결정**: `accelerate-headless-semantic-v2`는 성공한 restore/newGame admission에서
-  원문의 activePieceAnimationUntil module Map을 cold 초기화한다. action 내부와 queued
-  settlement에서는 유지하고 복원 실패는 state·RNG·cache·callback을 보존한다.
-- **이유**: 같은 serialized snapshot·RNG도 snapshot 밖의 renderer Map에 따라
-  animatedPieceIds가 달랐다. reused oracle의 일치를 독립 snapshot 전이 증거로 사용할 수 없다.
+- **결정**: `accelerate-headless-semantic-v3`는 성공한 restore/newGame admission에서
+  원문의 activePieceAnimationUntil Map과 clockDisplayAnchor를 cold 초기화한다. action
+  내부와 queued settlement에서는 둘 다 유지하고 복원 실패는 state·RNG·두 context·callback을
+  보존한다. v2는 renderer Map만 초기화했던 과거 실행 profile로 보존한다.
+- **이유**: 같은 serialized snapshot·RNG도 snapshot 밖의 renderer Map이나 과거
+  clockDisplayAnchor에 따라 animatedPieceIds 또는 다음 clock commit이 달랐다. reused oracle의
+  일치를 독립 snapshot 전이 증거로 사용할 수 없다.
 - **영향**: serialized field를 삭제하거나 비교에서 제외하지 않는다. 최초 source hash와
   rules/catalog/관측 정책 버전은 유지하며 실행 profile과 증거의 context를 별도로 기록한다.
-  기존 v1·renderer audit 증거는 당시 범위로 보존하고 v2의 fresh full-state·RNG 재검증과
-  구분한다. 이 경계는 populated browser의 미래 RNG 동등성이나 전체 코드 GO의 근거가 아니다.
+  기존 v1·renderer audit·v2 증거는 당시 범위로 보존한다. v3에서는 fresh/reused 및 후보 조회
+  유무의 시계 반례 16개가 전체 상태·history·RNG에서 일치했고 기존 Node 계약 17개가 통과했다.
+  `draftDeleteEnabled`라는 별도의 newGame 모듈 상태 의존성은 D-012에서 다룬다.
+  populated browser의 미래 RNG 동등성이나 전체 코드 GO도 이 증거로 주장하지 않는다.
+
+## D-011: snapshot에서 계산하는 Deathmatch 공개 경고 자격
+
+- **날짜**: 2026-09-28
+- **상태**: 기존 공개 관측 요구를 위한 source 기반 구현 선택 채택; 새 정책 배포 검증 진행 중
+- **결정**: local explicit 실행에서 `publicState.deathmatchStatus`의 `active`·`warning` 두
+  bool을 제공한다. `warning`은 동결 source의 현재 경고 조건이며 다음 턴의 종료·승패
+  예측이 아니다. source의 owner/online guard를 다른 실행 context로 일반화하지 않는다.
+- **이유**: 기존 관측은 실제 source 경고가 달라지는 두 snapshot을 같은 정보 상태로
+  취급했다. 반면 toast가 사라진 뒤 남는 DOM 문구와 notice dedup cache는 snapshot에
+  없으므로 정확한 현재 DOM 표시를 복원할 수 없다. 두 bool은 source에서 계산할 수 있는
+  공개 의미만 전달하고 raw counter·notice ID·외부 UI cache를 특징에 넣지 않는다.
+- **영향**: 관측 envelope v2와 tensor 용량을 유지하고 projection을
+  `source-visible-20260927-v3`로 갱신한다. 정책·encoder hash가 달라지므로 기존 artifact와
+  replay의 계약 불일치를 명시적으로 거부하고 초기 관측 및 모든 복원 trace frame을
+  spec에 따라 검증한다. 동결 rules/catalog/source와 모델 설정은 유지한다.
+  미분류 52개 source 감사의 종료는 해당 규칙 구현이나 전체 코드 GO를 뜻하지 않는다.
+
+## D-012: 새 게임의 원문 모듈 상태를 staging VM에서 원자적으로 초기화
+
+- **날짜**: 2026-09-28
+- **상태**: headless profile v4 구현 선택 채택; 전체 카드 재검증 진행 중
+- **결정**: `accelerate-headless-semantic-v4`는 새 게임의 설정·seed·tape를 먼저 검증한
+  뒤 별도의 동결 source VM에서 설정의 `draftDeleteEnabled`를 원문 초기화 전에 적용한다.
+  상태 snapshot까지 성공하면 VM과 RNG callback을 함께 교체하며, 실패하면 기존 VM·상태·RNG·
+  renderer Map·clock anchor·callback을 유지한다. D-010의 cold admission 의미를 계승한다.
+- **이유**: 같은 `{draftDelete: true}`와 seed 41에서도 이전 원문 모듈값에 따라
+  middle/end draft 완료 flag와 replay 기본 frame이 달랐다. 원문의 `resetGame`이 모듈값을
+  읽은 뒤 어댑터가 state field만 덮어쓰는 순서로는 snapshot 전이 동등성이 성립하지 않는다.
+- **영향**: 새 게임 세 모드의 전체 상태·RNG를 원문 직접 초기화와 비교했고 Node 계약
+  17개, cold/warm 반례 및 주입한 실패 원자성 검사가 통과했다. 관측 정책·rules/catalog·
+  동결 원본은 유지한다. v3 설치 wheel의 실제 ONNX 세 모드 통과는 v4 adapter를 포함하지
+  않은 별도 근거이므로 혼합해 보고하지 않는다. 수치 설정 `starWinLimit`와
+  `deathmatchLimitTurns`를 후속 적용하면 initial replay 기본 frame이 이전 값을 보유하는
+  경계가 추가로 발견됐다. v4를 모든 설정의 새 게임 closure로 주장하지 않으며 D-013에서
+  원문 기록시점을 따르는 수정을 구분한다.
+
+## D-013: 초기 replay frame을 수치 설정 적용 후 원문 helper로 재기록
+
+- **날짜**: 2026-09-28
+- **상태**: headless profile v5 구현 선택 채택; 전체 카드 재검증 진행 중
+- **결정**: v5의 staging VM에서 수치 설정을 적용한 뒤 초기 board history가 1개이고
+  label이 initial이며 replay event와 nonce가 모두 0인 경우에만 원문의
+  `captureReplayFrame()`과 `cloneReplayValue()`로 replay 기본 frame과 tail을 재캡처한다.
+  예상 밖 replay 형태는 오류로 처리하고 기존 Oracle을 그대로 둔다.
+- **이유**: 원문 `resetGame`은 사용자 수치 설정을 state에 반영하기 전에 초기 replay
+  frame을 기록한다. 후속 state만 바꾸면 `starWinLimit=50`·`deathmatchLimitTurns=3`의
+  현재 상태와 replay base/tail의 기본값 45·10이 갈라진다.
+- **영향**: 같은 seed 41의 cold/warm 모듈 context 반례에서 전체 Position·RNG가 일치하고
+  base/tail에 설정 수치가 남는 것을 확인했다. 기존 Node 17개와 기본 세 모드 직접 원문
+  초기화 비교, 실패 원자성 검사도 통과했다. v3 wheel의 추론 검증과는 별도 근거이며
+  관측 정책·rules/catalog·동결 원본은 유지한다.
+
+## D-014: 공개 관측 후 행동 조회의 viewer 실행 context 복원
+
+- **날짜**: 2026-09-28
+- **상태**: headless profile v6 구현 선택 채택; 변형기물 전체 실행 검증 진행 중
+- **결정**: `accelerate-headless-semantic-v6`는 동결 source의 원래 localViewColor와
+  boardViewColor를 보존하고, 성공한 Position restore admission에서 상태 decode·relink 후
+  두 값을 다시 결합한다. 관측 호출은 요청 viewer를 적용할 수 있지만 뒤따르는 새 행동
+  조회는 해당 Position의 원문 턴 context에서 시작한다. restore 실패는 기존 viewer context를
+  유지한다.
+- **이유**: 같은 football Position에서도 `observe(black)`을 먼저 호출하면 원문의
+  숨김 판정이 boardViewColor=black을 사용해 White의 합법 킥 3개를 0개로 만들었다.
+  `observe(white)` 뒤에는 다시 3개가 나타나 snapshot만으로 행동을 정할 수 없었다.
+- **영향**: cold·black 관측 후·white 관측 후 동일 Position의 행동 3개와 입력 불변을
+  비교했고 기존 Node 17개가 통과했다. 관측 정책·rules/catalog·동결 원본을 바꾸지
+  않는다. 앞선 v5 wheel의 세 모드 추론과는 별도 oracle 검증이며 전체 변형기물 지원의
+  완료 근거는 아니다.
+
+## D-015: 자동 OPENING 카드의 복구 snapshot을 공개 관측에서 제외
+
+- **날짜**: 2026-09-28
+- **상태**: source 분류 및 정책 구현 채택; 새 정책의 전체 배포 검증 진행 중
+- **결정**: `firstMoveUndo`를 관측 정책의 내부 bookkeeping 필드로 명시한다. 이 필드는
+  공개 viewer 관측·모델 특징·리플레이 공개 frame에서 제외하고 raw Position의 원문
+  상태·실패 복구 의미는 유지한다.
+- **이유**: 동결 source는 첫 수 자동 카드의 rollback을 위해 이전 보드·포획·합법 수 등을
+  이 필드에 보관하고, 성공 뒤 null로 정리한다. renderer·AI 후보·공개 관측에서 직접
+  읽는 경로는 없다. 성공한 chaos·grand 첫 수 뒤 `firstMoveUndo:null`만 남아도 기존
+  엄격한 관측 정책은 미분류 오류를 냈다.
+- **영향**: projection v3와 schema 2, tensor 크기는 유지하지만 정책 JCS hash는
+  `5e17b5622f1e761d6e0719187006aaaac336150c4ae2372f76ef0080da0ab037`로 바뀐다.
+  기존 BFB artifact·replay를 새 정책과 혼용하지 않는다. source 첫 수의 raw 전체 상태·RNG,
+  양측 공개 관측·이력 기록을 새 정책에서 별도로 비교하고, 최종 ONNX metadata·설치
+  wheel·두 OS CI는 새 hash로 다시 검증한다.
 
 ## 열린 질문
 

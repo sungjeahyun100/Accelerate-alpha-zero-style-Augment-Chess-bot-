@@ -47,7 +47,8 @@ explicit `draftDelete` modes. This initial-state boundary does not establish
 support for every later acquisition, effect or hidden-information transition.
 
 `condition_hidden_opening_draft(expected_next_public, independent_seed)` delegates
-a source-valid proposal for a supported, previously hidden normal opening offer.
+a source-valid proposal for a supported, previously hidden normal or chaos
+opening offer on the standard initial board.
 It returns exactly `position`, `importance_weight`, `source_probability`, and
 `proposal_probability`. The position owns its state; the probabilities are finite
 and positive. A weighted filter must check the source/proposal density correction

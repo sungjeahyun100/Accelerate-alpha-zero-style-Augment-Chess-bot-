@@ -20,7 +20,7 @@ from .encoding import HISTORY_SUMMARY_VERSION, PublicEncoder, PublicObservation,
 from .inference import ProductionEvaluator
 
 TRACE_VERSION = "accelerate-public-trace-v1"
-SEARCH_VERSION = "availability-puct-v1"
+SEARCH_VERSION = "availability-puct-v3"
 MAX_PUBLIC_BYTES = 8 * 1024 * 1024
 MAX_INFERENCE_ELEMENTS = 16_777_216
 
@@ -220,8 +220,38 @@ class SourceParticleFactory(Protocol):
     def sample_initial(self, public_initial: Mapping[str, Any], independent_seed: int) -> Any:
         """Create a source-valid conditional particle, never import actual state."""
 
-    def apply_conditioned(self, position: Any, action: Any, expected: Mapping[str, Any], independent_seed: int) -> Any:
-        """Condition an observed past draw/opaque ID using native source helpers."""
+    def apply_conditioned(self, position: Any, action: Any, expected: Mapping[str, Any], independent_seed: int) -> TransitionProposal | None:
+        """Return a source-conditioned child and its validated chance correction."""
+
+
+@dataclass(frozen=True)
+class TransitionProposal:
+    """Source-owned latent proposal and its prior/proposal density correction.
+
+    The unchanged proposal has weight one. Conditional proposals carry the
+    actual source chance probability and proposal probability. These describe
+    independently sampled source draws, never a posterior over actual RNG
+    seeds. Python applies the correction and the opponent-action likelihood.
+    """
+    position: Any
+    importance_weight: float = 1.
+    source_probability: float | None = None
+    proposal_probability: float | None = None
+    profile: str = "source-prior-v1"
+
+    def __post_init__(self):
+        if type(self.importance_weight) not in (int, float) or not math.isfinite(self.importance_weight) or self.importance_weight <= 0:
+            raise InformationMismatchError("source proposal importance must be finite and positive")
+        if (self.source_probability is None) != (self.proposal_probability is None):
+            raise InformationMismatchError("source proposal probability metadata is incomplete")
+        if self.source_probability is not None:
+            for probability in (self.source_probability, self.proposal_probability):
+                if type(probability) not in (int, float) or not math.isfinite(probability) or not 0 < probability <= 1:
+                    raise InformationMismatchError("source proposal probabilities must be finite within (0,1]")
+            if not math.isclose(self.importance_weight, self.source_probability / self.proposal_probability, rel_tol=1e-10, abs_tol=0.):
+                raise InformationMismatchError("source proposal importance does not equal source/proposal probability")
+        if not isinstance(self.profile, str) or not self.profile or len(self.profile) > 128:
+            raise InformationMismatchError("source proposal profile is invalid")
 
 
 class NativeSourceFactory:
@@ -247,23 +277,55 @@ class NativeSourceFactory:
             return None
 
     def apply_conditioned(self, position, action, expected, independent_seed):
-        apply = getattr(position, "apply_conditioned_public", None)
-        if apply is not None:
-            step = apply(action, expected, independent_seed)
-            return None if step is None else step.position
-        child = position.apply(action).position
-        if _public(child.observe(expected["viewer"])) == expected:
-            return child
-        condition = getattr(child, "condition_public_identities", None)
-        if condition is None:
-            raise SourceCapabilityError("native past transition identity conditioning is unavailable")
-        # Native checks card definitions/status/source feasibility and updates
-        # every internal reference together; Python never patches rules state.
         from ._native import ConditioningMismatchError
+        apply = getattr(position, "apply_weighted_conditioned_public", None)
+        if apply is None:
+            raise SourceCapabilityError("native weighted public transition conditioning is unavailable")
         try:
-            return condition(expected)
+            proposal = apply(action, expected, independent_seed)
         except ConditioningMismatchError:
             return None
+        if not isinstance(proposal, Mapping) or set(proposal) != {"step", "importance_weight", "source_probability", "proposal_probability"}:
+            raise InformationMismatchError("native conditioned step metadata has an invalid shape")
+        step = proposal["step"]
+        if step is None or not hasattr(step, "position"):
+            raise InformationMismatchError("native conditioned step has no child position")
+        # The former StepResult-only helper proves compatibility, but carries
+        # no observed-chance likelihood. It is never a posterior fallback.
+        return TransitionProposal(step.position, proposal["importance_weight"],
+            proposal["source_probability"], proposal["proposal_probability"],
+            "source-weighted-conditional-step-v1")
+
+    def prepare_transition(self, position, expected, independent_seed):
+        before = _public(position.observe(expected["viewer"]))
+        public = before["publicState"]
+        if (public.get("mode") != "draft" or public.get("phase") != "OPENING"
+                or _actor(position) == expected["viewer"] or "draft" in public
+                or len(expected["publicState"].get("revealedOpponentCards", ())) <= len(public.get("revealedOpponentCards", ()))):
+            return TransitionProposal(position)
+        condition = getattr(position, "condition_hidden_opening_draft", None)
+        if condition is None:
+            return TransitionProposal(position)
+        from ._native import ConditioningMismatchError
+        try:
+            proposal = condition(expected, independent_seed)
+        except ConditioningMismatchError:
+            return None
+        if not isinstance(proposal, Mapping) or set(proposal) != {"position", "importance_weight", "source_probability", "proposal_probability"}:
+            raise InformationMismatchError("native source proposal metadata has an invalid shape")
+        result = TransitionProposal(**proposal, profile="source-weighted-offer-proposal-v1")
+        if _public(result.position.observe(expected["viewer"])) != before:
+            raise InformationMismatchError("latent conditioning changed the prior public observation")
+        return result
+
+    def transition_compatible(self, position, action, expected):
+        compatible = getattr(position, "public_transition_compatible", None)
+        if compatible is None:
+            return True
+        result = compatible(action, expected)
+        if type(result) is not bool:
+            raise InformationMismatchError("native public transition compatibility must be boolean")
+        return result
 
 
 def _actor(position: Any) -> str:
@@ -318,12 +380,13 @@ class BeliefLimits:
 
 
 class ParticleBelief:
-    """Finite bootstrap filter of independent conditional source particles.
+    """Finite importance filter of independent conditional source particles.
 
-    Conditioning on public transitions does not select a favorable chance
-    outcome. Matching hidden actions are reservoir-sampled uniformly, then
-    particles are uniformly resampled. This is an explicit uniform legal
-    opponent-action prior, not a learned opponent-policy posterior.
+    Matching hidden actions are reservoir-sampled uniformly. A source-owned
+    conditional proposal contributes its prior/proposal correction; the public
+    action likelihood is matching intents divided by all unique legal intents.
+    Log weights are normalized before bootstrap resampling. The opponent prior
+    is explicit and uniform; the chance prior uses independent source draws.
     """
     def __init__(self, tracker: PublicTracker, factory: SourceParticleFactory, *, seed: int, limits: BeliefLimits = BeliefLimits(), cancelled: Callable[[], bool] | None = None):
         if not isinstance(tracker, PublicTracker) or type(seed) is not int or not 0 <= seed < 2**64:
@@ -335,6 +398,8 @@ class ParticleBelief:
         self._particles: list[Any] = []
         self._revision = -1
         self.proposals_used = 0
+        self._proposal_profiles: set[str] = set()
+        self._effective_sample_size = 0.
         self.rebuild()
 
     def _check(self, started: float):
@@ -347,17 +412,50 @@ class ParticleBelief:
         return int(self._rng.integers(0, 2**32, dtype=np.uint64))
 
     def _advance(self, position: Any, step: TraceStep, expected: Mapping[str, Any], started: float):
+        if _actor(position) != step.events[0]["actor"]:
+            return None
+        prepare = getattr(self.factory, "prepare_transition", None)
+        proposal = prepare(position, expected, self._seed()) if prepare is not None else TransitionProposal(position)
+        if proposal is None:
+            return None
+        if not isinstance(proposal, TransitionProposal):
+            raise InformationMismatchError("source transition proposal must carry validated density metadata")
+        if proposal.source_probability is not None and _public(proposal.position.observe(self.tracker.viewer)) != _public(position.observe(self.tracker.viewer)):
+            raise InformationMismatchError("latent proposal changed the prior public observation")
+        self._proposal_profiles.add(proposal.profile)
+        position = proposal.position
+        log_weight = math.log(proposal.importance_weight)
+        compatibility = getattr(self.factory, "transition_compatible", None)
+
+        def compatible(action):
+            result = compatibility(position, action, expected) if compatibility is not None else True
+            if type(result) is not bool:
+                raise InformationMismatchError("source transition compatibility must be boolean")
+            return result
+
+        def advance(action):
+            child = self.factory.apply_conditioned(position, action, expected, self._seed())
+            if child is None:
+                return None
+            if not isinstance(child, TransitionProposal):
+                raise InformationMismatchError("conditioned source transition must carry validated density metadata")
+            self._proposal_profiles.add(child.profile)
+            if _public(child.position.observe(self.tracker.viewer)) != expected:
+                return None
+            return child.position, math.log(child.importance_weight)
+
         known = canonical_json(step.own_intent) if step.own_intent is not None else None
         if known is not None:
             if _actor(position) != self.tracker.viewer:
                 return None
             action = position.bind_public_intent(step.own_intent)
-            child = self.factory.apply_conditioned(position, action, expected, self._seed())
+            if not compatible(action):
+                return None
+            child = advance(action)
             if child is None:
                 return None
-            observed = _public(child.observe(self.tracker.viewer))
-            return child if observed == expected else None
-        selected, matches, exhausted = None, 0, False
+            return child[0], log_weight + child[1]
+        selected, log_mass, exhausted = None, -math.inf, False
         seen: set[str] = set()
         for actions, exhausted in _stream(position, self.limits.page_size, self.limits.actions_per_transition):
             for action in actions:
@@ -368,23 +466,44 @@ class ParticleBelief:
                     continue
                 seen.add(key)
                 bound = position.bind_public_intent(intent)
-                child = self.factory.apply_conditioned(position, bound, expected, self._seed())
-                if child is not None and _public(child.observe(self.tracker.viewer)) == expected:
-                    matches += 1
-                    if int(self._rng.integers(matches)) == 0:
-                        selected = child
+                # Provably incompatible actions retain their prior mass in the
+                # denominator. Source rules, rather than Python heuristics,
+                # decide whether their effects need to be evaluated.
+                if not compatible(bound):
+                    continue
+                child = advance(bound)
+                if child is not None:
+                    # Source-conditioned chance proposals can have different
+                    # corrections for different intents. Keep the uniform
+                    # intent prior, but select a child by its corrected mass.
+                    log_mass = float(np.logaddexp(log_mass, child[1]))
+                    if self._rng.random() < math.exp(child[1] - log_mass):
+                        selected = child[0]
         if not exhausted:
             raise SearchBudgetError("belief action enumeration is incomplete; a partial posterior is not accepted")
-        # Hidden worlds with many compatible observations have higher
-        # likelihood under the declared uniform-intent opponent prior.
-        return selected if matches and self._rng.random() < matches / len(seen) else None
+        return (selected, log_weight + log_mass - math.log(len(seen))) if selected is not None else None
+
+    def _resample(self, weighted):
+        if not weighted:
+            raise ParticleExhaustedError("no source-valid weighted particles reproduce the public trace")
+        logs = np.asarray([weight for _, weight in weighted], dtype=np.float64)
+        if not np.isfinite(logs).all():
+            raise InformationMismatchError("source posterior log weights must be finite")
+        weights = np.exp(logs - logs.max())
+        weights /= weights.sum()
+        # Stratified bootstrap resampling keeps equal-weight populations
+        # diverse without the ordering correlation of one shared offset.
+        thresholds = (self._rng.random(self.limits.particles) + np.arange(self.limits.particles)) / self.limits.particles
+        indices = np.searchsorted(np.cumsum(weights), thresholds, side="right")
+        particles = [weighted[int(index)][0] for index in indices]
+        return particles, float(1. / np.square(weights).sum())
 
     def rebuild(self) -> None:
         started = time.monotonic()
         initial = self.tracker.initial
-        particles: list[Any] = []
+        weighted: list[tuple[Any, float]] = []
         proposals = 0
-        while len(particles) < self.limits.particles and proposals < self.limits.proposals:
+        while len(weighted) < self.limits.particles and proposals < self.limits.proposals:
             self._check(started)
             proposals += 1
             position = self.factory.sample_initial(initial, self._seed())
@@ -392,17 +511,21 @@ class ParticleBelief:
                 continue
             if _public(position.observe(self.tracker.viewer)) != initial:
                 raise InformationMismatchError("source-conditioned initial particle does not match the full public frame")
+            log_weight = 0.
             for step, frame in self.tracker.frames():
-                position = self._advance(position, step, frame, started)
-                if position is None:
+                advanced = self._advance(position, step, frame, started)
+                if advanced is None:
+                    position = None
                     break
+                position, transition_weight = advanced
+                log_weight += transition_weight
             if position is not None:
-                particles.append(position)
-        if not particles:
+                weighted.append((position, log_weight))
+        if not weighted:
             raise ParticleExhaustedError("no source-valid particles reproduce the complete public trace within the finite proposal budget")
-        # Incomplete target count is explicit; usable posterior samples can be
-        # resampled with replacement without pretending independence increased.
-        self._particles, self._revision = particles, self.tracker.steps
+        particles, effective_size = self._resample(weighted)
+        self._particles, self._effective_sample_size = particles, effective_size
+        self._revision = self.tracker.steps
         self.proposals_used = proposals
 
     def synchronize(self) -> None:
@@ -415,13 +538,12 @@ class ParticleBelief:
         for index, (step, frame) in enumerate(self.tracker.frames()):
             if index < self._revision:
                 continue
-            surviving = [child for position in surviving if (child := self._advance(position, step, frame, started)) is not None]
-            if not surviving:
+            weighted = [child for position in surviving if (child := self._advance(position, step, frame, started)) is not None]
+            if not weighted:
                 self.rebuild()
                 return
-            # Standard bootstrap resampling; duplicate particles remain marked
-            # in the summary rather than reported as distinct determinizations.
-            surviving = [surviving[int(self._rng.integers(len(surviving)))] for _ in range(self.limits.particles)]
+            surviving, effective_size = self._resample(weighted)
+        self._effective_sample_size = effective_size
         self._particles, self._revision = surviving, self.tracker.steps
 
     def draw(self):
@@ -433,9 +555,12 @@ class ParticleBelief:
 
     @property
     def summary(self) -> dict[str, Any]:
-        return {"version": "public-particle-summary-v1", "particle_count": len(self._particles),
+        return {"version": "public-particle-summary-v3", "particle_count": len(self._particles),
                 "distinct_particle_instances": len({id(position) for position in self._particles}),
-                "trace_steps": self._revision, "opponent_action_prior": "uniform-public-intents"}
+                "trace_steps": self._revision, "opponent_action_prior": "uniform-public-intents",
+                "filter_version": "source-importance-filter-v2", "chance_prior": "independent-source-draws",
+                "conditional_steps": "source-weighted-conditional-step-v1",
+                "proposal_profiles": sorted(self._proposal_profiles), "effective_sample_size": self._effective_sample_size}
 
 
 @dataclass(frozen=True)

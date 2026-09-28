@@ -52,7 +52,7 @@ test("runtime schema enforces envelopes, v2 projection provenance and public sur
   assert.deepEqual(validate(schema.schema, p, "$", schema.docName), []);
   assert.deepEqual(validate(schema.schema, a, "$", schema.docName), []);
   for (const invalid of [{ ...a, actionId: "x" }, { ...a, payload: { ...a.payload, from: { row: 8, col: 0 } } }, { ...a, payload: { type: "card", color: "white" } }, { ...p, rng: { ...p.rng, tape: [1] } }]) assert.ok(validate(schema.schema, invalid, "$", schema.docName).length > 0);
-  const observation = { protocolVersion: contract.VERSIONS.observation, viewer: "white", board: state().board, turn: "white", ownCards: [], opponentHandCount: 0, history: [], publicState: { projectionVersion: contract.observationPolicy.projectionVersion, observationPolicyHash: contract.digest(contract.observationPolicy), boardMarks: [], relationships: [], overlays: [] } };
+  const observation = { protocolVersion: contract.VERSIONS.observation, viewer: "white", board: state().board, turn: "white", ownCards: [], opponentHandCount: 0, history: [], publicState: { projectionVersion: contract.observationPolicy.projectionVersion, observationPolicyHash: contract.digest(contract.observationPolicy), deathmatchStatus: { active: false, warning: false }, boardMarks: [], relationships: [], overlays: [] } };
   observation.board[2][0] = { type: "wall", color: "neutral", status: {} };
   observation.informationStateKey = contract.digest(observation);
   contract.validateObservation(observation);

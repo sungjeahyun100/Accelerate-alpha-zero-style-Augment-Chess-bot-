@@ -47,6 +47,11 @@ test("client-only cache validates executable dependencies and cannot load a work
 
 for (const [style, choices, picks, cards] of [["normal", 3, 2, 1], ["chaos", 3, 2, 2], ["grand", 28, 12, 6]]) test(`actual ${style} initialization and draft reaches play`, () => {
   let p = oracle.newGame({ gameStyle: style }, 12345);
+  const direct = new OfflineOracle();
+  direct.random = contract.rng(12345);
+  direct.main.context.__style = style;
+  direct.evaluate("selectedGameStyle=__style;localPlayMode='local';playMode='local';draftDeleteEnabled=false;ruleOpeningEnabled=true;ruleSelectionEnabled=false;selectedRuleCardIds=[];deathmatchEnabled=true;resetGame(false,[]);beginInitialGameFlow();");
+  assert.deepEqual(p, direct.snapshot(), "newGame retains the frozen source's full initial state, replay frame and RNG");
   assert.equal(oracle.actions(p).length, choices);
   for (let step = 0; step < picks; step++) {
     const result = oracle.apply(p, oracle.actions(p)[0]);
@@ -58,9 +63,53 @@ for (const [style, choices, picks, cards] of [["normal", 3, 2, 1], ["chaos", 3, 
   assert.equal(p.history.length, picks);
   const observation = oracle.observe(p, "white");
   assert.equal(observation.publicState.revealedOpponentCards.length, cards); assertSchema(observation);
+  if (style === "normal") return;
+
+  // The frozen client's first automatic OPENING card leaves a rollback field
+  // in its full state. That internal field must not block either viewer's
+  // observation or the public history written by apply().
+  const plans = style === "chaos"
+    ? { white: ["otherworld+corner-kick"], black: ["suspicious-potion+guard"] }
+    : { white: ["democracy", "guard", "en-passant-bang", "feudal-contract", "scarecrow", "evasion"], black: ["king-of-the-hill", "d4", "freeze", "alekhine-machine-gun", "leap", "nullification"] };
+  const picked = { white: 0, black: 0 };
+  let first = oracle.newGame({ gameStyle: style }, 37);
+  while (first.state.mode === "draft") {
+    const color = first.state.draft.color, wanted = plans[color][picked[color]++], pool = first.state.draft.choices || [];
+    assert.ok(wanted, "the frozen draft has the expected number of choices");
+    const payload = oracle.candidates(first).find(candidate => candidate.type === "draftPick"
+      ? pool.some(card => card.id === wanted && card.instanceId === candidate.cardInstanceId)
+      : wanted.split("+").every(id => pool.some(card => card.id === id && candidate.cardInstanceIds.includes(card.instanceId))));
+    assert.ok(payload, `the frozen ${style} draft offers ${wanted}`);
+    const selected = oracle.apply(first, contract.action(first, payload), { recordHistory: false });
+    assert.equal(selected.ok, true); first = selected.position;
+  }
+  const rawMove = oracle.candidates(first).find(candidate => candidate.type === "move" && candidate.color === "white"
+    && candidate.from.row === 6 && candidate.from.col === 0 && candidate.move.row === 4 && candidate.move.col === 0);
+  assert.ok(rawMove, "the source offers a2-a4");
+  const action = contract.action(first, rawMove);
+  const withoutHistory = oracle.apply(first, action, { recordHistory: false });
+  const withHistory = oracle.apply(first, action);
+  assert.equal(withoutHistory.ok, true); assert.equal(withHistory.ok, true); assertSchema(withHistory);
+  assert.deepEqual(withHistory.position.state, withoutHistory.position.state);
+  assert.deepEqual(withHistory.position.rng, withoutHistory.position.rng);
+  assert.equal(withHistory.position.state.firstMoveUndo, null);
+  assert.equal(withHistory.position.history.length, 1);
+  const withoutInternal = contract.jsonCopy(withHistory.position.state);
+  delete withoutInternal.firstMoveUndo;
+  const samePublic = contract.position(withoutInternal, withHistory.position.rng, withHistory.position.history);
+  for (const viewer of ["white", "black"]) {
+    const visible = oracle.observe(withHistory.position, viewer);
+    assertSchema(visible);
+    assert.equal(oracle.observe(samePublic, viewer).informationStateKey, visible.informationStateKey,
+      "the rollback field does not enter the viewer's JCS information key");
+    assert.equal(Object.hasOwn(visible.publicState, "firstMoveUndo"), false);
+  }
 });
 test("snapshot restore preserves exact RNG, public hints and 20 initial moves", () => {
   const p = oracle.newGame({ draftDelete: true }, 22, [0.1, 0.2, 0.3]);
+  assert.equal(p.state.middleDraftDone, true);
+  assert.equal(p.state.endDraftDone, true);
+  assert.equal(p.state.replayBaseFrame.draftDelete, true, "source reset observes draftDelete before capturing its replay base");
   assert.equal(oracle.actions(p).length, 20);
   assert.equal(oracle.publicHints(p, "white").moves.flatMap(piece => piece.destinations).length, 20);
   const a = oracle.actions(p)[0], left = oracle.apply(p, a), right = oracle.apply(JSON.parse(JSON.stringify(p)), JSON.parse(JSON.stringify(a)));
@@ -69,8 +118,10 @@ test("snapshot restore preserves exact RNG, public hints and 20 initial moves", 
   const rejected = oracle.apply(p, wrong);
   assert.equal(rejected.ok, false); assert.equal(rejected.position.positionId, p.positionId);
   oracle.restore(p);
-  oracle.evaluate("queueMicrotask(()=>{state.restoreCallbackProbe=true;});scheduledGameOverReplayState={pending:'prior-position'};activePieceAnimationUntil.set('prior-animation',Date.now()+240);");
+  oracle.evaluate("queueMicrotask(()=>{state.restoreCallbackProbe=true;});scheduledGameOverReplayState={pending:'prior-position'};activePieceAnimationUntil.set('prior-animation',Date.now()+240);setClockDisplayAnchor(state.clock,'white',271828);");
   const beforeState = oracle.state(), beforeRandom = contract.jsonCopy(oracle.random);
+  const beforeAnchor = oracle.evaluate("JSON.stringify(clockDisplayAnchor)");
+  assert.notEqual(beforeAnchor, "null");
   for (const [field, malformed] of [["values", { __simType: "Set", values: 12 }], ["entries", { __simType: "Map", entries: 12 }]]) {
     const state = contract.jsonCopy(p.state);
     state.restoreMalformedCollection = malformed;
@@ -81,12 +132,38 @@ test("snapshot restore preserves exact RNG, public hints and 20 initial moves", 
     assert.equal(oracle.evaluate("__microtasks.length"), 1);
     assert.equal(oracle.evaluate("scheduledGameOverReplayState.pending"), "prior-position");
     assert.equal(oracle.evaluate("activePieceAnimationUntil.has('prior-animation')"), true, "failed decoding preserves the live renderer cache");
+    assert.equal(oracle.evaluate("JSON.stringify(clockDisplayAnchor)"), beforeAnchor, "failed decoding preserves the live clock anchor");
     assert.equal(Object.hasOwn(oracle.main.context, "__restoredState"), false);
   }
+  const beforeMain = oracle.main, originalSnapshot = OfflineOracle.prototype.snapshot;
+  try {
+    OfflineOracle.prototype.snapshot = function (...args) {
+      if (this !== oracle) throw new Error("staged snapshot fault");
+      return originalSnapshot.apply(this, args);
+    };
+    assert.throws(() => oracle.newGame({ draftDelete: true }, 29), /staged snapshot fault/);
+  } finally {
+    OfflineOracle.prototype.snapshot = originalSnapshot;
+  }
+  for (const invalid of [() => oracle.newGame({ draftDelete: "yes" }, 29), () => oracle.newGame({}, 2 ** 32), () => oracle.newGame({}, 29, [1.1])]) {
+    assert.throws(invalid, TypeError);
+  }
+  assert.strictEqual(oracle.main, beforeMain, "failed staged creation keeps the existing VM");
+  assert.deepEqual(oracle.state(), beforeState);
+  assert.deepEqual(oracle.random, beforeRandom);
+  assert.equal(oracle.evaluate("__microtasks.length"), 1);
+  assert.equal(oracle.evaluate("scheduledGameOverReplayState.pending"), "prior-position");
+  assert.equal(oracle.evaluate("activePieceAnimationUntil.has('prior-animation')"), true);
+  assert.equal(oracle.evaluate("JSON.stringify(clockDisplayAnchor)"), beforeAnchor);
   assert.equal(oracle.snapshot().state.restoreCallbackProbe, true, "the original callback still executes");
   assert.equal(oracle.evaluate("activePieceAnimationUntil.has('prior-animation')"), true, "snapshot settlement retains this invocation's renderer cache");
+  assert.equal(oracle.evaluate("JSON.stringify(clockDisplayAnchor)"), beforeAnchor, "snapshot settlement retains this invocation's clock anchor");
   oracle.restore(p);
   assert.equal(oracle.evaluate("activePieceAnimationUntil.size"), 0, "successful restoration starts a cold renderer invocation");
+  assert.equal(oracle.evaluate("clockDisplayAnchor"), null, "successful restoration starts with the source's fresh clock context");
+  const beforeDraw = contract.jsonCopy(oracle.random), expectedDraw = contract.nextRandom(beforeDraw);
+  assert.equal(oracle.evaluate("Math.random()"), expectedDraw.value, "the committed VM draws from its current owner");
+  assert.deepEqual(oracle.random, expectedDraw.rng);
 });
 
 test("large-piece snapshot restoration retains source aliases within independent board frames", () => {
@@ -187,6 +264,8 @@ test("headless render retains source potion cleanup without inventing DOM RNG", 
   assert.deepEqual(oracle.snapshot().state, cleaned.state);
   assert.equal(HEADLESS_PROFILE.version, contract.ORACLE_PROFILE_VERSION);
   assert.equal(HEADLESS_PROFILE.rendererContext, "cold-activePieceAnimationUntil-at-admission");
+  assert.equal(HEADLESS_PROFILE.clockContext, "cold-clockDisplayAnchor-at-admission");
+  assert.equal(HEADLESS_PROFILE.newGameContext, "isolated-source-setup-replay-commit-on-success");
   // Source94100's vanish ghost calls createPieceElement75203, whose external
   // deadline Map75801 otherwise changes the serialized animation Set75820
   // when the same immutable snapshot is admitted a second time.
@@ -206,6 +285,43 @@ test("headless render retains source potion cleanup without inventing DOM RNG", 
   oracle.evaluate("activePieceAnimationUntil.set('prior-game',Date.now()+240)");
   oracle.newGame({ draftDelete: true }, 41);
   assert.equal(oracle.evaluate("activePieceAnimationUntil.size"), 0, "a valid new game starts with a cold renderer cache");
+  // The source retains an anchor when both color and lastStartedAt match,
+  // even if another admitted position has a different stored balance. Actual
+  // clock commits must use the snapshot's balance after every admission.
+  const clockState = contract.jsonCopy(initial.state);
+  clockState.clock = { ...clockState.clock, enabled: true, runningColor: "white", lastStartedAt: oracle.evaluate("Date.now()"), whiteMs: 300000, blackMs: 300000, incrementMs: 10000 };
+  const clockPosition = contract.position(clockState, initial.rng);
+  const commit = "ensureClockDisplayAnchor();commitClockElapsed('white',{incrementMs:10000});";
+  fresh.restore(clockPosition); fresh.evaluate(commit);
+  const committed = fresh.snapshot();
+  assert.equal(committed.state.clock.whiteMs, 310000);
+  for (let repeat = 0; repeat < 2; repeat++) {
+    oracle.restore(clockPosition);
+    oracle.evaluate("ensureClockDisplayAnchor();");
+    const anchor = oracle.evaluate("JSON.stringify(clockDisplayAnchor)");
+    oracle.evaluate("ensureClockDisplayAnchor();");
+    assert.equal(oracle.evaluate("JSON.stringify(clockDisplayAnchor)"), anchor, "an admitted invocation retains its source anchor");
+    oracle.evaluate(commit);
+    assert.deepEqual(oracle.snapshot(), committed, "repeated source commits preserve the complete state, history and RNG");
+    oracle.evaluate("state.clock.whiteMs=310000;ensureClockDisplayAnchor();");
+  }
+  oracle.restore(clockPosition); fresh.restore(clockPosition);
+  oracle.evaluate("setClockDisplayAnchor(state.clock,'white',310000);");
+  oracle.newGame({ draftDelete: true }, 41);
+  const freshGame = fresh.newGame({ draftDelete: true }, 41);
+  assert.deepEqual(oracle.snapshot().state.clock, freshGame.state.clock, "a valid new game's clock is independent of the prior anchor");
+  assert.equal(oracle.evaluate("JSON.stringify(clockDisplayAnchor)"), fresh.evaluate("JSON.stringify(clockDisplayAnchor)"), "new games use the source's fresh clock context");
+  const limits = { draftDelete: true, starWinLimit: 50, deathmatchEnabled: false, deathmatchLimitTurns: 3 };
+  const coldLimits = new OfflineOracle().newGame(limits, 41);
+  const warmLimits = oracle.newGame(limits, 41);
+  assert.deepEqual(warmLimits, coldLimits, "configured limits preserve the full source state, RNG and replay frame across previous games");
+  for (const frame of [warmLimits.state.replayBaseFrame, warmLimits.state.replayTailFrame]) {
+    assert.equal(frame.starWinLimit, 50);
+    assert.equal(frame.deathmatchLimitTurns, 3);
+    assert.equal(frame.deathmatchEnabled, false);
+  }
+  assert.equal(warmLimits.state.boardHistory.length, 1);
+  assert.equal(warmLimits.state.replayEvents.length, 0);
 });
 test("terminal microtasks retain source replay, chain cleanup and conditional notation RNG", () => {
   const initial = oracle.newGame({ draftDelete: true }, 45), state = contract.jsonCopy(initial.state);
@@ -274,11 +390,31 @@ test("ordered premove pages preserve 1..3 plans and resume without materializing
   assert.throws(() => first.nextPage(0), /Page size/);
 });
 test("hidden piece and private RNG changes do not change viewer projection", () => {
+  const contextOracle = new OfflineOracle();
+  const opening = contextOracle.newGame({ draftDelete: true }, 41);
+  contextOracle.restore(opening);
+  contextOracle.evaluate("state.board[4][4]=piece('white','football');state.board[4][3]=piece('white','bishop');state.board[4][3].hiddenFrom='black';");
+  const football = contextOracle.snapshot();
+  const kicks = () => contextOracle.actions(football).filter(action => action.payload.from?.row === 4 && action.payload.from?.col === 4 && action.payload.move?.footballKick).map(action => action.payload.move.col);
+  assert.deepEqual(kicks(), [5, 6, 7], "the source's local turn view can use its hidden-from-black kicker");
+  assert.equal(contextOracle.observe(football, "black").board[4][3], null);
+  assert.equal(contextOracle.evaluate("boardViewColor(false)"), "black", "the observation uses the requested viewer");
+  const malformedContext = contract.jsonCopy(football.state);
+  malformedContext.contextMalformedCollection = { __simType: "Set", values: 12 };
+  assert.throws(() => contextOracle.restore(contract.position(malformedContext, football.rng)), /iterable/);
+  assert.equal(contextOracle.evaluate("boardViewColor(false)"), "black", "failed admission preserves the current viewer context");
+  assert.deepEqual(kicks(), [5, 6, 7], "valid admission restores source turn semantics before action enumeration");
+  contextOracle.restore(football);
+  assert.equal(contextOracle.evaluate("boardViewColor(false)"), "white");
+  contextOracle.observe(football, "white");
+  assert.deepEqual(kicks(), [5, 6, 7]);
+  assert.equal(HEADLESS_PROFILE.viewerContext, "source-turn-view-after-restored-position-admission");
   const p = oracle.newGame({ draftDelete: true }, 42), a = contract.jsonCopy(p.state), b = contract.jsonCopy(p.state);
   a.board[0][0].hiddenFrom = "white"; b.board[0][0].hiddenFrom = "white"; b.board[0][0].type = "bishop";
   const first = contract.position(a, contract.rng(1)), second = contract.position(b, contract.rng(2));
   const one = oracle.observe(first, "white"), two = oracle.observe(second, "white");
   assert.equal(one.board[0][0], null); assert.equal(one.informationStateKey, two.informationStateKey);
+  assert.deepEqual(one.publicState.deathmatchStatus, { active: false, warning: false });
   assert.ok(!JSON.stringify(one).includes(first.positionId)); assert.ok(!JSON.stringify(one).includes("hiddenFrom"));
   const step = oracle.apply(first, oracle.actions(first)[0]);
   assert.ok(!JSON.stringify(oracle.observe(step.position, "white").history).includes("actionId"));
@@ -307,6 +443,37 @@ test("hidden piece and private RNG changes do not change viewer projection", () 
   assert.equal(originalView.publicState.selectionPhase.windowId,undefined);
   assert.equal(originalView.informationStateKey,changedView.informationStateKey);
   assert.ok(!JSON.stringify(originalView).includes(trolley.state.activeTrolley.id));
+  // Local source warning eligibility is public; private notice dedup and
+  // residual DOM text are not part of this semantic snapshot surface.
+  oracle.newGame({draftDelete:true,deathmatchEnabled:true,deathmatchLimitTurns:3},44);
+  oracle.evaluate("startDeathmatch('contract-check');state.deathmatch.halfTurnsSinceProgress=2");
+  const quiet=oracle.snapshot();
+  oracle.evaluate("state.deathmatch.halfTurnsSinceProgress=4");
+  const warned=oracle.snapshot();
+  for(const viewer of ["white","black"]){
+    const before=oracle.observe(quiet,viewer), after=oracle.observe(warned,viewer);
+    assert.deepEqual(before.publicState.deathmatchStatus,{active:true,warning:false});
+    assert.deepEqual(after.publicState.deathmatchStatus,{active:true,warning:true});
+    assert.notEqual(before.informationStateKey,after.informationStateKey);
+    assertSchema(after);
+    const identities=contract.jsonCopy(warned.state);
+    identities.deathmatch.warningKey="private-notice"; identities.deathmatch.startedAtTurn=17;
+    assert.equal(oracle.observe(contract.position(identities,contract.rng(987)),viewer).informationStateKey,after.informationStateKey);
+    for(const status of [null,{active:true},{active:true,warning:1},{active:true,warning:true,halfTurnsSinceProgress:4}]){
+      const malformed=contract.jsonCopy(after);
+      if(status===null)delete malformed.publicState.deathmatchStatus;
+      else malformed.publicState.deathmatchStatus=status;
+      assert.throws(()=>contract.validateObservation(malformed),/deathmatch/);
+    }
+    const previous=contract.jsonCopy(after); previous.publicState.projectionVersion="source-visible-20260927-v2";
+    assert.throws(()=>contract.validateObservation(previous),/policy mismatch/);
+  }
+  oracle.restore(warned);
+  assert.deepEqual(Array.from(oracle.evaluate("online.enabled=false;localPlayMode='local';[canShowDeathmatchWarningForColor('white'),canShowDeathmatchWarningForColor('black')]")),[true,true]);
+  assert.equal(oracle.evaluate("online.enabled=true;online.role='player';online.playerColor='black';canShowDeathmatchWarningForColor('white')"),false);
+  assert.equal(oracle.evaluate("online.playerColor='white';canShowDeathmatchWarningForColor('white')"),true);
+  oracle.evaluate("online.enabled=false;markDeathmatchProgress()");
+  assert.deepEqual(oracle.observe(oracle.snapshot(),"white").publicState.deathmatchStatus,{active:true,warning:false});
 });
 test("actual king capture reaches terminal result", () => {
   const initial = oracle.newGame({ draftDelete: true }, 9), state = contract.jsonCopy(initial.state);

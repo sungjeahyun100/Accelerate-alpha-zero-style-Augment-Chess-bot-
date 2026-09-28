@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "protocolVersion": "accelerate-observation-v2",
-  "projectionVersion": "source-visible-20260927-v2",
+  "projectionVersion": "source-visible-20260927-v3",
   "rulesVersion": "augment-site-20260927-abfe01a035813875",
   "statePublicFields": [
     "acceleration",
@@ -165,7 +165,8 @@
     "boardMarks",
     "relationships",
     "overlays",
-    "pendingRuleCardIds"
+    "pendingRuleCardIds",
+    "deathmatchStatus"
   ],
   "piecePublicFields": [
     "type",
@@ -238,6 +239,7 @@
       "magicGirlSurge"
     ],
     "privateOrViewerRestricted": [
+      "draftBalance",
       "hallucination",
       "pendingFreeMoves",
       "pendingIcbm",
@@ -249,6 +251,7 @@
       "pendingScarecrows",
       "pendingTrojanHorse",
       "pendingTrolley",
+      "positionCounts",
       "prophecy",
       "quantumPending",
       "repetitionSalt",
@@ -299,6 +302,7 @@
       "replayStartedAt",
       "replayTailFrame",
       "replayTimelineReady",
+      "ruleOpeningEvent",
       "ruleTicketChoice",
       "selected",
       "shotgunAction",
@@ -306,66 +310,69 @@
       "targeting",
       "timeErasedPieceIds",
       "timeErasingPieceIds",
+      "timeIsMineSequence",
       "turnResolving",
       "wizardPreview",
       "wizardSpell"
     ],
-    "visibilityReviewPending": [
+    "visibilityReviewPending": [],
+    "sourceDerivedOnly": [
       "accelerationTrail",
-      "brilliantMove",
-      "cardBanIds",
       "chainBonds",
       "chaosNoCaptureUntilHalfTurn",
-      "clonedPassiveCards",
       "collapsePending",
       "coronation",
       "crownRule",
       "deathmatch",
       "delayedHazards",
       "diceLocks",
-      "draftBalance",
-      "draftClock",
-      "draftResumeTurn",
-      "drawOffer",
       "enPassant",
       "encouragement",
       "exhaustion",
       "feudalContracts",
-      "firstMoveCardsForced",
       "freeMoveCaptureLock",
       "gomokuVictoryCells",
-      "idolEncoreUsedByPiece",
       "initiative",
       "judgmentExiles",
-      "lastTurnCaptures",
-      "magicGirlSurgeRefreshPending",
       "moving",
       "necromancy",
       "overwhelm",
       "palaces",
-      "pendingBearRetaliations",
-      "pendingFeudalStrike",
       "pendingGales",
       "pendingRuleTickets",
       "periodicCollapse",
       "platformRule",
       "portalRule",
-      "positionCounts",
-      "queensGambitFiles",
       "royalCommand",
       "ruleBombs",
-      "ruleOpeningEvent",
-      "shotgunOpeningForced",
       "sirenExposure",
       "taunt",
       "temporaryQueens",
-      "timeIsMineSequence",
-      "turnCaptures",
       "ultimatum",
       "undeadResurrections"
+    ],
+    "internalBookkeeping": [
+      "brilliantMove",
+      "cardBanIds",
+      "clonedPassiveCards",
+      "draftResumeTurn",
+      "firstMoveCardsForced",
+      "firstMoveUndo",
+      "idolEncoreUsedByPiece",
+      "lastTurnCaptures",
+      "magicGirlSurgeRefreshPending",
+      "pendingBearRetaliations",
+      "pendingFeudalStrike",
+      "queensGambitFiles",
+      "shotgunOpeningForced",
+      "turnCaptures"
+    ],
+    "unsupportedContext": [
+      "draftClock",
+      "drawOffer"
     ]
   },
-  "visibilityReview": "Classification is explicit; visibilityReviewPending is not a claim of private information. Active pending fields require further client-renderer review before full coverage GO.",
+  "visibilityReview": "The remaining 52 raw state fields have source renderer/hint/caller classifications. sourceDerivedOnly authorizes only the named strict derived surfaces, never a raw nested copy; internalBookkeeping and unsupportedContext are distinct from private information. This classification does not register rule-engine support or establish whole coverage GO.",
   "dynamicPublicFieldEvidence": {
     "source": "Source applyExpansionCard/September card owner flags; expansionSquareMarks displays taboo square marker, excluding private pieceId.",
     "fields": [
@@ -398,7 +405,7 @@
     "meaning": "Public acquired-card effects, represented as known owner flags; these are created lazily and absent from resetGame defaults."
   },
   "ownPlanEvidence": "canViewFreeMovePlans + currentFreeMoveTraceSets(main72535..72555): owner known ordered plans, opponent invisible; random plan/piece IDs excluded.",
-  "nestedVisibilityReview": "Previously raw nested fields moved to visibilityReviewPending until exact renderer/value projection is established; top-level allowlisting alone does not authorize internal pieceId/private coordinates.",
+  "nestedVisibilityReview": "Nested values are projected through strict source-derived piece/status/board/card/deathmatch schemas. Absolute clocks, opaque IDs, private piece state and future random choices are not authorized by a top-level classification. Unsupported timed/online/callback contexts retain explicit support boundaries.",
   "privateNestedKeyGuard": "Strict source value/status/selection schemas reject unreviewed nested keys. Raw identity/hiddenFrom/RNG keys and plural private piece/preview IDs are guarded; trolley windowId is execution-only. This is a boundary guard, not completion of remaining renderer visibility audit.",
   "surfaceSchemas": {
     "pieceStatus": {
@@ -2612,6 +2619,25 @@
         107005
       ],
       "meaning": "Only the two visible bundle labels and lever choice are public. Random/time window ID is private execution/staleness binding and never an observation or public intent feature; exact Action retains it."
+    },
+    "deathmatch": {
+      "anchors": [
+        94747,
+        94750,
+        94756,
+        94766,
+        94868,
+        94873,
+        94885,
+        94923,
+        94929,
+        107310,
+        107327
+      ],
+      "context": "8x8 normal/chaos/grand local explicit decisions. Local notices are visible independent of viewer color; online role guards are outside this projection context.",
+      "meaning": "deathmatchStatus.active is the active extension flag; warning is source local warning eligibility in play mode with no progress this turn and 1..2 remaining half-turns. It does not predict actual termination and does not claim current DOM toast/status presence.",
+      "private": "No raw elapsed counter, startedAt, warningKey, Date/server anchors, or online account role is copied.",
+      "lifetime": "Source toast show class expires after1900ms, status persists until setStatus overwrite, and private notice-key dedup suppresses re-delivery. Snapshot-derived warning preserves public rule warning meaning rather than external DOM history."
     }
   },
   "publicPieceSchema": {
@@ -6850,7 +6876,7 @@
   },
   "coverage": {
     "status": "partial-source-projection",
-    "pendingFieldDisposition": "visibilityReviewPending is an unresolved source audit, not a private/presentation classification or support claim. A caller must enforce engine typed support boundaries; full scope stays NO_GO until active families and source renderer/timing contexts are closed.",
+    "pendingFieldDisposition": "52-field source visibility audit classified current rendered/hint meanings versus internal/private/presentation/unsupported slices; no active source family is promoted by metadata. Whole implementation remains NO_GO until execution/chance/default-mode gates close.",
     "unsupportedContexts": [
       "campaign-specific fog/madAi and time-travel UI",
       "online room-only user identity/draw negotiation",
@@ -7131,5 +7157,753 @@
         "additionalProperties": false
       }
     ]
+  },
+  "deathmatchSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "active",
+      "warning"
+    ],
+    "properties": {
+      "active": {
+        "type": "boolean"
+      },
+      "warning": {
+        "type": "boolean"
+      }
+    }
+  },
+  "remainingStateReview": {
+    "accelerationTrail": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        72379,
+        72383,
+        72385,
+        72877,
+        72879,
+        72984,
+        92257
+      ],
+      "rawDisposition": "Mixed display coordinates and hidden-view ownership; raw trail is not universally public.",
+      "publicMeaning": "Visible trail cells, without raw hiddenFrom or automatic execution metadata."
+    },
+    "brilliantMove": {
+      "classification": "internalBookkeeping",
+      "anchors": [
+        61223,
+        66085
+      ],
+      "rawDisposition": "Unused legacy state normalization/reset slot, not a private-information classification inferred from its name.",
+      "publicMeaning": "No current source-visible meaning is read from this legacy state field."
+    },
+    "cardBanIds": {
+      "classification": "internalBookkeeping",
+      "anchors": [
+        65850,
+        66116,
+        66233,
+        66652,
+        67516,
+        70719,
+        71058
+      ],
+      "rawDisposition": "Pool exclusion bookkeeping plus editor configuration. No dedicated ban-list renderer was found in the complete references.",
+      "publicMeaning": "An applied public RULE already identifies its exclusion; editor-supplied bans are configuration, not a player hand."
+    },
+    "chainBonds": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        73222,
+        73231,
+        73235,
+        73242,
+        96804,
+        96874,
+        105586
+      ],
+      "rawDisposition": "Opaque bond ID and aId/bId references remain internal; full raw bond is not public.",
+      "publicMeaning": "Visible endpoint coordinates, bond owner color and geometric length profile."
+    },
+    "chaosNoCaptureUntilHalfTurn": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        65689,
+        65693,
+        65696,
+        98386,
+        98467,
+        98545,
+        101181
+      ],
+      "rawDisposition": "Absolute half-turn expiry is rule bookkeeping; do not fabricate a badge or expose the raw deadline.",
+      "publicMeaning": "Actual visible lock class where source elects to show it, and player legal destination hints."
+    },
+    "clonedPassiveCards": {
+      "classification": "internalBookkeeping",
+      "anchors": [
+        69060,
+        69064,
+        69072,
+        69074,
+        69089,
+        69094,
+        69104,
+        69111,
+        69130
+      ],
+      "rawDisposition": "Keys combine source color and source instance identity. Source bounds this internal ledger to 64; it is not a list of publicly rendered cards.",
+      "publicMeaning": "The public passive application/effect and its log, not the dedup ledger."
+    },
+    "collapsePending": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        93669,
+        93671,
+        105713,
+        109288,
+        109295,
+        109302,
+        72974
+      ],
+      "rawDisposition": "Queued owner color and settlement phase are not unconditionally copied.",
+      "publicMeaning": "The pending collapse ring as meteor markers."
+    },
+    "coronation": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        103299,
+        103301,
+        93031,
+        93035,
+        93041,
+        75227
+      ],
+      "rawDisposition": "Color flag and protection startTurn/previousProtected bookkeeping are separate from the visible protected trait.",
+      "publicMeaning": "Public known card effect and visible queen protection/status."
+    },
+    "crownRule": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        75407,
+        101589,
+        101631,
+        101648,
+        101767,
+        101845,
+        101876,
+        101893,
+        73054
+      ],
+      "rawDisposition": "Holder IDs, token identity and pending reconciliation references are internal; hidden holders are not independently revealed.",
+      "publicMeaning": "Visible ground crown, visible crown bearer and accessible held-move count."
+    },
+    "deathmatch": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        49975,
+        94862,
+        94868,
+        94873,
+        94885,
+        94893,
+        94907,
+        94923,
+        94929,
+        107310,
+        107327
+      ],
+      "rawDisposition": "startedAtTurn, halfTurnsSinceProgress, progressThisTurn and warning dedup keys must not be copied wholesale.",
+      "publicMeaning": "Active public extension and its current-turn no-progress end-warning meaning; toast/status text is not a raw countdown."
+    },
+    "delayedHazards": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        72823,
+        72974,
+        95070,
+        95075,
+        95092,
+        95121,
+        106395,
+        109310,
+        109313
+      ],
+      "rawDisposition": "casterId, triggerAfter and internal queue identities are not displayed as raw nested values.",
+      "publicMeaning": "Displayed meteor/lightning cells and source impact/history after settlement."
+    },
+    "diceLocks": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        94728,
+        94734,
+        101243,
+        75203
+      ],
+      "rawDisposition": "Raw lock object is a per-color execution window, not an arbitrary nested public object.",
+      "publicMeaning": "Visible lock state and declared roll/type-duration public message."
+    },
+    "draftBalance": {
+      "classification": "privateOrViewerRestricted",
+      "anchors": [
+        67011,
+        67016,
+        67344,
+        67349,
+        67357,
+        67363
+      ],
+      "rawDisposition": "Owner-known offer statistic and opponent-private latent chance input.",
+      "publicMeaning": "White can derive its own average from its known offered cards. Black does not receive the latent mean."
+    },
+    "draftClock": {
+      "classification": "unsupportedContext",
+      "anchors": [
+        65139,
+        65143,
+        65159,
+        65171,
+        65185,
+        65231
+      ],
+      "rawDisposition": "Server anchors/Date starts are transport timing; treating the complete clock as private would be wrong.",
+      "publicMeaning": "Visible remaining draft time in the timed-game context."
+    },
+    "draftResumeTurn": {
+      "classification": "internalBookkeeping",
+      "anchors": [
+        66744,
+        66987,
+        67024,
+        67025,
+        81613
+      ],
+      "rawDisposition": "Internal phase continuation color. Absence of a dedicated renderer does not make the color intrinsically secret.",
+      "publicMeaning": "Public next turn after draft completion; earlier action/history may identify the interrupted actor."
+    },
+    "drawOffer": {
+      "classification": "unsupportedContext",
+      "anchors": [
+        63433,
+        63466,
+        65412,
+        65503,
+        94325,
+        109699
+      ],
+      "rawDisposition": "Raw userId/cooldown/room transport is not a neural input.",
+      "publicMeaning": "Public offer role, accept/reject affordance and completed result in online rooms."
+    },
+    "enPassant": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        96302,
+        96305,
+        96322,
+        96480,
+        98441,
+        72869,
+        72942,
+        72955
+      ],
+      "rawDisposition": "Raw captured coordinates/auxiliary rights can contain latent board facts and are not universally exposed.",
+      "publicMeaning": "Player-selectable destination and visible capture marker; source execution flags are preserved by exact action binding."
+    },
+    "encouragement": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        105430,
+        109238,
+        72978
+      ],
+      "rawDisposition": "Internal enable flag/royal or campfire/outpost rule helpers are not opaque plans.",
+      "publicMeaning": "Displayed encouraged cells and known public active effect."
+    },
+    "exhaustion": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        100612,
+        100654,
+        75242,
+        75399,
+        95551
+      ],
+      "rawDisposition": "Current pieceId and streak are rule bookkeeping; own move history may infer them, but hidden opponent streaks must not be copied.",
+      "publicMeaning": "Actual locked-piece status and player legal move consequences."
+    },
+    "feudalContracts": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        73220,
+        75880,
+        75883,
+        75885,
+        75888,
+        102980,
+        108113
+      ],
+      "rawDisposition": "pawnId/guardianId/contract ID and private endpoint coordinates remain internal.",
+      "publicMeaning": "Visible pawn contract badge including the source-revealed guardian type, even if the guardian itself is hidden."
+    },
+    "firstMoveCardsForced": {
+      "classification": "internalBookkeeping",
+      "anchors": [
+        87905,
+        87907,
+        87908,
+        87910,
+        87919,
+        93396
+      ],
+      "rawDisposition": "Internal once-only lifecycle flag; not a separate player decision or hidden offer.",
+      "publicMeaning": "Known auto-used card and resulting board/card-used state."
+    },
+    "firstMoveUndo": {
+      "classification": "internalBookkeeping",
+      "anchors": [
+        87905,
+        87918,
+        87943,
+        87954,
+        87966,
+        88118,
+        88121,
+        90846,
+        91622,
+        91623
+      ],
+      "rawDisposition": "First-move auto-card rollback snapshot. Its non-null form copies the board, captures, selection and internal Set state; neither the object nor its null lifecycle sentinel is a player-visible surface.",
+      "publicMeaning": "Only the resulting visible board, used card, history and legal choices are projected after the automatic opening resolves."
+    },
+    "freeMoveCaptureLock": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        65678,
+        65682,
+        65696,
+        93419,
+        93653,
+        93654,
+        98401
+      ],
+      "rawDisposition": "Raw free-move lifecycle flag and secret premove plans are separate; opponent plans remain private.",
+      "publicMeaning": "Source-visible capture lock and selectable quiet destinations."
+    },
+    "gomokuVictoryCells": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        72861,
+        73016,
+        93187,
+        93190,
+        93198
+      ],
+      "rawDisposition": "Coordinates are display meaning; no private piece identity is needed.",
+      "publicMeaning": "Public terminal winning cells and their display order."
+    },
+    "idolEncoreUsedByPiece": {
+      "classification": "internalBookkeeping",
+      "anchors": [
+        98942,
+        98945,
+        98964,
+        98988,
+        98992,
+        50065
+      ],
+      "rawDisposition": "Internal once-per-color-turn ledger; its name does not describe actual piece-ID storage.",
+      "publicMeaning": "Public same-actor extra decision and source idol movement/remaining eligibility."
+    },
+    "initiative": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        87303,
+        94318,
+        98390,
+        98396,
+        98403,
+        98409,
+        104450
+      ],
+      "rawDisposition": "Raw by/startTurn/limit object is not a public timestamp payload.",
+      "publicMeaning": "Current selected-piece no-capture meaning and legal destination consequences."
+    },
+    "judgmentExiles": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        99215,
+        99243,
+        99254,
+        99285,
+        99296,
+        99303,
+        99306,
+        105767,
+        94103
+      ],
+      "rawDisposition": "Full saved piece, private traits, opaque exile ID and ID-seeded future return destination remain hidden/internal.",
+      "publicMeaning": "Visible removal and stated return phase; future visible return when it actually occurs."
+    },
+    "lastTurnCaptures": {
+      "classification": "internalBookkeeping",
+      "anchors": [
+        61246,
+        65986,
+        93651,
+        50128
+      ],
+      "rawDisposition": "Internal previous-turn captured-ID Set, not a public counter.",
+      "publicMeaning": "No current direct display is driven by this retained Set."
+    },
+    "magicGirlSurgeRefreshPending": {
+      "classification": "internalBookkeeping",
+      "anchors": [
+        65742,
+        65750,
+        65752,
+        93657,
+        93659,
+        93660,
+        93664
+      ],
+      "rawDisposition": "Internal deferred turn-boundary latch.",
+      "publicMeaning": "Visible awakened magic-girl/remembered movement status and its next actual action consequences."
+    },
+    "moving": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        100684,
+        100695,
+        100702,
+        100704,
+        100706,
+        100708
+      ],
+      "rawDisposition": "Raw pieceId/count streak remains private-world bookkeeping when opponent movement was hidden.",
+      "publicMeaning": "Visible evasion trait once granted and public known Moving effect."
+    },
+    "necromancy": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        75247,
+        75730,
+        75734,
+        104951,
+        104967,
+        104976,
+        109062
+      ],
+      "rawDisposition": "Root piece IDs, originalType/revivedType copies and createdAt are execution records, not raw public objects.",
+      "publicMeaning": "Visible revived type, necromancy class and remaining glyph/aria count."
+    },
+    "overwhelm": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        103020,
+        103022,
+        98479,
+        108039,
+        108927,
+        108990
+      ],
+      "rawDisposition": "Per-color effect flag is not a secret plan, but no arbitrary nested state is rendered.",
+      "publicMeaning": "Public known applied effect and legal-action/capture consequences."
+    },
+    "palaces": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        105683,
+        109256,
+        109259,
+        109263,
+        72973
+      ],
+      "rawDisposition": "Full owner/rule object is distinct from the neutral marker surface.",
+      "publicMeaning": "Public palace terrain cells; source message identifies whose palace was created."
+    },
+    "pendingBearRetaliations": {
+      "classification": "internalBookkeeping",
+      "anchors": [
+        107618,
+        107624,
+        107637,
+        108005,
+        108053,
+        108072,
+        108103,
+        93245
+      ],
+      "rawDisposition": "Saved full bear/parry piece, attackerId/counterDestination/queue ID are internal latent execution inputs.",
+      "publicMeaning": "Visible counteraction, restored piece and filtered event/ghost results after settlement."
+    },
+    "pendingFeudalStrike": {
+      "classification": "internalBookkeeping",
+      "anchors": [
+        108113,
+        108126,
+        108140,
+        108143,
+        92287
+      ],
+      "rawDisposition": "Guardian/attacker IDs and raw landing plan are internal settlement references.",
+      "publicMeaning": "Filtered public feudal counterattack result."
+    },
+    "pendingGales": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        98812,
+        98815,
+        98837,
+        98842,
+        75872,
+        75876,
+        75878
+      ],
+      "rawDisposition": "Queue IDs, exact absolute triggerTurn and raw entry ownership are not independently displayed as nested values.",
+      "publicMeaning": "Source gale remaining glyph and later publicly visible removals."
+    },
+    "pendingRuleTickets": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        66275,
+        66289,
+        66303,
+        66315,
+        71946,
+        71954,
+        71986,
+        72009
+      ],
+      "rawDisposition": "Opaque ticket ID/absolute owner clock remain internal.",
+      "publicMeaning": "Pending RULE card ID list visible to both viewers."
+    },
+    "periodicCollapse": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        101573,
+        101575,
+        101580,
+        109288,
+        109291,
+        109293,
+        109387
+      ],
+      "rawDisposition": "Internal nextAt schedule is not copied wholesale; known application/history can identify its origin.",
+      "publicMeaning": "Public RULE/cadence meaning and current collapse warning cells."
+    },
+    "platformRule": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        93549,
+        93571,
+        100006,
+        72845,
+        73042,
+        73045,
+        73047
+      ],
+      "rawDisposition": "Raw turn schedule and future random-spawn context are not player inputs.",
+      "publicMeaning": "Platform terrain and public forecast coordinate."
+    },
+    "portalRule": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        96952,
+        96955,
+        96958,
+        101585,
+        72844,
+        72968
+      ],
+      "rawDisposition": "Raw helper state and source execution flags are separate from the public neutral marker.",
+      "publicMeaning": "Visible paired portal terrain and player click destinations."
+    },
+    "positionCounts": {
+      "classification": "privateOrViewerRestricted",
+      "anchors": [
+        94955,
+        94977,
+        94984,
+        94990,
+        94993,
+        94742
+      ],
+      "rawDisposition": "Raw repetition keys/count map can reveal hidden world; it is not a safe public count.",
+      "publicMeaning": "Public terminal repetition/tiebreak result and genuinely public action history."
+    },
+    "queensGambitFiles": {
+      "classification": "internalBookkeeping",
+      "anchors": [
+        103356,
+        103385,
+        103386,
+        103393,
+        75227
+      ],
+      "rawDisposition": "Saved file pair has no root-field consumer in the current frozen source; previousProtected is restoration bookkeeping on pieces.",
+      "publicMeaning": "Actual sacrificed queen and visible protected pawns."
+    },
+    "royalCommand": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        103304,
+        103306,
+        94631,
+        94634,
+        94642,
+        75835,
+        75839
+      ],
+      "rawDisposition": "Raw start/expiry owner clock and window object are internal.",
+      "publicMeaning": "Royal-command remaining glyph and actual king-like legal destinations."
+    },
+    "ruleBombs": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        101550,
+        101558,
+        101564,
+        74061,
+        74071,
+        72967,
+        73001
+      ],
+      "rawDisposition": "Opaque bomb ID and ignorePieceId must remain internal; do not cap public coordinates using AI candidate heuristics.",
+      "publicMeaning": "Every displayed bomb coordinate."
+    },
+    "ruleOpeningEvent": {
+      "classification": "presentationOrInactiveMode",
+      "anchors": [
+        66216,
+        66223,
+        66251,
+        76639,
+        76653,
+        76661,
+        76672,
+        76690
+      ],
+      "rawDisposition": "Nonce, Date/server deadline and catch-up flags are rendering/transport control, not future RNG features.",
+      "publicMeaning": "Public applied RULE result/card once opening settles; transient opening presentation text is visible in that context."
+    },
+    "shotgunOpeningForced": {
+      "classification": "internalBookkeeping",
+      "anchors": [
+        86958,
+        86960,
+        87943,
+        87948,
+        87950,
+        87995,
+        87997
+      ],
+      "rawDisposition": "Internal once-only opening lifecycle flag; no dedicated reader beyond force lifecycle.",
+      "publicMeaning": "Public shotgun king transform/card used status."
+    },
+    "sirenExposure": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        93100,
+        93105,
+        93115,
+        93126,
+        93128,
+        93129,
+        75309
+      ],
+      "rawDisposition": "Nested siren ID -> nearby private target IDs and __turnStartKey are internal.",
+      "publicMeaning": "Visible piece siren conversion warning and actual visible conversion."
+    },
+    "taunt": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        104465,
+        104469,
+        98241,
+        98253,
+        98128,
+        93368
+      ],
+      "rawDisposition": "Raw color counter is internal action-window state, not a secret card or UI scalar count.",
+      "publicMeaning": "Known public Taunt effect and player-selectable forward-only move destinations."
+    },
+    "temporaryQueens": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        105322,
+        105331,
+        109046,
+        109050,
+        109053,
+        75724,
+        104240
+      ],
+      "rawDisposition": "Root IDs/createdAt are lifecycle references; public count is the piece scalar actually rendered.",
+      "publicMeaning": "Visible bribed type/class and remaining glyph, then its knight return."
+    },
+    "timeIsMineSequence": {
+      "classification": "presentationOrInactiveMode",
+      "anchors": [
+        102803,
+        102884,
+        102885,
+        102894,
+        102897,
+        102915,
+        102926,
+        102930
+      ],
+      "rawDisposition": "Date start and color latch control asynchronous settlement; erasing ID Sets are internal/presentation, not unconditionally public.",
+      "publicMeaning": "Visible filtered erase ghosts, resolving presentation, and final public winner."
+    },
+    "turnCaptures": {
+      "classification": "internalBookkeeping",
+      "anchors": [
+        61245,
+        65985,
+        88138,
+        89256,
+        90861,
+        93651,
+        93652,
+        108060,
+        108337,
+        50127
+      ],
+      "rawDisposition": "Internal captured-piece-ID Set, not an integer count or independently rendered library.",
+      "publicMeaning": "Public filtered captures and board/history transitions from separate fields."
+    },
+    "ultimatum": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        105717,
+        94564,
+        94575,
+        94596,
+        75842,
+        75849,
+        75852
+      ],
+      "rawDisposition": "Raw deadline, tracked movements and reference identity are not copied as public nested data.",
+      "publicMeaning": "Source-visible ultimatum remaining glyph and actual terminal consequence."
+    },
+    "undeadResurrections": {
+      "classification": "sourceDerivedOnly",
+      "anchors": [
+        65756,
+        65763,
+        65767,
+        65768,
+        74875,
+        74882,
+        74884,
+        93150,
+        93165,
+        93174
+      ],
+      "rawDisposition": "Full saved piece, dueMoveCount, random future destination and opaque queue ID stay hidden/internal.",
+      "publicMeaning": "Source-revealed royal-anchor revival countdown and later visible revived piece."
+    }
   }
 }

@@ -24,6 +24,41 @@ const MINOR_CURRENT: &[&str] = &[
     "recruiter",
     "trickster",
 ];
+// main:3655-3687. Filtering preserves this order for the one-draw choice.
+const POTION_EFFECTS: &[&str] = &[
+    "sacrificeProtection",
+    "lastResistance",
+    "coronationProtection",
+    "shield",
+    "evasion",
+    "parry",
+    "basicTraining",
+    "stealth",
+    "loyalist",
+    "ghost",
+    "chameleon",
+    "submerge",
+    "freeze",
+    "chimera",
+    "witchTrial",
+    "stake",
+    "callingCard",
+    "emptyLunchbox",
+    "poisonStun",
+    "disarm",
+    "mannerNoCapture",
+    "saturationNoCapture",
+    "explosive",
+    "poisonedPawn",
+    "queensGambitProtection",
+    "trojanHorse",
+    "severance",
+    "inertia",
+    "outpostProtection",
+    "nullification",
+    "recurrence",
+    "grapplerBound",
+];
 // main-CqkYwJX4.js:1747-1761. Pool order is part of the random-choice contract.
 const TRICKSTER_TYPES: &[&str] = &[
     "queen",
@@ -121,6 +156,17 @@ enum Mutation {
     Windmill,
     QueensGambit,
     Chain,
+    FeudalContract,
+    Guard,
+    Freeze,
+    Alekhine,
+    Evasion,
+    Scarecrow,
+    Potion,
+    Metal,
+    Twins,
+    LastResistance,
+    Coronation,
 }
 #[derive(Clone, Copy)]
 struct Plan {
@@ -177,6 +223,11 @@ fn current_random_pool(state: &GameState) -> Result<()> {
     Ok(())
 }
 fn validate_profile(state: &GameState, plan: Plan) -> Result<()> {
+    if matches!(plan.mutation, Mutation::Scarecrow) && !september18(state) {
+        return Err(EngineError::UnsupportedFeature(
+            "legacy scarecrow installation reservations".into(),
+        ));
+    }
     if matches!(plan.mutation, Mutation::Grant("promotionRushUntil"))
         && (catalog_hash(state).is_some_and(|hash| hash != CATALOG)
             || (catalog_hash(state).is_none()
@@ -261,6 +312,7 @@ fn plan(state: &GameState, card: &CardSlot) -> Option<Plan> {
         // The adopted catalog's parrot helper uses rook targets.
         "parrot" => (NonRoyal("rook"), InternalTransform("parrot")),
         "brutus" => (NonRoyal("rook"), RandomBrutus),
+        "metal" => (Exact(""), Metal),
         _ => match card.effect.as_str() {
             "reaper" => (QueenIdentity, Transform("reaper")),
             "idol" => (QueenIdentity, Transform("idol")),
@@ -287,6 +339,16 @@ fn plan(state: &GameState, card: &CardSlot) -> Option<Plan> {
             "windmill" => (Exact("bishop"), Windmill),
             "queensGambit" => (NonRoyal("queen"), QueensGambit),
             "chain" => (Exact(""), Chain),
+            "feudalContract" => (Exact(""), FeudalContract),
+            "guard" => (Exact(""), Guard),
+            "freeze" => (Exact(""), Freeze),
+            "alekhineMachineGun" => (Exact(""), Alekhine),
+            "evasion" => (Exact(""), Evasion),
+            "scarecrow" => (Exact(""), Scarecrow),
+            "suspiciousPotion" => (Exact(""), Potion),
+            "twins" => (Exact(""), Twins),
+            "lastResistance" => (Exact(""), LastResistance),
+            "coronation" => (Exact(""), Coronation),
             "wizard" => (QueenIdentity, Transform("wizard")),
             "constitutionalMonarchy" => (QueenIdentity, Transform("primeMinister")),
             "jester" => (QueenIdentity, Transform("jester")),
@@ -481,7 +543,7 @@ fn grant_matches(state: &GameState, piece: &Piece, square: Square, field: &str) 
 }
 // main:1803-1815,68455-68463. This predicate differs from movement dispatch:
 // an invalid trickster copy does not fall back to queen movement here.
-fn ranged_piece(state: &GameState, piece: &Piece) -> bool {
+pub(crate) fn ranged_piece(state: &GameState, piece: &Piece) -> bool {
     let kind = if piece.kind == "trickster" {
         let Some(kind) = piece
             .extra
@@ -770,6 +832,25 @@ fn matches_plan(state: &GameState, piece: &Piece, square: Square, plan: Plan) ->
             source_matches(state, piece, plan.source) && !state.flag("regency", state.turn)
         }
         Mutation::Chain => chain_target(state, piece),
+        Mutation::FeudalContract => {
+            piece.color == state.turn
+                && ["pawn", "fanatic"].contains(&piece.kind.as_str())
+                && !truthy(piece.extra.get("explosive"))
+                && !truthy(piece.extra.get("feudalContractId"))
+        }
+        Mutation::Scarecrow => {
+            piece.color == state.turn
+                && !["wall", "football", "blackHole", "coffin"].contains(&piece.kind.as_str())
+                && crate::movement::d4_destination_allowed(state, piece.color, &[square])
+        }
+        Mutation::Potion => potion_target(piece),
+        Mutation::Metal => {
+            piece.color == state.turn
+                && !state.royal_identity(piece)
+                && !truthy(piece.extra.get("metalized"))
+                && ranged_piece(state, piece)
+        }
+        Mutation::Twins => twin_target(state, piece),
         Mutation::Evacuation => {
             return evacuation_candidate(state, piece, square);
         }
@@ -903,20 +984,47 @@ pub(crate) fn actions(state: &GameState, card: &CardSlot) -> Result<Option<Vec<A
         return Ok(None);
     };
     validate_profile(state, plan)?;
-    if matches!(plan.mutation, Mutation::SideFlag(..)) {
+    if matches!(plan.mutation, Mutation::SideFlag(..) | Mutation::Coronation) {
         return Ok(Some(vec![Action::card(state.turn, card, None)]));
+    }
+    if matches!(
+        plan.mutation,
+        Mutation::Guard
+            | Mutation::Freeze
+            | Mutation::Alekhine
+            | Mutation::Evasion
+            | Mutation::LastResistance
+    ) {
+        let available = match plan.mutation {
+            Mutation::Guard => guard_pawn_square(state).is_some(),
+            Mutation::Freeze => !freeze_candidates(state).is_empty(),
+            Mutation::Alekhine => alekhine_formation(state).is_some(),
+            Mutation::Evasion => !evasion_candidates(state).is_empty(),
+            Mutation::LastResistance => king_augment_square(state).is_some(),
+            _ => unreachable!(),
+        };
+        return Ok(Some(if available {
+            vec![Action::card(state.turn, card, None)]
+        } else {
+            Vec::new()
+        }));
     }
     let targets = ui_targets(
         state,
         plan,
         matches!(
             plan.mutation,
-            Mutation::Selection(_) | Mutation::Judgment | Mutation::Evacuation | Mutation::Chain
+            Mutation::Selection(_)
+                | Mutation::Judgment
+                | Mutation::Evacuation
+                | Mutation::Chain
+                | Mutation::Twins
         ),
     )?;
     let actions = match plan.mutation {
         Mutation::Selection(field) => selection_actions(state, card, &targets, field == "panic"),
         Mutation::Evacuation => selection_actions(state, card, &targets, false),
+        Mutation::Twins => selection_actions(state, card, &targets, true),
         Mutation::Chain => chain_pairs(state, &targets)?
             .into_iter()
             .map(|pair| Action::card(state.turn, card, Some(json!({"selections":pair}))))
@@ -938,6 +1046,21 @@ pub(crate) fn actions(state: &GameState, card: &CardSlot) -> Result<Option<Vec<A
                             state.turn,
                             card,
                             Some(json!({"row":rook.row,"col":rook.col,"bishop":bishop})),
+                        )
+                    })
+                })
+                .collect()
+        }
+        Mutation::FeudalContract => {
+            let guardians = feudal_guardians(state);
+            targets
+                .into_iter()
+                .flat_map(|pawn| {
+                    guardians.iter().map(move |guardian| {
+                        Action::card(
+                            state.turn,
+                            card,
+                            Some(json!({"row":guardian.row,"col":guardian.col,"pawn":pawn})),
                         )
                     })
                 })
@@ -1054,6 +1177,701 @@ fn chain_target(state: &GameState, piece: &Piece) -> bool {
     piece.color == state.turn.opponent()
         && !piece.is_large()
         && !["wall", "football", "blackHole"].contains(&piece.kind.as_str())
+}
+fn feudal_guardian(state: &GameState, piece: &Piece) -> bool {
+    piece.color == state.turn
+        && ![
+            "pawn",
+            "fanatic",
+            "wall",
+            "colossus",
+            "bigRook",
+            "bigBishop",
+        ]
+        .contains(&piece.kind.as_str())
+}
+fn feudal_guardians(state: &GameState) -> Vec<Square> {
+    (0..8)
+        .flat_map(|row| (0..8).map(move |col| Square { row, col }))
+        .filter(|square| {
+            state
+                .at(*square)
+                .is_some_and(|piece| feudal_guardian(state, piece))
+        })
+        .collect()
+}
+// main:102969-102982. Existing pawn contracts are excluded by UI selection,
+// but the raw handler intentionally replaces matching ledger entries.
+fn apply_feudal_contract(state: &mut GameState, action: &Action) -> Result<()> {
+    let target = action.target.as_ref().ok_or(EngineError::IllegalAction)?;
+    let pawn_square = square_value(target.get("pawn").ok_or(EngineError::IllegalAction)?)?;
+    let guardian_square = square_value(&json!({"row":target.get("row"),"col":target.get("col")}))?;
+    let mut pawn = state
+        .at(pawn_square)
+        .filter(|piece| {
+            piece.color == state.turn
+                && ["pawn", "fanatic"].contains(&piece.kind.as_str())
+                && !truthy(piece.extra.get("explosive"))
+        })
+        .cloned()
+        .ok_or(EngineError::IllegalAction)?;
+    let guardian = state
+        .at(guardian_square)
+        .filter(|piece| feudal_guardian(state, piece))
+        .cloned()
+        .ok_or(EngineError::IllegalAction)?;
+    let suffix = crate::draft::random_suffix(state.rng.sample()?)?;
+    let id = format!("feudal-{suffix}");
+    pawn.extra.insert("feudalContractId".into(), json!(id));
+    write_piece(state, &pawn);
+    let entries = state
+        .extra
+        .get_mut("feudalContracts")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| EngineError::InvalidState("feudalContracts must be an array".into()))?;
+    entries.retain(|entry| {
+        entry.get("pawnId").and_then(Value::as_str) != Some(pawn.id.as_str())
+            && entry.get("guardianId").and_then(Value::as_str) != Some(guardian.id.as_str())
+    });
+    entries.push(json!({"id":id,"color":state.turn,"pawnId":pawn.id,"guardianId":guardian.id}));
+    Ok(())
+}
+// main:103967-103991 and findGuardPawnByOrigin:2161. Current coordinates
+// select the first matching pawn's recorded origin, even after it moved.
+fn guard_pawn_square(state: &GameState) -> Option<Square> {
+    let default_king = Square {
+        row: if state.turn == Color::White { 7 } else { 0 },
+        col: 4,
+    };
+    let king = state
+        .board
+        .iter()
+        .flatten()
+        .flatten()
+        .find(|piece| piece.color == state.turn && state.royal_identity(piece))?;
+    let king_origin = exile_origin(king, default_king).unwrap_or(default_king);
+    let reversed = js_number(
+        state
+            .extra
+            .get("effects")
+            .and_then(|effects| effects.get("pawnReverse"))
+            .and_then(|sides| sides.get(state.turn.as_str())),
+        0,
+    )
+    .is_some_and(|value| value > 0.0);
+    let direction = state.turn.pawn_dir() * if reversed { -1 } else { 1 };
+    let expected = king_origin.offset(direction, 0)?;
+    (0..8)
+        .flat_map(|row| (0..8).map(move |col| Square { row, col }))
+        .find(|square| {
+            state.at(*square).is_some_and(|piece| {
+                piece.color == state.turn
+                    && ["pawn", "fanatic"].contains(&piece.kind.as_str())
+                    && exile_origin(piece, *square).is_ok_and(|origin| origin == expected)
+            })
+        })
+}
+fn apply_guard(state: &mut GameState) -> Result<()> {
+    let square = guard_pawn_square(state).ok_or(EngineError::IllegalAction)?;
+    let mut piece = state
+        .at(square)
+        .cloned()
+        .ok_or(EngineError::IllegalAction)?;
+    clear_promotion_inherited_traits(state, &mut piece)?;
+    piece.kind = "guard".into();
+    piece.moved = true;
+    mark_transformed_origin(state, &mut piece, square)?;
+    mark_animation(state, &piece)?;
+    write_piece(state, &piece);
+    Ok(())
+}
+// freezeCardAvailability:74177 counts every eligible enemy before excluding
+// already frozen pieces. The source's Last Warmth limit is unconditional.
+fn freeze_candidates(state: &GameState) -> Vec<Square> {
+    let mut seen = BTreeSet::new();
+    let eligible = (0..8)
+        .flat_map(|row| (0..8).map(move |col| Square { row, col }))
+        .filter(|square| {
+            state.at(*square).is_some_and(|piece| {
+                !piece.id.is_empty()
+                    && piece.color == state.turn.opponent()
+                    && !state.royal_identity(piece)
+                    && !["wall", "football", "blackHole", "scarecrow"]
+                        .contains(&piece.kind.as_str())
+                    && seen.insert(piece.id.clone())
+            })
+        })
+        .collect::<Vec<_>>();
+    if eligible.len() <= 4 {
+        return Vec::new();
+    }
+    eligible
+        .into_iter()
+        .filter(|square| {
+            state
+                .at(*square)
+                .is_some_and(|piece| !crate::movement::frozen(piece))
+        })
+        .collect()
+}
+fn apply_freeze(state: &mut GameState) -> Result<()> {
+    let mut candidates = freeze_candidates(state);
+    if candidates.is_empty() {
+        return Err(EngineError::IllegalAction);
+    }
+    for index in (1..candidates.len()).rev() {
+        let chosen = (state.rng.sample()? * (index + 1) as f64).floor() as usize;
+        candidates.swap(index, chosen);
+    }
+    for square in candidates.into_iter().take(3) {
+        let mut piece = state
+            .at(square)
+            .cloned()
+            .ok_or(EngineError::IllegalAction)?;
+        piece.extra.insert("frozen".into(), json!(true));
+        let mut frozen = json!({"remaining":3,"source":state.turn});
+        if september18(state) {
+            frozen["countBy"] = json!(state.turn);
+        }
+        piece.extra.insert("frozenByCard".into(), frozen);
+        mark_animation(state, &piece)?;
+        write_piece(state, &piece);
+    }
+    Ok(())
+}
+fn evasion_candidates(state: &GameState) -> Vec<Square> {
+    let mut seen = BTreeSet::new();
+    (0..8)
+        .flat_map(|row| (0..8).map(move |col| Square { row, col }))
+        .filter_map(|square| {
+            let piece = state.at(square)?;
+            if piece.color != state.turn
+                || !seen.insert(piece.id.clone())
+                || ["wall", "football", "blackHole", "scarecrow"].contains(&piece.kind.as_str())
+                || truthy(piece.extra.get("evasion"))
+            {
+                return None;
+            }
+            Some(if piece.is_large() {
+                normalize_square(state, square)
+            } else {
+                square
+            })
+        })
+        .collect()
+}
+fn apply_evasion(state: &mut GameState) -> Result<()> {
+    let candidates = evasion_candidates(state);
+    if candidates.is_empty() {
+        return Err(EngineError::IllegalAction);
+    }
+    let square = candidates[(state.rng.sample()? * candidates.len() as f64).floor() as usize];
+    let mut piece = state
+        .at(square)
+        .cloned()
+        .ok_or(EngineError::IllegalAction)?;
+    piece.extra.insert("evasion".into(), json!(true));
+    write_piece(state, &piece);
+    Ok(())
+}
+// main:105000-105013 chooses the first queen and first two row-major rooks,
+// with no adjacency or unobstructed-ray requirement.
+fn alekhine_formation(state: &GameState) -> Option<[Square; 3]> {
+    let queens = (0..8)
+        .flat_map(|row| (0..8).map(move |col| Square { row, col }))
+        .filter(|square| {
+            state
+                .at(*square)
+                .is_some_and(|piece| source_matches(state, piece, Source::QueenIdentity))
+        })
+        .collect::<Vec<_>>();
+    let rooks = (0..8)
+        .flat_map(|row| (0..8).map(move |col| Square { row, col }))
+        .filter(|square| {
+            state
+                .at(*square)
+                .is_some_and(|piece| piece.color == state.turn && piece.kind == "rook")
+        })
+        .collect::<Vec<_>>();
+    for queen in queens {
+        let same = rooks
+            .iter()
+            .filter(|rook| rook.col == queen.col)
+            .copied()
+            .collect::<Vec<_>>();
+        if same.len() < 2
+            || same.iter().any(|rook| {
+                if state.turn == Color::White {
+                    rook.row > queen.row
+                } else {
+                    rook.row < queen.row
+                }
+            })
+        {
+            continue;
+        }
+        return Some([queen, same[0], same[1]]);
+    }
+    None
+}
+fn apply_alekhine(state: &mut GameState) -> Result<()> {
+    let formation = alekhine_formation(state).ok_or(EngineError::IllegalAction)?;
+    for square in formation {
+        let mut piece = state
+            .at(square)
+            .cloned()
+            .ok_or(EngineError::IllegalAction)?;
+        piece.extra.insert("shielded".into(), json!(true));
+        mark_animation(state, &piece)?;
+        write_piece(state, &piece);
+    }
+    Ok(())
+}
+fn scarecrow_piece_reservation(state: &GameState) -> bool {
+    catalog_hash(state).map_or_else(
+        || state.extra.get("scarecrowPieceReservation") != Some(&Value::Bool(false)),
+        |hash| {
+            SEPTEMBER26_HASHES.contains(&hash)
+                || [
+                    "kWXPFPmgOmKoI1zMkHzSLbhkx-2wxOhsNXGvDmO6KFc",
+                    "P9ZXnDcBx7WGbrutYve1S2Q5255dQug3pnmS8YQym-g",
+                ]
+                .contains(&hash)
+        },
+    )
+}
+// main:104532-104556. Royal resolution follows reservation/spawn; this is
+// direct environmental removal and intentionally does not use sacrifice.
+fn apply_scarecrow(state: &mut GameState, action: &Action, plan: Plan) -> Result<Vec<Piece>> {
+    let square = target_square(action)?;
+    let piece = state.at(square).ok_or(EngineError::IllegalAction)?;
+    if !matches_plan(state, piece, square, plan)? {
+        return Err(EngineError::IllegalAction);
+    }
+    if state
+        .extra
+        .get("campaign")
+        .is_some_and(|campaign| !campaign.is_null())
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "scarecrow campaign sacrifice objectives".into(),
+        ));
+    }
+    let immediate = scarecrow_piece_reservation(state);
+    if !truthy(state.extra.get("pendingScarecrows")) {
+        state.extra.insert("pendingScarecrows".into(), json!([]));
+    }
+    let actor = state.turn;
+    let removed = crate::transition::scarecrow_remove(state, square, actor.opponent())?
+        .ok_or(EngineError::IllegalAction)?;
+    let entry = json!({"id":format!("scarecrow-pending-{}",crate::draft::frozen_timestamp()?),"reserved":true,"color":actor,"by":actor,"row":square.row,"col":square.col,"remainingOwnTurns":3});
+    state
+        .extra
+        .get_mut("pendingScarecrows")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| EngineError::InvalidState("pendingScarecrows must be an array".into()))?
+        .push(entry);
+    if immediate {
+        let mut reserved = crate::opening::spawn(state, actor, "scarecrow")?;
+        reserved.moved = true;
+        reserved
+            .extra
+            .insert("scarecrowReserved".into(), json!(true));
+        let id = reserved.id.clone();
+        state.board[square.row as usize][square.col as usize] = Some(reserved);
+        let entry = state
+            .extra
+            .get_mut("pendingScarecrows")
+            .and_then(Value::as_array_mut)
+            .and_then(|entries| entries.last_mut())
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| EngineError::InvalidState("scarecrow reservation disappeared".into()))?;
+        entry.insert("pieceId".into(), json!(id));
+        entry.insert("reserved".into(), json!(false));
+    }
+    crate::transition::resolve_royal_capture(state, &removed, actor.opponent())?;
+    Ok(vec![removed])
+}
+// main:99092-99145. Twin pairing includes royal pieces; slime's copied
+// ability blocks selection even when the visible type is a trickster.
+fn twin_target(state: &GameState, piece: &Piece) -> bool {
+    piece.color == state.turn
+        && piece.ability_kind() != "slime"
+        && !truthy(piece.extra.get("twinBondId"))
+        && !piece.is_large()
+        && !["wall", "football", "blackHole", "coffin"].contains(&piece.kind.as_str())
+}
+fn apply_twins(state: &mut GameState, action: &Action) -> Result<()> {
+    let requested = action
+        .target
+        .as_ref()
+        .and_then(|target| target.get("selections"))
+        .and_then(Value::as_array)
+        .ok_or(EngineError::IllegalAction)?;
+    let mut selected = Vec::with_capacity(2);
+    let mut seen = BTreeSet::new();
+    for cell in requested.iter().take(2) {
+        let Some(square) = loose_square(cell).map(|square| normalize_square(state, square)) else {
+            continue;
+        };
+        if let Some(piece) = state.at(square).filter(|piece| twin_target(state, piece))
+            && seen.insert(piece.id.clone())
+        {
+            selected.push(piece.clone());
+        }
+    }
+    if selected.len() != 2 {
+        return Err(EngineError::IllegalAction);
+    }
+    let suffix = crate::draft::random_suffix(state.rng.sample()?)?
+        .chars()
+        .take(6)
+        .collect::<String>();
+    let bond = format!("twins-{}-{suffix}", crate::draft::frozen_timestamp()?);
+    let partner_ids = [selected[1].id.clone(), selected[0].id.clone()];
+    for (piece, partner_id) in selected.iter_mut().zip(partner_ids) {
+        piece.extra.insert("twinBondId".into(), json!(bond));
+        piece
+            .extra
+            .insert("twinPartnerId".into(), json!(partner_id));
+        mark_animation(state, piece)?;
+        write_piece(state, piece);
+    }
+    Ok(())
+}
+// main:67810 and103287. This is the first actual royal identity in board
+// order, including the source's active regency heir.
+fn king_augment_square(state: &GameState) -> Option<Square> {
+    (0..8)
+        .flat_map(|row| (0..8).map(move |col| Square { row, col }))
+        .find(|square| {
+            state
+                .at(*square)
+                .is_some_and(|piece| piece.color == state.turn && state.royal_identity(piece))
+        })
+}
+fn temporary_protection(piece: &mut Piece, field: &str, owner: Color) {
+    let previous = if field == "lastResistance" && truthy(piece.extra.get(field)) {
+        truthy(
+            piece
+                .extra
+                .get(field)
+                .and_then(|entry| entry.get("previousProtected")),
+        )
+    } else {
+        truthy(piece.extra.get("protected"))
+    };
+    piece.extra.insert(
+        field.into(),
+        json!({"by":owner,"remaining":3,"previousProtected":previous}),
+    );
+    piece.extra.insert("protected".into(), json!(true));
+}
+fn apply_last_resistance(state: &mut GameState) -> Result<()> {
+    let square = king_augment_square(state).ok_or(EngineError::IllegalAction)?;
+    let mut piece = state
+        .at(square)
+        .cloned()
+        .ok_or(EngineError::IllegalAction)?;
+    temporary_protection(&mut piece, "lastResistance", state.turn);
+    write_piece(state, &piece);
+    Ok(())
+}
+fn apply_side_flag(state: &mut GameState, field: &str, color: Color) -> Result<()> {
+    if !truthy(state.extra.get(field)) {
+        state
+            .extra
+            .insert(field.into(), json!({"white":false,"black":false}));
+    }
+    state
+        .extra
+        .get_mut(field)
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| EngineError::InvalidState(format!("{field} color map missing")))?
+        .insert(color.as_str().into(), json!(true));
+    Ok(())
+}
+fn potion_target(piece: &Piece) -> bool {
+    piece.color.owner().is_some()
+        && !piece.is_large()
+        && !["wall", "football", "blackHole", "monster", "coffin"].contains(&piece.kind.as_str())
+}
+// main:3689-3707 and suspiciousPotion:99691. Royal status and ranged
+// movement are source option predicates, rather than physical king type.
+pub(crate) fn potion_pool(state: &GameState, piece: &Piece) -> Vec<&'static str> {
+    let royal = state.royal_identity(piece);
+    let ranged = ranged_piece(state, piece);
+    let current_copy_pool = catalog_hash(state).map_or_else(
+        || {
+            !truthy(state.extra.get("campaign"))
+                || state.extra.get("september27CopyPools") == Some(&Value::Bool(true))
+        },
+        |hash| hash == CATALOG,
+    );
+    POTION_EFFECTS
+        .iter()
+        .copied()
+        .filter(|effect| match *effect {
+            "grapplerBound" => current_copy_pool,
+            "lastResistance" => royal,
+            "sacrificeProtection" => !royal,
+            "basicTraining" => !royal && piece.kind != "pawn",
+            "loyalist" | "chameleon" | "chimera" | "witchTrial" | "callingCard"
+            | "emptyLunchbox" | "recurrence" => !royal,
+            "explosive" | "poisonedPawn" | "queensGambitProtection" => piece.kind == "pawn",
+            "trojanHorse" => piece.kind == "knight",
+            "severance" | "inertia" => ranged,
+            _ => true,
+        })
+        .collect()
+}
+fn potion_effect_active(piece: &Piece, effect: &str) -> bool {
+    if !POTION_EFFECTS.contains(&effect) {
+        return false;
+    }
+    match effect {
+        "mannerNoCapture" => {
+            truthy(piece.extra.get("potionManner"))
+                && truthy(piece.extra.get("coolGuyCapturedLast"))
+        }
+        "saturationNoCapture" => {
+            truthy(piece.extra.get("potionSaturation"))
+                && js_number(piece.extra.get("capturesMade"), 0).is_some_and(|value| value >= 3.0)
+        }
+        "poisonStun" => {
+            js_number(piece.extra.get("poisonStunTurns"), 0).is_some_and(|value| value > 0.0)
+        }
+        "queensGambitProtection" => truthy(piece.extra.get("protected")),
+        effect => truthy(piece.extra.get(match effect {
+            "shield" => "shielded",
+            "stealth" => "hiddenFrom",
+            "submerge" => "submerged",
+            "freeze" => "frozen",
+            "stake" => "staked",
+            "disarm" => "disarmed",
+            "severance" => "severed",
+            "outpostProtection" => "outpostProtected",
+            _ => effect,
+        })),
+    }
+}
+// main:3872-3882. Rendering and endMove both call this state mutation.
+// Non-array provenance is ignored by pruning, unlike the later note spread.
+pub(crate) fn prune_potion_effects(piece: &mut Piece) -> Result<()> {
+    let nested = piece
+        .extra
+        .get("attributes")
+        .filter(|value| truthy(Some(value)));
+    let provenance = nested.map_or_else(
+        || piece.extra.get("potionEffects"),
+        |attributes| attributes.get("potionEffects"),
+    );
+    let Some(Value::Array(entries)) = provenance else {
+        return Ok(());
+    };
+    if nested.is_some() {
+        return Err(EngineError::UnsupportedFeature(
+            "raw potion piece with nested canonical attributes".into(),
+        ));
+    }
+    let mut ids = Vec::with_capacity(POTION_EFFECTS.len());
+    let mut seen = BTreeSet::new();
+    for entry in entries {
+        if let Some(id) = entry.as_str()
+            && potion_effect_active(piece, id)
+            && seen.insert(id)
+        {
+            ids.push(id.to_owned());
+        }
+    }
+    if ids.is_empty() {
+        piece.extra.shift_remove("potionEffects");
+    } else {
+        piece.extra.insert("potionEffects".into(), json!(ids));
+    }
+    Ok(())
+}
+// main:3883-3888. Append the selected effect after pruning, even when its
+// active predicate differs. Deleting an empty list preserves JS key order.
+pub(crate) fn note_potion_effect(piece: &mut Piece, effect: &str) -> Result<()> {
+    prune_potion_effects(piece)?;
+    if !POTION_EFFECTS.contains(&effect) {
+        return Ok(());
+    }
+    if truthy(piece.extra.get("attributes")) {
+        return Err(EngineError::UnsupportedFeature(
+            "raw potion piece with nested canonical attributes".into(),
+        ));
+    }
+    if piece
+        .extra
+        .get("potionEffects")
+        .is_some_and(|value| !value.is_array() && truthy(Some(value)))
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "non-array potion effect provenance spread".into(),
+        ));
+    }
+    let mut ids: Vec<String> = piece
+        .extra
+        .get("potionEffects")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect();
+    if !ids.iter().any(|id| id == effect) {
+        ids.push(effect.into());
+    }
+    piece.extra.insert("potionEffects".into(), json!(ids));
+    Ok(())
+}
+fn apply_potion(state: &mut GameState, card: &CardSlot, action: &Action) -> Result<()> {
+    let square = target_square(action)?;
+    let mut piece = state
+        .at(square)
+        .filter(|piece| potion_target(piece))
+        .cloned()
+        .ok_or(EngineError::IllegalAction)?;
+    let pool = potion_pool(state, &piece);
+    if pool.is_empty() {
+        return Err(EngineError::IllegalAction);
+    }
+    let effect = pool[crate::transition::sample_choice(state, pool.len())?];
+    let owner = piece.color.owner().ok_or(EngineError::IllegalAction)?;
+    let hostile = owner.opponent();
+    match effect {
+        "grapplerBound" => {
+            piece
+                .extra
+                .insert("grapplerBound".into(), json!({"untilColor":owner}));
+        }
+        "sacrificeProtection" | "lastResistance" => {
+            temporary_protection(&mut piece, effect, owner);
+        }
+        "coronationProtection" => {
+            piece.extra.insert("coronationProtection".into(),json!({"color":owner,"startTurn":state.turns_taken.get(owner),"previousProtected":truthy(piece.extra.get("protected"))}));
+            piece.extra.insert("protected".into(), json!(true));
+        }
+        "shield" | "evasion" | "ghost" | "chameleon" | "loyalist" | "explosive"
+        | "outpostProtection" | "nullification" | "recurrence" | "poisonedPawn" | "trojanHorse"
+        | "inertia" => {
+            piece.extra.insert(
+                match effect {
+                    "shield" => "shielded",
+                    "outpostProtection" => "outpostProtected",
+                    _ => effect,
+                }
+                .into(),
+                json!(true),
+            );
+        }
+        "basicTraining" => {
+            piece.extra.insert("basicTraining".into(), json!(true));
+            piece
+                .extra
+                .insert("potionBasicTraining".into(), json!(true));
+        }
+        "stealth" => {
+            piece.extra.insert("hiddenFrom".into(), json!(hostile));
+        }
+        "parry" => {
+            piece.extra.insert("parry".into(), json!({"chance":0.4}));
+        }
+        "submerge" => {
+            piece.extra.insert("submerged".into(), json!(true));
+        }
+        "chimera" => {
+            piece.extra.insert("chimera".into(), json!(true));
+            if state.royal_identity(&piece) {
+                piece.extra.insert("crownRoyal".into(), json!(true));
+            }
+        }
+        "witchTrial" => {
+            piece.extra.insert(
+                "witchTrial".into(),
+                json!({"by":hostile,"remaining":if september26(state){2}else{3}}),
+            );
+        }
+        "stake" => {
+            piece
+                .extra
+                .insert("staked".into(), json!({"by":owner,"remaining":4}));
+        }
+        "callingCard" => {
+            piece
+                .extra
+                .insert("callingCard".into(), json!({"by":hostile}));
+        }
+        "emptyLunchbox" => {
+            piece.extra.insert(
+                "emptyLunchbox".into(),
+                json!({"by":hostile,"deadlineTurn":u64::from(*state.turns_taken.get(owner))+3}),
+            );
+        }
+        "poisonStun" => {
+            let remaining = js_number(piece.extra.get("poisonStunTurns"), 0)
+                .unwrap_or(0.0)
+                .max(3.0);
+            piece
+                .extra
+                .insert("poisonStunTurns".into(), json!(remaining));
+            piece.extra.insert("poisonStunColor".into(), json!(owner));
+        }
+        "freeze" => {
+            piece.extra.insert("frozen".into(), json!(true));
+            piece.extra.insert(
+                "frozenByCard".into(),
+                json!({"remaining":3,"source":hostile}),
+            );
+        }
+        "disarm" => {
+            piece
+                .extra
+                .insert("disarmed".into(), json!({"by":hostile,"remaining":1}));
+        }
+        "mannerNoCapture" => {
+            piece.extra.insert("potionManner".into(), json!(true));
+            piece
+                .extra
+                .insert("coolGuyCapturedLast".into(), json!(true));
+        }
+        "saturationNoCapture" => {
+            piece.extra.insert("potionSaturation".into(), json!(true));
+            piece.extra.insert("capturesMade".into(), json!(3));
+        }
+        "queensGambitProtection" => {
+            piece.extra.insert("protected".into(), json!(true));
+            piece
+                .extra
+                .insert("queensGambitProtection".into(), json!(true));
+        }
+        "severance" => {
+            piece
+                .extra
+                .insert("severed".into(), json!({"by":hostile,"remaining":2}));
+        }
+        _ => {
+            return Err(EngineError::UnsupportedFeature(format!(
+                "potion result {effect}"
+            )));
+        }
+    }
+    note_potion_effect(&mut piece, effect)?;
+    if let Some(actual) = state
+        .deck_slots
+        .get_mut(state.turn)
+        .iter_mut()
+        .find(|actual| actual.instance_id == card.instance_id && actual.id == card.id)
+    {
+        actual
+            .extra
+            .insert("suspiciousPotionResultId".into(), json!(effect));
+    }
+    mark_animation(state, &piece)?;
+    write_piece(state, &piece);
+    Ok(())
 }
 fn chain_range(first: Square, second: Square) -> bool {
     first
@@ -2505,22 +3323,39 @@ pub(crate) fn apply(
             if action.target.is_some() {
                 return Err(EngineError::IllegalAction);
             }
-            if !truthy(state.extra.get(field)) {
-                state
-                    .extra
-                    .insert(field.into(), json!({"white":false,"black":false}));
-            }
             let color = if enemy {
                 state.turn.opponent()
             } else {
                 state.turn
             };
-            state
-                .extra
-                .get_mut(field)
-                .and_then(Value::as_object_mut)
-                .ok_or_else(|| EngineError::InvalidState(format!("{field} color map missing")))?
-                .insert(color.as_str().into(), json!(true));
+            apply_side_flag(state, field, color)?;
+            return Ok(Some(Vec::new()));
+        }
+        Mutation::Coronation => {
+            apply_side_flag(state, "coronation", state.turn)?;
+            return Ok(Some(Vec::new()));
+        }
+        Mutation::LastResistance => {
+            apply_last_resistance(state)?;
+            return Ok(Some(Vec::new()));
+        }
+        Mutation::Twins => {
+            apply_twins(state, action)?;
+            return Ok(Some(Vec::new()));
+        }
+        Mutation::Metal => {
+            let target = action.target.as_ref().ok_or(EngineError::IllegalAction)?;
+            let square = loose_square(target).ok_or(EngineError::IllegalAction)?;
+            let mut piece = state
+                .at(square)
+                .cloned()
+                .ok_or(EngineError::IllegalAction)?;
+            if !matches_plan(state, &piece, square, plan)? {
+                return Err(EngineError::IllegalAction);
+            }
+            piece.extra.insert("metalized".into(), json!(true));
+            piece.extra.insert("metalCooldown".into(), json!(0));
+            write_piece(state, &piece);
             return Ok(Some(Vec::new()));
         }
         Mutation::Selection(field) => {
@@ -2537,6 +3372,27 @@ pub(crate) fn apply(
         }
         Mutation::Chain => {
             apply_chain(state, action)?;
+            return Ok(Some(Vec::new()));
+        }
+        Mutation::FeudalContract => {
+            apply_feudal_contract(state, action)?;
+            return Ok(Some(Vec::new()));
+        }
+        Mutation::Scarecrow => {
+            return apply_scarecrow(state, action, plan).map(Some);
+        }
+        Mutation::Potion => {
+            apply_potion(state, card, action)?;
+            return Ok(Some(Vec::new()));
+        }
+        Mutation::Guard | Mutation::Freeze | Mutation::Alekhine | Mutation::Evasion => {
+            match plan.mutation {
+                Mutation::Guard => apply_guard(state)?,
+                Mutation::Freeze => apply_freeze(state)?,
+                Mutation::Alekhine => apply_alekhine(state)?,
+                Mutation::Evasion => apply_evasion(state)?,
+                _ => unreachable!(),
+            }
             return Ok(Some(Vec::new()));
         }
         Mutation::QueensGambit => return apply_queens_gambit(state, action).map(Some),

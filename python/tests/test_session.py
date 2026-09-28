@@ -21,7 +21,7 @@ from accelerate_chess.search import PublicTracker, SearchResult
 from accelerate_chess.training import (DatasetCursor, ReplayDataset, TrainingLimits, _rng_snapshot,
     _tree_hash, create_optimizer, load_training_checkpoint, optimize, save_training_checkpoint)
 from test_search import TestAction, TestPosition, spec
-from test_model_stack import observation_policy
+from test_model_stack import observation_policy, resign
 
 torch.set_num_threads(1)
 
@@ -61,7 +61,7 @@ def synthetic_episode(*, terminal=True):
     return recorder
 
 
-def test_public_replay_terminal_labels_and_streamed_dataset(session_directory):
+def test_public_replay_terminal_labels_and_streamed_dataset(session_directory, monkeypatch):
     completed = synthetic_episode()
     completed.save(session_directory / "episode.json")
     unfinished = synthetic_episode(terminal=False)
@@ -94,6 +94,52 @@ def test_public_replay_terminal_labels_and_streamed_dataset(session_directory):
     pending.finish(None, "cancelled-before-apply")
     ReplayEpisode(pending.snapshot(), spec())
     assert pending.snapshot()["decisions"][-1]["transition_completed"] is False
+    initial = {viewer: TestPosition(1).observe(viewer) for viewer in ("white", "black")}
+    # A decision-free, unfinished replay still has a complete policy boundary.
+    # Public validation retains owned JSON and allocates no neural features.
+    with monkeypatch.context() as public_only:
+        public_only.setattr("accelerate_chess.encoding.np.zeros", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("public validation allocated features")))
+        empty = EpisodeRecorder(initial, spec(), environment_seed=37, belief_seed=71, evidence_kind="synthetic")
+        empty.finish(None, "no-decisions")
+        assert list(ReplayEpisode(empty.snapshot(), spec()).examples()) == []
+        owned = PublicEncoder(spec()).validate_observation(initial["white"])
+    initial["white"]["publicState"]["observationPolicyHash"] = "0" * 64
+    assert owned.public["publicState"]["observationPolicyHash"] == spec().observation_policy_hash
+    assert empty.trackers["white"].initial["publicState"]["observationPolicyHash"] == spec().observation_policy_hash
+    for modify in (
+        lambda frame: frame["publicState"].update(projectionVersion="source-visible-20260927-v2"),
+        lambda frame: frame["publicState"].update(observationPolicyHash="0" * 64),
+        lambda frame: frame["publicState"].pop("deathmatchStatus"),
+    ):
+        malformed = deepcopy(empty.snapshot())
+        frame = malformed["traces"]["white"]["initial"]
+        modify(frame); resign(frame)
+        malformed["replay_hash"] = hashlib.sha256(canonical_json({key: value for key, value in malformed.items() if key != "replay_hash"}).encode()).hexdigest()
+        with pytest.raises(ValueError, match="policy|projection|deathmatch"):
+            EpisodeRecorder({viewer: trace["initial"] for viewer, trace in malformed["traces"].items()}, spec(), environment_seed=37, belief_seed=71, evidence_kind="synthetic")
+        with pytest.raises(ValueError, match="policy|projection|deathmatch"):
+            ReplayEpisode(malformed, spec())
+    malformed = deepcopy(completed.snapshot())
+    malformed["decisions"] = []
+    malformed["outcome"] = {"status": "unfinished", "winner": None, "reason": "invalid-intermediate-frame"}
+    frame = completed.trackers["white"].frame_at(1)
+    frame["publicState"]["observationPolicyHash"] = "0" * 64
+    resign(frame)
+    malformed["traces"]["white"]["steps"][0]["patch"].extend([
+        {"path": ["publicState", "observationPolicyHash"], "value": "0" * 64},
+        {"path": ["informationStateKey"], "value": frame["informationStateKey"]},
+    ])
+    malformed["traces"]["white"]["steps"][1]["patch"].extend([
+        {"path": ["publicState", "observationPolicyHash"], "value": spec().observation_policy_hash},
+        {"path": ["informationStateKey"], "value": completed.trackers["white"].latest["informationStateKey"]},
+    ])
+    malformed["replay_hash"] = hashlib.sha256(canonical_json({key: value for key, value in malformed.items() if key != "replay_hash"}).encode()).hexdigest()
+    with pytest.raises(ValueError, match="policy"):
+        ReplayEpisode(malformed, spec())
+    external = deepcopy(empty.snapshot())
+    loaded = ReplayEpisode(external, spec())
+    external["outcome"]["winner"] = "black"
+    assert loaded.outcome["winner"] is None and list(loaded.examples()) == []
 
 
 def test_synthetic_optimizer_and_rng_cursor_resume_preserve_failure_state(session_directory):

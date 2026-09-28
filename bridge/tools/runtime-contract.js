@@ -2,7 +2,7 @@
 const crypto = require("node:crypto");
 const catalog = require("../catalog/site-20260927.json");
 const observationPolicy = require("../catalog/observation-20260927.json");
-const ORACLE_PROFILE_VERSION = "accelerate-headless-semantic-v2";
+const ORACLE_PROFILE_VERSION = "accelerate-headless-semantic-v6";
 const { validate } = require("./validate");
 const VERSIONS = Object.freeze({ position: "accelerate-position-v1", action: "accelerate-action-v1", observation: "accelerate-observation-v2", result: "accelerate-result-v1", step: "accelerate-step-v1" });
 const digest = value => crypto.createHash("sha256").update(canonical(value)).digest("hex");
@@ -193,6 +193,9 @@ function validateObservation(value) {
   const publicKeys = [...observationPolicy.statePublicFields, ...observationPolicy.derivedPublicFields];
   if (Object.keys(value.publicState).some(key => !publicKeys.includes(key))) throw new TypeError("Unknown public field requires an observation contract version update.");
   if (value.publicState.projectionVersion !== observationPolicy.projectionVersion || value.publicState.observationPolicyHash !== digest(observationPolicy)) throw new TypeError("Observation projection policy mismatch.");
+  if (!Object.hasOwn(value.publicState, "deathmatchStatus")) throw new TypeError("Missing public deathmatch status.");
+  const deathmatchErrors = validate(observationPolicy.deathmatchSchema, value.publicState.deathmatchStatus, "publicState.deathmatchStatus", "runtime-v1.schema.json");
+  if (deathmatchErrors.length) throw new TypeError(`Invalid public deathmatch status: ${deathmatchErrors.join("; ")}`);
   for(const key of observationPolicy.statePublicFields){
     if(!Object.hasOwn(value.publicState,key))continue;
     const shape=observationPolicy.stateValueSchemas?.[key];

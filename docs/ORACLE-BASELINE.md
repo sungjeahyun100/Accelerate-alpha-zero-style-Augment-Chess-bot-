@@ -3,10 +3,15 @@
 > 상태: 기존 worker와 fixture에 대한 과거 조사 자료입니다. O-002는 [DECISIONS.md의 D-008](DECISIONS.md#d-008-최초-동결-사이트-본체를-규칙-정답으로-고정)에서 최초 동결 client를 기준으로 채택했습니다. 아래 worker/fixture 비교 수치를 현재 Rust 엔진의 동등성으로 사용하지 않습니다.
 
 현재 실행 기준은 2026-09-27에 동결한 main-CqkYwJX4.js와 명시
-accelerate-headless-semantic-v2 profile이다. 성공한 restore/newGame에서 snapshot 밖
-activePieceAnimationUntil renderer Map을 cold 상태로 초기화한다. action 내부 정산에서는
-cache를 보존하고 복원 실패는 state·RNG·cache·callback을 바꾸지 않는다. v1의 reused-oracle
-card 비교와 v2의 fresh-state 비교를 구분하며 serialized field는 비교에서 제외하지 않는다.
+accelerate-headless-semantic-v6 profile이다. 성공한 restore/newGame에서 snapshot 밖
+activePieceAnimationUntil renderer Map과 clockDisplayAnchor를 cold 상태로 초기화한다.
+action 내부 정산에서는 두 context를 보존하고 복원 실패는 state·RNG·context·callback을
+바꾸지 않는다. 새 게임은 별도 동결 source VM에서 설정의 `draftDeleteEnabled`를 원문
+초기화 전에 적용하고 수치 설정 후 원문 helper로 초기 replay 기본 frame과 tail을
+재캡처한 뒤 VM·RNG callback을 함께 교체한다. v1의 reused-oracle, v2의 renderer-only,
+v3의 시계 반례, v4의 새 게임 모듈 상태, v5의 수치 설정 replay 반례, v6의 관측 후 viewer
+context 반례를 구분하며 serialized field는 비교에서 제외하지 않는다. v3 wheel의 세 모드
+ONNX 실행 근거에는 v4·v5·v6가 포함되지 않는다.
 최초 hash와 실행 의존성을 보존하고,
 사용자가 사용하는 client의 legal/apply/draft/result를 실제 Rust와 비교한다.
 worker의 useful/전략 필터는 client legality를 대신하지 않는다. 전체 catalog의 정답

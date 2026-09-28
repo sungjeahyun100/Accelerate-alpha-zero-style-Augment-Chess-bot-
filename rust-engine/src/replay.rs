@@ -17,6 +17,73 @@ fn value(state: &GameState, key: &str, fallback: Value) -> Value {
         .cloned()
         .unwrap_or(fallback)
 }
+
+/// applyWinterFreezeCycle runs during endMove, including when Winter Kingdom
+/// is disabled. It reconstructs this object; replay uses JSON.stringify, so
+/// property order matters even when all values are unchanged.
+pub(crate) fn normalize_winter_after_turn(state: &mut GameState) -> Result<()> {
+    let empty = serde_json::Map::new();
+    let original = state
+        .extra
+        .get("winterKingdom")
+        .and_then(Value::as_object)
+        .unwrap_or(&empty);
+    if crate::observation::truth(original.get("enabled")) {
+        return Err(EngineError::UnsupportedFeature(
+            "winter freeze cycle".into(),
+        ));
+    }
+    let mut winter = serde_json::Map::new();
+    if let Some(cycle) = original
+        .get("previewCycle")
+        .filter(|v| v.as_i64().is_some() || v.as_u64().is_some())
+    {
+        winter.insert("previewCycle".into(), cycle.clone());
+        let ids = original.get("previewIds").and_then(Value::as_array);
+        let mut seen = BTreeSet::new();
+        let ids = ids
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .filter(|id| seen.insert((*id).to_owned()))
+            .take(6)
+            .collect::<Vec<_>>();
+        winter.insert("previewIds".into(), json!(ids));
+    }
+    winter.insert(
+        "enabled".into(),
+        json!(crate::observation::truth(original.get("enabled"))),
+    );
+    let cycle = crate::observation::number(original.get("lastCycle"))
+        .filter(|n| *n != 0.0)
+        .unwrap_or(0.0);
+    winter.insert("lastCycle".into(), json!(cycle));
+    let ids = original.get("frozenIds").and_then(Value::as_array);
+    let ids = ids
+        .into_iter()
+        .flatten()
+        .filter(|id| crate::observation::truth(Some(id)))
+        .take(12)
+        .map(|id| {
+            id.as_str().map(str::to_owned).ok_or_else(|| {
+                EngineError::UnsupportedFeature(
+                    "winter frozenIds non-string source coercion".into(),
+                )
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    winter.insert("frozenIds".into(), json!(ids));
+    winter.insert(
+        "disabledByLastWarmth".into(),
+        json!(crate::observation::truth(
+            original.get("disabledByLastWarmth")
+        )),
+    );
+    state
+        .extra
+        .insert("winterKingdom".into(), Value::Object(winter));
+    Ok(())
+}
 fn canonical_equal(first: &Value, second: &Value) -> Result<bool> {
     // Source valuesEqual uses JSON.stringify, including object insertion order.
     // Numeric spelling still follows JavaScript, where 0.0 and 0 stringify alike.
@@ -81,6 +148,16 @@ pub(crate) fn track_moving(state: &mut GameState, piece: &Piece) -> Result<()> {
     let Some(actor) = piece.color.owner() else {
         return Ok(());
     };
+    // main846/100695: another allied move releases every alias of the bond.
+    // The moving object's own binding is preserved by the source helper.
+    for candidate in state.board.iter_mut().flatten().flatten() {
+        if candidate.color == piece.color
+            && candidate.id != piece.id
+            && crate::observation::truth(candidate.extra.get("grapplerBound"))
+        {
+            candidate.extra.shift_remove("grapplerBound");
+        }
+    }
     let current = value(state, "exhaustion", json!({}));
     let entry = |color: Color| json!({"enabled":current[color.as_str()]["enabled"].as_bool().unwrap_or(false),"pieceId":current[color.as_str()]["pieceId"].as_str().unwrap_or(""),"count":current[color.as_str()]["count"].as_u64().unwrap_or(0)});
     let mut exhaustion = json!({"white":entry(Color::White),"black":entry(Color::Black)});
@@ -279,6 +356,38 @@ pub(crate) fn queue_card(state: &mut GameState, color: Color, card: &CardSlot) -
     }
     Ok(())
 }
+
+/// The source's forced first-move card goes through
+/// recordForcedOpeningCardUse, which appends a special notation after the move
+/// notation. Ordinary finishCard reorders its card notation to the front.
+pub(crate) fn queue_forced_opening_card(
+    state: &mut GameState,
+    color: Color,
+    card: &CardSlot,
+) -> Result<()> {
+    let name = card.extra.get("name").and_then(Value::as_str).unwrap_or("");
+    let move_number = state
+        .extra
+        .get("activeHistoryMoveNumber")
+        .and_then(Value::as_u64)
+        .unwrap_or(u64::from(state.full_move.max(1)));
+    queue_notation(
+        state,
+        "card",
+        color,
+        format!("@{}", trim(name, 60)),
+        format!(
+            "{} 카드 {}",
+            label(color),
+            card.extra
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("undefined")
+        ),
+        move_number,
+    )?;
+    Ok(())
+}
 fn square_name(square: Square) -> String {
     format!("{}{}", char::from(b'a' + square.col), 8 - square.row)
 }
@@ -426,14 +535,31 @@ pub(crate) fn queue_move(
 /// activeMoveReplayCapture control variable without leaking it into snapshots.
 pub(crate) fn begin_move(state: &mut GameState, actor: Color) -> Result<GameState> {
     let before = state.clone();
-    let replay = state
+    let old = state
         .extra
-        .entry("moveReplay")
-        .or_insert_with(|| json!({"white":null,"black":null}));
-    replay
-        .as_object_mut()
-        .ok_or_else(|| EngineError::InvalidState("moveReplay must be a player map".into()))?
-        .insert(actor.as_str().into(), Value::Null);
+        .get("moveReplay")
+        .cloned()
+        .unwrap_or(Value::Null);
+    if !old.is_null() && !old.is_object() {
+        return Err(EngineError::InvalidState(
+            "moveReplay must be a player map".into(),
+        ));
+    }
+    // normalizeColorValues constructs a new white-then-black object. Its
+    // insertion order enters the source's JSON.stringify replay delta even
+    // when both color values stay null after a threat probe interrupts capture.
+    let mut replay = serde_json::Map::new();
+    for color in [Color::White, Color::Black] {
+        let value = if color == actor {
+            Value::Null
+        } else {
+            old[color.as_str()].clone()
+        };
+        replay.insert(color.as_str().into(), value);
+    }
+    state
+        .extra
+        .insert("moveReplay".into(), Value::Object(replay));
     Ok(before)
 }
 fn board_delta(before: &Value, after: &Value) -> Result<Vec<Value>> {
@@ -612,6 +738,44 @@ pub(crate) fn record(state: &mut GameState, label: &str) -> Result<()> {
     notations.retain(|v| {
         v["text"].as_str().is_some_and(|s| !s.is_empty()) && seen.insert(notation_key(v))
     });
+    if label != "sync" && state.mode == "play" {
+        let selected = notations
+            .iter()
+            .rposition(|event| event["kind"] == "move")
+            .or_else(|| {
+                notations
+                    .iter()
+                    .rposition(|event| event["kind"] == "special")
+            });
+        if let Some(index) = selected {
+            let color = notations[index]["color"]
+                .as_str()
+                .and_then(|color| match color {
+                    "white" => Some(Color::White),
+                    "black" => Some(Color::Black),
+                    _ => None,
+                });
+            if let Some(color) = color
+                && crate::threat::evaluate_royal_capture(state, color.opponent())?.0
+            {
+                let event = &mut notations[index];
+                let text = event["text"].as_str().unwrap_or("");
+                if !text.ends_with(['+', '#']) {
+                    event["text"] =
+                        json!(format!("{}+", text.chars().take(95).collect::<String>()));
+                    if let Some(redactions) =
+                        event.get_mut("redactions").and_then(Value::as_object_mut)
+                    {
+                        for redaction in redactions.values_mut() {
+                            let text = redaction["text"].as_str().unwrap_or("");
+                            redaction["text"] =
+                                json!(format!("{}+", text.chars().take(95).collect::<String>()));
+                        }
+                    }
+                }
+            }
+        }
+    }
     let mut entry = json!({"board":state.board,"lastMove":value(state,"lastMove",Value::Null),"blackHole":value(state,"blackHole",json!([])),"winterKingdom":value(state,"winterKingdom",Value::Null),"camouflageRule":state.extra.get("camouflageRule").and_then(Value::as_bool).unwrap_or(false),"cardAnimation":null,"effects":[],"notation":notations.first().cloned().unwrap_or(Value::Null),"label":label,"turn":state.turn,"moveCount":state.move_count,"fullMove":state.full_move});
     if !notations.is_empty() {
         state.extra.insert(

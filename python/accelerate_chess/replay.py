@@ -108,7 +108,8 @@ class EpisodeRecorder:
             raise ValueError("unknown replay evidence kind")
         if (model_sha256 is None and evidence_kind != "synthetic") or (model_sha256 is not None and (not isinstance(model_sha256, str) or len(model_sha256) != 64 or any(digit not in "0123456789abcdef" for digit in model_sha256))):
             raise ValueError("native replay needs the verified teacher model SHA-256")
-        self.trackers = {viewer: PublicTracker(frame) for viewer, frame in initial_observations.items()}
+        self._encoder = PublicEncoder(spec)
+        self.trackers = {viewer: PublicTracker(self._encoder.validate_observation(frame).to_native()) for viewer, frame in initial_observations.items()}
         if any(tracker.viewer != viewer for viewer, tracker in self.trackers.items()):
             raise ValueError("replay viewer identity mismatch")
         self.spec = spec
@@ -138,6 +139,7 @@ class EpisodeRecorder:
     def advance(self, observations: Mapping[str, Mapping[str, Any]], *, actor: str, intent: Mapping[str, Any]):
         if set(observations) != {"white", "black"} or actor not in self.trackers:
             raise ValueError("advance requires both public projections and the actual decision actor")
+        observations = {viewer: self._encoder.validate_observation(frame).to_native() for viewer, frame in observations.items()}
         # Validate both projections without partially advancing one tracker.
         for viewer, tracker in self.trackers.items():
             tracker.validate_append(observations[viewer], own_intent=intent if viewer == actor else None)
@@ -196,6 +198,9 @@ def _validate_decision(record, trackers, spec):
 class ReplayEpisode:
     def __init__(self, payload, expected_spec: EncoderSpec | None = None):
         fields = {"version", "metadata", "encoder", "observation_policy", "traces", "decisions", "outcome", "replay_hash"}
+        if not isinstance(payload, dict):
+            raise ValueError("replay contract must be a JSON object")
+        payload = json.loads(canonical_json(payload))
         if not isinstance(payload, dict) or set(payload) != fields or payload["version"] != REPLAY_VERSION or payload["replay_hash"] != _digest({key: value for key, value in payload.items() if key != "replay_hash"}):
             raise ValueError("replay contract or content hash mismatch")
         self.spec = EncoderSpec.from_dict(payload["encoder"], observation_policy=payload["observation_policy"])
@@ -215,6 +220,11 @@ class ReplayEpisode:
         if not isinstance(payload["traces"], dict) or set(payload["traces"]) != {"white", "black"}:
             raise ValueError("replay public traces are missing")
         self.trackers = {viewer: PublicTracker.from_snapshot(trace) for viewer, trace in payload["traces"].items()}
+        encoder = PublicEncoder(self.spec)
+        for tracker in self.trackers.values():
+            encoder.validate_observation(tracker.initial)
+            for _, frame in tracker.frames():
+                encoder.validate_observation(frame)
         if any(tracker.viewer != viewer for viewer, tracker in self.trackers.items()) or len({tracker.steps for tracker in self.trackers.values()}) != 1:
             raise ValueError("replay public projection steps do not agree")
         self.decisions = payload["decisions"]

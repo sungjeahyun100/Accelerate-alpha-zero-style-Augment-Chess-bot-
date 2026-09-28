@@ -85,16 +85,27 @@ UI가 보여 주는 legal hint는 그 자체가 관찰 가능한 정보다.
 captured piece는 사이트 renderCaptureList가 viewer/hiddenFrom 필터 없이 양측에 보여 주는
 마지막 12개의 type/color/시각 변형만 제공한다. collapsedCells, 공개 card owner flags, 현재
 promotion/trolley 선택 phase와 clock의 공개 잔여값도 보존한다. raw publicState 복사는 금지한다.
-필드별 allowlist와 viewer projection/실제 private/presentation/아직 검토 중인 분류는
+필드별 allowlist와 viewer projection·private·내부 기록·presentation·미지원 context 분류는
 `bridge/catalog/observation-20260927.json`에 있다. 새 unknown 필드는 검토 없이 무시하지 않는다.
-visibilityReviewPending은 비공개라는 결론이 아니며 전체 관측 coverage의 미완료 범위다.
+미분류였던 raw 52개는 source 감사로 분류했고 `sourceDerivedOnly`는 지정된 strict 파생
+surface만 허가한다. raw nested 객체 전체의 복사나 해당 규칙의 엔진 지원 등록을 허가하지 않는다.
 
 관측 v2는 동결 source renderer가 보여 주는 기물 상태, 보드 표시와 관계를 별도로 투영한다.
 기물의 `status`와 publicState의 `boardMarks`·`relationships`·`overlays`는 정책에 있는 strict schema를
 따른다. 효과의 내부 ID나 raw deadline을 복사하는 대신 실제 화면의 flag·남은 횟수·표시 좌표를
 제공한다. 소유자와 시간 정보가 화면에 나타나는 경우에는 그 공개 의미를 유지한다.
-정책은 schemaVersion 2·projectionVersion `source-visible-20260927-v2`이며, 규칙·catalog의
+정책은 schemaVersion 2·projectionVersion `source-visible-20260927-v3`이며, 규칙·catalog의
 동결 source 버전은 바꾸지 않는다. 정확한 필드별 구현 범위와 남은 검증은 IMPLEMENTATION에 기록한다.
+`publicState.deathmatchStatus`는 정확히 `{active: boolean, warning: boolean}`이며 필수다.
+`warning`은 local explicit snapshot의 원문 경고 자격이다. DOM에 남은 toast/status 문구,
+notice dedup cache와 다음 턴의 종료·승패를 재현하지 않는다. online/owner guard는 별도 실행
+context의 경계이며 local 의미를 그대로 적용하지 않는다.
+첫 수 자동 OPENING 카드가 만드는 `firstMoveUndo`는 원문 실패 복구용 내부 snapshot이다.
+성공 뒤 null이어도 raw Position에는 존재할 수 있지만 공개 관측·모델 특징으로 복사하지 않는다.
+이 내부 필드 분류를 추가한 정책의 JCS hash는
+`5e17b5622f1e761d6e0719187006aaaac336150c4ae2372f76ef0080da0ab037`이며,
+projection/schema/tensor 용량은 유지한다. 이전 BFB hash의 artifact·replay는 새 정책과
+명시적으로 불일치한다.
 
 `EncoderSpec`은 `observation_policy_hash`를 포함한 16개 필드를 직렬화한다. Python 생성자는
 catalog와 관측 정책을 명시적으로 받고, encoder 계약·ONNX metadata·replay에는 그 정책도
@@ -102,6 +113,9 @@ catalog와 관측 정책을 명시적으로 받고, encoder 계약·ONNX metadat
 compile-time 정책과 비교한다. encoder/condition 버전은 `public-utf8-v2`·`public-film-v2`다.
 이전 관측 v1이나 정책이 누락된 artifact를 자동으로 보완하지 않는다. 설치 패키지의
 `site_catalog()`·`site_observation_policy()`는 서로 같은 wheel에 포함된 원본의 owned copy를 제공한다.
+replay는 decision이 없는 미완료 episode도 초기 관측과 복원한 모든 trace frame을
+EncoderSpec의 정책·projection·surface와 대조한다. 이 입력 검증을 위해 특징 tensor를
+생성하지 않는다. 같은 projection의 잘못된 정책 hash나 필수 surface 누락도 거부한다.
 
 ## 전이·이력·결과
 

@@ -104,22 +104,42 @@ ghost helper와 실제 체크 경보의 lastMove 변경을 포팅했고, monochr
 미지원 범위는 그대로 남으며 이 23개 변형을 전체 카드 완료로 합산하지 않는다.
 초기 public conditioning은 세 mode
 각 viewer에서 독립 future RNG를 유지하고 JCS 숫자 표현을 포함해 공개 frame 전체를
-검증한다. 전체 자동 패시브, grand의 최종 정산, 전체 카드·RULE·특수 이동·예약 전이
+검증한다. 전체 자동 패시브, grand의 모든 조합 정산, 전체 카드·RULE·특수 이동·예약 전이
 및 큰 조합 행동의 lazy 열거는 진행 중이다. 초기 draw 지원은 그 카드의 효과 지원을
 뜻하지 않으며 기본 normal 설정을 표준 play로 임의 대체하지 않는다. 선택·효과·활성
 상태의 미구현 의미는 명확한 오류이며 전체 256개 지원의 GO 근거로 사용하지 않는다.
 
-공개 조건화는 실제 private Position이나 실제 seed를 받지 않는다. normal 초기
+공개 조건화는 실제 private Position이나 실제 seed를 받지 않는다. normal·chaos 초기
 white·black의 숨은 OPENING offer 제안은 원문 pool·weight·배타성 및 black의 최대
 3회 balancing/조기 종료를 유지하고 `HiddenDraftProposal`로 source/proposal 확률과
-비율을 반환한다. 새로 공개되는 normal black offer의 조건화는 별도
+비율을 반환한다. 새로 공개되는 black offer의 조건화는 별도
 `ConditionedStepProposal`로 전체 realized draw trace의 p/q를 반환한다. 관측된
 ordered offer를 강제하는 latent attempt의 모든 mixture component를 계산하며,
 원문 best candidate가 관측과 다르면 제안을 거부한다. 기존 compatibility-only
 `apply_conditioned_public`의 성공을 이 확률 근거로 대체하지 않는다. probability는
 독립 source weighted-draw prior에 관한 것으로 유한 LCG seed의 정확한 posterior
-주장이 아니다. 수정된 board·후기 phase·chaos bundle/replacement 밀도는 미완료이며
-추정 확률로 통과시키지 않는다. Python이 filtering·weighted resampling을 소유한다.
+주장이 아니다. chaos는 원문 여섯 장의 순서 있는 draw, pair swap, replacement 및
+최대 세 balance attempt의 실제 trace를 유지하고, 강제 latent attempt에는 95% tilt와
+5% 원문 prior의 mixture를 사용해 원문 support를 보존한다. 공개 선택이 필요한 장을
+포함해도 실제 source best attempt가 관측과 다르면 거부한다. 수정된 board·후기 phase
+밀도는 미완료이며 추정 확률로 통과시키지 않는다. Python이 filtering·weighted
+resampling을 소유한다.
+
+현재 seed 37의 실제 기본 경로에서 normal 2회, chaos 2회, grand 12회 선택이 각각
+play에 도달하며, 모든 개별 wrapper 전이의 전체 상태·RNG·공개 이력이 일치했다.
+이것은 선택된 카드 조합의 근거이며 전체 mode 지원이나 모든 향후 반응의 근거가
+아니다. 민주주의의 왕 보호/마지막 폰 패배와 leap의 점프는 실제 kernel로 처리한다.
+카드 사용 가능성 검사에서 no-target 가상 실행이 소비하는 원문 RNG도 유지한다.
+가상 board/plan과 그 semantic density는 폐기하며 실제 future RNG cursor만 정산한다.
+성공한 카드의 public used/slot 변화로 불가능한 숨은 후보를 배제해도 호출자의 공개
+intent prior 분모는 그대로 유지한다.
+
+`sample_choice`는 실제 semantic uniform 선택의 1/N을 소유 실행 trace에 기록한다.
+ordinary source proposal은 같은 trace의 p와 q를 반환하며 opaque plan/notation ID
+생성은 확률 사건으로 중복 계산하지 않는다. nullification과 otherworld가 이 경계에
+연결되었고, 다른 카드 trace는 각 kernel 근거가 닫힐 때 연결한다. otherworld의 대기
+counter는 반수마다 감소하지만 예정된 귀환의 spawn/crush 정산은 명시 Unsupported다.
+카드의 실제 result metadata는 효과 적용 후 같은 deck instance에서 다시 읽어 기록한다.
 
 동결 metadata는 `bridge/catalog/`에서 compile time에 공유한다. 이 데이터는 초기값,
 카탈로그·공개 정책의 단일 근거이며 실행 결과를 fixture에서 찾아 반환하지 않는다.
@@ -141,12 +161,26 @@ name/text/art만 제외한 동일 비교를 통과했다. 원시 로그와 중�
 묶는다. 139개 공개 상태 필드의 중첩 schema와 기물·카드·선택창·이력의 공개 표면을
 엄격히 검사한다. 내부 deadline·기물 ID·난수 window ID를 원형으로 전달하지 않는다.
 대기 중 트롤리 window ID는 exact private action에만 남고 관측·공개 이력에는 없다.
-트롤리 실행 family 자체는 아직 미완료다. 현재 source 관측 130개 경우에서 전체 JSON과
+트롤리 실행 family 자체는 아직 미완료다. 당시 source 관측 130개 경우에서 전체 JSON과
 정보 상태 SHA-256이 일치했다. 초기 play의 공개 이동 강조도 이 비교에 포함하며,
 대부분의 추가 상태 조합은 draft 단계의 renderer 표면 비교다. 실제 DOM 표시 88개
 경우의 별도 검증 근거와 구분한다. 모든 활성 RULE의 fog·특수 강조·의사결정 전환이
-완료되었다는 의미로 사용하지 않는다. Rust 1.96에서 37개 커널 검사와 1개 입력 한도
-검사, 전체 target의 엄격 clippy 및 format 검사를 통과한 중간 checkpoint다.
+완료되었다는 의미로 사용하지 않는다. 공개 정책은 이후 v3으로 갱신되어
+`deathmatchStatus`의 공개 경고 자격을 포함한다. 정책과 규칙 카탈로그의 버전은
+구분하며 관측 증거는 해당 고정 소스 단위로 기록한다.
+
+다음 공통 규칙 checkpoint는 Potion2의 검증된 카드 구현과 조합해 원본
+normal 2·chaos 2·grand 12개의 초기 드래프트 전이, 앙파상 카드 12개 사례의
+활성화와 선택된 후속 이동, 포션 결과 뒤 왕의 조용한 이동 64개 사례를 비교했다.
+드래프트 16개와 앙파상 활성화 11개·실제 후속 이동 7개는 전체 원문 상태·RNG·이력
+차이가 없었다. 조용한 이동에서는 원본이 승인한 64개 중 지원하는 62개의 전체
+상태·RNG·이력·결과와 양측 관측 124개가 일치했다. 마녀 재판의 자동 포획 2개는
+`UnsupportedFeature`로 남는다. 이 범위를 전체 카드·RULE·변형 기물 실행 지원으로
+확대하지 않는다. Rust 1.96에서 이 고정 소스의 라이브러리 39개·CLI 1개 검사,
+전체 target 엄격 clippy와 format 검사를 통과했다. 사이트의 겨울 상태 객체는
+snapshot 불러오기 때가 아니라 턴 종료의 겨울 주기에서 재구성한다. 왕 위협 소리
+판정은 아군 속박 해제보다 먼저 실행한다. 두 순서는 실행 이력과 replay delta에도
+영향을 준다.
 
 Linux 검사는 저장소 밖 고정 빌드 슬롯을 사용한다.
 
@@ -157,6 +191,6 @@ CARGO_TARGET_DIR="$HOME/.cache/accelerate/build/full-stack-implementation/engine
 Windows에서는 `%APPDATA%\Accelerate\build\windows\full-stack-implementation\cargo`를
 사용한다. 현재 호스트에서 proc-macro DLL은 OS 정책에 의해 차단되어 Linux 검사를
 사용했다. f41e45d 기반 Windows·Linux native CI의 전체 실행 성공은 확인되었고 각
-OS 설치 검사 34개는 skip 없이 통과했다. 이후 진행 중인 replay·카드·관측 v2 변경의
+OS 설치 검사 34개는 skip 없이 통과했다. 이후 replay·카드·관측 v3의 새 고정 소스
 검증과 전체 catalog differential 완료는 그 CI 결과와 구분한다. 원시 실행 로그와
 일회성 비교 결과는 Git 밖 reports에 둔다.

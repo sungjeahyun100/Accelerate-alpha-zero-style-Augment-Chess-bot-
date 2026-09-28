@@ -22,7 +22,7 @@ ENCODER_VERSION = "public-utf8-v2"
 ACTION_VERSION = "candidate-payload-v1"
 CONDITION_VERSION = "public-film-v2"
 OBSERVATION_VERSION = "accelerate-observation-v2"
-PROJECTION_VERSION = "source-visible-20260927-v2"
+PROJECTION_VERSION = "source-visible-20260927-v3"
 HISTORY_SUMMARY_VERSION = "public-history-summary-v1"
 ACTION_TYPES = ("move", "card", "promotion", "promotionChoice", "shotgunReload", "wizardSpell", "fileSurgeSkip", "draftPick", "draftBundlePick", "trolleyChoice")
 
@@ -204,6 +204,8 @@ class EncoderSpec:
             raise ValueError("observation policy needs the strict source surface schemas")
         if not isinstance(policy.get("stateValueSchemas"), Mapping) or set(policy["stateValueSchemas"]) != set(policy["statePublicFields"]):
             raise ValueError("observation policy needs explicit public state value schemas")
+        if policy.get("deathmatchSchema") != {"type": "object", "additionalProperties": False, "required": ["active", "warning"], "properties": {"active": {"type": "boolean"}, "warning": {"type": "boolean"}}}:
+            raise ValueError("observation policy needs the strict source deathmatch status schema")
         return replace(self, _observation_policy=json.loads(encoded))
 
     @property
@@ -414,6 +416,9 @@ class PublicEncoder:
         allowed = set(self.policy["statePublicFields"]) | set(self.policy["derivedPublicFields"])
         if set(public) - allowed:
             raise ValueError("unknown public state fields require a source visibility review")
+        if "deathmatchStatus" not in public:
+            raise ValueError("public observation needs source-derived deathmatch status")
+        _surface_shape(self.policy["deathmatchSchema"], public["deathmatchStatus"], "publicState.deathmatchStatus")
         for key in self.policy["statePublicFields"]:
             if key in public:
                 _surface_shape(self.policy["stateValueSchemas"][key], public[key], f"publicState.{key}")
@@ -446,17 +451,25 @@ class PublicEncoder:
                     if change.get(key) is not None:
                         _surface_shape(self.policy["publicPieceSchema"], change[key], f"history.{key}")
 
-    def encode(self, observation: PublicObservation | Mapping[str, Any], actions: Sequence[Mapping[str, Any]], *, belief_summary: Mapping[str, Any] | None = None) -> EncodedPosition:
+    def validate_observation(self, observation: PublicObservation | Mapping[str, Any], *, belief_summary: Mapping[str, Any] | None = None) -> PublicObservation:
+        """Own and validate a public frame without allocating feature tensors.
+
+        Replay uses the same policy and surface boundary as inference, including
+        frames with no policy decisions. This does not impose neural payload
+        capacities on the full history retained by the tracker.
+        """
         if isinstance(observation, Mapping):
-            observation = PublicObservation.from_native(observation, belief_summary=belief_summary)
+            native = observation
         elif belief_summary is not None:
             raise ValueError("belief summary must be attached to the typed public observation or supplied with a native observation")
-        if not isinstance(observation, PublicObservation):
-            raise TypeError("encoding requires a PublicObservation, never a Position")
-        observation = PublicObservation.from_native(observation.to_native(), belief_summary=observation.belief_summary)
-        if observation.player not in ("white", "black"):
-            raise ValueError("unknown observation player")
-        if len(observation.board) != 8 or any(len(row) != 8 for row in observation.board):
+        elif isinstance(observation, PublicObservation):
+            native, belief_summary = observation.to_native(), observation.belief_summary
+        else:
+            raise TypeError("public validation requires a PublicObservation, never a Position")
+        owned = json.loads(canonical_json(native))
+        summary = json.loads(canonical_json(belief_summary)) if belief_summary is not None else None
+        observation = PublicObservation.from_native(owned, belief_summary=summary)
+        if not isinstance(observation.board, list) or len(observation.board) != 8 or any(not isinstance(row, list) or len(row) != 8 for row in observation.board):
             raise ValueError("only an 8x8 public board is supported")
         # These keys cannot be publicly supplied even through auxiliary history.
         if set(observation.public) != {"turn", "ownCards", "opponentHandCount", "publicState", "informationStateKey"}:
@@ -467,6 +480,11 @@ class PublicEncoder:
         self._reject_private(public_data)
         self._reject_private(observation.board)
         self._validate_surface(observation)
+        return observation
+
+    def encode(self, observation: PublicObservation | Mapping[str, Any], actions: Sequence[Mapping[str, Any]], *, belief_summary: Mapping[str, Any] | None = None) -> EncodedPosition:
+        observation = self.validate_observation(observation, belief_summary=belief_summary)
+        public_data = {"public": {key: value for key, value in observation.public.items() if key != "informationStateKey"}, "history": observation.history, "belief": observation.belief_summary}
         if self.spec.history_encoding == HISTORY_SUMMARY_VERSION:
             public_data["history"] = summarize_public_history(observation.history)
         board = np.zeros((self.spec.board_channels, 8, 8), np.float32)

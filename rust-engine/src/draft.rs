@@ -514,6 +514,172 @@ fn normal_offer_trace(
     Ok((picked, source_probability, proposal_probability))
 }
 
+// Keep a positive source-prior component: an observed final pair can originate
+// from a replacement or deterministic swap, rather than the first two raw
+// draws. Its source trace must never lose proposal support. The tilted branch
+// is an efficiency choice; this exact mixture density corrects its bias.
+const CHAOS_TILT_PROBABILITY: f64 = 0.95;
+
+pub(crate) fn propose_hidden_chaos_offer(
+    state: &mut GameState,
+    required: &[&str],
+    color: Color,
+) -> Result<(f64, f64)> {
+    if required.len() != 2 || required[0] == required[1] {
+        return Err(EngineError::ConditioningMismatch(
+            "CHAOS acquisition must contain two distinct definitions".into(),
+        ));
+    }
+    balanced_normal_proposal(state, color, |state, force| {
+        chaos_offer_trace(state, color, required, force)
+    })
+}
+
+pub(crate) fn propose_observed_chaos_offer(
+    state: &mut GameState,
+    public: &[Value],
+    color: Color,
+) -> Result<(f64, f64)> {
+    if public.len() != 6 {
+        return Err(EngineError::InvalidState(
+            "CHAOS OPENING offer must contain six cards".into(),
+        ));
+    }
+    let ids = public
+        .iter()
+        .map(|card| {
+            card["id"].as_str().ok_or_else(|| {
+                EngineError::InvalidState("public CHAOS card definition missing".into())
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    balanced_normal_proposal(state, color, |state, force| {
+        chaos_offer_trace(state, color, &ids, force)
+    })
+}
+
+pub(crate) fn propose_unobserved_chaos_offer(
+    state: &mut GameState,
+    color: Color,
+) -> Result<(f64, f64)> {
+    let (p, _) = balanced_normal_proposal(state, color, |state, _| {
+        chaos_offer_trace(state, color, &[], false)
+    })?;
+    Ok((p, p))
+}
+
+/// Full realized semantic draw trace, including every source replacement.
+/// At most six original and six replacement draws occur in one attempt; the
+/// source balancing loop reaches at most three attempts. No outcome-dependent
+/// unbounded retries, seed search, or conditional-event normalizer is used.
+fn chaos_offer_trace(
+    state: &mut GameState,
+    color: Color,
+    ids: &[&str],
+    force_attempt: bool,
+) -> Result<(Vec<Value>, f64, f64)> {
+    let force = force_attempt && !ids.is_empty() && state.rng.sample()? < CHAOS_TILT_PROBABILITY;
+    let (choices, mut p, mut tilted) = mixed_draw_trace(
+        state,
+        &["OPENING", "MIDDLE", "PIECE"],
+        6,
+        color,
+        &BTreeSet::new(),
+        true,
+        DrawTilt { ids, active: force },
+    )?;
+    let choices = arrange_chaos_with(state, choices, |state, excluded| {
+        let (mut choices, source, _) = mixed_draw_trace(
+            state,
+            &["MIDDLE", "PIECE"],
+            1,
+            color,
+            excluded,
+            false,
+            DrawTilt {
+                ids: &[],
+                active: false,
+            },
+        )?;
+        p *= source;
+        tilted *= source;
+        Ok(choices.pop())
+    })?;
+    let q = if ids.is_empty() {
+        p
+    } else {
+        CHAOS_TILT_PROBABILITY * tilted + (1.0 - CHAOS_TILT_PROBABILITY) * p
+    };
+    Ok((choices, p, q))
+}
+
+/// q_tilt is evaluated on this realized trace even when the sampled component
+/// was the source prior. Forced outcomes consume their ancillary uniform draw
+/// and clone nonce at the same source call boundary; those variables have the
+/// same conditional density in both kernels and cancel in the ratio.
+struct DrawTilt<'a> {
+    ids: &'a [&'a str],
+    active: bool,
+}
+
+fn mixed_draw_trace(
+    state: &mut GameState,
+    categories: &[&str],
+    count: usize,
+    color: Color,
+    excluded: &BTreeSet<String>,
+    opening: bool,
+    tilt: DrawTilt<'_>,
+) -> Result<(Vec<Value>, f64, f64)> {
+    let mut unavailable = acquired_ids(state);
+    unavailable.extend(excluded.iter().cloned());
+    let mut choices = Vec::new();
+    let mut p = 1.0;
+    let mut tilted = 1.0;
+    for index in 0..count {
+        let pool = mixed_pool(state, categories, color, &unavailable)?;
+        if pool.is_empty() {
+            break;
+        }
+        let total = pool.iter().map(|card| weight(card, opening)).sum::<f64>();
+        if !total.is_finite() || total <= 0.0 {
+            return Err(EngineError::UnsupportedFeature(
+                "nonpositive weighted CHAOS source pool".into(),
+            ));
+        }
+        let selected = if tilt.active && index < tilt.ids.len() {
+            state.rng.sample()?;
+            pool.iter()
+                .copied()
+                .find(|card| card["id"] == tilt.ids[index] && weight(card, opening) > 0.0)
+                .ok_or_else(|| {
+                    EngineError::ConditioningMismatch(
+                        "conditioned CHAOS sequence violates source draw predicates".into(),
+                    )
+                })?
+        } else {
+            weighted_pick(state, &pool, opening)?.expect("nonempty source pool")
+        };
+        let chance = weight(selected, opening) / total;
+        p *= chance;
+        tilted *= if index < tilt.ids.len() {
+            if selected["id"] == tilt.ids[index] {
+                1.0
+            } else {
+                0.0
+            }
+        } else {
+            chance
+        };
+        choices.push(clone_card(state, selected)?);
+        unavailable.insert(selected["id"].as_str().expect("id").into());
+    }
+    if choices.len() < tilt.ids.len() {
+        tilted = 0.0;
+    }
+    Ok((choices, p, tilted))
+}
+
 pub(crate) fn selected_draft_cards(state: &GameState, action: &Action) -> Result<Vec<Value>> {
     let choices = state
         .extra
@@ -550,10 +716,19 @@ fn forbidden_bundle(first: &Value, second: &Value) -> bool {
         || (first["id"] == "democracy" && second["id"] == "queens-gambit")
         || (first["id"] == "queens-gambit" && second["id"] == "democracy")
 }
-fn arrange_chaos(
+fn arrange_chaos(state: &mut GameState, choices: Vec<Value>, color: Color) -> Result<Vec<Value>> {
+    arrange_chaos_with(state, choices, |state, excluded| {
+        Ok(draw_mixed(state, &["MIDDLE", "PIECE"], 1, color, excluded, false)?.pop())
+    })
+}
+
+/// Source pairing and deterministic swaps are shared by ordinary draws and
+/// density-carrying proposals. Only the weighted replacement draw is supplied
+/// by the caller; the resulting pair order and exclusions are identical.
+fn arrange_chaos_with(
     state: &mut GameState,
     mut choices: Vec<Value>,
-    color: Color,
+    mut replacement: impl FnMut(&mut GameState, &BTreeSet<String>) -> Result<Option<Value>>,
 ) -> Result<Vec<Value>> {
     if choices.len() != 6 {
         return Ok(choices);
@@ -577,9 +752,7 @@ fn arrange_chaos(
                 .iter()
                 .filter_map(|c| c["id"].as_str().map(str::to_owned))
                 .collect();
-            if let Some(card) =
-                draw_mixed(state, &["MIDDLE", "PIECE"], 1, color, &excluded, false)?.pop()
-            {
+            if let Some(card) = replacement(state, &excluded)? {
                 choices[start + 1] = card;
             }
         }
@@ -612,9 +785,7 @@ fn arrange_chaos(
                 .iter()
                 .filter_map(|c| c["id"].as_str().map(str::to_owned))
                 .collect();
-            if let Some(card) =
-                draw_mixed(state, &["MIDDLE", "PIECE"], 1, color, &excluded, false)?.pop()
-            {
+            if let Some(card) = replacement(state, &excluded)? {
                 choices[partner] = card;
             }
         }
@@ -1298,6 +1469,7 @@ pub(crate) fn apply_pick(state: &mut GameState, action: &Action) -> Result<Vec<P
         state.extra.insert("endPhaseStartMove".into(), json!(0));
         crate::flow::start_clock(state)?;
         crate::flow::record_position(state)?;
+        crate::flow::check_no_action_loss(state)?;
     }
     Ok(Vec::new())
 }
@@ -1480,6 +1652,7 @@ fn apply_regular_pick(state: &mut GameState, action: &Action, draft: &Value) -> 
         }
         crate::flow::start_clock(state)?;
         crate::flow::record_position(state)?;
+        crate::flow::check_no_action_loss(state)?;
     }
     Ok(Vec::new())
 }

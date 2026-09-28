@@ -646,11 +646,9 @@ fn ensure_supported_interactions(state: &GameState, require_execution_support: b
         "relay",
         "fieldPromotion",
         "gomoku",
-        "magicGirlSurge",
         "vanishing",
         "knightInjury",
         "pawnConversion",
-        "pawnLeap",
         "fileSurge",
         "rookLift",
         "underpromotion",
@@ -671,7 +669,6 @@ fn ensure_supported_interactions(state: &GameState, require_execution_support: b
         "ruleBombs",
         "pendingPortals",
         "exhaustion",
-        "democracy",
         "camouflageRule",
         "transcendenceRule",
         "captureTheFlag",
@@ -693,7 +690,6 @@ fn ensure_supported_interactions(state: &GameState, require_execution_support: b
         "captureLock",
         "taunt",
         "monsterRule",
-        "potionEffects",
     ];
     for name in PENDING {
         if state.extra.get(*name).is_some_and(active) {
@@ -711,16 +707,11 @@ fn ensure_supported_interactions(state: &GameState, require_execution_support: b
         }
         for flag in [
             "quantum",
-            "evasion",
             "frenzy",
             "desperado",
-            "nullification",
             "stealth",
-            "ghost",
             "poisoned",
-            "submerged",
             "hedgehog",
-            "potionEffects",
             "crownBearer",
             "crownRoyal",
             "metalized",
@@ -730,7 +721,6 @@ fn ensure_supported_interactions(state: &GameState, require_execution_support: b
             "ironMonarchExtraMove",
             "madHorseSecondMove",
             "fileSurgeSecondMove",
-            "basicTraining",
             "promotionRush",
             "royalCommand",
         ] {
@@ -1059,6 +1049,20 @@ pub(crate) fn can_capture(state: &GameState, attacker: &Piece, target: &Piece) -
     let Some(actor) = attacker.color.owner() else {
         return false;
     };
+    if crate::observation::number(
+        attacker
+            .extra
+            .get("disarmed")
+            .and_then(|entry| entry.get("remaining")),
+    )
+    .unwrap_or(0.0)
+        > 0.0
+        || attacker.kind != "monster"
+            && crate::observation::truth(attacker.extra.get("potionManner"))
+            && crate::observation::truth(attacker.extra.get("coolGuyCapturedLast"))
+    {
+        return false;
+    }
     for lock in ["freshNoCaptureUntil", "cardNoCaptureUntil"] {
         if attacker.number(lock) > i64::from(*state.turns_taken.get(actor)) {
             return false;
@@ -1078,6 +1082,28 @@ pub(crate) fn can_capture(state: &GameState, attacker: &Piece, target: &Piece) -
     {
         return false;
     }
+    // main1193: physical royal augmentation identity is used here, including
+    // inactive regency/editor side flags. Copied movement is not that identity.
+    fn nullification_identity(piece: &Piece) -> &str {
+        if ["regencyHeir", "crownRoyal", "editorRoyal"]
+            .iter()
+            .any(|field| crate::observation::truth(piece.extra.get(*field)))
+            || matches!(
+                piece.kind.as_str(),
+                "king" | "royalKnight" | "shotgunKing" | "darkWizard" | "merchant"
+            )
+        {
+            "king"
+        } else {
+            piece.kind.as_str()
+        }
+    }
+    if target.kind != "scarecrow"
+        && crate::observation::truth(target.extra.get("nullification"))
+        && nullification_identity(target) == nullification_identity(attacker)
+    {
+        return false;
+    }
     let socialist = state.flag("socialism", actor)
         && !state.royal_identity(attacker)
         && attacker.kind != "crown"
@@ -1092,7 +1118,10 @@ pub(crate) fn can_capture(state: &GameState, attacker: &Piece, target: &Piece) -
     if ability == "idol" && !attacker.flag("crownBearer") && !socialist {
         return false;
     }
-    if state.flag("saturationRule", attacker.color) && attacker.number("capturesMade") >= 3 {
+    if (crate::observation::truth(state.extra.get("saturationRule"))
+        || crate::observation::truth(attacker.extra.get("potionSaturation")))
+        && crate::observation::number(attacker.extra.get("capturesMade")).unwrap_or(0.0) >= 3.0
+    {
         return false;
     }
     if state.flag("genevaConvention", target.color)
@@ -1237,6 +1266,13 @@ pub(crate) fn rays(
             match state.at(to) {
                 None => moves.push(MoveTarget::at(to)),
                 Some(target) => {
+                    if target.color == piece.color
+                        && target.flag("ghost")
+                        && piece.kind != "cannon"
+                        && crate::card_effects::ranged_piece(state, piece)
+                    {
+                        continue;
+                    }
                     if can_capture(state, piece, target) {
                         moves.push(MoveTarget::at(to));
                     }
@@ -1253,6 +1289,22 @@ pub(crate) fn piece_moves(
     piece: &Piece,
     from: Square,
 ) -> Result<Vec<MoveTarget>> {
+    if frozen(piece)
+        || crate::observation::number(
+            piece
+                .extra
+                .get("staked")
+                .and_then(|entry| entry.get("remaining")),
+        )
+        .unwrap_or(0.0)
+            > 0.0
+        || crate::observation::number(piece.extra.get("poisonStunTurns"))
+            .unwrap_or(0.0)
+            .floor()
+            > 0.0
+    {
+        return Ok(Vec::new());
+    }
     let reversed = state.flag("reversal", piece.color);
     let mut moves = match piece.kind.as_str() {
         "pawn" | "squire" | "standardBearer" => pawn_moves(state, piece, from),
@@ -1345,9 +1397,132 @@ pub(crate) fn piece_moves(
             .filter(|target| !target.flag("standardPawnDoubleStep"))
             .collect();
     }
+    if piece.flag("basicTraining")
+        && !piece.is_large()
+        && !matches!(piece.kind.as_str(), "wall" | "football" | "blackHole")
+        && piece.ability_kind() != "slime"
+        && (piece.flag("potionBasicTraining")
+            || !matches!(
+                piece.kind.as_str(),
+                "pawn"
+                    | "king"
+                    | "queen"
+                    | "primeMinister"
+                    | "jester"
+                    | "guard"
+                    | "amazon"
+                    | "man"
+                    | "idol"
+                    | "babyBear"
+                    | "bear"
+            ))
+        && let Some(actor) = piece.color.owner()
+    {
+        for direction in [actor.pawn_dir(), -actor.pawn_dir()] {
+            if direction != actor.pawn_dir() && !state.flag("retreat", actor) {
+                continue;
+            }
+            if let Some(to) = from.offset(direction, 0)
+                && state.at(to).is_none()
+            {
+                moves.push(MoveTarget::at(to));
+            }
+            if piece.ability_kind() != "missionary" {
+                for dc in [-1, 1] {
+                    if let Some(to) = from.offset(direction, dc)
+                        && state
+                            .at(to)
+                            .is_some_and(|victim| can_capture(state, piece, victim))
+                    {
+                        let mut target = MoveTarget::at(to);
+                        target
+                            .flags
+                            .insert("basicTrainingCapture".into(), json!(true));
+                        moves.push(target);
+                    }
+                }
+            }
+        }
+    }
+    if piece.flag("loyalist") && piece.ability_kind() != "slime" {
+        for row in 0..8 {
+            for col in 0..8 {
+                let anchor = Square { row, col };
+                if state.at(anchor).is_some_and(|candidate| {
+                    candidate.color == piece.color
+                        && (state.royal_identity(candidate) || candidate.kind == "merchant")
+                }) {
+                    for &(dr, dc) in KING {
+                        if let Some(to) = anchor.offset(dr, dc)
+                            && open_relocation(state, to)?
+                        {
+                            let mut target = MoveTarget::at(to);
+                            target.flags.insert("loyalistMove".into(), json!(true));
+                            moves.push(target);
+                        }
+                    }
+                }
+            }
+        }
+    }
     let mut seen = BTreeSet::new();
     let mut allowed = Vec::new();
     for target in moves {
+        let stationary = [
+            "colossusBody",
+            "colossusAttack",
+            "shotgunBlast",
+            "shotgunSnipe",
+            "merchantBuy",
+            "setLogDirection",
+        ]
+        .iter()
+        .any(|field| target.flag(field));
+        if crate::observation::truth(piece.extra.get("grapplerBound"))
+            && !stationary
+            && target.square() != from
+        {
+            continue;
+        }
+        let severed = crate::observation::number(
+            piece
+                .extra
+                .get("severed")
+                .and_then(|entry| entry.get("remaining")),
+        )
+        .unwrap_or(0.0)
+            > 0.0;
+        let exempt = target.flag("castle") || target.flag("colossusMove") || stationary;
+        if severed && !exempt {
+            let memory = crate::card_effects::current_base_movement(state, piece);
+            let kind = memory
+                .as_ref()
+                .and_then(|memory| memory.get("type"))
+                .and_then(Value::as_str)
+                .unwrap_or(piece.kind.as_str());
+            let dr = from.row.abs_diff(target.row);
+            let dc = from.col.abs_diff(target.col);
+            let distance = if matches!(kind, "hook" | "brutus") {
+                dr + dc
+            } else {
+                dr.max(dc)
+            };
+            if distance > 1 {
+                continue;
+            }
+        }
+        if piece.flag("inertia")
+            && !exempt
+            && !(matches!(piece.kind.as_str(), "hook" | "brutus")
+                && (target.flag("bent") || target.flag("portalThrough")))
+            && from
+                .row
+                .abs_diff(target.row)
+                .max(from.col.abs_diff(target.col))
+                == 1
+        {
+            continue;
+        }
         if expansion_move_allowed(state, piece, from, &target)?
             && fianchetto_move_allowed(state, piece, from, &target)?
             && seen.insert(serde_json::to_string(&target).expect("move serializes"))
@@ -1479,20 +1654,13 @@ pub(crate) fn expansion_destination_allowed(
     color: PieceColor,
     cells: &[Square],
 ) -> bool {
-    if cells.is_empty() || cells.iter().any(|cell| cell.row >= 8 || cell.col >= 8) {
+    if !d4_destination_allowed(state, color, cells) {
         return false;
     }
     let Some(owner) = color.owner() else {
         return true;
     };
     let enemy = owner.opponent();
-    let forbidden = Square {
-        row: if enemy == Color::Black { 3 } else { 4 },
-        col: 3,
-    };
-    if state.flag("d4", enemy) && cells.contains(&forbidden) {
-        return false;
-    }
     if state.flag("synchronization", enemy) {
         let mut parity = None;
         let mut uniform = true;
@@ -1522,6 +1690,26 @@ pub(crate) fn expansion_destination_allowed(
         }
     }
     true
+}
+
+/// Some source installation callers pass d4 but deliberately omit the
+/// synchronization argument. Keep that policy distinct from move placement.
+pub(crate) fn d4_destination_allowed(
+    state: &GameState,
+    color: PieceColor,
+    cells: &[Square],
+) -> bool {
+    if cells.is_empty() || cells.iter().any(|cell| cell.row >= 8 || cell.col >= 8) {
+        return false;
+    }
+    color.owner().is_none_or(|owner| {
+        let enemy = owner.opponent();
+        !state.flag("d4", enemy)
+            || !cells.contains(&Square {
+                row: if enemy == Color::Black { 3 } else { 4 },
+                col: 3,
+            })
+    })
 }
 fn expansion_move_allowed(
     state: &GameState,
@@ -1675,6 +1863,20 @@ pub(crate) fn pawn_moves(state: &GameState, piece: &Piece, from: Square) -> Vec<
                     moves.push(target);
                 }
             }
+        } else if piece.kind == "pawn"
+            && state.flag("pawnLeap", piece.color)
+            && forward == actor.pawn_dir()
+            && let Some(one) = from.offset(forward, 0)
+            && state
+                .at(one)
+                .is_some_and(|piece| piece.color == actor.opponent())
+            && let Some(two) = one.offset(forward, 0)
+            && state.at(two).is_none()
+            && !collapsed(state, two)
+        {
+            let mut target = MoveTarget::at(two);
+            target.flags.insert("pawnLeap".into(), json!(true));
+            moves.push(target);
         }
         for dc in [-1, 1] {
             if let Some(to) = from.offset(forward, dc)
@@ -1743,6 +1945,53 @@ pub(crate) fn pawn_moves(state: &GameState, piece: &Piece, from: Square) -> Vec<
                 && !collapsed(state, cell)
             {
                 moves.push(MoveTarget::at(cell));
+            }
+        }
+    }
+    // main96225: the source replaces a diagonal landing with the prioritized
+    // side capture. The destination can itself contain a second victim.
+    if piece.kind == "pawn" && state.flag("enPassantFrenzy", actor) {
+        for dc in [-1, 1] {
+            let Some(to) = from.offset(dir, dc) else {
+                continue;
+            };
+            let Some(side) = from.offset(0, dc) else {
+                continue;
+            };
+            let ordinary_right = state.en_passant.as_ref().is_some_and(|right| {
+                right.color != actor
+                    && right.row == to.row
+                    && right.col == to.col
+                    && state
+                        .at(Square {
+                            row: right.captured_row,
+                            col: right.captured_col,
+                        })
+                        .is_some_and(|victim| {
+                            victim.kind == "pawn" && victim.color == actor.opponent()
+                        })
+            });
+            if ordinary_right
+                || state
+                    .at(side)
+                    .is_none_or(|victim| victim.color != actor.opponent())
+            {
+                continue;
+            }
+            moves.retain(|target| target.square() != to);
+            if state
+                .at(side)
+                .is_some_and(|victim| can_capture(state, piece, victim))
+                && state
+                    .at(to)
+                    .is_none_or(|victim| can_capture(state, piece, victim))
+            {
+                let mut target = MoveTarget::at(to);
+                target.flags.insert("enPassant".into(), json!(true));
+                target.flags.insert("capturedRow".into(), json!(side.row));
+                target.flags.insert("capturedCol".into(), json!(side.col));
+                target.flags.insert("enPassantFrenzy".into(), json!(true));
+                moves.push(target);
             }
         }
     }

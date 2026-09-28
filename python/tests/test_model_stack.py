@@ -39,7 +39,7 @@ def observation(player="white"):
     board[2][0] = {"type": "wall", "color": "neutral", "status": {}}
     return resign({"protocolVersion": "accelerate-observation-v2", "viewer": player, "board": board, "turn": player,
             "ownCards": [{"id": "slime", "instanceId": "s1", "used": False}], "opponentHandCount": 3,
-            "publicState": {"projectionVersion": observation_policy()["projectionVersion"], "observationPolicyHash": spec().observation_policy_hash, "actionsRemaining": 1, "moveCount": 2, "fullMove": 1, "ruleCardIds": ["crown"], "revealedOpponentCards": [{"id": "rule-ticket", "instanceId": "public-opponent-1", "used": True}], "boardMarks": [{"kind": "meteor", "square": {"row": 3, "col": 2}}], "relationships": [], "overlays": []},
+            "publicState": {"projectionVersion": observation_policy()["projectionVersion"], "observationPolicyHash": spec().observation_policy_hash, "deathmatchStatus": {"active": False, "warning": False}, "actionsRemaining": 1, "moveCount": 2, "fullMove": 1, "ruleCardIds": ["crown"], "revealedOpponentCards": [{"id": "rule-ticket", "instanceId": "public-opponent-1", "used": True}], "boardMarks": [{"kind": "meteor", "square": {"row": 3, "col": 2}}], "relationships": [], "overlays": []},
             "history": [{"type": "move", "color": "black", "from": {"row": 1, "col": 2}}], "informationStateKey": ""})
 
 
@@ -151,6 +151,20 @@ def test_public_boundary_capacity_and_catalog_fail_closed():
     wrong_policy = observation(); wrong_policy["publicState"]["observationPolicyHash"] = "b" * 64; resign(wrong_policy)
     with pytest.raises(ValueError, match="policy"):
         encoder.encode(wrong_policy, actions())
+    previous_projection = observation(); previous_projection["publicState"]["projectionVersion"] = "source-visible-20260927-v2"; resign(previous_projection)
+    with pytest.raises(ValueError, match="projection"):
+        encoder.encode(previous_projection, actions())
+    for status in (None, {"active": True}, {"active": True, "warning": 1}, {"active": True, "warning": False, "halfTurnsSinceProgress": 4}):
+        invalid = observation()
+        if status is None:
+            del invalid["publicState"]["deathmatchStatus"]
+        else:
+            invalid["publicState"]["deathmatchStatus"] = status
+        resign(invalid)
+        with pytest.raises(ValueError, match="deathmatch"):
+            encoder.encode(invalid, actions())
+    warned = observation(); warned["publicState"]["deathmatchStatus"] = {"active": True, "warning": True}; resign(warned)
+    assert not np.array_equal(encoder.encode(warned, actions()).condition, encoder.encode(observation(), actions()).condition)
     malformed_status = observation(); malformed_status["board"][6][1]["status"]["witchTrialRemaining"] = "two"; resign(malformed_status)
     with pytest.raises(ValueError, match="status"):
         encoder.encode(malformed_status, actions())

@@ -2679,8 +2679,24 @@
             "legalHints": {},
             "tabooPending": {},
             "ownPlans": {},
+            "deathmatchStatus": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "active",
+                "warning"
+              ],
+              "properties": {
+                "active": {
+                  "type": "boolean"
+                },
+                "warning": {
+                  "type": "boolean"
+                }
+              }
+            },
             "projectionVersion": {
-              "const": "source-visible-20260927-v2"
+              "const": "source-visible-20260927-v3"
             },
             "observationPolicyHash": {
               "type": "string",
@@ -4590,7 +4606,8 @@
             "observationPolicyHash",
             "boardMarks",
             "relationships",
-            "overlays"
+            "overlays",
+            "deathmatchStatus"
           ]
         },
         "history": {

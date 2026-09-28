@@ -1,6 +1,6 @@
 use crate::*;
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) fn card_actions(state: &GameState, card: &CardSlot) -> Result<Vec<Action>> {
     let candidates = card_ui_actions(state, card)?;
@@ -28,7 +28,7 @@ pub(crate) fn card_ui_actions(state: &GameState, card: &CardSlot) -> Result<Vec<
     }
     let color = state.turn;
     match card.effect.as_str() {
-        "genevaConvention" | "cornerKick" | "retreat" => {
+        "genevaConvention" | "cornerKick" | "retreat" | "otherworld" | "enPassantBang" => {
             if state.flag(&card.effect, color) {
                 return Ok(Vec::new());
             }
@@ -39,6 +39,16 @@ pub(crate) fn card_ui_actions(state: &GameState, card: &CardSlot) -> Result<Vec<
                     .flatten()
                     .flatten()
                     .any(|p| p.color == color && p.kind == "knight")
+            {
+                return Ok(Vec::new());
+            }
+            if matches!(card.effect.as_str(), "otherworld" | "enPassantBang")
+                && !state
+                    .board
+                    .iter()
+                    .flatten()
+                    .flatten()
+                    .any(|piece| piece.color == color && piece.kind == "pawn")
             {
                 return Ok(Vec::new());
             }
@@ -147,6 +157,11 @@ pub(crate) fn apply_draft_passive(
         return Ok(false);
     }
     match effect {
+        "democracy" => {
+            if !apply_democracy(state, color)? {
+                return Ok(false);
+            }
+        }
         "genevaConvention" | "retreat" | "cornerKick" | "pawnSprint" | "pawnLeap"
         | "fianchetto" | "rookLift" | "backwardKnight" | "fileSurge" | "earlyPromotion"
         | "fastGrowth" | "underpromotion" | "finalWeapon" | "religiousVictory" | "binaMate"
@@ -267,6 +282,24 @@ pub(crate) fn apply_draft_passive(
     Ok(true)
 }
 
+/// The source normalizes both player flags and requires a physical pawn;
+/// pending recurrence is counted for survival, but not for initial activation.
+fn apply_democracy(state: &mut GameState, color: Color) -> Result<bool> {
+    if state.flag("democracy", color)
+        || !state
+            .board
+            .iter()
+            .flatten()
+            .flatten()
+            .any(|piece| piece.color == color && piece.kind == "pawn")
+    {
+        return Ok(false);
+    }
+    state.extra.insert("democracy".into(), json!({"white":state.flag("democracy",Color::White),"black":state.flag("democracy",Color::Black)}));
+    state.set_flag("democracy", color, true);
+    Ok(true)
+}
+
 pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
     let actor = action.color;
     let before = Sides {
@@ -283,6 +316,7 @@ pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>
         }
         other => return Err(EngineError::UnsupportedFeature(format!("action {other:?}"))),
     };
+    prune_board_potion_effects(state)?;
     crate::replay::settle(state)?;
     let transition = |viewer| {
         let after = state.observe(viewer);
@@ -526,7 +560,6 @@ fn apply_move(state: &mut GameState, action: &Action, threat_probe: bool) -> Res
         Value::Object(memory)
     });
     crate::card_effects::mark_animation(state, &piece)?;
-    crate::replay::track_moving(state, &piece)?;
     state.extra.insert(
         "lastMove".into(),
         json!({"from":from,"to":to,"pieceId":piece.id,"pieceType":original_type,
@@ -536,15 +569,18 @@ fn apply_move(state: &mut GameState, action: &Action, threat_probe: bool) -> Res
     );
     // queueMoveHistoryNotation creates its identifier before promotion and turn
     // settlement, sharing the source random stream with later rule draws.
-    crate::replay::queue_move(
-        state,
-        &replay_before,
-        &original_piece,
-        from,
-        to,
-        target,
-        !captures.is_empty(),
-    )?;
+    if !threat_probe {
+        crate::replay::queue_move(
+            state,
+            &replay_before,
+            &original_piece,
+            from,
+            to,
+            target,
+            !captures.is_empty(),
+        )?;
+    }
+    let mut replay_interrupted = false;
     if !threat_probe {
         let sound = if target.flag("castle") {
             "castle"
@@ -557,8 +593,11 @@ fn apply_move(state: &mut GameState, action: &Action, threat_probe: bool) -> Res
         } else {
             "capture"
         };
-        crate::threat::play_move_sound(state, sound, actor)?;
+        replay_interrupted = crate::threat::play_move_sound(state, sound, actor)?;
     }
+    // main92263–92307: the threat-sound probe observes bindings before the
+    // moving piece releases its allies through trackMovingProgress.
+    crate::replay::track_moving(state, &piece)?;
     crate::replay::add_log(
         state,
         format!(
@@ -586,17 +625,22 @@ fn apply_move(state: &mut GameState, action: &Action, threat_probe: bool) -> Res
         return Ok(captures);
     }
     if state.result().is_none() {
+        transform_chimera_after_move(state, &mut piece, to)?;
         finish_move(state, actor)?;
     }
-    crate::replay::commit_move(state, &replay_before, actor)?;
-    crate::replay::record(
-        state,
-        if state.mode == "gameover" {
-            "gameover"
-        } else {
-            "move"
-        },
-    )?;
+    if !replay_interrupted {
+        crate::replay::commit_move(state, &replay_before, actor)?;
+    }
+    if !threat_probe {
+        crate::replay::record(
+            state,
+            if state.mode == "gameover" {
+                "gameover"
+            } else {
+                "move"
+            },
+        )?;
+    }
     Ok(captures)
 }
 
@@ -606,6 +650,28 @@ fn capture(
     mut victim: Piece,
     captures: &mut Vec<Piece>,
 ) -> Result<()> {
+    if crate::observation::truth(victim.extra.get("feudalContractId"))
+        || victim.ability_kind() == "undead"
+        || victim.ability_kind() == "reaper"
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "feudal/undead/reaper capture callback".into(),
+        ));
+    }
+    for field in [
+        "evasion",
+        "parry",
+        "explosive",
+        "poisonedPawn",
+        "recurrence",
+        "trojanHorse",
+    ] {
+        if crate::observation::truth(victim.extra.get(field)) {
+            return Err(EngineError::UnsupportedFeature(format!(
+                "capture reaction {field}"
+            )));
+        }
+    }
     if victim.flag("shielded") || victim.flag("protected") {
         return Err(EngineError::UnsupportedFeature(
             "shield/protection capture reaction".into(),
@@ -624,9 +690,135 @@ fn capture(
     clear_piece(state, &victim.id);
     victim.extra.shift_remove("checkerChainCapture");
     let actor = attacker.color.owner().ok_or(EngineError::WrongActor)?;
+    add_capture_type(state, "capturedTypes", actor, &victim.kind)?;
+    add_capture_type(state, "turnCaptures", actor, &victim.kind)?;
+    if state.extra.contains_key("mediumMovement")
+        && !matches!(
+            victim.kind.as_str(),
+            "wall" | "football" | "blackHole" | "black-hole"
+        )
+    {
+        let memory = if victim.kind == "medium" {
+            state.extra.get("mediumMovement").cloned()
+        } else if victim.kind == "parrot" {
+            state
+                .extra
+                .get("parrotMovement")
+                .and_then(|value| value.get(victim.color.as_str()))
+                .cloned()
+        } else {
+            crate::card_effects::current_base_movement(state, &victim)
+        };
+        state
+            .extra
+            .insert("mediumMovement".into(), memory.unwrap_or(Value::Null));
+    }
+    grant_vigilance_protection(state, &victim)?;
+    if let Some(owner) = victim.color.owner() {
+        crate::replay::normalize_color_booleans(state, "magicGirlSurge");
+        state.set_flag("magicGirlSurge", owner, true);
+        crate::replay::normalize_color_booleans(state, "magicGirlSurgeRefreshPending");
+        if owner == state.turn
+            && state.board.iter().flatten().flatten().any(|piece| {
+                piece.color == owner
+                    && matches!(piece.ability_kind(), "magicGirl" | "parrot" | "medium")
+            })
+        {
+            state.set_flag("magicGirlSurgeRefreshPending", owner, true);
+        }
+    }
     state.captures.get_mut(actor).push(victim.clone());
     captures.push(victim.clone());
-    if victim.is_defeat_royal() {
+    resolve_royal_capture(state, &victim, actor)?;
+    if let Some(owner) = victim.color.owner() {
+        crate::flow::check_democracy_defeat(
+            state,
+            owner,
+            if owner == actor {
+                actor.opponent()
+            } else {
+                actor
+            },
+            "모든 폰이 잡혔습니다.",
+        )?;
+    }
+    Ok(())
+}
+
+fn add_capture_type(state: &mut GameState, field: &str, owner: Color, kind: &str) -> Result<()> {
+    let Some(value) = state
+        .extra
+        .get_mut(field)
+        .and_then(|value| value.get_mut(owner.as_str()))
+    else {
+        return Ok(());
+    };
+    let values = value
+        .get_mut("values")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| {
+            EngineError::InvalidState(format!("{field} player entry is not a source Set"))
+        })?;
+    let kind = json!(kind);
+    if !values.contains(&kind) {
+        values.push(kind);
+    }
+    Ok(())
+}
+
+/// Royal loss is a separately ordered source callback. Installation cards
+/// invoke it after placing their replacement, whereas ordinary captures call
+/// it immediately after recording the victim.
+pub(crate) fn resolve_royal_capture(
+    state: &mut GameState,
+    victim: &Piece,
+    actor: Color,
+) -> Result<()> {
+    if victim.flag("recurrence")
+        && state
+            .extra
+            .get("pendingRecurrences")
+            .and_then(Value::as_array)
+            .is_some_and(|entries| {
+                entries.iter().any(|entry| {
+                    entry.get("piece").and_then(|piece| piece.get("id")) == Some(&json!(victim.id))
+                })
+            })
+    {
+        return Ok(());
+    }
+    if state.flag("recycling", victim.color) && victim.kind == "queen" {
+        return Err(EngineError::UnsupportedFeature(
+            "recycling royal-loss promotions".into(),
+        ));
+    }
+    if state.flag("regency", victim.color)
+        && (victim.is_royal() || victim.kind == "queen" || victim.flag("regencyHeir"))
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "regency royal-loss succession".into(),
+        ));
+    }
+    if state.democracy_protects_royal(victim) {
+        state.set_flag(
+            "kingDead",
+            victim.color.owner().ok_or(EngineError::WrongActor)?,
+            true,
+        );
+        if !state
+            .board
+            .iter()
+            .flatten()
+            .flatten()
+            .any(|piece| piece.color == victim.color && state.royal_identity(piece))
+        {
+            state.set_flag(
+                "zugzwang",
+                victim.color.owner().ok_or(EngineError::WrongActor)?,
+                false,
+            );
+        }
+    } else if victim.is_defeat_royal() {
         let label = if victim.color == Color::White {
             "백"
         } else {
@@ -647,6 +839,60 @@ fn capture(
         crate::flow::end_game(state, Some(actor), &reason)?;
     }
     Ok(())
+}
+
+pub(crate) fn grant_vigilance_protection(state: &mut GameState, victim: &Piece) -> Result<()> {
+    let Some(owner) = victim.color.owner() else {
+        return Ok(());
+    };
+    if !state.flag("vigilance", owner) {
+        return Ok(());
+    }
+    let enemy = owner.opponent();
+    let remaining = if state.turn == enemy { 2.0 } else { 1.0 };
+    let mut royals = Vec::new();
+    let mut seen = BTreeSet::new();
+    for royal in state.board.iter().flatten().flatten() {
+        if royal.id != victim.id
+            && royal.color == owner
+            && state.royal_identity(royal)
+            && seen.insert(royal.id.clone())
+        {
+            let mut royal = royal.clone();
+            let old = crate::observation::number(
+                royal
+                    .extra
+                    .get("vigilanceProtection")
+                    .and_then(|value| value.get("remaining")),
+            )
+            .unwrap_or(0.0);
+            royal.extra.insert(
+                "vigilanceProtection".into(),
+                json!({"countBy":enemy,"remaining":f64::max(remaining,old)}),
+            );
+            royals.push(royal);
+        }
+    }
+    for royal in royals {
+        update_piece(state, &royal);
+    }
+    Ok(())
+}
+
+/// Scarecrow performs direct removal, not sacrifice: it does not cancel
+/// prophecies or trigger ordinary capture/reaper reactions at this boundary.
+pub(crate) fn scarecrow_remove(
+    state: &mut GameState,
+    square: Square,
+    capture_owner: Color,
+) -> Result<Option<Piece>> {
+    let Some(victim) = state.at(square).cloned() else {
+        return Ok(None);
+    };
+    clear_piece(state, &victim.id);
+    grant_vigilance_protection(state, &victim)?;
+    state.captures.get_mut(capture_owner).push(victim.clone());
+    Ok(Some(victim))
 }
 
 pub(crate) fn clear_piece(state: &mut GameState, id: &str) {
@@ -722,33 +968,7 @@ pub(crate) fn judgment_remove(
         actor
     };
     clear_piece(state, &piece.id);
-    if state.flag("vigilance", owner) {
-        let enemy = owner.opponent();
-        let remaining = if state.turn == enemy { 2.0 } else { 1.0 };
-        let mut royals = Vec::new();
-        let mut seen = BTreeSet::new();
-        for royal in state.board.iter().flatten().flatten() {
-            if royal.color == owner && state.royal_identity(royal) && seen.insert(royal.id.clone())
-            {
-                let mut royal = royal.clone();
-                let old = crate::observation::number(
-                    royal
-                        .extra
-                        .get("vigilanceProtection")
-                        .and_then(|v| v.get("remaining")),
-                )
-                .unwrap_or(0.0);
-                royal.extra.insert(
-                    "vigilanceProtection".into(),
-                    json!({"countBy":enemy,"remaining":f64::max(remaining,old)}),
-                );
-                royals.push(royal);
-            }
-        }
-        for royal in royals {
-            update_piece(state, &royal);
-        }
-    }
+    grant_vigilance_protection(state, &piece)?;
     state.captures.get_mut(capture_owner).push(piece.clone());
     crate::card_effects::mark_vanish_animation(state, &piece, square)?;
     crate::flow::mark_progress(state);
@@ -855,7 +1075,90 @@ fn update_piece(state: &mut GameState, piece: &Piece) {
     }
 }
 
+fn transform_chimera_after_move(
+    state: &mut GameState,
+    piece: &mut Piece,
+    square: Square,
+) -> Result<()> {
+    if !crate::observation::truth(piece.extra.get("chimera"))
+        || state.at(square).is_none_or(|at| at.id != piece.id)
+    {
+        return Ok(());
+    }
+    let monochrome = crate::observation::truth(state.extra.get("monochromeChess"));
+    let normalize = |kind| {
+        if monochrome && kind == "knight" {
+            "camel"
+        } else {
+            kind
+        }
+    };
+    let kinds = if piece.kind == "queen" {
+        &["pawn", "knight", "bishop", "rook"][..]
+    } else {
+        &["pawn", "knight", "bishop", "rook", "queen"][..]
+    };
+    let options = kinds
+        .iter()
+        .copied()
+        .map(normalize)
+        .filter(|kind| *kind != normalize(piece.kind.as_str()))
+        .map(|kind| {
+            (
+                kind,
+                if piece.kind == "queen" {
+                    25.0
+                } else if kind == "queen" {
+                    10.0
+                } else {
+                    30.0
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    let weights = options
+        .iter()
+        .map(|(_, weight)| *weight)
+        .collect::<Vec<_>>();
+    piece.kind = options[sample_weighted(state, &weights)?].0.into();
+    for field in [
+        "windmillMode",
+        "logDir",
+        "logRollAfterTurn",
+        "mana",
+        "maxMana",
+        "ammo",
+        "maxAmmo",
+        "facing",
+    ] {
+        piece.extra.shift_remove(field);
+    }
+    piece.moved = true;
+    piece.extra.insert("shielded".into(), json!(false));
+    if monochrome {
+        piece
+            .extra
+            .insert("monoShade".into(), json!((square.row + square.col) % 2));
+    }
+    update_piece(state, piece);
+    crate::card_effects::mark_animation(state, piece)?;
+    crate::replay::add_piece_action_log(
+        state,
+        piece,
+        Some(square),
+        None,
+        format!(
+            "키메라: {}{}의 기물이 {}으로 변신했습니다.",
+            char::from(b'a' + square.col),
+            8 - square.row,
+            crate::replay::piece_label(&piece.kind)
+        ),
+    )?;
+    Ok(())
+}
+
 fn finish_move(state: &mut GameState, actor: Color) -> Result<()> {
+    prune_board_potion_effects(state)?;
     crate::replay::normalize_color_booleans(state, "skipTurn");
     if state.actions_remaining > 1 {
         state.actions_remaining -= 1;
@@ -878,10 +1181,18 @@ fn finish_move(state: &mut GameState, actor: Color) -> Result<()> {
         .move_count
         .checked_add(1)
         .ok_or_else(|| EngineError::InvalidState("move count overflow".into()))?;
+    advance_otherworld(state)?;
+    tick_piece_turn_effects(state, actor)?;
+    if state.extra.contains_key("enPassantFrenzy") {
+        state.set_flag("enPassantFrenzy", actor, false);
+    }
+    resolve_first_move_cards(state, actor)?;
     let turns = state.turns_taken.get_mut(actor);
     *turns = turns
         .checked_add(1)
         .ok_or_else(|| EngineError::InvalidState("turn count overflow".into()))?;
+    crate::threat::tick_protection(state, actor, "sacrificeProtection");
+    tick_card_frozen_and_poison(state, actor)?;
     if crate::flow::tick_deathmatch(state, actor)? {
         return Ok(());
     }
@@ -891,11 +1202,31 @@ fn finish_move(state: &mut GameState, actor: Color) -> Result<()> {
             .checked_add(1)
             .ok_or_else(|| EngineError::InvalidState("full move count overflow".into()))?;
     }
+    crate::replay::normalize_winter_after_turn(state)?;
     state.cards_used_this_turn = Sides::new(
         state.cards_used_this_turn.white,
         state.cards_used_this_turn.black,
     );
     *state.cards_used_this_turn.get_mut(actor) = 0;
+    if let Some(current) = state
+        .extra
+        .get("turnCaptures")
+        .and_then(|value| value.get(actor.as_str()))
+        .cloned()
+    {
+        if let Some(last) = state
+            .extra
+            .get_mut("lastTurnCaptures")
+            .and_then(Value::as_object_mut)
+        {
+            last.insert(actor.as_str().into(), current);
+        }
+        state
+            .extra
+            .get_mut("turnCaptures")
+            .expect("turn captures present")[actor.as_str()] =
+            json!({"__simType":"Set","values":[]});
+    }
     for key in [
         "zugzwang",
         "mistakeCard",
@@ -921,38 +1252,387 @@ fn finish_move(state: &mut GameState, actor: Color) -> Result<()> {
         state.set_flag("reversal", actor, false);
     }
     state.turn = actor.opponent();
+    clear_coronation_protection(state, state.turn);
     state.actions_remaining = if state.flag("acceleration", state.turn) {
         2
     } else {
         1
     };
-    if state.extra.contains_key("firstMoveCardsForced") {
-        state.set_flag("firstMoveCardsForced", actor, true);
-    }
-    if let Some(exposure) = state
-        .extra
-        .get_mut("sirenExposure")
-        .and_then(Value::as_object_mut)
-    {
-        exposure.insert(
-            "__turnStartKey".into(),
-            json!(format!(
-                "{}:{}",
-                state.turn.as_str(),
-                state.turns_taken.get(state.turn)
-            )),
-        );
-    }
-    if let Some(winter) = state
-        .extra
-        .get_mut("winterKingdom")
-        .and_then(Value::as_object_mut)
-    {
-        winter.entry("disabledByLastWarmth").or_insert(json!(false));
-    }
     crate::flow::start_clock(state)?;
     if crate::flow::check_termination(state)? {
         crate::flow::pause_clock(state)?;
+    }
+    crate::flow::check_no_action_loss(state)?;
+    Ok(())
+}
+
+// main87905: this happens after a successful first board move and before the
+// owner-turn counter advances. It is separate from finishCard: an automatic
+// card is marked used, but does not consume a card action or add progress.
+fn resolve_first_move_cards(state: &mut GameState, actor: Color) -> Result<()> {
+    if !state.extra.contains_key("firstMoveCardsForced")
+        || state.flag("firstMoveCardsForced", actor)
+        || *state.turns_taken.get(actor) != 0
+    {
+        return Ok(());
+    }
+    let cards = state
+        .deck_slots
+        .get(actor)
+        .iter()
+        .filter(|card| {
+            !card.vacant
+                && !card.used
+                && crate::observation::truth(card.extra.get("firstTurnCard"))
+                && (card.extra.get("phase").and_then(Value::as_str) == Some("OPENING")
+                    || matches!(
+                        card.id.as_str(),
+                        "shotgun-king" | "black-tower-legacy-magic"
+                    ))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if cards.is_empty() {
+        state.set_flag("firstMoveCardsForced", actor, true);
+        return Ok(());
+    }
+    for card in cards {
+        // The targeted cards, shotgun opening and failed-effect move rollback
+        // have distinct source branches. Do not count them as successful uses.
+        if !matches!(card.effect.as_str(), "otherworld" | "guard")
+            || crate::observation::truth(card.extra.get("target"))
+        {
+            return Err(EngineError::UnsupportedFeature(format!(
+                "first-move automatic card {}",
+                card.id
+            )));
+        }
+        let previous_capture_locks = state
+            .board
+            .iter()
+            .flatten()
+            .flatten()
+            .map(|piece| {
+                (
+                    piece.id.clone(),
+                    piece.extra.get("freshNoCaptureUntil").cloned(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let previous_turn = state.turn;
+        state.turn = actor;
+        let effect = apply_card_raw(state, &card, &Action::card(actor, &card, None));
+        state.turn = previous_turn;
+        match effect {
+            Ok(_) => {}
+            Err(EngineError::IllegalAction) => {
+                return Err(EngineError::UnsupportedFeature(
+                    "first-move automatic opening card rollback".into(),
+                ));
+            }
+            Err(error) => return Err(error),
+        }
+        // main5244/87943 restores the pre-card opening capture lock of every
+        // surviving piece. A transformed guard keeps its pawn's former lock.
+        for piece in state.board.iter_mut().flatten().flatten() {
+            let current = piece.extra.get("freshNoCaptureUntil");
+            if !current.and_then(Value::as_f64).is_some_and(f64::is_finite) {
+                continue;
+            }
+            let previous = previous_capture_locks
+                .get(&piece.id)
+                .and_then(Option::as_ref);
+            if current == previous {
+                continue;
+            }
+            if let Some(previous) = previous {
+                piece
+                    .extra
+                    .insert("freshNoCaptureUntil".into(), previous.clone());
+            } else {
+                piece.extra.shift_remove("freshNoCaptureUntil");
+            }
+        }
+        crate::replay::queue_forced_opening_card(state, actor, &card)?;
+        let live_card = state
+            .deck_slots
+            .get_mut(actor)
+            .iter_mut()
+            .find(|candidate| candidate.instance_id == card.instance_id)
+            .ok_or_else(|| EngineError::InvalidState("automatic card instance was lost".into()))?;
+        live_card.used = true;
+        live_card
+            .extra
+            .insert("usedAt".into(), json!(crate::draft::frozen_timestamp()?));
+        crate::flow::note_card_event(state)?;
+        crate::replay::add_log(
+            state,
+            format!(
+                "{} {} 카드가 첫 이동 후 강제로 발동되었습니다.",
+                crate::replay::label(actor),
+                card.extra
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("undefined")
+            ),
+        )?;
+    }
+    state.extra.insert("firstMoveUndo".into(), Value::Null);
+    state.set_flag("firstMoveCardsForced", actor, true);
+    state.extra.insert("selected".into(), Value::Null);
+    state.extra.insert("legalMoves".into(), json!([]));
+    state.extra.insert("shotgunAction".into(), json!("move"));
+    state.extra.insert("shotgunPreview".into(), json!([]));
+    Ok(())
+}
+
+fn unique_board_pieces(state: &GameState) -> Vec<(Square, Piece)> {
+    let mut seen = BTreeSet::new();
+    (0..8)
+        .flat_map(|row| (0..8).map(move |col| Square { row, col }))
+        .filter_map(|square| {
+            state
+                .at(square)
+                .filter(|piece| seen.insert(piece.id.clone()))
+                .cloned()
+                .map(|piece| (square, piece))
+        })
+        .collect()
+}
+
+// The source decrements these owner-turn counters before turnsTaken advances.
+// Expiring witch-trial removal uses the shared environmental capture family;
+// that due callback is explicit until the complete reaction kernel is ported.
+fn tick_piece_turn_effects(state: &mut GameState, actor: Color) -> Result<()> {
+    for (square, mut piece) in unique_board_pieces(state) {
+        if let Some(trial) = piece
+            .extra
+            .get("witchTrial")
+            .filter(|v| crate::observation::truth(Some(v)))
+        {
+            let count_by =
+                trial
+                    .get("countBy")
+                    .and_then(Value::as_str)
+                    .and_then(|value| match value {
+                        "white" => Some(Color::White),
+                        "black" => Some(Color::Black),
+                        _ => None,
+                    });
+            let count_color = if let Some(color) = count_by {
+                if state.extra.get("september18Balance") == Some(&json!(false)) {
+                    color
+                } else {
+                    color.opponent()
+                }
+            } else {
+                piece.color.owner().unwrap_or(actor.opponent())
+            };
+            if count_color == actor {
+                let remaining = decrement_remaining(&mut piece, "witchTrial", false)?;
+                if remaining <= 0.0 {
+                    return Err(EngineError::UnsupportedFeature(
+                        "due witch-trial environmental capture".into(),
+                    ));
+                }
+            }
+        }
+        if piece.color == actor {
+            for field in ["disarmed", "staked", "severed", "iceSheet"] {
+                if !crate::observation::truth(piece.extra.get(field)) {
+                    continue;
+                }
+                if field == "severed"
+                    && crate::observation::number(
+                        piece.extra.get(field).and_then(|v| v.get("remaining")),
+                    )
+                    .is_none()
+                {
+                    return Err(EngineError::UnsupportedFeature(
+                        "legacy full-move severance expiry".into(),
+                    ));
+                }
+                if decrement_remaining(&mut piece, field, false)? <= 0.0 {
+                    piece.extra.shift_remove(field);
+                    if field == "staked" {
+                        piece.extra.insert("shielded".into(), json!(true));
+                        if piece
+                            .extra
+                            .get("potionEffects")
+                            .and_then(Value::as_array)
+                            .is_some_and(|effects| effects.contains(&json!("stake")))
+                        {
+                            crate::card_effects::note_potion_effect(&mut piece, "shield")?;
+                        }
+                        update_piece(state, &piece);
+                        crate::card_effects::mark_animation(state, &piece)?;
+                        crate::replay::add_piece_action_log(
+                            state,
+                            &piece,
+                            Some(square),
+                            None,
+                            format!(
+                                "말뚝: {}{}의 {}로 가호를 얻었습니다.",
+                                char::from(b'a' + square.col),
+                                8 - square.row,
+                                crate::replay::piece_label(&piece.kind)
+                            ),
+                        )?;
+                    }
+                }
+            }
+        }
+        update_piece(state, &piece);
+    }
+    crate::threat::tick_protection(state, actor, "lastResistance");
+    Ok(())
+}
+
+fn decrement_remaining(piece: &mut Piece, field: &str, clamp: bool) -> Result<f64> {
+    let entry = piece
+        .extra
+        .get_mut(field)
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| {
+            EngineError::UnsupportedFeature(format!("non-object {field} turn counter"))
+        })?;
+    let previous = crate::observation::number(entry.get("remaining"))
+        .ok_or_else(|| EngineError::UnsupportedFeature(format!("non-finite {field} remaining")))?;
+    let remaining = if clamp {
+        (previous - 1.0).max(0.0)
+    } else {
+        previous - 1.0
+    };
+    entry.insert("remaining".into(), json!(remaining));
+    Ok(remaining)
+}
+
+fn tick_card_frozen_and_poison(state: &mut GameState, actor: Color) -> Result<()> {
+    let mut thawed = 0;
+    let mut recovered = 0;
+    for (_, mut piece) in unique_board_pieces(state) {
+        if let Some(frozen) = piece
+            .extra
+            .get("frozenByCard")
+            .filter(|v| crate::observation::truth(Some(v)))
+        {
+            let explicit = frozen
+                .get("countBy")
+                .and_then(Value::as_str)
+                .and_then(|value| match value {
+                    "white" => Some(Color::White),
+                    "black" => Some(Color::Black),
+                    _ => None,
+                });
+            let color = explicit.map(Color::opponent).or(piece.color.owner());
+            if color == Some(actor) && decrement_remaining(&mut piece, "frozenByCard", true)? <= 0.0
+            {
+                piece.extra.shift_remove("frozenByCard");
+                let winter = state
+                    .extra
+                    .get("winterKingdom")
+                    .and_then(|v| v.get("frozenIds"))
+                    .and_then(Value::as_array)
+                    .is_some_and(|ids| ids.contains(&json!(piece.id)));
+                if !winter {
+                    piece.extra.shift_remove("frozen");
+                }
+                thawed += 1;
+            }
+        }
+        let poison = crate::observation::number(piece.extra.get("poisonStunTurns"))
+            .unwrap_or(0.0)
+            .floor()
+            .max(0.0);
+        let count_by = piece
+            .extra
+            .get("poisonStunColor")
+            .and_then(Value::as_str)
+            .and_then(|value| match value {
+                "white" => Some(Color::White),
+                "black" => Some(Color::Black),
+                _ => None,
+            });
+        if poison > 0.0
+            && count_by.map_or(
+                piece.color == actor || piece.color == PieceColor::Neutral,
+                |color| color == actor,
+            )
+        {
+            let remaining = (crate::observation::number(piece.extra.get("poisonStunTurns"))
+                .unwrap_or(0.0)
+                - 1.0)
+                .max(0.0);
+            if remaining > 0.0 {
+                piece
+                    .extra
+                    .insert("poisonStunTurns".into(), json!(remaining));
+            } else {
+                piece.extra.shift_remove("poisonStunTurns");
+                piece.extra.shift_remove("poisonStunColor");
+                recovered += 1;
+            }
+        }
+        update_piece(state, &piece);
+    }
+    if thawed > 0 {
+        crate::replay::add_log(state, format!("빙결: 기물 {thawed}개의 얼음이 녹았습니다."))?;
+    }
+    if recovered > 0 {
+        crate::replay::add_log(
+            state,
+            format!(
+                "독이 든 폰: {} 기물 {recovered}개가 다시 움직일 수 있습니다.",
+                crate::replay::label(actor)
+            ),
+        )?;
+    }
+    Ok(())
+}
+
+fn clear_coronation_protection(state: &mut GameState, color: Color) {
+    for (_, mut piece) in unique_board_pieces(state) {
+        if piece.color != color
+            || !crate::observation::truth(piece.extra.get("coronationProtection"))
+        {
+            continue;
+        }
+        let keep = crate::observation::truth(
+            piece
+                .extra
+                .get("coronationProtection")
+                .and_then(|v| v.get("previousProtected")),
+        ) || [
+            "lastResistance",
+            "sacrificeProtection",
+            "queensGambitProtection",
+        ]
+        .iter()
+        .any(|field| crate::observation::truth(piece.extra.get(*field)));
+        piece.extra.shift_remove("coronationProtection");
+        if !keep {
+            piece.extra.shift_remove("protected");
+        }
+        update_piece(state, &piece);
+    }
+}
+
+/// Source renderAll/endMove prune one shared object per board identity.
+/// Provenance is presentation data with a rule-state mutation boundary, while
+/// the active trait itself is handled by its movement/capture/lifecycle kernel.
+fn prune_board_potion_effects(state: &mut GameState) -> Result<()> {
+    let mut seen = BTreeSet::new();
+    let pieces = state
+        .board
+        .iter()
+        .flatten()
+        .flatten()
+        .filter(|piece| seen.insert(piece.id.clone()))
+        .cloned()
+        .collect::<Vec<_>>();
+    for mut piece in pieces {
+        crate::card_effects::prune_potion_effects(&mut piece)?;
+        update_piece(state, &piece);
     }
     Ok(())
 }
@@ -1018,11 +1698,38 @@ fn apply_card(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
                 && Some(&card.instance_id) == action.card_instance_id.as_ref()
         })
         .ok_or(EngineError::IllegalAction)?;
-    let effect = state.deck_slots.get(color)[slot].effect.clone();
     let card = state.deck_slots.get(color)[slot].clone();
+    let captures = apply_card_raw(state, &card, action)?;
+    // Potion and black-box effects can reveal metadata on this exact instance.
+    // Source finishCard receives that updated object, including replay/log data.
+    let updated_card = state.deck_slots.get(color)[slot].clone();
+    finish_card(state, &updated_card, slot, captures)
+}
+
+fn apply_card_raw(state: &mut GameState, card: &CardSlot, action: &Action) -> Result<Vec<Piece>> {
+    let color = state.turn;
+    let effect = &card.effect;
     let mut captures = Vec::new();
     match effect.as_str() {
-        "genevaConvention" | "cornerKick" | "retreat" => state.set_flag(&effect, color, true),
+        "genevaConvention" | "cornerKick" | "retreat" => state.set_flag(effect, color, true),
+        "enPassantBang" => {
+            if !state
+                .board
+                .iter()
+                .flatten()
+                .flatten()
+                .any(|piece| piece.color == color && piece.kind == "pawn")
+            {
+                return Err(EngineError::IllegalAction);
+            }
+            if !crate::observation::truth(state.extra.get("enPassantFrenzy")) {
+                state.extra.insert(
+                    "enPassantFrenzy".into(),
+                    json!({"white":false,"black":false}),
+                );
+            }
+            state.set_flag("enPassantFrenzy", color, true);
+        }
         "conversion" => {
             for cell in state.board.iter_mut().flatten().flatten() {
                 if cell.color == color && cell.kind == "knight" {
@@ -1047,13 +1754,23 @@ fn apply_card(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
             captures.push(victim);
             state.set_flag("reversal", color, true);
         }
+        "otherworld" => apply_otherworld(state)?,
         _ => {
-            let card = state.deck_slots.get(color)[slot].clone();
-            captures = crate::card_effects::apply(state, &card, action)?
+            captures = crate::card_effects::apply(state, card, action)?
                 .ok_or_else(|| EngineError::UnsupportedFeature(format!("card {effect}")))?;
         }
     }
     refresh_submerged(state)?;
+    Ok(captures)
+}
+
+fn finish_card(
+    state: &mut GameState,
+    card: &CardSlot,
+    slot: usize,
+    captures: Vec<Piece>,
+) -> Result<Vec<Piece>> {
+    let color = state.turn;
     if card.extra.get("devCard") != Some(&json!(true)) {
         state.deck_slots.get_mut(color)[slot].used = true;
         state.deck_slots.get_mut(color)[slot]
@@ -1070,7 +1787,7 @@ fn apply_card(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
         crate::flow::note_card_event(state)?;
     }
     if !crate::draft::is_passive_definition(
-        &serde_json::to_value(&card).map_err(EngineError::serialization)?,
+        &serde_json::to_value(card).map_err(EngineError::serialization)?,
     ) && card.extra.get("phase").and_then(Value::as_str) != Some("RULE")
     {
         crate::flow::mark_progress(state);
@@ -1094,7 +1811,7 @@ fn apply_card(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
                 .unwrap_or("undefined")
         ),
     )?;
-    crate::replay::queue_card(state, color, &card)?;
+    crate::replay::queue_card(state, color, card)?;
     state.extra.insert("ruleTicketChoice".into(), Value::Null);
     state.extra.insert("jokerChoice".into(), Value::Null);
     refresh_submerged(state)?;
@@ -1111,8 +1828,242 @@ fn apply_card(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
     update_palaces(state)?;
     resolve_herald_threats(state, color)?;
     crate::flow::check_star_limit(state)?;
+    if card.id == "brainwash" && state.mode == "play" {
+        // main86914/86999: brainwash consumes the rest of its owner's turn,
+        // including extra actions, before recording the card replay frame.
+        state.actions_remaining = 1;
+        if let Some(effects) = state
+            .extra
+            .get_mut("effects")
+            .and_then(Value::as_object_mut)
+        {
+            effects.insert("extraMove".into(), json!(0));
+        }
+        finish_move(state, color)?;
+    } else {
+        crate::flow::check_no_action_loss(state)?;
+    }
     crate::replay::record(state, "card")?;
     Ok(captures)
+}
+
+/// The simulated source card availability shares global randomness with the
+/// real position, although its mutated board is discarded. This is different
+/// from the public immutable rule-query API, whose probe RNG stays isolated.
+pub(crate) fn available_card_action(state: &mut GameState, color: Color) -> Result<bool> {
+    if state.flag("draftDelete", color) {
+        return Ok(false);
+    }
+    let cards = state.deck_slots.get(color).clone();
+    for card in cards {
+        if card.vacant
+            || card.used
+            || card.recovering
+            || crate::observation::truth(card.extra.get("devCard"))
+            || crate::observation::truth(card.extra.get("nextTurnPending"))
+        {
+            continue;
+        }
+        if crate::observation::truth(card.extra.get("target")) {
+            let mut probe = state.clone();
+            probe.turn = color;
+            if !card_ui_actions(&probe, &card)?.is_empty() {
+                return Ok(true);
+            }
+            continue;
+        }
+        let mut probe = state.clone();
+        probe.turn = color;
+        for field in ["selected", "targeting"] {
+            probe.extra.insert(field.into(), Value::Null);
+        }
+        probe.extra.insert("legalMoves".into(), json!([]));
+        let result = apply_card_raw(&mut probe, &card, &Action::card(color, &card, None));
+        state.rng = probe.rng;
+        match result {
+            Ok(_) => return Ok(true),
+            Err(EngineError::IllegalAction) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(false)
+}
+
+fn apply_otherworld(state: &mut GameState) -> Result<()> {
+    let color = state.turn;
+    let mut seen = BTreeSet::new();
+    let pawns = state
+        .board
+        .iter()
+        .enumerate()
+        .flat_map(|(row, cells)| {
+            cells.iter().enumerate().filter_map(move |(col, piece)| {
+                piece
+                    .as_ref()
+                    .filter(|piece| piece.color == color && piece.kind == "pawn")
+                    .map(|piece| {
+                        (
+                            Square {
+                                row: row as u8,
+                                col: col as u8,
+                            },
+                            piece.clone(),
+                        )
+                    })
+            })
+        })
+        .filter(|(_, piece)| seen.insert(piece.id.clone()))
+        .collect::<Vec<_>>();
+    if pawns.is_empty() {
+        return Err(EngineError::IllegalAction);
+    }
+    let index = sample_choice(state, pawns.len())?;
+    let (square, piece) = &pawns[index];
+    let suffix = crate::draft::random_suffix(state.rng.sample()?)?
+        .chars()
+        .take(6)
+        .collect::<String>();
+    let due = state
+        .move_count
+        .checked_add(28)
+        .ok_or_else(|| EngineError::InvalidState("otherworld return counter overflow".into()))?;
+    let origin = piece
+        .extra
+        .get("origin")
+        .filter(|value| crate::observation::truth(Some(value)))
+        .cloned()
+        .unwrap_or_else(|| {
+            json!(format!(
+                "{}{}",
+                char::from(b'a' + square.col),
+                8 - square.row
+            ))
+        });
+    let entry = json!({"id":format!("otherworld-{}-{suffix}",crate::draft::frozen_timestamp()?),
+        "color":color,"pieceId":piece.id,"row":square.row,"col":square.col,
+        "origin":origin,"dueMoveCount":due,"remainingHalfTurns":28});
+    clear_piece(state, &piece.id);
+    if !state
+        .extra
+        .get("pendingOtherworld")
+        .is_some_and(Value::is_array)
+    {
+        state.extra.insert("pendingOtherworld".into(), json!([]));
+    }
+    state
+        .extra
+        .get_mut("pendingOtherworld")
+        .expect("normalized otherworld")
+        .as_array_mut()
+        .expect("array")
+        .push(entry);
+    crate::card_effects::mark_vanish_animation(state, piece, *square)?;
+    Ok(())
+}
+
+/// Source uniform semantic choice, with the density of the realized outcome.
+/// Opaque identity draws use RNG directly. A clone-only availability probe
+/// discards this execution trace even though its source RNG cursor is retained.
+pub(crate) fn sample_choice(state: &mut GameState, count: usize) -> Result<usize> {
+    if !(1..=4096).contains(&count) {
+        return Err(EngineError::InvalidState(
+            "semantic chance pool must contain 1..=4096 outcomes".into(),
+        ));
+    }
+    let index = (state.rng.sample()? * count as f64).floor() as usize;
+    if let Some(probability) = &mut state.semantic_chance_probability {
+        *probability /= count as f64;
+        if !probability.is_finite() || *probability <= 0.0 {
+            return Err(EngineError::InvalidState(
+                "semantic chance trace density is not finite and positive".into(),
+            ));
+        }
+    }
+    Ok(index)
+}
+
+pub(crate) fn sample_weighted(state: &mut GameState, weights: &[f64]) -> Result<usize> {
+    if weights.is_empty()
+        || weights.len() > 4096
+        || weights
+            .iter()
+            .any(|weight| !weight.is_finite() || *weight < 0.0)
+    {
+        return Err(EngineError::InvalidState(
+            "invalid weighted chance pool".into(),
+        ));
+    }
+    let total = weights.iter().sum::<f64>();
+    if total <= 0.0 {
+        return sample_choice(state, weights.len());
+    }
+    if !total.is_finite() {
+        return Err(EngineError::InvalidState(
+            "weighted chance total overflow".into(),
+        ));
+    }
+    let mut roll = state.rng.sample()? * total;
+    let mut selected = weights.len() - 1;
+    for (index, weight) in weights.iter().enumerate() {
+        roll -= weight;
+        if roll <= 0.0 {
+            selected = index;
+            break;
+        }
+    }
+    if let Some(probability) = &mut state.semantic_chance_probability {
+        *probability *= weights[selected] / total;
+        if !probability.is_finite() || *probability <= 0.0 {
+            return Err(EngineError::InvalidState(
+                "invalid weighted semantic trace density".into(),
+            ));
+        }
+    }
+    Ok(selected)
+}
+
+// main99042 advances the explicit half-turn scheduler on every completed
+// board move. Due returns need their spawn/crush/collapse/notation callbacks;
+// they are explicit pending work rather than silently discarded plans.
+fn advance_otherworld(state: &mut GameState) -> Result<()> {
+    let Some(entries) = state
+        .extra
+        .get("pendingOtherworld")
+        .and_then(Value::as_array)
+    else {
+        return Ok(());
+    };
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let mut advanced = entries.clone();
+    for entry in &mut advanced {
+        let remaining = crate::observation::number(entry.get("remainingHalfTurns"));
+        let due = if let Some(remaining) = remaining.filter(|number| {
+            number.fract() == 0.0 && *number >= 0.0 && *number <= 9_007_199_254_740_991.0
+        }) {
+            let next = (remaining - 1.0).max(0.0);
+            entry
+                .as_object_mut()
+                .ok_or_else(|| {
+                    EngineError::InvalidState("otherworld scheduler entry must be an object".into())
+                })?
+                .insert("remainingHalfTurns".into(), json!(next as u64));
+            next == 0.0
+        } else {
+            f64::from(state.move_count)
+                >= crate::observation::number(entry.get("dueMoveCount")).unwrap_or(0.0)
+        };
+        if due {
+            return Err(EngineError::UnsupportedFeature(
+                "scheduled otherworld return".into(),
+            ));
+        }
+    }
+    state
+        .extra
+        .insert("pendingOtherworld".into(), Value::Array(advanced));
+    Ok(())
 }
 
 pub(crate) fn refresh_submerged(state: &mut GameState) -> Result<()> {

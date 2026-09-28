@@ -143,6 +143,36 @@ fn actual_royal_capture_is_terminal_without_checkmate_assumptions() {
     assert_eq!(step.captures.len(), 1);
     assert_eq!(step.position.state().mode, "gameover");
     assert!(step.position.legal_actions().unwrap().is_empty());
+    let mut democracy = root.state().clone();
+    democracy.set_flag("democracy", Color::Black, true);
+    put(&mut democracy, "pawn", Color::Black, 0, 1);
+    let democracy = Position::from_state(democracy).unwrap();
+    assert!(!crate::threat::has_royal_capture(democracy.state(), Color::Black).unwrap());
+    let alive = democracy
+        .apply(&movement(
+            &democracy,
+            Square { row: 1, col: 0 },
+            Square { row: 0, col: 0 },
+        ))
+        .unwrap();
+    assert_eq!(alive.result, None);
+    assert!(alive.position.state().flag("kingDead", Color::Black));
+    assert!(democracy.state().at(Square { row: 0, col: 0 }).is_some());
+    let mut last_pawn = alive.position.state().clone();
+    last_pawn.turn = Color::White;
+    let last_pawn = Position::from_state(last_pawn).unwrap();
+    let defeated = last_pawn
+        .apply(&movement(
+            &last_pawn,
+            Square { row: 0, col: 0 },
+            Square { row: 0, col: 1 },
+        ))
+        .unwrap();
+    assert_eq!(defeated.result, Some(GameResult::White));
+    assert_eq!(
+        defeated.position.state().extra["replayEndReason"],
+        "흑의 모든 폰이 잡혔습니다."
+    );
 }
 
 #[test]
@@ -216,6 +246,139 @@ fn en_passant_captures_off_destination() {
             .is_none()
     );
     assert_eq!(step.captures.len(), 1);
+    let mut leap = empty();
+    put(&mut leap, "pawn", Color::White, 4, 3);
+    put(&mut leap, "bishop", Color::Black, 3, 3);
+    leap.set_flag("pawnLeap", Color::White, true);
+    let leap = Position::from_state(leap).unwrap();
+    let action = movement(&leap, Square { row: 4, col: 3 }, Square { row: 2, col: 3 });
+    assert!(action.destination.as_ref().unwrap().flag("pawnLeap"));
+    let leaped = leap.apply(&action).unwrap();
+    assert!(leaped.captures.is_empty());
+    assert!(
+        leaped
+            .position
+            .state()
+            .at(Square { row: 3, col: 3 })
+            .is_some()
+    );
+    assert!(leaped.position.state().en_passant.is_none());
+    assert!(leap.state().at(Square { row: 4, col: 3 }).is_some());
+}
+
+#[test]
+fn en_passant_frenzy_prioritizes_two_victims_and_expires_on_completed_turn() {
+    let mut state = empty();
+    put(&mut state, "king", Color::White, 7, 7);
+    put(&mut state, "king", Color::Black, 0, 0);
+    put(&mut state, "pawn", Color::White, 4, 3);
+    put(&mut state, "rook", Color::Black, 4, 4);
+    put(&mut state, "bishop", Color::Black, 3, 4);
+    state.set_flag("enPassantFrenzy", Color::White, true);
+    let position = Position::from_state(state).unwrap();
+    let original = position.to_json().unwrap();
+    let action = movement(
+        &position,
+        Square { row: 4, col: 3 },
+        Square { row: 3, col: 4 },
+    );
+    let target = action.destination.as_ref().unwrap();
+    assert!(target.flag("enPassant") && target.flag("enPassantFrenzy"));
+    assert_eq!(target.flags["capturedRow"], 4);
+    assert_eq!(target.flags["capturedCol"], 4);
+    let step = position.apply(&action).unwrap();
+    assert_eq!(
+        step.captures
+            .iter()
+            .map(|piece| piece.kind.as_str())
+            .collect::<Vec<_>>(),
+        vec!["rook", "bishop"]
+    );
+    assert!(step.position.state().board[4][4].is_none());
+    assert_eq!(
+        step.position.state().board[3][4].as_ref().unwrap().kind,
+        "pawn"
+    );
+    assert!(!step.position.state().flag("enPassantFrenzy", Color::White));
+    assert_eq!(position.to_json().unwrap(), original);
+}
+
+#[test]
+fn owner_turn_effects_tick_once_and_incoming_protection_expires_without_losing_aliases() {
+    let mut state = empty();
+    put(&mut state, "king", Color::White, 7, 7);
+    put(&mut state, "king", Color::Black, 0, 7);
+    put(&mut state, "bishop", Color::White, 4, 3);
+    let piece = state.board[4][3].as_mut().unwrap();
+    for field in ["sacrificeProtection", "lastResistance"] {
+        piece.extra.insert(
+            field.into(),
+            json!({"remaining":3,"previousProtected":false}),
+        );
+    }
+    for (field, remaining) in [
+        ("witchTrial", 2),
+        ("staked", 4),
+        ("severed", 2),
+        ("disarmed", 1),
+    ] {
+        piece
+            .extra
+            .insert(field.into(), json!({"remaining":remaining}));
+    }
+    piece.extra.insert("frozen".into(), json!(true));
+    piece.extra.insert(
+        "frozenByCard".into(),
+        json!({"remaining":3,"source":"black"}),
+    );
+    piece.extra.insert("poisonStunTurns".into(), json!(3));
+    piece.extra.insert("poisonStunColor".into(), json!("white"));
+    piece.extra.insert("protected".into(), json!(true));
+    piece
+        .extra
+        .insert("grapplerBound".into(), json!({"untilColor":"white"}));
+    let mut enemy = state.board[0][7].as_ref().unwrap().clone();
+    enemy.extra.insert(
+        "coronationProtection".into(),
+        json!({"previousProtected":false}),
+    );
+    enemy.extra.insert("protected".into(), json!(true));
+    state.board[0][7] = Some(enemy);
+    let position = Position::from_state(state).unwrap();
+    let action = movement(
+        &position,
+        Square { row: 7, col: 7 },
+        Square { row: 7, col: 6 },
+    );
+    let next = position.apply(&action).unwrap().position;
+    let piece = next.state().board[4][3].as_ref().unwrap();
+    for (field, remaining) in [
+        ("sacrificeProtection", 2),
+        ("lastResistance", 2),
+        ("witchTrial", 1),
+        ("staked", 3),
+        ("severed", 1),
+        ("frozenByCard", 2),
+    ] {
+        assert_eq!(
+            crate::observation::number(
+                piece
+                    .extra
+                    .get(field)
+                    .and_then(|entry| entry.get("remaining"))
+            ),
+            Some(f64::from(remaining))
+        );
+    }
+    assert_eq!(
+        crate::observation::number(piece.extra.get("poisonStunTurns")),
+        Some(2.0)
+    );
+    assert!(!piece.extra.contains_key("disarmed"));
+    assert!(!piece.extra.contains_key("grapplerBound"));
+    let king = next.state().board[0][7].as_ref().unwrap();
+    assert!(!king.extra.contains_key("coronationProtection"));
+    assert!(!king.extra.contains_key("protected"));
 }
 
 #[test]
@@ -511,6 +674,174 @@ fn raw_card_acceptance_does_not_expand_public_source_selection() {
             .unwrap()
             .flag("outpostProtected")
     );
+
+    let mut state = GameState::new(kernel_config(), 37).unwrap();
+    let mut card: CardSlot = serde_json::from_value(
+        crate::draft::definitions()
+            .definitions
+            .iter()
+            .find(|card| card["id"] == "nullification")
+            .unwrap()
+            .clone(),
+    )
+    .unwrap();
+    card.instance_id = "nullification-test".into();
+    state.deck_slots.white[0] = card;
+    let position = Position::from_state(state).unwrap();
+    let nullification = position
+        .bind_payload(json!({"type":"card","color":"white",
+        "cardId":"nullification","cardInstanceId":"nullification-test",
+        "target":{"row":6,"col":0}}))
+        .unwrap();
+    let moved = position
+        .apply(&movement(
+            &position,
+            Square { row: 6, col: 0 },
+            Square { row: 4, col: 0 },
+        ))
+        .unwrap();
+    let moved_public =
+        serde_json::to_value(moved.position.try_observe(Color::Black).unwrap()).unwrap();
+    assert!(
+        !position
+            .public_transition_compatible(&nullification, moved_public)
+            .unwrap()
+    );
+    let activated = position.apply(&nullification).unwrap();
+    let public =
+        serde_json::to_value(activated.position.try_observe(Color::Black).unwrap()).unwrap();
+    assert!(
+        position
+            .public_transition_compatible(&nullification, public.clone())
+            .unwrap()
+    );
+    let weighted = position
+        .apply_weighted_conditioned_public(&nullification, public, 91)
+        .unwrap();
+    assert_eq!(
+        weighted.step.position.try_observe(Color::Black).unwrap(),
+        activated.position.try_observe(Color::Black).unwrap()
+    );
+    assert_eq!(
+        (
+            weighted.source_probability,
+            weighted.proposal_probability,
+            weighted.importance_weight
+        ),
+        (1.0, 1.0, 1.0)
+    );
+    assert!(!position.state().deck_slots.white[0].used);
+
+    // An actual semantic draw has p=q=1/N under an ordinary source proposal.
+    // Its opaque plan/notation identities consume RNG without adding another
+    // outcome factor, and the execution-only trace cannot leak into snapshots.
+    let mut state = empty();
+    put(&mut state, "king", Color::White, 7, 7);
+    put(&mut state, "king", Color::Black, 0, 7);
+    put(&mut state, "pawn", Color::White, 6, 0);
+    put(&mut state, "pawn", Color::White, 6, 1);
+    state.extra.insert("draftDelete".into(), json!(false));
+    let mut card: CardSlot = serde_json::from_value(
+        crate::draft::definitions()
+            .definitions
+            .iter()
+            .find(|card| card["id"] == "otherworld")
+            .unwrap()
+            .clone(),
+    )
+    .unwrap();
+    card.instance_id = "otherworld-test".into();
+    state.deck_slots.white[0] = card;
+    let position = Position::from_state(state).unwrap();
+    let original = position.to_json().unwrap();
+    let action = position
+        .bind_payload(json!({"type":"card","color":"white",
+        "cardId":"otherworld","cardInstanceId":"otherworld-test"}))
+        .unwrap();
+    let activated = position.apply(&action).unwrap();
+    let observed =
+        serde_json::to_value(activated.position.try_observe(Color::Black).unwrap()).unwrap();
+    let proposal = position
+        .apply_weighted_conditioned_public(&action, observed, 91)
+        .unwrap();
+    assert_eq!(
+        (
+            proposal.source_probability,
+            proposal.proposal_probability,
+            proposal.importance_weight
+        ),
+        (0.5, 0.5, 1.0)
+    );
+    assert!(
+        proposal
+            .step
+            .position
+            .state()
+            .semantic_chance_probability
+            .is_none()
+    );
+    assert_eq!(position.to_json().unwrap(), original);
+
+    // The source's availability simulation consumes both random draws while
+    // discarding its board, plan, animation and semantic outcome trace.
+    let mut probe = position.state().clone();
+    let before_board = probe.board.clone();
+    let before_cursor = probe.rng.cursor;
+    probe.semantic_chance_probability = Some(1.0);
+    assert!(crate::transition::available_card_action(&mut probe, Color::White).unwrap());
+    assert_eq!(probe.rng.cursor, before_cursor + 2);
+    assert_eq!(probe.board, before_board);
+    assert_eq!(probe.semantic_chance_probability, Some(1.0));
+    assert!(
+        probe.extra["pendingOtherworld"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let before_move = &activated.position;
+    let moved = before_move
+        .apply(&movement(
+            before_move,
+            Square { row: 7, col: 7 },
+            Square { row: 7, col: 6 },
+        ))
+        .unwrap();
+    assert_eq!(
+        moved.position.state().extra["pendingOtherworld"][0]["remainingHalfTurns"],
+        // The frozen source schedules 28 half-turns and the next completed
+        // board move advances that countdown once.
+        json!(27)
+    );
+    let mut due = activated.position.state().clone();
+    due.extra.get_mut("pendingOtherworld").unwrap()[0]["remainingHalfTurns"] = json!(1);
+    let due = Position::from_state(due).unwrap();
+    let snapshot = due.to_json().unwrap();
+    assert!(matches!(
+        due.apply(&movement(
+            &due,
+            Square { row: 7, col: 7 },
+            Square { row: 7, col: 6 }
+        ))
+        .unwrap_err(),
+        EngineError::UnsupportedFeature(_)
+    ));
+    assert_eq!(due.to_json().unwrap(), snapshot);
+
+    let attacker = Piece::new("darkWizard", Color::White, "royal-attacker");
+    let mut target = Piece::new("queen", Color::Black, "inactive-regency");
+    target.extra.insert("regencyHeir".into(), json!(true));
+    target.extra.insert("nullification".into(), json!(true));
+    assert!(!crate::movement::can_capture(
+        position.state(),
+        &attacker,
+        &target
+    ));
+    target.kind = "scarecrow".into();
+    assert!(crate::movement::can_capture(
+        position.state(),
+        &attacker,
+        &target
+    ));
 }
 
 #[test]
@@ -568,9 +899,11 @@ fn source_snapshot_preserves_presence_null_slots_and_outer_metadata() {
     assert!(restored.state().extra.get("activeTrolley").is_none());
     let mut external = source;
     external["gameoverReplayPending"] = json!(true);
+    external["semanticChanceProbability"] = json!(0.125);
     let imported = Position::from_snapshot_value(external.clone()).unwrap();
     assert_eq!(imported.export_state().unwrap(), external);
     assert!(!imported.state().gameover_replay_pending);
+    assert!(imported.state().semantic_chance_probability.is_none());
 }
 
 #[test]
@@ -658,6 +991,42 @@ fn repetition_uses_board_identity_and_lower_half_star_total_wins() {
 #[test]
 fn deathmatch_counts_black_boundaries_and_progress_resets_the_window() {
     let mut state = empty();
+    state.extra.insert(
+        "deathmatch".into(),
+        json!({"active":true,
+        "intervalHalfTurns":6,"halfTurnsSinceProgress":2,"progressThisTurn":false}),
+    );
+    let early = state.try_observe(Color::White).unwrap();
+    assert_eq!(
+        early.public_state["deathmatchStatus"],
+        json!({"active":true,"warning":false})
+    );
+    state.extra.get_mut("deathmatch").unwrap()["halfTurnsSinceProgress"] = json!(4);
+    let warning = state.try_observe(Color::White).unwrap();
+    assert_eq!(
+        warning.public_state["deathmatchStatus"],
+        json!({"active":true,"warning":true})
+    );
+    assert_ne!(early.information_state_key, warning.information_state_key);
+    assert_eq!(
+        state.try_observe(Color::Black).unwrap().public_state["deathmatchStatus"],
+        warning.public_state["deathmatchStatus"]
+    );
+    state.extra.get_mut("deathmatch").unwrap()["halfTurnsSinceProgress"] = json!(5);
+    assert_eq!(
+        state
+            .try_observe(Color::White)
+            .unwrap()
+            .information_state_key,
+        warning.information_state_key
+    );
+    state.extra.get_mut("deathmatch").unwrap()["progressThisTurn"] = json!(true);
+    assert!(
+        !state.try_observe(Color::White).unwrap().public_state["deathmatchStatus"]["warning"]
+            .as_bool()
+            .unwrap()
+    );
+    state.extra.insert("deathmatch".into(), Value::Null);
     state.turns_taken = Sides {
         white: 45,
         black: 45,
@@ -1257,6 +1626,87 @@ fn regular_draft_acquisition_enters_play_and_clock_commits_at_turn_boundary() {
         json!({"row":6,"col":0})
     );
     assert_eq!(initial.state().extra["clock"]["runningColor"], Value::Null);
+
+    // A CHAOS proposal covers the actual two-card acquisition and the entire
+    // newly exposed offer. Both spectator and acting-player public histories
+    // must match, while their previous public frame is immutable.
+    let chaos_config = GameConfig {
+        game_style: "chaos".into(),
+        ..GameConfig::default()
+    };
+    let chaos = Position::new_game(chaos_config.clone(), 37).unwrap();
+    let choice = chaos.legal_actions().unwrap()[0].clone();
+    let next = chaos.apply(&choice).unwrap().position;
+    for viewer in [Color::White, Color::Black] {
+        let previous = chaos.try_observe(viewer).unwrap();
+        let expected = next.try_observe(viewer).unwrap();
+        let sampled = Position::sample_initial_public(
+            chaos_config.clone(),
+            serde_json::to_value(&previous).unwrap(),
+            71,
+        )
+        .unwrap();
+        let candidate = if viewer == Color::Black {
+            let hidden = sampled
+                .condition_hidden_opening_draft(serde_json::to_value(&expected).unwrap(), 117)
+                .unwrap();
+            assert_eq!(hidden.position.try_observe(viewer).unwrap(), previous);
+            assert!(hidden.source_probability > 0.0 && hidden.source_probability < 1.0);
+            let action = hidden
+                .position
+                .legal_actions()
+                .unwrap()
+                .into_iter()
+                .find(|action| {
+                    hidden
+                        .position
+                        .public_transition_compatible(
+                            action,
+                            serde_json::to_value(&expected).unwrap(),
+                        )
+                        .unwrap()
+                })
+                .unwrap();
+            (hidden.position, action)
+        } else {
+            let action = sampled
+                .bind_public_intent(chaos.public_intent(&choice).unwrap())
+                .unwrap();
+            (sampled, action)
+        };
+        let mut success = None;
+        for seed in 0..16 {
+            match candidate.0.apply_weighted_conditioned_public(
+                &candidate.1,
+                serde_json::to_value(&expected).unwrap(),
+                seed,
+            ) {
+                Ok(proposal) => {
+                    success = Some(proposal);
+                    break;
+                }
+                Err(EngineError::ConditioningMismatch(_)) => {}
+                Err(error) => panic!("unexpected CHAOS proposal error: {error}"),
+            }
+        }
+        let proposal = success.expect("finite source-valid CHAOS conditional trace");
+        assert_eq!(
+            proposal.step.position.try_observe(viewer).unwrap(),
+            expected
+        );
+        assert_eq!(candidate.0.try_observe(viewer).unwrap(), previous);
+        assert!(proposal.source_probability > 0.0 && proposal.source_probability < 1.0);
+        if viewer == Color::White {
+            assert_eq!(proposal.source_probability, proposal.proposal_probability);
+            assert_eq!(proposal.importance_weight, 1.0);
+        } else {
+            assert!(proposal.proposal_probability > 0.0 && proposal.proposal_probability <= 1.0);
+            assert_eq!(
+                proposal.importance_weight,
+                proposal.source_probability / proposal.proposal_probability
+            );
+        }
+    }
 }
 
 #[test]
@@ -1327,4 +1777,59 @@ fn royal_sound_probes_execute_owned_captures_and_source_protection_window() {
         Square { row: 4, col: 3 },
         &[Square { row: 3, col: 4 }]
     ));
+}
+
+#[test]
+fn direct_guard_card_cannot_explain_a_first_move_that_auto_uses_guard() {
+    let mut state = GameState::new(kernel_config(), 37).unwrap();
+    let mut guard: CardSlot = serde_json::from_value(
+        crate::draft::definitions()
+            .definitions
+            .iter()
+            .find(|card| card["id"] == "guard")
+            .unwrap()
+            .clone(),
+    )
+    .unwrap();
+    guard.instance_id = "guard-first-move".into();
+    guard.extra.insert("firstTurnCard".into(), json!(true));
+    state.deck_slots.white[0] = guard;
+    state.extra.insert(
+        "firstMoveCardsForced".into(),
+        json!({"white":false,"black":false}),
+    );
+    let position = Position::from_state(state).unwrap();
+    let card = position
+        .bind_payload(json!({"type":"card","color":"white",
+            "cardId":"guard","cardInstanceId":"guard-first-move"}))
+        .unwrap();
+    let direct = position.apply(&card).unwrap().position;
+    assert_eq!(
+        (direct.state().turn, direct.state().move_count),
+        (Color::White, 0)
+    );
+    let direct_public = serde_json::to_value(direct.try_observe(Color::Black).unwrap()).unwrap();
+    assert!(
+        position
+            .public_transition_compatible(&card, direct_public)
+            .unwrap()
+    );
+
+    let first_move = movement(
+        &position,
+        Square { row: 6, col: 0 },
+        Square { row: 5, col: 0 },
+    );
+    let moved = position.apply(&first_move).unwrap().position;
+    assert_eq!(
+        (moved.state().turn, moved.state().move_count),
+        (Color::Black, 1)
+    );
+    assert!(moved.state().deck_slots.white[0].used);
+    let moved_public = serde_json::to_value(moved.try_observe(Color::Black).unwrap()).unwrap();
+    assert!(
+        !position
+            .public_transition_compatible(&card, moved_public)
+            .unwrap()
+    );
 }

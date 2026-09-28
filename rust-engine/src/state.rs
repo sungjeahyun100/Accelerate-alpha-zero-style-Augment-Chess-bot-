@@ -796,6 +796,10 @@ pub struct GameState {
     pub history: Vec<Value>,
     #[serde(skip)]
     pub(crate) gameover_replay_pending: bool,
+    /// Owned execution-only likelihood. Source identities and hypothetical
+    /// availability probes do not enter this semantic outcome trace.
+    #[serde(skip)]
+    pub(crate) semantic_chance_probability: Option<f64>,
     #[serde(flatten)]
     pub extra: Fields,
 }
@@ -948,6 +952,7 @@ pub(crate) struct ObservationPolicy {
     pub(crate) public_piece_schema: Value,
     pub(crate) card_revelation_schema: Value,
     pub(crate) selection_schema: Value,
+    pub(crate) deathmatch_schema: Value,
 }
 pub(crate) fn observation_protocol() -> &'static str {
     &observation_policy().protocol_version
@@ -1002,6 +1007,12 @@ impl GameState {
             || (piece.flag("regencyHeir")
                 && self.flag("kingDead", piece.color)
                 && self.flag("regency", piece.color))
+    }
+    pub(crate) fn democracy_protects_royal(&self, piece: &Piece) -> bool {
+        self.flag("democracy", piece.color)
+            && (piece.flag("regencyHeir")
+                || piece.flag("crownRoyal")
+                || matches!(piece.kind.as_str(), "king" | "royalKnight" | "shotgunKing"))
     }
     pub fn decision_actor(&self) -> Color {
         let decision_color = |name| {
@@ -1284,6 +1295,10 @@ impl GameState {
             .expect("state object")
             .clone();
         public_state.insert("projectionVersion".into(), json!(observation_projection()));
+        public_state.insert(
+            "deathmatchStatus".into(),
+            crate::observation::deathmatch_status(self),
+        );
         public_state.extend(
             crate::observation::board_surface(self, viewer)
                 .as_object()

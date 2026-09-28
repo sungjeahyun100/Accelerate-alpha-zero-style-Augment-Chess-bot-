@@ -47,6 +47,51 @@ pub(crate) fn end_game(state: &mut GameState, winner: Option<Color>, reason: &st
     Ok(())
 }
 
+pub(crate) fn check_democracy_defeat(
+    state: &mut GameState,
+    color: Color,
+    winner: Color,
+    cause: &str,
+) -> Result<bool> {
+    if state.flag("democracy", color)
+        && state.flag("zugzwang", color)
+        && !state
+            .board
+            .iter()
+            .flatten()
+            .flatten()
+            .any(|piece| piece.color == color && state.royal_identity(piece))
+    {
+        state.set_flag("zugzwang", color, false);
+    }
+    if state.mode == "gameover" || !state.flag("democracy", color) {
+        return Ok(false);
+    }
+    let recurring = state
+        .extra
+        .get("pendingRecurrences")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|entry| entry["piece"]["color"] == color.as_str() && entry["piece"]["type"] == "pawn");
+    if recurring
+        || state
+            .board
+            .iter()
+            .flatten()
+            .flatten()
+            .any(|piece| piece.color == color && piece.kind == "pawn")
+    {
+        return Ok(false);
+    }
+    end_game(
+        state,
+        Some(winner),
+        &format!("{}의 {cause}", crate::replay::label(color)),
+    )?;
+    Ok(true)
+}
+
 /// The adopted local oracle profile advances rules at the catalog's frozen
 /// logical time. Clock state remains part of the rules snapshot; a wall-clock
 /// scheduler must supply elapsed time separately rather than enter this kernel.
@@ -112,6 +157,7 @@ pub(crate) fn pause_clock(state: &mut GameState) -> Result<()> {
 }
 
 pub(crate) fn start_clock(state: &mut GameState) -> Result<()> {
+    tick_siren_turn_start(state)?;
     if state.mode != "play"
         || state
             .extra
@@ -139,6 +185,91 @@ pub(crate) fn start_clock(state: &mut GameState) -> Result<()> {
     clock["runningColor"] = json!(state.turn);
     clock["lastStartedAt"] = json!(crate::draft::frozen_timestamp()?);
     Ok(())
+}
+
+/// The client calls this before checking whether its clock is enabled. Empty
+/// aura boards still update the boundary key and remove stale exposure entries.
+/// Active conversion needs the same defection/capture callback kernel as moves.
+fn tick_siren_turn_start(state: &mut GameState) -> Result<()> {
+    if state.mode != "play" {
+        return Ok(());
+    }
+    let key = format!(
+        "{}:{}",
+        state.turn.as_str(),
+        state.turns_taken.get(state.turn)
+    );
+    if state
+        .extra
+        .get("sirenExposure")
+        .and_then(|v| v.get("__turnStartKey"))
+        == Some(&json!(key))
+    {
+        return Ok(());
+    }
+    if state.board.iter().flatten().flatten().any(|piece| {
+        piece.ability_kind() == "siren"
+            || piece.kind == "trickster"
+                && piece
+                    .extra
+                    .get("tricksterPreviousAbilityForTurn")
+                    .and_then(Value::as_str)
+                    == Some("siren")
+    }) {
+        return Err(EngineError::UnsupportedFeature(
+            "Siren turn-start conversion".into(),
+        ));
+    }
+    state
+        .extra
+        .insert("sirenExposure".into(), json!({"__turnStartKey":key}));
+    Ok(())
+}
+
+/// Source checkNoActionLoss probes cards before moves, even on a mobile board.
+/// Its untargeted trial may consume global RNG; skipping directly to a legal
+/// move would change future draws while leaving today's board identical.
+pub(crate) fn check_no_action_loss(state: &mut GameState) -> Result<bool> {
+    if state.mode != "play"
+        || crate::observation::truth(state.extra.get("pendingPromotion"))
+        || crate::observation::truth(state.extra.get("targeting"))
+    {
+        return Ok(false);
+    }
+    if state
+        .extra
+        .get("chainBonds")
+        .and_then(Value::as_array)
+        .is_some_and(|bonds| !bonds.is_empty())
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "no-action chain normalization".into(),
+        ));
+    }
+    if crate::transition::available_card_action(state, state.turn)?
+        || !crate::movement::legal_move_actions(state)?.is_empty()
+    {
+        return Ok(false);
+    }
+    if state.board.iter().flatten().flatten().any(|piece| {
+        piece.color == state.turn
+            && (piece.kind == "shotgunKing"
+                && crate::observation::number(piece.extra.get("ammo")).unwrap_or(0.0)
+                    < crate::observation::number(piece.extra.get("maxAmmo")).unwrap_or(3.0)
+                || piece.ability_kind() == "wizard"
+                    && crate::observation::number(piece.extra.get("mana")).unwrap_or(0.0) >= 1.0)
+    }) {
+        return Ok(false);
+    }
+    end_game(
+        state,
+        Some(state.turn.opponent()),
+        &format!(
+            "{}은 사용할 카드와 움직일 수 있는 기물이 없습니다.",
+            crate::replay::label(state.turn)
+        ),
+    )?;
+    Ok(true)
 }
 
 pub(crate) fn commit_turn_clock(state: &mut GameState, color: Color) -> Result<bool> {

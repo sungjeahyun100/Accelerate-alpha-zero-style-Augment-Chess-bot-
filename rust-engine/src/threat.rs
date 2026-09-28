@@ -7,11 +7,14 @@ use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
 fn royal(state: &GameState, piece: &Piece) -> bool {
-    state.royal_identity(piece)
-        || matches!(piece.kind.as_str(), "vip" | "timeTraveler" | "vampireLord")
+    state.royal_identity(piece) && !state.democracy_protects_royal(piece)
+        || matches!(
+            piece.kind.as_str(),
+            "vip" | "merchant" | "timeTraveler" | "vampireLord"
+        )
 }
 
-fn tick_protection(state: &mut GameState, color: Color, field: &str) {
+pub(crate) fn tick_protection(state: &mut GameState, color: Color, field: &str) {
     let mut seen = BTreeSet::new();
     let pieces = state
         .board
@@ -124,7 +127,17 @@ fn clone_window(state: &GameState, defender: Color) -> GameState {
     state
 }
 
+#[cfg(test)]
 pub(crate) fn has_royal_capture(state: &GameState, defender: Color) -> Result<bool> {
+    evaluate_royal_capture(&mut state.clone(), defender).map(|(check, _)| check)
+}
+
+/// Source restores the simulated board but not its external RNG or active
+/// move-replay capture variable. Return that control effect explicitly.
+pub(crate) fn evaluate_royal_capture(
+    state: &mut GameState,
+    defender: Color,
+) -> Result<(bool, bool)> {
     let mut seen = BTreeSet::new();
     let royals = state
         .board
@@ -136,7 +149,7 @@ pub(crate) fn has_royal_capture(state: &GameState, defender: Color) -> Result<bo
         .map(|piece| piece.id.clone())
         .collect::<BTreeSet<_>>();
     if royals.is_empty() {
-        return Ok(false);
+        return Ok((false, false));
     }
     for field in [
         "conveyorRule",
@@ -145,6 +158,29 @@ pub(crate) fn has_royal_capture(state: &GameState, defender: Color) -> Result<bo
         "delayedHazards",
         "pendingOtherworld",
     ] {
+        if field == "pendingOtherworld"
+            && state
+                .extra
+                .get(field)
+                .and_then(Value::as_array)
+                .is_some_and(|entries| {
+                    entries.iter().all(|entry| {
+                        let remaining = crate::observation::number(entry.get("remainingHalfTurns"));
+                        if let Some(remaining) = remaining.filter(|number| {
+                            number.fract() == 0.0
+                                && *number >= 0.0
+                                && *number <= 9_007_199_254_740_991.0
+                        }) {
+                            remaining > 1.0
+                        } else {
+                            crate::observation::number(entry.get("dueMoveCount"))
+                                .is_some_and(|due| due > f64::from(state.move_count) + 1.0)
+                        }
+                    })
+                })
+        {
+            continue;
+        }
         if state.extra.get(field).is_some_and(|value| match value {
             Value::Array(values) => !values.is_empty(),
             Value::Object(values) => values
@@ -166,13 +202,32 @@ pub(crate) fn has_royal_capture(state: &GameState, defender: Color) -> Result<bo
                         .extra
                         .get("witchTrial")
                         .and_then(|value| crate::observation::number(value.get("remaining")))
-                        .is_some_and(|remaining| remaining <= 1.0))
+                        .is_some_and(|remaining| remaining <= 1.0)
+                        && piece
+                            .extra
+                            .get("witchTrial")
+                            .and_then(|value| value.get("countBy"))
+                            .and_then(Value::as_str)
+                            == Some(defender.as_str()))
     }) {
         return Err(EngineError::UnsupportedFeature(
             "royal threat automatic piece reaction".into(),
         ));
     }
     let window = clone_window(state, defender);
+    let automatic = window.board.iter().flatten().flatten().any(|piece| {
+        crate::observation::truth(piece.extra.get("logDir"))
+            || piece.ability_kind() == "siren"
+            || piece.color == defender
+                && (piece.ability_kind() == "brutus"
+                    || piece
+                        .extra
+                        .get("witchTrial")
+                        .and_then(|value| crate::observation::number(value.get("remaining")))
+                        .is_some_and(|remaining| remaining <= 1.0))
+    });
+    let mut check = false;
+    let mut executed = false;
     for action in crate::movement::legal_move_actions(&window)? {
         let attacker = window
             .at(action.from.ok_or(EngineError::IllegalAction)?)
@@ -206,11 +261,12 @@ pub(crate) fn has_royal_capture(state: &GameState, defender: Color) -> Result<bo
                 );
             }
         }
-        if !cells.iter().any(|square| {
+        let relevant = cells.iter().any(|square| {
             window
                 .at(*square)
-                .is_some_and(|piece| royals.contains(&piece.id))
-        }) {
+                .is_some_and(|piece| piece.color != attacker.color)
+        });
+        if !automatic && !relevant {
             if cells.iter().any(|square| {
                 window
                     .at(*square)
@@ -232,7 +288,12 @@ pub(crate) fn has_royal_capture(state: &GameState, defender: Color) -> Result<bo
             continue;
         }
         let mut child = window.clone();
-        match crate::transition::execute_threat_move(&mut child, &action) {
+        child.rng = state.rng.clone();
+        child.semantic_chance_probability = None;
+        let result = crate::transition::execute_threat_move(&mut child, &action);
+        state.rng = child.rng;
+        executed = true;
+        match result {
             Ok(captures) => {
                 if captures.iter().any(|piece| royals.contains(&piece.id))
                     || royals.iter().any(|id| {
@@ -244,25 +305,28 @@ pub(crate) fn has_royal_capture(state: &GameState, defender: Color) -> Result<bo
                             .any(|piece| &piece.id == id && piece.color == defender)
                     })
                 {
-                    return Ok(true);
+                    check = true;
                 }
             }
             Err(EngineError::IllegalAction | EngineError::WrongActor | EngineError::Terminal) => {}
             Err(error) => return Err(error),
         }
     }
-    Ok(false)
+    Ok((check, executed))
 }
 
 /// Headless local profile uses loadCheckAlertEnabled's absent-storage default
 /// true. The source callback mutates lastMove metadata; audio output is absent.
-pub(crate) fn play_move_sound(state: &mut GameState, default: &str, color: Color) -> Result<()> {
+pub(crate) fn play_move_sound(state: &mut GameState, default: &str, color: Color) -> Result<bool> {
     if state.mode != "play" {
-        return Ok(());
+        return Ok(false);
     }
     let mut check = false;
+    let mut executed = false;
     for defender in [Color::White, Color::Black] {
-        if has_royal_capture(state, defender)? {
+        let (threat, simulated) = evaluate_royal_capture(state, defender)?;
+        executed |= simulated;
+        if threat {
             check = true;
             break;
         }
@@ -278,5 +342,5 @@ pub(crate) fn play_move_sound(state: &mut GameState, default: &str, color: Color
     {
         last.insert("soundName".into(), json!("checkDanger"));
     }
-    Ok(())
+    Ok(executed)
 }

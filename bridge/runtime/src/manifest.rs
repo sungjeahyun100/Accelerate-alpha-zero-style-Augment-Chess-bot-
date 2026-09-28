@@ -206,7 +206,7 @@ impl Bundle {
                 && spec["observation_policy_hash"].as_str() == Some(&canonical_hash(&policy)?)
                 && policy["schemaVersion"] == 2
                 && policy["protocolVersion"] == "accelerate-observation-v2"
-                && policy["projectionVersion"] == "source-visible-20260927-v2"
+                && policy["projectionVersion"] == "source-visible-20260927-v3"
                 && policy["rulesVersion"] == catalog["rulesVersion"],
             "frozen rules/catalog compatibility mismatch"
         );

@@ -11,7 +11,10 @@ const { installEnumerationSource } = require("./client-enumeration");
 const HEADLESS_PROFILE = Object.freeze({
   version: contract.ORACLE_PROFILE_VERSION,
   rendererContext: "cold-activePieceAnimationUntil-at-admission",
-  retained: Object.freeze(["source-transitions", "draft-availability-predicates", "potion-cleanup", "terminal-rule-ticket-cleanup", "queued-replay-settlement", "history-notation-rng"]),
+  clockContext: "cold-clockDisplayAnchor-at-admission",
+  viewerContext: "source-turn-view-after-restored-position-admission",
+  newGameContext: "isolated-source-setup-replay-commit-on-success",
+  retained: Object.freeze(["source-transitions", "source-clock-commit", "draft-availability-predicates", "potion-cleanup", "terminal-rule-ticket-cleanup", "queued-replay-settlement", "history-notation-rng"]),
   excluded: Object.freeze(["dom-card-animation-rng", "dom-update-log-rng", "dom-render-probes-and-ui-state", "network-persistence", "editor-ui", "timers"]),
   queryRng: "restored-position-probe-only",
   decisionMode: "local-explicit-decisions",
@@ -21,6 +24,9 @@ const HEADLESS_PROFILE = Object.freeze({
 const PRESENTATION_HOOKS = ["setStatus", "toast", "playSound", "renderJokerChoicePanel", "renderHistoryControls"];
 const BOOTSTRAP = `
 aiSimulationDepth = 0;
+// Public observation temporarily uses a selected viewer. A subsequent source
+// action must recover the client's local turn view when admitting its Position.
+const __sourceLocalViewColor=localViewColor, __sourceBoardViewColor=boardViewColor;
 ${PRESENTATION_HOOKS.map(name => `${name}=()=>{};`).join("\n")}
 const __sourceRenderAll=renderAll, __sourceRuleTicketPanel=renderRuleTicketPanel;
 renderRuleTicketPanel=()=>{if(state?.mode==="gameover")__sourceRuleTicketPanel();};
@@ -199,6 +205,14 @@ function __publicCardRevelation(card) {
   const box=revealedBoxCard(card);if(box)revealed.boxCardId=box.id;
   return revealed;
 }
+function __publicDeathmatchStatus() {
+  // Source local warning meaning, independent of private notice dedup and
+  // the lifetime of toast/status DOM text. Online role negotiation is outside
+  // this local explicit-decision projection.
+  const active = isDeathmatchActive();
+  const warning = Boolean(active && state.mode === "play" && !state.deathmatch.progressThisTurn && deathmatchWarningNoticeKeyForState(state, state.turn));
+  return { active, warning };
+}
 `;
 const decisionActor = state => state.mode === "draft" && state.draft?.color || state.pendingPromotion?.color || state.activeTrolley?.color || state.turn;
 function validateBoardAliases(state) {
@@ -253,6 +267,7 @@ class OfflineOracle {
   constructor(root = cacheRoot(), { maxCandidates = 100000, maxMicrotasks = 256 } = {}) {
     if (!Number.isSafeInteger(maxCandidates) || maxCandidates < 1) throw new TypeError("maxCandidates must be positive.");
     if (!Number.isSafeInteger(maxMicrotasks) || maxMicrotasks < 1 || maxMicrotasks > 4096) throw new TypeError("maxMicrotasks must be between 1 and 4096.");
+    this.root = root;
     this.main = loadMain(root);
     this.maxCandidates = maxCandidates;
     const file = this.main.manifest.files.find(file => /^main-/.test(file.name));
@@ -283,10 +298,11 @@ class OfflineOracle {
       // the prepared state separate until both operations succeed, including
       // the existing RNG and callbacks owned by the currently live position.
       this.main.context.__restoredState = this.evaluate("(()=>{const candidate=__decode(__position);__relinkSnapshotBoards(candidate);return candidate;})()");
-      // Source75801 keeps this animation deadline Map outside its snapshots.
-      // Profile v2 admits each immutable position with a cold render cache;
-      // source Set fields and cache activity within the action stay intact.
-      this.evaluate("state=__restoredState;activePieceAnimationUntil.clear();__microtasks.length=0;scheduledGameOverReplayState=null;selectedGameStyle=state.gameStyle||'normal';localPlayMode='local';playMode='local';");
+      // Source75801's animation Map and source56499's clock display anchor
+      // are outside snapshots. The headless profile uses their fresh invocation state
+      // only after decoding/relinking succeeds; source state fields, elapsed
+      // clock commits and cache activity during this action stay intact.
+      this.evaluate("state=__restoredState;activePieceAnimationUntil.clear();clearClockDisplayAnchor();__microtasks.length=0;scheduledGameOverReplayState=null;selectedGameStyle=state.gameStyle||'normal';localPlayMode='local';playMode='local';localViewColor=__sourceLocalViewColor;boardViewColor=__sourceBoardViewColor;");
       this.random = random;
     } finally {
       delete this.main.context.__position;
@@ -298,18 +314,54 @@ class OfflineOracle {
     return contract.position(this.state(), this.random, history);
   }
   newGame(config = {}, seed = 0, tape = []) {
+    const ownedConfig = contract.jsonCopy(config);
     const allowed = ["gameStyle", "draftDelete", "ruleCardIds", "starWinLimit", "deathmatchEnabled", "deathmatchLimitTurns"];
-    if (Object.keys(config).some(key => !allowed.includes(key))) throw new TypeError("Unknown game configuration field.");
-    const style = config.gameStyle || "normal";
+    if (Object.keys(ownedConfig).some(key => !allowed.includes(key))) throw new TypeError("Unknown game configuration field.");
+    const style = ownedConfig.gameStyle || "normal";
     if (!["normal", "chaos", "grand"].includes(style)) throw new TypeError("Only normal, chaos and grand 8x8 are supported.");
-    if (config.ruleCardIds && (!Array.isArray(config.ruleCardIds) || config.ruleCardIds.some(id => !contract.catalog.cards.some(card => card.id === id && card.draftCategory === "RULE")))) throw new TypeError("Unknown RULE card.");
-    this.random = contract.rng(seed, tape);
-    this.evaluate("__microtasks.length=0;scheduledGameOverReplayState=null;");
-    this.main.context.__config = { ...config, gameStyle: style };
-    for (const key of ["draftDelete", "deathmatchEnabled"]) if (config[key] !== undefined && typeof config[key] !== "boolean") throw new TypeError(`Invalid ${key}.`);
-    for (const key of ["starWinLimit", "deathmatchLimitTurns"]) if (config[key] !== undefined && (!Number.isSafeInteger(config[key]) || config[key] < 1)) throw new TypeError(`Invalid ${key}.`);
-    this.evaluate("activePieceAnimationUntil.clear();selectedGameStyle=__config.gameStyle; localPlayMode='local'; playMode='local'; resetGame(false,[]); state.draftDelete=__config.draftDelete===true; if(__config.deathmatchEnabled!==undefined)state.deathmatchEnabled=__config.deathmatchEnabled; if(__config.deathmatchLimitTurns!==undefined)state.deathmatchLimitTurns=__config.deathmatchLimitTurns; if(__config.starWinLimit!==undefined)state.starWinLimit=__config.starWinLimit; if(__config.ruleCardIds?.length){state.ruleOpeningEnabled=true;state.ruleSelectionEnabled=true;state.selectedRuleCardIds=[...__config.ruleCardIds];maybeApplyOpeningRuleEvent();finishRuleOpeningEvent();}beginInitialGameFlow();");
-    return this.snapshot();
+    if (ownedConfig.ruleCardIds && (!Array.isArray(ownedConfig.ruleCardIds) || ownedConfig.ruleCardIds.some(id => !contract.catalog.cards.some(card => card.id === id && card.draftCategory === "RULE")))) throw new TypeError("Unknown RULE card.");
+    for (const key of ["draftDelete", "deathmatchEnabled"]) if (ownedConfig[key] !== undefined && typeof ownedConfig[key] !== "boolean") throw new TypeError(`Invalid ${key}.`);
+    for (const key of ["starWinLimit", "deathmatchLimitTurns"]) if (ownedConfig[key] !== undefined && (!Number.isSafeInteger(ownedConfig[key]) || ownedConfig[key] < 1)) throw new TypeError(`Invalid ${key}.`);
+    const random = contract.rng(seed, tape);
+    const staged = new OfflineOracle(this.root, { maxCandidates: this.maxCandidates, maxMicrotasks: this.maxMicrotasks });
+    staged.random = random;
+    staged.main.context.__config = { ...ownedConfig, gameStyle: style };
+    // resetGame reads these source setup variables before it creates state or
+    // its replay base frame. A later state-only patch leaves them inconsistent.
+    staged.evaluate(`
+      activePieceAnimationUntil.clear(); clearClockDisplayAnchor();
+      selectedGameStyle=__config.gameStyle; localPlayMode='local'; playMode='local';
+      draftDeleteEnabled=__config.draftDelete===true;
+      ruleOpeningEnabled=true;
+      ruleSelectionEnabled=Boolean(__config.ruleCardIds?.length);
+      selectedRuleCardIds=[...(__config.ruleCardIds||[])];
+      selectedRuleCardId=legacySelectedRuleCardId(selectedRuleCardIds);
+      deathmatchEnabled=__config.deathmatchEnabled!==false;
+      resetGame(false,[]);
+      if(__config.deathmatchLimitTurns!==undefined)state.deathmatchLimitTurns=__config.deathmatchLimitTurns;
+      if(__config.starWinLimit!==undefined)state.starWinLimit=__config.starWinLimit;
+      if(__config.deathmatchLimitTurns!==undefined||__config.starWinLimit!==undefined){
+        if(state.boardHistory?.length!==1||state.boardHistory[0]?.label!=='initial'||
+           state.replayEvents?.length!==0||state.replayEventNonce!==0||
+           !state.replayBaseFrame||!state.replayTailFrame)
+          throw new Error('Unsupported source initial replay shape for configured limits.');
+        // resetGame records its first source replay frame before these explicit
+        // headless limit overrides. Recapture both frames with the source's
+        // canonical helper; boardHistory contains board/turn, not the limits.
+        state.replayBaseFrame=captureReplayFrame();
+        state.replayTailFrame=cloneReplayValue(state.replayBaseFrame);
+      }
+      if(__config.ruleCardIds?.length){maybeApplyOpeningRuleEvent();finishRuleOpeningEvent();}
+      beginInitialGameFlow();
+    `);
+    const position = staged.snapshot();
+    // The constructor's RNG callback closes over staged. Rebind it to this
+    // owner before committing the VM, so later actions advance this.random.
+    staged.main.context.__random = () => { const next = contract.nextRandom(this.random); this.random = next.rng; return next.value; };
+    staged.evaluate("Math.random=__random;");
+    this.main = staged.main;
+    this.random = staged.random;
+    return position;
   }
   result(position) {
     contract.validatePosition(position);
@@ -349,6 +401,7 @@ class OfflineOracle {
     publicState.projectionVersion = policy.projectionVersion;
     publicState.observationPolicyHash = contract.digest(policy);
     Object.assign(publicState, JSON.parse(this.evaluate("JSON.stringify(__publicBoardSurface(__viewer))")));
+    publicState.deathmatchStatus = JSON.parse(this.evaluate("JSON.stringify(__publicDeathmatchStatus())"));
     publicState.captures = Object.fromEntries(Object.entries(state.captures || {}).map(([color, cells]) => [color, cells.slice(-12).map(cell => typeof cell === "string" ? { type: cell } : Object.fromEntries(Object.entries(cell).filter(([key]) => ["type", "color", "logDir", "windmillMode"].includes(key))))]));
     publicState.clock = state.clock && Object.fromEntries(Object.entries(state.clock).filter(([key]) => ["enabled", "initialMs", "incrementMs", "whiteMs", "blackMs", "runningColor", "timeoutWinner", "timeoutLoser"].includes(key)));
     publicState.lastMove = state.lastMove && state.lastMove.hiddenFrom !== viewer ? Object.fromEntries(Object.entries(state.lastMove).filter(([key]) => ["from", "to", "color", "kind"].includes(key)).map(([key,value])=>[key,["from","to"].includes(key)?{row:value.row,col:value.col}:value])) : null;
