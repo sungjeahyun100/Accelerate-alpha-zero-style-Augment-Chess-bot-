@@ -19,7 +19,7 @@ pub use movement::implemented_piece_types;
 pub use state::*;
 
 use serde_json::{Map, Value};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 #[derive(Clone, Debug)]
 struct SnapshotShape {
@@ -28,7 +28,11 @@ struct SnapshotShape {
 }
 
 #[derive(Clone, Debug)]
-pub struct Position(Arc<GameState>, Option<Arc<SnapshotShape>>);
+pub struct Position(
+    Arc<GameState>,
+    Option<Arc<SnapshotShape>>,
+    Arc<OnceLock<Sides<Observation>>>,
+);
 
 /// Importance proposal for a previously hidden source OPENING offer.
 /// Probabilities refer to the ordered weighted-choice chance kernel; opaque
@@ -54,7 +58,11 @@ pub struct ConditionedStepProposal {
 impl Position {
     pub(crate) fn with_state(&self, mut state: GameState) -> Result<Self> {
         state.validate_and_identify()?;
-        Ok(Self(Arc::new(state), self.1.clone()))
+        Ok(Self(
+            Arc::new(state),
+            self.1.clone(),
+            Arc::new(OnceLock::new()),
+        ))
     }
     pub fn sample_initial_public(
         config: GameConfig,
@@ -189,7 +197,7 @@ impl Position {
     }
     pub fn from_state(mut state: GameState) -> Result<Self> {
         state.validate_and_identify()?;
-        Ok(Self(Arc::new(state), None))
+        Ok(Self(Arc::new(state), None, Arc::new(OnceLock::new())))
     }
     /// Import a source snapshot without inventing fields at its serialization
     /// boundary. Typed defaults remain internal until a rule changes them.
@@ -210,6 +218,7 @@ impl Position {
         Ok(Self(
             Arc::new(state),
             Some(Arc::new(SnapshotShape { original, baseline })),
+            Arc::new(OnceLock::new()),
         ))
     }
     /// RNG and public history are position metadata in the v1 transport.
@@ -218,7 +227,11 @@ impl Position {
         state.rng = rng;
         state.history = history;
         state.validate_and_identify()?;
-        Ok(Self(Arc::new(state), self.1.clone()))
+        Ok(Self(
+            Arc::new(state),
+            self.1.clone(),
+            Arc::new(OnceLock::new()),
+        ))
     }
     pub fn export_state(&self) -> Result<Value> {
         let current = serde_json::to_value(self.state()).map_err(EngineError::serialization)?;
@@ -312,6 +325,33 @@ impl Position {
         )?;
         movement::validate_action(self.state(), &semantic)
     }
+    fn raw_observations(&self) -> &Sides<Observation> {
+        self.2.get_or_init(|| Sides {
+            white: self.state().observe(Color::White),
+            black: self.state().observe(Color::Black),
+            white_first: true,
+        })
+    }
+    fn validated_after_cache(
+        state: &mut GameState,
+        after: Sides<Observation>,
+    ) -> Result<Arc<OnceLock<Sides<Observation>>>> {
+        // Validation can normalize an empty winner and assign IDs to board
+        // pieces. Observations made during the transition precede both edits.
+        let normalized_after_observation = state.winner.as_deref() == Some("")
+            || state
+                .board
+                .iter()
+                .flatten()
+                .flatten()
+                .any(|piece| piece.id.is_empty());
+        state.validate_and_identify()?;
+        let cache = Arc::new(OnceLock::new());
+        if !normalized_after_observation {
+            cache.set(after).expect("fresh observation cache");
+        }
+        Ok(cache)
+    }
     pub fn apply(&self, action: &Action) -> Result<StepResult> {
         if let Some(key) = &action.position_key
             && key != &format!("{:016x}", self.key())
@@ -326,12 +366,13 @@ impl Position {
         self.validate_action(action)?;
         let actor = self.actor();
         let mut state = self.state().clone();
-        let captures = transition::apply(&mut state, &comparable)?;
-        state.validate_and_identify()?;
+        let (captures, after) =
+            transition::apply(&mut state, &comparable, self.raw_observations())?;
+        let cache = Self::validated_after_cache(&mut state, after)?;
         let turn_changed = self.state().turn != state.turn;
         let result = state.result();
         Ok(StepResult {
-            position: Self(Arc::new(state), self.1.clone()),
+            position: Self(Arc::new(state), self.1.clone(), cache),
             actor,
             turn_changed,
             captures,
@@ -342,10 +383,15 @@ impl Position {
         self.state().result()
     }
     pub fn observe(&self, viewer: Color) -> Observation {
-        self.state().observe(viewer)
+        self.raw_observations().get(viewer).clone()
     }
     pub fn try_observe(&self, viewer: Color) -> Result<Observation> {
-        self.state().try_observe(viewer)
+        let hints = movement::public_hints(self.state(), viewer)?;
+        let mut observation = self.raw_observations().get(viewer).clone();
+        observation.public_state.insert("legalHints".into(), hints);
+        observation::validate_projection(&observation)?;
+        observation.refresh_key();
+        Ok(observation)
     }
 }
 
@@ -390,4 +436,38 @@ pub(crate) fn stable_hash(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf29ce484222325u64, |hash, byte| {
         (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
     })
+}
+
+#[cfg(test)]
+mod cache_normalization_tests {
+    use super::*;
+
+    fn before_validation(state: &GameState) -> Sides<Observation> {
+        Sides {
+            white: state.observe(Color::White),
+            black: state.observe(Color::Black),
+            white_first: true,
+        }
+    }
+
+    #[test]
+    fn after_observations_are_discarded_when_validation_assigns_a_piece_id() {
+        let mut state = GameState::new(GameConfig::default(), 11).unwrap();
+        state.board[4][4] = Some(Piece::new("pawn", Color::White, ""));
+        let after = before_validation(&state);
+        let cache = Position::validated_after_cache(&mut state, after).unwrap();
+        assert!(cache.get().is_none());
+        assert_eq!(state.board[4][4].as_ref().unwrap().id, "white-4-4");
+        let position = Position(Arc::new(state.clone()), None, cache);
+        for viewer in [Color::White, Color::Black] {
+            assert_eq!(
+                serde_json::to_value(position.observe(viewer)).unwrap(),
+                serde_json::to_value(state.observe(viewer)).unwrap()
+            );
+        }
+
+        let ordinary_after = before_validation(&state);
+        let ordinary_cache = Position::validated_after_cache(&mut state, ordinary_after).unwrap();
+        assert!(ordinary_cache.get().is_some());
+    }
 }

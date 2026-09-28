@@ -346,6 +346,19 @@ CI 범위 34/34·skip 0을 확인했다. 거대 manifest fixture와 실제 학�
 이 Linux 로컬 설치 검사는 최종 커밋의 두 OS CI와 전체 코드 GO를 대신하지 않으며,
 보고서는 Git 밖 `reports/full-stack-implementation/ci-contract-v1`에 보존한다.
 
+추가 고정 성능 후보는 불변 `Position`의 양쪽 공개 관측을 전이 후보 사이에 재사용하되,
+상태가 바뀌면 캐시를 새로 만든다. 전이의 공개 history를 양 viewer에 각각 반영하고
+키를 다시 계산한다. 검증 중 빈 승자 값이나 기물 ID가 정규화되면 전이 전 관측 캐시를
+버리고 검증된 상태에서 재투영한다. 고정 소스의 Rust 42/42·fmt·strict Clippy와
+100개 seed의 전체 상태·가중치 동등성을 확인했다. 이 코드의 maturin sdist
+`bbd41a36...`→wheel `d7d7dfd5...` 설치본은 기존 CI 범위 34/34·skip 0,
+CHAOS·GRAND 기본 사례 추가 3회씩 모두 통과했다. 정확한 소스 목록과 JUnit은 Git 밖
+`reports/full-stack-implementation/ci-perf-v5`에 고정했다. 로컬 Windows에서는 같은
+후보보다 이전 고정 소스의 sdist까지 생성했으나, 이 호스트의 긴 MSVC 출력 경로와
+애플리케이션 제어 정책으로 wheel·설치 검사를 실행하지 못했다. 이를 코드 실패나
+Windows 원격 CI 결과로 계산하지 않는다. 최종 커밋의 두 OS 원격 CI와 전체 규칙·카드
+coverage는 여전히 별도 완료 조건이며 실제 학습은 시작하지 않았다.
+
 ## 구현 연결 순서와 완료 기준
 
 작업별 담당자는 하나로 유지하고 공통 계약은 담당자끼리 확인한다. 다음 순서는 의존 관계이며,

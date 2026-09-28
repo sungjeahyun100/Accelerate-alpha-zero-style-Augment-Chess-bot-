@@ -300,13 +300,12 @@ fn apply_democracy(state: &mut GameState, color: Color) -> Result<bool> {
     Ok(true)
 }
 
-pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
+pub(crate) fn apply(
+    state: &mut GameState,
+    action: &Action,
+    before: &Sides<Observation>,
+) -> Result<(Vec<Piece>, Sides<Observation>)> {
     let actor = action.color;
-    let before = Sides {
-        white: state.observe(Color::White),
-        black: state.observe(Color::Black),
-        white_first: true,
-    };
     let captures = match action.kind {
         ActionKind::Move => apply_move(state, action, false)?,
         ActionKind::Card => apply_card(state, action)?,
@@ -318,20 +317,25 @@ pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>
     };
     prune_board_potion_effects(state)?;
     crate::replay::settle(state)?;
+    let mut after = Sides {
+        white: state.observe(Color::White),
+        black: state.observe(Color::Black),
+        white_first: true,
+    };
     let transition = |viewer| {
-        let after = state.observe(viewer);
+        let view = after.get(viewer);
         let before = before.get(viewer);
         let mut board_changes = Vec::new();
         for row in 0..8 {
             for col in 0..8 {
-                if before.board[row][col] != after.board[row][col] {
+                if before.board[row][col] != view.board[row][col] {
                     board_changes.push(BoardChange {
                         square: Square {
                             row: row as u8,
                             col: col as u8,
                         },
                         before: before.board[row][col].clone(),
-                        after: after.board[row][col].clone(),
+                        after: view.board[row][col].clone(),
                     });
                 }
             }
@@ -347,8 +351,8 @@ pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>
             next_actor: state.decision_actor(),
             phase: state.mode.clone(),
             board_changes,
-            own_cards: after.own_cards,
-            revealed_opponent_cards: after
+            own_cards: view.own_cards.clone(),
+            revealed_opponent_cards: view
                 .public_state
                 .get("revealedOpponentCards")
                 .and_then(Value::as_array)
@@ -371,10 +375,20 @@ pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>
             white_first: true,
         },
     };
+    after
+        .white
+        .history
+        .push(serde_json::to_value(&event.public.white).expect("public transition serializes"));
+    after
+        .black
+        .history
+        .push(serde_json::to_value(&event.public.black).expect("public transition serializes"));
+    after.white.refresh_key();
+    after.black.refresh_key();
     state
         .history
         .push(serde_json::to_value(event).expect("game event serializes"));
-    Ok(captures)
+    Ok((captures, after))
 }
 
 pub(crate) fn execute_threat_move(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {

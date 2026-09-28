@@ -5,6 +5,25 @@ use crate::*;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+fn with_trace(position: &Position, probability: Option<f64>) -> Position {
+    let mut state = position.state().clone();
+    state.semantic_chance_probability = probability;
+    Position(
+        std::sync::Arc::new(state),
+        position.1.clone(),
+        position.2.clone(),
+    )
+}
+fn with_seed(position: &Position, seed: u32) -> Position {
+    let mut state = position.state().clone();
+    state.rng = RngState::seeded(u64::from(seed));
+    Position(
+        std::sync::Arc::new(state),
+        position.1.clone(),
+        position.2.clone(),
+    )
+}
+
 fn same_content<T: serde::Serialize>(left: &T, right: &T) -> Result<bool> {
     let canonical = |value| {
         serde_jcs::to_vec(value).map_err(|error| {
@@ -135,9 +154,8 @@ pub(crate) fn apply_conditioned(
     seed: u32,
 ) -> Result<StepResult> {
     let expected = checked_observation(expected)?;
-    let expected_value = serde_json::to_value(&expected).map_err(EngineError::serialization)?;
     let mut step = position.apply(action)?;
-    let conditioned = match condition_identities(&step.position, expected_value.clone()) {
+    let conditioned = match condition_identities_checked(&step.position, &expected) {
         Ok(position) => position,
         Err(EngineError::ConditioningMismatch(_)) => {
             let old_draft = position.state().extra.get("draft");
@@ -180,7 +198,7 @@ pub(crate) fn apply_conditioned(
             let mut state = step.position.state().clone();
             crate::draft::condition_opening_offer(&mut state, choices, Color::Black)?;
             let proposed = step.position.with_state(state)?;
-            condition_identities(&proposed, expected_value)?
+            condition_identities_checked(&proposed, &expected)?
         }
         Err(error) => return Err(error),
     };
@@ -201,7 +219,6 @@ pub(crate) fn apply_weighted_conditioned(
     seed: u32,
 ) -> Result<ConditionedStepProposal> {
     let expected = checked_observation(expected)?;
-    let expected_value = serde_json::to_value(&expected).map_err(EngineError::serialization)?;
     if action.kind == ActionKind::Card {
         position.validate_action(action)?;
         let card = position
@@ -223,17 +240,13 @@ pub(crate) fn apply_weighted_conditioned(
             ));
         }
     }
-    let mut traced_state = position.state().clone();
-    traced_state.semantic_chance_probability = Some(1.0);
-    let mut step = position.with_state(traced_state)?.apply(action)?;
+    let mut step = with_trace(position, Some(1.0)).apply(action)?;
     let semantic_probability = step
         .position
         .state()
         .semantic_chance_probability
         .ok_or_else(|| EngineError::InvalidState("missing owned semantic chance trace".into()))?;
-    let mut completed = step.position.state().clone();
-    completed.semantic_chance_probability = None;
-    step.position = step.position.with_state(completed)?;
+    step.position = with_trace(&step.position, None);
     let old_draft = position.state().extra.get("draft");
     let new_draft = step.position.state().extra.get("draft");
     let visible_draft = expected.public_state.get("draft");
@@ -303,20 +316,18 @@ pub(crate) fn apply_weighted_conditioned(
         // This compares every public field and every viewer-scoped history
         // event, so a forced component selecting a different best attempt is
         // rejected rather than changing the source's balance decision.
-        (condition_identities(&proposed, expected_value)?, p, q)
+        (condition_identities_checked(&proposed, &expected)?, p, q)
     } else {
         // The ordinary proposal samples the same source semantic kernel. Its
         // realized outcome density appears in both p and q, including cards.
         (
-            condition_identities(&step.position, expected_value)?,
+            condition_identities_checked(&step.position, &expected)?,
             semantic_probability,
             semantic_probability,
         )
     };
     let importance_weight = checked_density(source_probability, proposal_probability)?;
-    let mut state = conditioned.state().clone();
-    state.rng = RngState::seeded(u64::from(seed));
-    step.position = conditioned.with_state(state)?;
+    step.position = with_seed(&conditioned, seed);
     Ok(ConditionedStepProposal {
         step,
         importance_weight,
@@ -659,6 +670,10 @@ fn remap(value: &mut Value, map: &BTreeMap<String, String>) {
 }
 pub(crate) fn condition_identities(position: &Position, expected: Value) -> Result<Position> {
     let expected = checked_observation(expected)?;
+    condition_identities_checked(position, &expected)
+}
+
+fn condition_identities_checked(position: &Position, expected: &Observation) -> Result<Position> {
     let current = position.try_observe(expected.viewer)?;
     let mut map = BTreeMap::new();
     card_identity_map(&current.own_cards, &expected.own_cards, &mut map)?;
@@ -695,6 +710,18 @@ pub(crate) fn condition_identities(position: &Position, expected: Value) -> Resu
             ));
         }
     }
+    // When all public identities already match, the remap is the identity
+    // function. Comparing the complete frame still rejects semantic changes,
+    // while retaining the caller's immutable Position without a full state
+    // serialization, decode, and second observation projection.
+    if map.iter().all(|(old, new)| old == new) {
+        if same_content(&current, expected)? {
+            return Ok(position.clone());
+        }
+        return Err(EngineError::ConditioningMismatch(
+            "public frame differs beyond opaque identities".into(),
+        ));
+    }
     let mut raw = serde_json::to_value(position.state()).map_err(EngineError::serialization)?;
     // The metadata RNG is never relabeled or sampled here. Only existing opaque
     // identity strings and references to them are changed together.
@@ -707,7 +734,7 @@ pub(crate) fn condition_identities(position: &Position, expected: Value) -> Resu
     raw["rng"] = rng;
     let state: GameState = serde_json::from_value(raw).map_err(EngineError::serialization)?;
     let conditioned = position.with_state(state)?;
-    if !same_content(&conditioned.try_observe(expected.viewer)?, &expected)? {
+    if !same_content(&conditioned.try_observe(expected.viewer)?, expected)? {
         return Err(EngineError::ConditioningMismatch(
             "public frame differs beyond opaque identities".into(),
         ));

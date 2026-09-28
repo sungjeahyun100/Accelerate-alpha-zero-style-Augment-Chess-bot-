@@ -892,7 +892,11 @@ fn source_snapshot_preserves_presence_null_slots_and_outer_metadata() {
     );
     let mut changed = imported.state().clone();
     changed.extra.remove("activeTrolley");
-    let changed = Position(std::sync::Arc::new(changed), imported.1.clone());
+    let changed = Position(
+        std::sync::Arc::new(changed),
+        imported.1.clone(),
+        std::sync::Arc::new(std::sync::OnceLock::new()),
+    );
     let exported = changed.export_state().unwrap();
     assert!(exported.get("activeTrolley").is_none());
     let restored = Position::from_snapshot_value(exported).unwrap();
@@ -1832,4 +1836,35 @@ fn direct_guard_card_cannot_explain_a_first_move_that_auto_uses_guard() {
             .public_transition_compatible(&card, moved_public)
             .unwrap()
     );
+}
+
+#[test]
+fn cached_position_views_track_recorded_history() {
+    for style in ["normal", "chaos", "grand"] {
+        let mut position = Position::new_game(
+            GameConfig {
+                game_style: style.into(),
+                ..GameConfig::default()
+            },
+            37,
+        )
+        .unwrap();
+        for _ in 0..13 {
+            let step = position
+                .legal_actions()
+                .unwrap()
+                .into_iter()
+                .take(30)
+                .find_map(|action| position.apply(&action).ok())
+                .expect("selected source action progresses");
+            position = step.position;
+            for viewer in [Color::White, Color::Black] {
+                assert_eq!(position.observe(viewer), position.state().observe(viewer));
+                assert_eq!(
+                    position.try_observe(viewer).unwrap(),
+                    position.state().try_observe(viewer).unwrap()
+                );
+            }
+        }
+    }
 }
