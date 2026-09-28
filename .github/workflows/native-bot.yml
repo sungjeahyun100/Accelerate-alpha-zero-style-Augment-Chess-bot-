@@ -6,6 +6,12 @@ on:
   push:
     branches: [develop, main]
   workflow_dispatch:
+    inputs:
+      adapter_only:
+        description: Run the pinned game adapter jobs without rebuilding the native engine
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -21,6 +27,7 @@ concurrency:
 
 jobs:
   native-bot:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.adapter_only != true }}
     name: Python 3.12 / Rust 1.96 / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
