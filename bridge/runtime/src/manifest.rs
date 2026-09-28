@@ -406,10 +406,16 @@ struct AttributeProto {
     tensor: Option<TensorProto>,
     #[prost(message, optional, tag = "6")]
     graph: Option<GraphProto>,
+    #[prost(float, repeated, tag = "7")]
+    floats: Vec<f32>,
     #[prost(message, repeated, tag = "10")]
     tensors: Vec<TensorProto>,
     #[prost(message, repeated, tag = "11")]
     graphs: Vec<GraphProto>,
+    #[prost(message, optional, tag = "22")]
+    sparse_tensor: Option<Empty>,
+    #[prost(message, repeated, tag = "23")]
+    sparse_tensors: Vec<Empty>,
 }
 #[derive(Clone, PartialEq, Message)]
 struct TensorProto {
@@ -417,6 +423,8 @@ struct TensorProto {
     dtype: i32,
     #[prost(float, repeated, tag = "4")]
     floats: Vec<f32>,
+    #[prost(string, tag = "8")]
+    name: String,
     #[prost(bytes = "vec", tag = "9")]
     raw: Vec<u8>,
     #[prost(message, repeated, tag = "13")]
@@ -564,7 +572,19 @@ fn validate_graph(bytes: &[u8], config: &ModelConfig) -> Result<()> {
         batch_symbol != action_symbol,
         "ONNX batch and action symbols must be independent"
     );
+    let input_names: BTreeSet<&str> = graph
+        .inputs
+        .iter()
+        .map(|input| input.name.as_str())
+        .collect();
+    let mut initializer_names = BTreeSet::new();
     for initializer in &graph.initializers {
+        ensure!(
+            !initializer.name.is_empty()
+                && !input_names.contains(initializer.name.as_str())
+                && initializer_names.insert(initializer.name.as_str()),
+            "ONNX initializer name is empty, duplicate, or shadows an input"
+        );
         tensor(initializer)?;
     }
     let mut producers = BTreeMap::new();
@@ -574,6 +594,15 @@ fn validate_graph(bytes: &[u8], config: &ModelConfig) -> Result<()> {
             "unsupported ONNX node domain"
         );
         for output in &node.outputs {
+            if output.is_empty() {
+                // ONNX permits an omitted optional output with an empty name.
+                continue;
+            }
+            ensure!(
+                !input_names.contains(output.as_str())
+                    && !initializer_names.contains(output.as_str()),
+                "ONNX node output shadows an input or initializer"
+            );
             ensure!(
                 producers.insert(output.as_str(), node).is_none(),
                 "duplicate ONNX producer"
@@ -581,8 +610,13 @@ fn validate_graph(bytes: &[u8], config: &ModelConfig) -> Result<()> {
         }
         for attr in &node.attributes {
             ensure!(
-                attr.float.is_finite() && attr.graph.is_none() && attr.graphs.is_empty(),
-                "nested graph or non-finite attribute unsupported"
+                attr.float.is_finite()
+                    && attr.floats.iter().all(|value| value.is_finite())
+                    && attr.graph.is_none()
+                    && attr.graphs.is_empty()
+                    && attr.sparse_tensor.is_none()
+                    && attr.sparse_tensors.is_empty(),
+                "nested/sparse graph or non-finite attribute unsupported"
             );
             if let Some(t) = &attr.tensor {
                 tensor(t)?;

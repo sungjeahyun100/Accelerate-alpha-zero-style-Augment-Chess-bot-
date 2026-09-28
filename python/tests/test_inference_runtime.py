@@ -189,3 +189,32 @@ def test_runtime_rejects_manifest_semantics_hashes_and_graph_corruption(small_bu
     write(bad)
     with pytest.raises(ValueError, match="float32"):
         InferenceSession(invalid_path, "tract")
+
+    def reject_graph(change, message):
+        graph = onnx.load_model_from_string(model)
+        change(graph.graph)
+        corrupted = graph.SerializeToString()
+        model_path.write_bytes(corrupted)
+        bad = deepcopy(original)
+        bad["model_sha256"] = hashlib.sha256(corrupted).hexdigest()
+        write(bad)
+        for backend in ("ort", "tract"):
+            with pytest.raises(ValueError, match=message):
+                InferenceSession(invalid_path, backend)
+
+    def nonfinite_repeated_attribute(graph):
+        attribute = graph.node[0].attribute.add()
+        attribute.name = "invalid_repeated_float"
+        attribute.type = onnx.AttributeProto.FLOATS
+        attribute.floats.append(float("nan"))
+
+    def sparse_attribute(graph):
+        attribute = graph.node[0].attribute.add()
+        attribute.name = "unsupported_sparse"
+        attribute.type = onnx.AttributeProto.SPARSE_TENSOR
+        attribute.sparse_tensor.values.data_type = onnx.TensorProto.FLOAT
+
+    reject_graph(nonfinite_repeated_attribute, "non-finite attribute")
+    reject_graph(sparse_attribute, "sparse graph")
+    reject_graph(lambda graph: setattr(graph.initializer[0], "name", "condition"), "shadows an input")
+    reject_graph(lambda graph: graph.node[0].output.__setitem__(0, "condition"), "shadows an input")
