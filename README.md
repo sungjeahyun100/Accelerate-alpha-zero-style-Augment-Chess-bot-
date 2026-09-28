@@ -66,6 +66,7 @@ node tools/ci/golden-eval.js   # 평가 함수 회귀 검사
 
 ## 문서
 
+- [monitoring/README.md](monitoring/README.md): 모델 loss 모니터 설치·입력 형식·실행·결과 확인
 - [CONTRIBUTING.md](CONTRIBUTING.md): Gitflow, PR, 리뷰 규칙
 - [AGENTS.md](AGENTS.md): 에이전트 작업·생성물·WSL2 규약
 - [docs/ENGINEERING-STANDARDS.md](docs/ENGINEERING-STANDARDS.md): NASA/JPL 원칙의 조정과 경계별 검증 기준
