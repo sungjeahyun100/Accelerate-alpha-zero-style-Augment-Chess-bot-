@@ -320,6 +320,18 @@ def test_public_replay_terminal_labels_and_streamed_dataset(session_directory, m
     episode = ReplayEpisode.load(session_directory / "episode.json", spec())
     examples = list(episode.examples())
     assert len(examples) == 2 and all(example.value == 1. for example in examples)
+    terminal_outcome = deepcopy(completed.outcome)
+    with pytest.raises(ValueError, match="unfinished replay cannot hide a terminal public result"):
+        completed.finish(None, "cancelled-after-terminal")
+    assert completed.outcome == terminal_outcome
+    relabelled = deepcopy(completed.snapshot())
+    relabelled["outcome"] = {"status": "unfinished", "winner": None, "reason": "elapsed"}
+    relabelled["replay_hash"] = hashlib.sha256(canonical_json({key: value for key, value in relabelled.items()
+                                                               if key != "replay_hash"}).encode()).hexdigest()
+    relabelled_path = session_directory / "terminal-disguised-as-unfinished.json"
+    atomic_json(relabelled_path, relabelled)
+    with pytest.raises(ValueError, match="unfinished replay cannot hide a terminal public result"):
+        ReplayDataset([relabelled_path], spec())
     assert examples[1].observation["turn"] == "black" and examples[1].actor == "white"
     assert completed.snapshot()["traces"]["black"]["steps"][0]["ownIntent"] is None
     for missing_or_wrong in (None, TestAction(1, 1).public_intent()):

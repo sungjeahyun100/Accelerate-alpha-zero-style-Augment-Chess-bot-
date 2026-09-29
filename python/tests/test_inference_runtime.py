@@ -89,13 +89,21 @@ def test_typed_v3_transformer_export_and_manifest_contract():
                                  hidden_dim=16)
     model = EntityTransformer(EntityTransformerConfig(context, blocks=1, heads=4, ffn_dim=32,
                                                        lora_rank=2, lora_alpha=2.)).eval()
+    model.configure_training("adapter")
+    with torch.no_grad():
+        for name, parameter in model.named_parameters():
+            if name.endswith(".lora_b"):
+                parameter.fill_(.003)
+    model.eval()
     arrays = _typed_arrays(spec, "entity-transformer")
     reference = model.evaluate(*(torch.from_numpy(value) for value in arrays.values()))
     manifest_path = export_typed_onnx(model, spec, _root() / "typed-transformer", arrays,
-                                      architecture_family="entity-transformer")
+                                      architecture_family="entity-transformer",
+                                      descriptor=model.adapter_descriptor(spec.digest))
     manifest = load_manifest(manifest_path, spec)
     assert manifest["version"] == "onnx-policy-value-v3"
     assert manifest["model_io_version"] == "typed-policy-value-v1"
+    assert manifest["adapter"]["version"] == "lora-transformer-qv-v1"
     assert {item["dtype"] for item in manifest["onnx"]["inputs"]} == {"float32", "int64", "bool"}
     session = onnxruntime.InferenceSession(str(manifest_path.with_name("model.onnx")),
                                            providers=["CPUExecutionProvider"])
@@ -110,6 +118,13 @@ def test_typed_v3_transformer_export_and_manifest_contract():
     (invalid / "manifest.json").write_text(json.dumps(changed), encoding="utf-8")
     with pytest.raises(ValueError, match="contract"):
         load_manifest(invalid / "manifest.json", spec)
+    for field, wrong in (("condition_lifetime", "per-position"),
+                         ("version", "lora-convolution-v1"), ("unexpected", True)):
+        changed = deepcopy(manifest)
+        changed["adapter"][field] = wrong
+        (invalid / "manifest.json").write_text(json.dumps(changed), encoding="utf-8")
+        with pytest.raises(ValueError, match="typed adapter compatibility"):
+            load_manifest(invalid / "manifest.json", spec)
 
 
 @pytest.mark.parametrize("family", ("entity-transformer", "mask-resnet"))
@@ -125,11 +140,21 @@ def test_typed_v3_native_backend_parity_and_input_boundary(family):
         model = MaskResNetPolicyValueNetwork(MaskResNetConfig(6, context, channels=8,
                                                                residual_blocks=1, lora_rank=2,
                                                                lora_alpha=2.)).eval()
+    model.configure_training("adapter")
+    with torch.no_grad():
+        for name, parameter in model.named_parameters():
+            if name.endswith(".lora_b"):
+                parameter.fill_(.003)
+    model.eval()
     arrays = _typed_arrays(spec, family)
     with torch.no_grad():
         reference = model.evaluate(*(torch.from_numpy(value) for value in arrays.values()))
     manifest_path = export_typed_onnx(model, spec, _root() / f"typed-native-{family}", arrays,
-                                      architecture_family=family)
+                                      architecture_family=family,
+                                      descriptor=model.adapter_descriptor(spec.digest))
+    manifest = load_manifest(manifest_path, spec)
+    assert manifest["adapter"]["version"] == {"mask-resnet": "lora-convolution-v1",
+                                                 "entity-transformer": "lora-transformer-qv-v1"}[family]
     for backend in ("ort", "tract"):
         evaluator = ProductionEvaluator(manifest_path, spec, backend)
         assert evaluator.architecture_family == family

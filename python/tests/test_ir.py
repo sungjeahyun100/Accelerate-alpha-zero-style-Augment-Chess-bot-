@@ -106,27 +106,17 @@ def test_source_bound_spec_and_public_v2_geometry_cells():
     assert np.any(relation_kinds == contract.category_id("semantic-link"))
 
 
-def test_v7_public_v2_rectangular_board_has_a_typed_only_validation_boundary():
+def test_source_bound_v7_observation_rejects_synthetic_rectangular_geometry():
     public = frame()
     public["board"] = [row[:7] for row in public["board"][:5]]
     public["publicState"]["collapsedCells"] = []
-    public["history"] = [{"kind": "transition", "actor": "white", "nextActor": "black",
-                          "phase": "play", "boardChanges": [{"square": {"row": 6, "col": 7},
-                                                               "before": None, "after": None}],
-                          "ownCards": [], "revealedOpponentCards": [], "captures": [],
-                          "result": {"outcome": "ongoing"}}]
     signed(public)
     with pytest.raises(ValueError, match="8x8"):
         spec().legacy_validator().validate_observation(public)
-    verified = validate_typed_public_observation(public, spec())
-    assert len(verified.board) == 5 and len(verified.board[0]) == 7
-    ir = ObservationIR.from_public(public, spec())
-    assert ir.geometry == BoardGeometry(0, 0, 5, 7)
-    assert ir.history_summary["recent_events"][0]["board_change_squares"] == [[6, 7]]
-    encoded = TypedEncoder(spec()).encode(ir, [])
-    assert encoded.inputs["layout_mask"].shape == (1, 5, 7)
-    assert encoded.inputs["layout_mask"].all()
-    assert encoded.inputs["spatial"][1, 2, 2] == 1
+    with pytest.raises(ValueError, match="source-bound.*8x8"):
+        validate_typed_public_observation(public, spec())
+    with pytest.raises(ValueError, match="source-bound.*8x8"):
+        ObservationIR.from_public(public, spec())
     ragged = deepcopy(public)
     ragged["board"][0].pop()
     signed(ragged)
@@ -141,7 +131,7 @@ def test_v7_public_v2_rectangular_board_has_a_typed_only_validation_boundary():
                                       "projectionVersion": old_policy["projectionVersion"],
                                       "observationPolicyHash": old_spec.observation_policy_hash})
     signed(old_public)
-    with pytest.raises(ValueError, match="v7 typed profile"):
+    with pytest.raises(ValueError, match="source-bound.*8x8"):
         validate_typed_public_observation(old_public, old_spec)
 
 

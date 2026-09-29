@@ -163,21 +163,46 @@ pub(crate) fn legal_move_actions(state: &GameState) -> Result<Vec<Action>> {
 pub(crate) fn v7_opening_legal_move_actions(state: &GameState) -> Result<Vec<Action>> {
     ensure_v7_orthodox_opening(state)?;
     let moves = legal_move_candidates(state)?;
-    if moves.len() != 20
-        || moves.iter().any(|action| {
-            action.kind != ActionKind::Move
-                || action.from.is_none_or(|from| from.row < 6)
-                || action
-                    .destination
-                    .as_ref()
-                    .is_none_or(|to| to.flags.keys().any(|flag| flag != "standardPawnDoubleStep"))
-        })
-    {
+    if moves != v7_expected_orthodox_first_play_moves() {
         return Err(EngineError::UnsupportedFeature(
             "v7 opening movement differs from the source-verified orthodox profile".into(),
         ));
     }
     Ok(moves)
+}
+
+/// Frozen v7 actionStream movement prefix, shared by the three verified
+/// active-only first-play samples. Compare the complete ordered payload so a
+/// future candidate change cannot silently preserve only its count and flags.
+fn v7_expected_orthodox_first_play_moves() -> Vec<Action> {
+    let mut actions = Vec::with_capacity(20);
+    for col in 0..8 {
+        let from = Square { row: 6, col };
+        actions.push(Action::movement(
+            Color::White,
+            from,
+            MoveTarget::at(Square { row: 5, col }),
+        ));
+        let mut double = MoveTarget::at(Square { row: 4, col });
+        double
+            .flags
+            .insert("standardPawnDoubleStep".into(), json!(true));
+        actions.push(Action::movement(Color::White, from, double));
+    }
+    for (from_col, to_col) in [(1, 0), (1, 2), (6, 5), (6, 7)] {
+        actions.push(Action::movement(
+            Color::White,
+            Square {
+                row: 7,
+                col: from_col,
+            },
+            MoveTarget::at(Square {
+                row: 5,
+                col: to_col,
+            }),
+        ));
+    }
+    actions
 }
 
 /// Validate an unbound movement payload against the same narrow source
@@ -211,12 +236,64 @@ pub(crate) fn v7_opening_relay_legal_move_actions(state: &GameState) -> Result<V
                 .is_some_and(|to| to.flag("relaySwap"))
         })
         .count();
-    if moves.len() != 148 || swaps != 128 {
+    let base_moves = moves
+        .iter()
+        .filter(|action| {
+            action
+                .destination
+                .as_ref()
+                .is_none_or(|to| !to.flag("relaySwap"))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if moves.len() != 148 || swaps != 128 || base_moves != v7_expected_orthodox_first_play_moves() {
         return Err(EngineError::UnsupportedFeature(
             "v7 Relay first-play candidates differ from source-verified 148 moves".into(),
         ));
     }
     Ok(moves)
+}
+
+/// The movement-only source profiles verified from reachable first-play
+/// Positions. Card actions, Position binding and applying a move are separate
+/// contracts; none of these variants opens the general v7 public legal gate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code, reason = "v7 Position first-play gate is staged")]
+pub(crate) enum V7VerifiedFirstPlayProfile {
+    Normal,
+    Chaos,
+    Grand,
+    NormalRelayAfter,
+}
+
+#[allow(dead_code, reason = "v7 Position first-play gate is staged")]
+pub(crate) fn v7_verified_first_play_movement_actions(
+    state: &GameState,
+) -> Result<(V7VerifiedFirstPlayProfile, Vec<Action>)> {
+    let relay = state.extra.get("relay");
+    if relay == Some(&json!({"black":false,"white":true})) {
+        return Ok((
+            V7VerifiedFirstPlayProfile::NormalRelayAfter,
+            v7_opening_relay_legal_move_actions(state)?,
+        ));
+    }
+    if relay != Some(&json!({"black":false,"white":false})) {
+        return Err(EngineError::UnsupportedFeature(
+            "v7 first-play Relay/Solidarity profile".into(),
+        ));
+    }
+    let actions = v7_opening_legal_move_actions(state)?;
+    let profile = match state.extra.get("gameStyle").and_then(Value::as_str) {
+        Some("normal") => V7VerifiedFirstPlayProfile::Normal,
+        Some("chaos") => V7VerifiedFirstPlayProfile::Chaos,
+        Some("grand") => V7VerifiedFirstPlayProfile::Grand,
+        _ => {
+            return Err(EngineError::UnsupportedFeature(
+                "v7 first-play game style".into(),
+            ));
+        }
+    };
+    Ok((profile, actions))
 }
 
 /// In the verified orthodox profile, a Relay exchange selects a different
@@ -228,6 +305,7 @@ pub(crate) struct RelaySwap {
     #[allow(dead_code, reason = "v7 Relay swap execution gate is staged")]
     pub(crate) from: Square,
     pub(crate) to: Square,
+    mover_id: String,
     #[allow(dead_code, reason = "v7 Relay swap execution gate is staged")]
     pub(crate) target_id: String,
 }
@@ -256,6 +334,7 @@ impl RelaySwap {
         Some(Self {
             from,
             to,
+            mover_id: mover.id.clone(),
             target_id: target.id.clone(),
         })
     }
@@ -283,6 +362,55 @@ impl RelaySwap {
         target.flags.insert("relaySwap".into(), json!(true));
         target
     }
+
+    /// Exchange two occupied cells without changing either identity or the
+    /// target piece. The source marks only the acting piece as moved. A stale
+    /// descriptor must not be applied to a different occupant.
+    fn board_after(&self, state: &GameState) -> Result<Vec<Vec<Option<Piece>>>> {
+        let mover = state.at(self.from).ok_or(EngineError::IllegalAction)?;
+        if Self::for_pair(state, mover, self.from, self.to).as_ref() != Some(self) {
+            return Err(EngineError::IllegalAction);
+        }
+        let mut board = state.board.clone();
+        let mut mover = board[self.from.row as usize][self.from.col as usize]
+            .take()
+            .ok_or(EngineError::IllegalAction)?;
+        let other = board[self.to.row as usize][self.to.col as usize]
+            .take()
+            .ok_or(EngineError::IllegalAction)?;
+        if mover.id != self.mover_id || other.id != self.target_id {
+            return Err(EngineError::IllegalAction);
+        }
+        mover.moved = true;
+        board[self.from.row as usize][self.from.col as usize] = Some(other);
+        board[self.to.row as usize][self.to.col as usize] = Some(mover);
+        Ok(board)
+    }
+}
+
+/// Stage only the board effect of a source-legal normal first-play Relay
+/// action. The caller must bind/check the Position key and perform the source
+/// turn, replay, clock, history, and RNG transition separately. Candidate
+/// enumeration bounds work to the verified 148-move profile.
+#[allow(dead_code, reason = "v7 Relay swap Position execution gate is staged")]
+pub(crate) fn v7_opening_relay_swap_board(
+    state: &GameState,
+    action: &Action,
+) -> Result<Vec<Vec<Option<Piece>>>> {
+    let mut semantic = action.clone();
+    semantic.position_key = None;
+    if !v7_opening_relay_legal_move_actions(state)?.contains(&semantic) {
+        return Err(EngineError::IllegalAction);
+    }
+    let from = action.from.ok_or(EngineError::IllegalAction)?;
+    let target = action
+        .destination
+        .as_ref()
+        .ok_or(EngineError::IllegalAction)?;
+    let mover = state.at(from).ok_or(EngineError::IllegalAction)?;
+    RelaySwap::from_target(state, mover, from, target)?
+        .ok_or(EngineError::IllegalAction)?
+        .board_after(state)
 }
 
 fn relay_swap_targets(state: &GameState, mover: &Piece, from: Square) -> Vec<MoveTarget> {
@@ -3094,6 +3222,35 @@ mod v7_movement_tests {
         assert_eq!(swap.from, from);
         assert_eq!(swap.to, Square { row: 6, col: 1 });
         assert_eq!(swap.target_id, state.at(swap.to).unwrap().id);
+        let original_board = state.board.clone();
+        let board = swap.board_after(&state).unwrap();
+        let mut expected = original_board.clone();
+        let mut acting_pawn = state.at(from).unwrap().clone();
+        acting_pawn.moved = true;
+        expected[from.row as usize][from.col as usize] = state.at(swap.to).cloned();
+        expected[swap.to.row as usize][swap.to.col as usize] = Some(acting_pawn);
+        assert_eq!(board, expected);
+        assert_eq!(state.board, original_board);
+        let reverse_from = Square { row: 7, col: 0 };
+        let reverse_to = Square { row: 6, col: 0 };
+        let reverse_mover = state.at(reverse_from).unwrap();
+        let mut reverse_target = MoveTarget::at(reverse_to);
+        reverse_target.flags.insert("relaySwap".into(), json!(true));
+        let reverse = RelaySwap::from_target(&state, reverse_mover, reverse_from, &reverse_target)
+            .unwrap()
+            .unwrap();
+        let reverse_board = reverse.board_after(&state).unwrap();
+        assert_eq!(reverse_board[6][0].as_ref().unwrap().id, reverse_mover.id);
+        assert!(reverse_board[6][0].as_ref().unwrap().moved);
+        assert_eq!(reverse_board[7][0].as_ref().unwrap().id, pawn.id);
+        assert!(!reverse_board[7][0].as_ref().unwrap().moved);
+        let mut replaced_target = state.clone();
+        replaced_target.board[swap.to.row as usize][swap.to.col as usize] =
+            Some(Piece::new("pawn", Color::White, "replacement"));
+        assert!(matches!(
+            swap.board_after(&replaced_target),
+            Err(EngineError::IllegalAction)
+        ));
         let mut forged = staged[0].destination.clone().unwrap();
         forged.flags.insert("capture".into(), json!(true));
         assert!(matches!(

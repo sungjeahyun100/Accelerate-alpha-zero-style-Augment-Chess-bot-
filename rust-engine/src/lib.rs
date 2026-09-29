@@ -2,6 +2,7 @@
 mod card_constraints;
 mod card_effects;
 mod card_registry;
+mod card_target_hints;
 mod conditioning;
 mod draft;
 mod eligibility;
@@ -19,6 +20,7 @@ mod tests;
 mod threat;
 mod transition;
 mod turn_effects_v7;
+mod v7_action_surface;
 mod variant_movement;
 
 pub use geometry::{BoardGeometry, Coord, Offset};

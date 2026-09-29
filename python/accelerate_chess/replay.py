@@ -234,6 +234,8 @@ class EpisodeRecorder:
     def finish(self, outcome: str | None, reason: str):
         if outcome not in (None, "white", "black", "draw") or not isinstance(reason, str) or not reason:
             raise ValueError("invalid terminal/unfinished replay outcome")
+        if outcome is None and _has_terminal_public_result(self.trackers):
+            raise ValueError("unfinished replay cannot hide a terminal public result")
         self.outcome = {"status": "unfinished" if outcome is None else "terminal", "winner": outcome,
                         "reason": reason}
 
@@ -261,6 +263,12 @@ def _validated_typed_public(frame, spec):
 
 def _is_sha256(value):
     return isinstance(value, str) and len(value) == 64 and all(digit in "0123456789abcdef" for digit in value)
+
+
+def _has_terminal_public_result(trackers):
+    return any((history := tracker.latest["history"])
+               and history[-1].get("result", {}).get("status") == "terminal"
+               for tracker in trackers.values())
 
 
 def _validate_adapter_provenance(family, encoder_hash, base_hash, adapter_hash, descriptor):
@@ -413,6 +421,8 @@ class ReplayEpisode:
             raise ValueError("invalid replay outcome")
         if (self.outcome["status"] == "unfinished" and self.outcome["winner"] is not None) or (self.outcome["status"] == "terminal" and self.outcome["winner"] not in ("white", "black", "draw")):
             raise ValueError("unfinished episodes cannot carry a defeat/draw training label")
+        if self.outcome["status"] == "unfinished" and _has_terminal_public_result(self.trackers):
+            raise ValueError("unfinished replay cannot hide a terminal public result")
         if self.outcome["status"] == "terminal":
             if any(not record["transition_completed"] for record in self.decisions):
                 raise ValueError("terminal replay cannot contain an unexecuted policy decision")

@@ -381,6 +381,20 @@ def _typed_resource_limits() -> dict[str, Any]:
             "max_intermediate_bytes": 256 * 1024 * 1024}
 
 
+def _validate_typed_adapter_metadata(family: str, adapter: Any, base_hash: str,
+                                     config_hash: str, encoder_hash: str) -> None:
+    version = {"mask-resnet": "lora-convolution-v1",
+               "entity-transformer": "lora-transformer-qv-v1"}[family]
+    if (not isinstance(adapter, dict)
+            or set(adapter) != {"base_hash", "config_hash", "encoder_hash", "generator",
+                                "condition_lifetime", "mergeable", "version"}
+            or (adapter["base_hash"], adapter["config_hash"], adapter["encoder_hash"])
+            != (base_hash, config_hash, encoder_hash)
+            or adapter["generator"] != "static-lora" or adapter["condition_lifetime"] != "global"
+            or adapter["mergeable"] is not True or adapter["version"] != version):
+        raise ValueError("typed adapter compatibility mismatch")
+
+
 def _validate_typed_graph(path: Path, contract: Mapping[str, Any]) -> None:
     import onnx
 
@@ -457,6 +471,8 @@ def export_typed_onnx(model: Any, spec: Any, directory: str | Path, sample_input
     encoder = spec.contract()
     if spec.digest != _typed_hash(encoder):
         raise ValueError("typed encoder digest mismatch")
+    if _typed_family(model) != architecture_family:
+        raise ValueError("typed architecture family does not match the model")
     onnx_contract = _typed_io_contract(spec, architecture_family)
     names = [item["name"] for item in onnx_contract["inputs"]]
     if set(sample_inputs) != set(names):
@@ -488,6 +504,8 @@ def export_typed_onnx(model: Any, spec: Any, directory: str | Path, sample_input
     if any(value < 1 or value > _typed_resource_limits()["axis_maxima"][name] for name, value in symbols.items()):
         raise ValueError("sample dynamic shape exceeds resource limits")
     if descriptor is not None:
+        _validate_typed_adapter_metadata(architecture_family, asdict(descriptor), model.base_hash,
+                                         model.config.digest, spec.digest)
         exported = model.merged_copy(descriptor, spec.digest)
         adapter_hash = tensor_state_hash(model.adapter_state())
     else:
@@ -574,11 +592,11 @@ def _validate_typed_manifest(manifest: dict[str, Any], path: Path, expected_spec
     if adapter is None:
         if adapter_hash is not None:
             raise ValueError("typed adapter metadata/hash mismatch")
-    elif (not isinstance(adapter, dict) or not _valid_hash(adapter_hash)
-          or (adapter.get("base_hash"), adapter.get("config_hash"), adapter.get("encoder_hash")) !=
-             (manifest["base_hash"], manifest["model_config_hash"], manifest["encoder_hash"])
-          or adapter.get("generator") != "static-lora" or adapter.get("mergeable") is not True):
-        raise ValueError("typed adapter compatibility mismatch")
+    else:
+        if not _valid_hash(adapter_hash):
+            raise ValueError("typed adapter metadata/hash mismatch")
+        _validate_typed_adapter_metadata(family, adapter, manifest["base_hash"],
+                                         manifest["model_config_hash"], manifest["encoder_hash"])
     model_path = path.parent / "model.onnx"
     if model_path.stat().st_size > MAX_ARTIFACT_BYTES or file_sha256(model_path) != manifest["model_sha256"]:
         raise ValueError("typed ONNX model size/hash mismatch")

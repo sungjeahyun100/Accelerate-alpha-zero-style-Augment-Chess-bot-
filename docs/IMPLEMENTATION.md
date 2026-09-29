@@ -41,6 +41,42 @@ import·play legal·bind·apply를 아직 열지 않는다.
 Linux 전체 workspace 테스트의 PyO3 링크에는 WSL 시스템의 `libpython3.12.so.1.0`을
 가리키는 재생성 가능한 외부 캐시 symlink를 사용했다. 모델 학습 캠페인은 실행하지 않았다.
 
+## 2026-09-29 첫 플레이 계약 확장 checkpoint
+
+이 절의 구현은 source v7에서 도달 가능한 **seed 19의 제한된 상태**와 공통 입력 경계를
+넓힌 것이다. 공개 Rust `Position`의 v7 import·bind·apply는 계속 닫혀 있고,
+처음 이동 이후의 일반 왕실 위협·합법 행동·종료 판정은 원문 동등성이 확인되지 않았다.
+
+| 범위 | 이번 검증 가능한 진전 | 아직 허용하지 않는 범위 |
+|---|---|---|
+| 공간 | 실제 원문 전이에서 blackHole은 사용 가능한 위험 지형으로 남고, 주기적 붕괴는 8×8 extent를 유지하며 외곽 셀의 사용 가능성과 기물 identity를 바꾼다. 실제 draft의 2×2 `bigBishop` 및 중립 `football`도 단일 identity·파생 점유에서 원문 64셀과 일치했다. | 이 기물의 전체 행마·카드 상호작용 및 일반 resize의 사이트 규칙 동등성. |
+| 행동 후보·카드 | normal·chaos·grand 첫 플레이의 기본 이동 20개와 카드 행동 **1·2·16개**를 각각 원문 전체 순서·payload 해시와 대조했다. normal Relay 뒤의 148개 이동 후보 및 수용된 교환 두 건의 64셀 보드 효과도 비교했다. `symmetry`·`ice-sheet`·`quantum-mechanics`와 grand 일부 활성 카드의 직접 효과·후보는 좁은 도달 상태에서 검사했다. | 첫 플레이 후보를 공개 `Position`으로 승격하는 것, 일반 카드·이동 적용과 전체 state/history/RNG parity. |
+| 공개 관측·AI 입력 | seed 19 세 첫 플레이 상태의 카드 표적 힌트를 실제 UI 표시 순서로 투영한다. `miracle`의 빈 힌트, `grappler`의 첫 클릭 한 칸과 합법 복합 행동 네 개를 분리했다. 세 모드의 행동자·비행동자 **6개 전체 Observation v2 JCS와 `informationStateKey`**가 동결 원문과 바이트 단위로 일치한다. Python의 공식 사이트 공개 관측은 8×8로 검증하고 가변 geometry는 합성 profile에만 둔다. 검색의 v7 카드 필터는 첫 클릭만 대조하며 v6 복합 선택 방식은 보존한다. | 첫 플레이 이후 모든 도달 상태의 공개 관측, source-reviewed 운영용 MoveProgram descriptor. |
+| 바인딩·CI | 서명이 맞지만 형식이 잘못된 v7 Position envelope는 native 경계에서 입력 오류로 구분한다. 직전 공유 SHA `766e55d8`의 Windows/Linux CI는 Rust·설치 wheel pytest 각 **87 pass** 뒤 v7 차분 9/9에서 import 미지원으로 정확히 **NO-GO**였다. | 이번 로컬 변경을 포함한 새 동일 SHA 설치 wheel·두 OS CI, v7 규칙 실행 GO. |
+
+첫 보통 이동 `a2→a3`을 실제 Rust 전이에 넣는 조사에서는 아직 미지원인
+`threat::play_move_sound`의 v7 합법 이동 조회에서 종료됐다. 원문은 여기서 세 번의
+왕실 위협 후보 평가를 하고, chaos는 자동 효과로 RNG가 추가 진행한다. 결과를 상수로
+대체하거나 v6 행마로 우회하지 않으며, 완성되지 않은 임시 실행 helper는 남기지 않는다.
+원문 전체 snapshot·일회성 대조 자료는 Git 밖 `%APPDATA%\Accelerate\reports`에 둔다.
+
+## 2026-09-29 규칙 객체 이관 checkpoint
+
+[D-017](DECISIONS.md#d-017-모노레포를-위한-프로젝트-독립-객체형-어댑터-계약)은
+Accelerate 전용 Rust 분기문을 공통 패키지로 옮기는 지시가 아니다. 다른 프로젝트도
+사용할 **언어 독립 계약과 Rust 첫 구현체**를 계획하고, Accelerate의 기물 이동과
+카드 효과는 기능별 객체를 통한 첫 소비 사례로 둔다. 현재 소스 경계와 다음 담당자의
+작업 순서·수용 기준은 [이관 문서](RULE-ADAPTER-HANDOFF.md)에 정리했다.
+
+카드 직접 효과의 좁은 배치는 `796a3da`로 커밋·공유하고 추가 카드 편집을 동결했다.
+별도 source 대조에서는 seed 19 첫 일반 이동의 왕실 위협용 순서 후보 **9/9 배열**이
+기존 Rust 생성 결과와 일치했지만, 가상 상태·관련 후보 실행 미검증 때문에 위협
+경로를 열지 않았다. 종료 검사는 normal·chaos·grand 3/3 전체 상태/RNG가 일치했고,
+무행동 검사는 normal·grand만 일치했다. chaos는 미지원 카드 `qxe1`에서 fail-closed다.
+실제 도달한 Grappler 한 국면의 기본 이동 4개도 원문 순서와 일치하지만 포획·전역
+제약·전체 이동 적용을 입증하지 않는다. 추가 조사 자료는 Git 밖 reports에 둔다.
+이 이관은 공개 v7 `Position`의 import/legal/bind/apply 지원이나 코드 GO를 선언하지 않는다.
+
 ## D0 의미 정렬과 적용 상태 (2026-09-29)
 
 아래는 [DECISIONS](DECISIONS.md#재설계-d0-의미-정렬-2026-09-29)의 채택 관계다.
@@ -55,6 +91,7 @@ Linux 전체 workspace 테스트의 PyO3 링크에는 WSL 시스템의 `libpytho
 | D-007 | 유지 | Python-first encoding을 계속 사용한다. 실제 profiling으로 Python 인코딩 병목을 확인한 경우에만 Rust 이전을 재검토한다. O-001은 해결 상태다. |
 | D-009 | 최종 대상 v7로 갱신 | 가변 보드·두 모델·대표 규칙의 기반 완료와 동결 v7 전체 규칙의 최종 GO를 구분한다. v6 호환은 유지하고 실제 학습은 제외한다. |
 | D-016 | 새 설계 | 엔진 상태와 모델 입력 분리, 내부 보드 크기 상수 제거, 검증 전용 N-version, 자동 runtime 대체 금지. |
+| D-017 | 새 설계 | 프로젝트 독립 언어 중립 어댑터 계약과 Rust 첫 구현체를 계획하고, 기물·카드별 객체는 Accelerate 소비 구현으로 분리한다. |
 
 PR #29의 변경 파일에는 `rust-engine/`이 없다. 구현 완료는 게임 어댑터와 고정 v7
 검증 계층에 대한 것이며, 아래 기록처럼 현재 Rust 엔진은 v7 Position을 실행하지

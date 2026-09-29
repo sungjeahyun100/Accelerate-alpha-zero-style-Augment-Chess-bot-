@@ -1762,6 +1762,91 @@ mod tests {
     }
 
     #[test]
+    fn v7_source_reachable_grappler_keeps_four_ordered_plain_rays() {
+        // Frozen v7 seed 19 grand: twelve active-only draft picks, White e2-e4,
+        // Black a7-a6, then White's Grappler card converts the queen on d1
+        // while sacrificing the knight on b1. Source raw and complete legal
+        // streams both emit e2, f3, g4, h5 with no execution flags.
+        let mut state = crate::draft::initialize_for_ruleset(
+            GameConfig {
+                game_style: "grand".into(),
+                ..GameConfig::default()
+            },
+            19,
+            RULES_VERSION_V7,
+        )
+        .unwrap();
+        for (offer, id) in [
+            (1, "princess"),
+            (3, "inertia"),
+            (3, "suicide-bomber"),
+            (3, "miracle"),
+            (3, "suspicious-potion"),
+            (3, "taunt"),
+            (3, "symmetry"),
+            (3, "trojan-horse"),
+            (5, "chimera"),
+            (5, "grasshopper"),
+            (5, "missionary"),
+            (5, "grappler"),
+        ] {
+            let action = crate::draft::legal_actions(&state).unwrap().remove(offer);
+            let chosen = state.extra["draft"]["choices"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|card| card["instanceId"].as_str() == action.card_instance_id.as_deref())
+                .unwrap();
+            assert_eq!(chosen["id"], id);
+            crate::draft::apply_pick(&mut state, &action).unwrap();
+            crate::replay::canonicalize_position_frames(&mut state).unwrap();
+        }
+        assert_eq!(state.mode, "play");
+        for (from, to) in [((6, 4), (4, 4)), ((1, 0), (2, 0))] {
+            let mut pawn = state.board[from.0][from.1].take().unwrap();
+            assert_eq!(pawn.kind, "pawn");
+            pawn.moved = true;
+            assert!(state.board[to.0][to.1].is_none());
+            state.board[to.0][to.1] = Some(pawn);
+        }
+        state.turns_taken.white = 1;
+        state.turns_taken.black = 1;
+        state.move_count = 2;
+        state.full_move = 2;
+        let card = state
+            .deck_slots
+            .white
+            .iter()
+            .find(|card| card.id == "grappler")
+            .unwrap()
+            .clone();
+        let action = Action::card(
+            Color::White,
+            &card,
+            Some(json!({"row":7,"col":3,"minor":{"row":7,"col":1}})),
+        );
+        let captures = crate::card_effects::apply(&mut state, &card, &action)
+            .unwrap()
+            .unwrap();
+        assert_eq!(captures.len(), 1);
+        assert!(state.board[7][1].is_none());
+        let from = Square { row: 7, col: 3 };
+        let grappler = state.at(from).unwrap();
+        assert_eq!(grappler.id, "white-queen-1ou4c52pl2n");
+        assert_eq!(grappler.kind, "grappler");
+        assert_eq!(
+            moves(&state, grappler, from),
+            [
+                Square { row: 6, col: 4 },
+                Square { row: 5, col: 5 },
+                Square { row: 4, col: 6 },
+                Square { row: 3, col: 7 },
+            ]
+            .map(MoveTarget::at)
+        );
+    }
+
+    #[test]
     fn v7_injured_don_quixote_uses_the_long_axis_jump_blocker() {
         let mut state = GameState::new(GameConfig::default(), 37).unwrap();
         let from = Square { row: 4, col: 4 };

@@ -20,8 +20,8 @@ from accelerate_chess.inference import ProductionEvaluator
 from accelerate_chess.ir import TypedEncoder, TypedEncoderSpec
 from accelerate_chess.search import (BeliefLimits, InformationMismatchError, InformationSetSearch,
     MissingHistoryError, NativeSourceFactory, ParticleBelief, ParticleExhaustedError,
-    PublicTracker, SearchBudgetError, SearchLimits, TransitionProposal,
-    TypedInformationSetSearch, _stream)
+    PublicTracker, SearchBudgetError, SearchLimits, SourceCapabilityError, TransitionProposal,
+    TypedInformationSetSearch, _allowed, _stream)
 from test_model_stack import observation_policy
 
 
@@ -140,6 +140,49 @@ def typed_spec():
                "catalogVersion": "synthetic-typed-v1", "pieceTypes": ["pawn", "wall"],
                "cards": [{"id": "slime", "draftCategory": "MIDDLE"}], "actionTypes": ["move"]}
     return TypedEncoderSpec.from_catalog(catalog, observation_policy=policy)
+
+
+def test_source_pinned_grappler_primary_hint_allows_compound_public_choices():
+    catalog = json.loads((Path(__file__).parents[2] / "bridge/catalog/site-20260928.json").read_text(encoding="utf-8"))
+    assert next(file for file in catalog["source"]["files"] if file["name"] == "main-OahWs0tU.js")["sha256"] == (
+        "e5ed84fcf8e72a24e6a8cfeb9050787387a616c55184e6501fca2077e302c45c"
+    )
+    # Frozen seed-19 grand first play: the visible Grappler hint is the queen
+    # at d1, while the source exposes four public minor choices at b1/c1/f1/g1.
+    instance = "grappler-xvn13x9he"
+    observation = {"publicState": {"rulesVersion": catalog["rulesVersion"],
+        "projectionVersion": "source-visible-20260928-v1", "legalHints": {"moves": [], "cardTargets": [
+        {"cardInstanceId": instance, "targets": [{"row": 7, "col": 3}]}
+    ]}}}
+    intent = {"type": "card", "color": "white", "cardId": "grappler", "cardInstanceId": instance}
+    for col in (1, 2, 5, 6):
+        assert _allowed({**intent, "target": {"row": 7, "col": 3, "minor": {"row": 7, "col": col}}}, observation)
+    assert not _allowed({**intent, "target": {"row": 7, "col": 2, "minor": {"row": 7, "col": 1}}}, observation)
+    assert not _allowed({**intent, "cardInstanceId": "different", "target": {"row": 7, "col": 3}}, observation)
+    for target in ({"selections": [{"row": 7, "col": 3}]}, {"row": 7}, [], {"row": True, "col": 3}):
+        with pytest.raises(InformationMismatchError, match="primary click coordinates"):
+            _allowed({**intent, "target": target}, observation)
+    with pytest.raises(SourceCapabilityError, match="source rules version"):
+        _allowed({**intent, "target": {"row": 7, "col": 3}}, {"publicState": {
+            **observation["publicState"], "rulesVersion": "unverified"}})
+
+
+def test_legacy_portal_gun_nested_selection_hints_remain_supported():
+    policy = observation_policy()
+    assert policy["rulesVersion"] == "augment-site-20260927-abfe01a035813875"
+    squares = [{"row": 1, "col": 1}, {"row": 2, "col": 2}]
+    observation = {"publicState": {"rulesVersion": policy["rulesVersion"],
+        "projectionVersion": policy["projectionVersion"], "legalHints": {"moves": [], "cardTargets": [
+            {"cardInstanceId": "portal-stream", "targets": squares}
+        ]}}}
+    intent = {"type": "card", "color": "white", "cardId": "portal-gun", "cardInstanceId": "portal-stream",
+        "target": {"selections": squares}}
+    assert _allowed(intent, observation)
+    legacy = deepcopy(observation)
+    del legacy["publicState"]["rulesVersion"]
+    assert _allowed(intent, legacy)
+    assert not _allowed(intent, {"publicState": {**observation["publicState"], "legalHints": {
+        "moves": [], "cardTargets": [{"cardInstanceId": "portal-stream", "targets": squares[:1]}]}}})
 
 
 def test_action_stream_counts_examined_candidates_and_rejects_zero_progress():
@@ -489,7 +532,8 @@ def test_typed_tracker_binds_v7_public_projection_and_replays_exact_frames():
     rectangle["board"] = [row[:7] for row in rectangle["board"][:5]]
     rectangle["publicState"]["collapsedCells"] = []
     signed(rectangle)
-    assert PublicTracker(rectangle, typed_spec=contract).latest == rectangle
+    with pytest.raises(ValueError, match="source-bound.*8x8"):
+        PublicTracker(rectangle, typed_spec=contract)
     with pytest.raises(InformationMismatchError, match="8 by 8"):
         PublicTracker(rectangle)
 

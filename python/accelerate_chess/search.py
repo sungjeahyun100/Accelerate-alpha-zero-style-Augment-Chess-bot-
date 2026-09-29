@@ -16,13 +16,15 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 
 import numpy as np
 
-from .encoding import HISTORY_SUMMARY_VERSION, PublicEncoder, PublicObservation, batch_positions, canonical_json
+from .encoding import (HISTORY_SUMMARY_VERSION, LEGACY_RULES_VERSION, SOURCE_PROJECTIONS,
+                       PublicEncoder, PublicObservation, batch_positions, canonical_json)
 from .inference import ProductionEvaluator
 
 TRACE_VERSION = "accelerate-public-trace-v1"
 SEARCH_VERSION = "availability-puct-v3"
 MAX_PUBLIC_BYTES = 8 * 1024 * 1024
 MAX_INFERENCE_ELEMENTS = 16_777_216
+V7_RULES_VERSION = "augment-site-20260928-e5ed84fcf8e72a24"
 
 
 class SearchError(RuntimeError):
@@ -727,6 +729,19 @@ def _allowed(intent: Mapping[str, Any], observation: Mapping[str, Any]) -> bool:
         return any(item.get("from") == origin and coordinate in item.get("destinations", ()) for item in hints.get("moves", ()))
     if intent["type"] == "card" and "target" in intent:
         targets = next((item["targets"] for item in hints.get("cardTargets", ()) if item.get("cardInstanceId") == intent.get("cardInstanceId")), ())
+        public_state = observation["publicState"]
+        rules_version = public_state.get("rulesVersion", LEGACY_RULES_VERSION)
+        if (rules_version not in (LEGACY_RULES_VERSION, V7_RULES_VERSION)
+                or public_state.get("projectionVersion") != SOURCE_PROJECTIONS[rules_version]):
+            raise SourceCapabilityError("unsupported source rules version for card target hints")
+        if rules_version == V7_RULES_VERSION:
+            target = intent["target"]
+            if not isinstance(target, Mapping) or any(type(target.get(name)) is not int for name in ("row", "col")):
+                raise InformationMismatchError("native card intent has no public primary click coordinates")
+            # v7 cardTargets describes the first UI click. A compound intent
+            # can carry later choices that are not in this static hint list.
+            return {name: target[name] for name in ("row", "col")} in targets
+
         def coordinates(value):
             if isinstance(value, Mapping):
                 if "row" in value and "col" in value:

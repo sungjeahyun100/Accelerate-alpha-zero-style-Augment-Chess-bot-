@@ -97,6 +97,82 @@ fn canonical_bytes(value: &Value) -> PyResult<Vec<u8>> {
 fn digest(value: &Value) -> PyResult<String> {
     Ok(format!("{:x}", Sha256::digest(canonical_bytes(value)?)))
 }
+/// Check the fixed v7 transport fields before asking the engine to admit its
+/// source state. This does not validate game rules or make v7 executable.
+fn validate_v7_position_transport(snapshot: &Value) -> Result<(), &'static str> {
+    let state = snapshot["state"]
+        .as_object()
+        .ok_or("snapshot state must be object")?;
+    let board = state
+        .get("board")
+        .and_then(Value::as_array)
+        .filter(|board| board.len() == 8)
+        .ok_or("snapshot board must be 8x8")?;
+    if board.iter().any(|row| {
+        row.as_array().is_none_or(|row| {
+            row.len() != 8 || row.iter().any(|cell| !cell.is_null() && !cell.is_object())
+        })
+    }) {
+        return Err("snapshot board must be 8x8");
+    }
+    if !matches!(
+        state.get("turn").and_then(Value::as_str),
+        Some("white" | "black")
+    ) {
+        return Err("snapshot turn must be white or black");
+    }
+    if !state
+        .get("mode")
+        .and_then(Value::as_str)
+        .is_some_and(|mode| !mode.is_empty())
+    {
+        return Err("snapshot mode must be nonempty text");
+    }
+    if state
+        .get("rulesetId")
+        .is_some_and(|version| version.as_str() != Some(RULES_VERSION_V7))
+    {
+        return Err("state rulesetId does not match Position rulesVersion");
+    }
+    let rng = snapshot["rng"]
+        .as_object()
+        .ok_or("snapshot RNG must be object")?;
+    if rng.len() != 4
+        || ["algorithm", "state", "cursor", "tape"]
+            .iter()
+            .any(|key| !rng.contains_key(*key))
+    {
+        return Err("unexpected snapshot RNG fields");
+    }
+    if rng["algorithm"] != "lcg32-v1" {
+        return Err("unsupported RNG algorithm");
+    }
+    if !rng["state"]
+        .as_u64()
+        .is_some_and(|state| state <= u32::MAX as u64)
+    {
+        return Err("snapshot RNG state must be uint32");
+    }
+    if !rng["cursor"]
+        .as_u64()
+        .is_some_and(|cursor| cursor <= 9_007_199_254_740_991)
+    {
+        return Err("snapshot RNG cursor must be a safe integer");
+    }
+    if !rng["tape"].as_array().is_some_and(|tape| {
+        tape.iter().all(|value| {
+            value
+                .as_f64()
+                .is_some_and(|value| value.is_finite() && (0.0..1.0).contains(&value))
+        })
+    }) {
+        return Err("snapshot RNG tape values must be in [0, 1)");
+    }
+    if !snapshot["history"].is_array() {
+        return Err("snapshot history must be array");
+    }
+    Ok(())
+}
 fn color(color: &str) -> PyResult<Color> {
     match color {
         "white" => Ok(Color::White),
@@ -310,6 +386,9 @@ impl Position {
         content.as_object_mut().unwrap().remove("positionId");
         if snapshot["positionId"].as_str() != Some(&digest(&content)?) {
             return Err(PyValueError::new_err("snapshot identity mismatch"));
+        }
+        if rules_version == RULES_VERSION_V7 {
+            validate_v7_position_transport(&snapshot).map_err(PyValueError::new_err)?;
         }
         let state = snapshot["state"]
             .as_object()
@@ -740,4 +819,63 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
             .ok_or_else(|| NativeError::new_err("catalog version missing"))?,
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod position_transport_tests {
+    use super::*;
+
+    fn signed_v7_snapshot() -> Value {
+        let selected_catalog = catalog_for_ruleset(RULES_VERSION_V7).expect("v7 catalog");
+        let mut snapshot = json!({
+            "protocolVersion": POSITION_VERSION,
+            "rulesVersion": RULES_VERSION_V7,
+            "catalogVersion": selected_catalog["catalogVersion"],
+            "state": {
+                "board": vec![vec![Value::Null; 8]; 8],
+                "turn": "white",
+                "mode": "play"
+            },
+            "rng": {"algorithm": "lcg32-v1", "state": 0, "cursor": 0, "tape": []},
+            "history": []
+        });
+        sign(&mut snapshot);
+        snapshot
+    }
+
+    fn sign(snapshot: &mut Value) {
+        snapshot.as_object_mut().unwrap().remove("positionId");
+        let position_id = digest(snapshot).expect("valid JCS identity");
+        snapshot["positionId"] = json!(position_id);
+    }
+
+    #[test]
+    fn malformed_v7_transport_is_distinct_from_unsupported_v7_rules() {
+        Python::initialize();
+        Python::attach(|py| {
+            let unsupported = Position::import(signed_v7_snapshot())
+                .err()
+                .expect("v7 execution remains closed");
+            assert!(unsupported.is_instance_of::<UnsupportedFeatureError>(py));
+
+            for mutate in [
+                (|snapshot: &mut Value| snapshot["state"]["board"] = json!([])) as fn(&mut Value),
+                |snapshot| snapshot["state"]["turn"] = json!("neutral"),
+                |snapshot| snapshot["state"]["mode"] = json!(""),
+                |snapshot| snapshot["state"]["rulesetId"] = json!(RULES_VERSION_V6),
+                |snapshot| snapshot["rng"]["cursor"] = json!(-1),
+                |snapshot| snapshot["rng"]["tape"] = json!([1.0]),
+                |snapshot| snapshot["rng"]["extra"] = json!(true),
+            ] {
+                let mut snapshot = signed_v7_snapshot();
+                mutate(&mut snapshot);
+                sign(&mut snapshot);
+                let malformed = Position::import(snapshot)
+                    .err()
+                    .expect("malformed v7 transport must be rejected");
+                assert!(malformed.is_instance_of::<PyValueError>(py));
+                assert!(!malformed.is_instance_of::<UnsupportedFeatureError>(py));
+            }
+        });
+    }
 }

@@ -386,12 +386,11 @@ class BoardGeometry:
 
 def validate_typed_public_observation(observation: Mapping[str, Any], spec: TypedEncoderSpec,
                                       *, belief_summary: Mapping[str, Any] | None = None) -> PublicObservation:
-    """Validate a source-bound v2 frame under the typed board-size profile.
+    """Validate a source-bound v2 frame under the frozen site's 8x8 wire contract.
 
-    Observation v2 carries a rectangular board but no origin. The frozen v6
-    encoder remains 8x8; only the v7 typed profile admits other extents. This
-    checks the public envelope, information-state identity and source policy,
-    not whether an executable native Position can produce a given geometry.
+    Variable geometry belongs to the explicit synthetic component profile;
+    accepting it with a source rules/policy identity would claim site parity
+    that neither frozen client nor the native Position currently provides.
     """
     if spec.observation_version != PUBLIC_OBSERVATION_VERSION:
         raise ValueError("native v2 observation needs a v2 typed encoder spec")
@@ -412,20 +411,9 @@ def validate_typed_public_observation(observation: Mapping[str, Any], spec: Type
             or any(not isinstance(row, list) or len(row) != len(board[0]) for row in board)):
         raise ValueError("typed public board needs bounded rectangular geometry")
     geometry = (len(board), len(board[0]))
-    if geometry != (8, 8) and spec.rules_version != V7_RULES_VERSION:
-        raise ValueError("source-bound v2 geometry beyond 8x8 requires the v7 typed profile")
-    validator = spec.legacy_validator()
-    if geometry == (8, 8):
-        return validator.validate_observation(owned, belief_summary=summary)
-    public_data = {"public": {key: value for key, value in verified.public.items()
-                              if key != "informationStateKey"},
-                   "history": verified.history, "belief": verified.belief_summary}
-    _reject_private(public_data)
-    _reject_private(board)
-    # Reuse the frozen policy's strict state, card, piece and surface schemas.
-    # The v6 validator's separate board-size gate is intentionally untouched.
-    validator._validate_surface(verified)
-    return verified
+    if geometry != (8, 8):
+        raise ValueError("source-bound public observation must use the site's 8x8 board")
+    return spec.legacy_validator().validate_observation(owned, belief_summary=summary)
 
 
 @dataclass(frozen=True)

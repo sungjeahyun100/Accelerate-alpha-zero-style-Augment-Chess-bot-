@@ -222,9 +222,10 @@ pub(crate) fn validate_projection(observation: &Observation) -> Result<()> {
 }
 
 /// The frozen v7 client emits no selection hints outside the acting side's
-/// ordinary play window. Active hints call `getLegalMoves` and
-/// `getVisibleCardTargetSquares`; until both v7 kernels have source parity,
-/// a partial move/card list would be a false public contract.
+/// ordinary play window. Three exact seed-19 first-play states have 20
+/// source-ordered movement hints. Their card hints use the separate UI target
+/// projection, not the full legal card action stream; all other active-play
+/// states remain unsupported until their source parity is established.
 pub(crate) fn public_hints_v7(state: &GameState, viewer: Color) -> Result<Value> {
     if state.ruleset_id != RULES_VERSION_V7 {
         return Err(EngineError::UnsupportedFeature(format!(
@@ -239,9 +240,41 @@ pub(crate) fn public_hints_v7(state: &GameState, viewer: Color) -> Result<Value>
     {
         return Ok(json!({"moves":[],"cardTargets":[]}));
     }
-    Err(EngineError::UnsupportedFeature(
-        "v7 active public move and card target hints".into(),
-    ))
+    let card_targets =
+        crate::card_target_hints::v7_seed19_first_play_card_target_hints(state, viewer)?;
+    let actions = crate::movement::v7_opening_legal_move_actions(state)?;
+    let mut grouped = Vec::<(Square, Vec<Square>)>::new();
+    for action in actions {
+        let from = action.from.ok_or_else(|| {
+            EngineError::InvalidState("v7 opening hint action lacks origin".into())
+        })?;
+        let destination = action.destination.ok_or_else(|| {
+            EngineError::InvalidState("v7 opening hint action lacks destination".into())
+        })?;
+        let piece = state
+            .at(from)
+            .ok_or_else(|| EngineError::InvalidState("v7 opening hint origin is empty".into()))?;
+        if !state.piece_visible(piece, from, viewer) {
+            return Err(EngineError::UnsupportedFeature(
+                "v7 opening hint visibility".into(),
+            ));
+        }
+        let square = destination.square();
+        if let Some((_, destinations)) = grouped.iter_mut().find(|(origin, _)| *origin == from) {
+            if !destinations.contains(&square) {
+                destinations.push(square);
+            }
+        } else {
+            grouped.push((from, vec![square]));
+        }
+    }
+    Ok(json!({
+        "moves": grouped
+            .into_iter()
+            .map(|(from, destinations)| json!({"from":from,"destinations":destinations}))
+            .collect::<Vec<_>>(),
+        "cardTargets": card_targets
+    }))
 }
 
 /// Validate projected field shapes against the selected frozen policy. This
