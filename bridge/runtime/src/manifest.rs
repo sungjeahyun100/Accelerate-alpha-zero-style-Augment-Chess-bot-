@@ -40,6 +40,81 @@ pub struct Bundle {
     pub onnx: Value,
     pub numerical_tolerance: Value,
 }
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TensorDtype {
+    Float32,
+    Int64,
+    Bool,
+}
+impl TensorDtype {
+    pub fn onnx_id(&self) -> i32 {
+        match self {
+            Self::Float32 => 1,
+            Self::Int64 => 7,
+            Self::Bool => 9,
+        }
+    }
+    pub fn element_bytes(&self) -> usize {
+        match self {
+            Self::Float32 => 4,
+            Self::Int64 => 8,
+            Self::Bool => 1,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum Axis {
+    Fixed(usize),
+    Dynamic(String),
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TensorSpec {
+    pub name: String,
+    pub dtype: TensorDtype,
+    pub shape: Vec<Axis>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TypedOnnxContract {
+    pub opset: u32,
+    pub inputs: Vec<TensorSpec>,
+    pub outputs: Vec<TensorSpec>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TypedResourceLimits {
+    pub axis_maxima: BTreeMap<String, usize>,
+    pub max_input_bytes: usize,
+    pub max_intermediate_bytes: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TypedBundle {
+    pub version: String,
+    pub model_io_version: String,
+    pub architecture_family: String,
+    pub model_file: String,
+    pub model_sha256: String,
+    pub base_hash: String,
+    pub adapter_hash: Option<String>,
+    pub adapter: Option<Value>,
+    pub model_config: Value,
+    pub model_config_hash: String,
+    pub encoder: Value,
+    pub encoder_hash: String,
+    pub onnx: TypedOnnxContract,
+    pub resource_limits: TypedResourceLimits,
+    pub numerical_tolerance: Value,
+}
 fn sha(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -373,6 +448,431 @@ impl Bundle {
     }
 }
 
+impl TypedBundle {
+    pub fn load(path: &Path, expected_encoder_hash: Option<&str>) -> Result<(Self, Vec<u8>)> {
+        ensure!(
+            path.file_name().is_some_and(|name| name == "manifest.json"),
+            "artifact path must name manifest.json"
+        );
+        let raw: Value = serde_json::from_slice(&read(path, 2 * 1024 * 1024)?)?;
+        json_numbers(&raw)?;
+        let bundle: Self = serde_json::from_value(raw.clone())?;
+        ensure!(
+            bundle.version == "onnx-policy-value-v3"
+                && bundle.model_io_version == "typed-policy-value-v1"
+                && bundle.model_file == "model.onnx",
+            "unsupported typed deployment manifest"
+        );
+        ensure!(
+            ["mask-resnet", "entity-transformer"].contains(&bundle.architecture_family.as_str()),
+            "unsupported architecture family"
+        );
+        ensure!(
+            [
+                &bundle.model_sha256,
+                &bundle.base_hash,
+                &bundle.model_config_hash,
+                &bundle.encoder_hash,
+            ]
+            .iter()
+            .all(|value| hash(value)),
+            "invalid typed artifact hash"
+        );
+        ensure!(
+            expected_encoder_hash.is_none_or(|expected| expected == bundle.encoder_hash),
+            "expected encoder compatibility mismatch"
+        );
+        ensure!(
+            canonical_hash(&bundle.model_config)? == bundle.model_config_hash
+                && canonical_hash(&bundle.encoder)? == bundle.encoder_hash,
+            "model/encoder contract hash mismatch"
+        );
+        let config = bundle
+            .model_config
+            .as_object()
+            .context("model config must be an object")?;
+        let architecture_version = config
+            .get("architecture_version")
+            .and_then(Value::as_str)
+            .context("architecture version missing")?;
+        ensure!(
+            match bundle.architecture_family.as_str() {
+                "mask-resnet" => architecture_version == "mask-resnet-v2",
+                "entity-transformer" => architecture_version == "entity-transformer-film-lora-v1",
+                _ => false,
+            },
+            "model architecture version/family mismatch"
+        );
+        let encoder = bundle
+            .encoder
+            .as_object()
+            .context("encoder contract must be an object")?;
+        fields(
+            &bundle.encoder,
+            &[
+                "rules_version",
+                "catalog_version",
+                "catalog_hash",
+                "observation_policy_hash",
+                "observation_version",
+                "ir_version",
+                "descriptor_version",
+                "encoder_version",
+                "feature_schema",
+                "feature_schema_hash",
+                "value_perspective",
+            ],
+        )?;
+        ensure!(
+            encoder["value_perspective"] == "observation.viewer"
+                && ["accelerate-observation-v2", "synthetic-geometry-v1"]
+                    .contains(&encoder["observation_version"].as_str().unwrap_or(""))
+                && encoder["ir_version"] == "semantic-ir-v1"
+                && encoder["descriptor_version"] == "move-program-v1"
+                && encoder["encoder_version"] == "typed-input-v1"
+                && hash(encoder["feature_schema_hash"].as_str().unwrap_or(""))
+                && canonical_hash(&encoder["feature_schema"])? == encoder["feature_schema_hash"],
+            "unsupported typed encoder semantics"
+        );
+        let (catalog, policy, projection) = frozen_baseline(
+            encoder["rules_version"]
+                .as_str()
+                .context("rules version missing")?,
+        )?;
+        ensure!(
+            encoder["rules_version"] == "augment-site-20260928-e5ed84fcf8e72a24"
+                && encoder["catalog_version"] == catalog["catalogVersion"]
+                && encoder["catalog_hash"].as_str() == Some(&canonical_hash(&catalog)?)
+                && encoder["observation_policy_hash"].as_str() == Some(&canonical_hash(&policy)?)
+                && policy["projectionVersion"] == projection,
+            "frozen v7 rules/catalog compatibility mismatch"
+        );
+        let limits = &bundle.resource_limits;
+        ensure!(
+            (1..=64 * 1024 * 1024).contains(&limits.max_input_bytes)
+                && (1..=256 * 1024 * 1024).contains(&limits.max_intermediate_bytes),
+            "invalid typed resource byte limits"
+        );
+        ensure!(
+            limits.axis_maxima.len() == 7
+                && [
+                    ("batch", 64),
+                    ("actions", 4096),
+                    ("records", 2048),
+                    ("relations", 8192),
+                    ("nodes", 64),
+                    ("height", 32),
+                    ("width", 32),
+                ]
+                .iter()
+                .all(|(name, maximum)| limits
+                    .axis_maxima
+                    .get(*name)
+                    .is_some_and(|value| (1..=*maximum).contains(value))),
+            "invalid typed resource axis limits"
+        );
+        ensure!(bundle.onnx.opset == 18, "ONNX requires opset18");
+        validate_typed_specs(&bundle.onnx, limits)?;
+        validate_typed_schema(
+            &encoder["feature_schema"],
+            &bundle.architecture_family,
+            &bundle.onnx,
+            limits,
+        )?;
+        ensure!(
+            bundle.numerical_tolerance == json!({"atol":1e-5,"rtol":1e-4}),
+            "unsupported numerical tolerance"
+        );
+        match (&bundle.adapter, &bundle.adapter_hash) {
+            (None, None) => {}
+            (Some(adapter), Some(adapter_hash)) => {
+                ensure!(
+                    hash(adapter_hash)
+                        && adapter["base_hash"] == bundle.base_hash
+                        && adapter["config_hash"] == bundle.model_config_hash
+                        && adapter["encoder_hash"] == bundle.encoder_hash
+                        && adapter["generator"] == "static-lora"
+                        && adapter["mergeable"] == true,
+                    "typed adapter compatibility mismatch"
+                );
+            }
+            _ => anyhow::bail!("typed adapter metadata/hash mismatch"),
+        }
+        let bytes = read(
+            &path
+                .parent()
+                .context("manifest parent missing")?
+                .join("model.onnx"),
+            512 * 1024 * 1024,
+        )?;
+        ensure!(
+            sha(&bytes) == bundle.model_sha256,
+            "ONNX model file hash mismatch"
+        );
+        validate_typed_graph(&bytes, &bundle.onnx)?;
+        Ok((bundle, bytes))
+    }
+}
+
+fn valid_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value.as_bytes()[0].is_ascii_lowercase()
+        && value
+            .bytes()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
+}
+
+fn validate_typed_specs(contract: &TypedOnnxContract, limits: &TypedResourceLimits) -> Result<()> {
+    ensure!(
+        !contract.inputs.is_empty() && contract.inputs.len() <= 64,
+        "invalid typed input count"
+    );
+    ensure!(
+        contract.outputs.len() == 2
+            && contract.outputs[0].name == "policy_logits"
+            && contract.outputs[1].name == "value"
+            && contract
+                .outputs
+                .iter()
+                .all(|spec| spec.dtype == TensorDtype::Float32)
+            && contract.outputs[0].shape
+                == [
+                    Axis::Dynamic("batch".into()),
+                    Axis::Dynamic("actions".into())
+                ]
+            && contract.outputs[1].shape == [Axis::Dynamic("batch".into()), Axis::Fixed(1)],
+        "typed output contract must be float32 [batch,actions] and [batch,1]"
+    );
+    let mut names = BTreeSet::new();
+    for spec in contract.inputs.iter().chain(&contract.outputs) {
+        ensure!(
+            valid_name(&spec.name) && names.insert(&spec.name),
+            "invalid or duplicate tensor name"
+        );
+        ensure!((1..=6).contains(&spec.shape.len()), "invalid tensor rank");
+        ensure!(
+            spec.shape.first() == Some(&Axis::Dynamic("batch".into())),
+            "tensor batch axis mismatch"
+        );
+        for axis in &spec.shape {
+            match axis {
+                Axis::Fixed(value) => ensure!(
+                    (1..=65_536).contains(value),
+                    "invalid fixed tensor dimension"
+                ),
+                Axis::Dynamic(name) => {
+                    ensure!(
+                        valid_name(name) && limits.axis_maxima.contains_key(name),
+                        "unbounded dynamic tensor axis"
+                    );
+                }
+            }
+        }
+    }
+    ensure!(
+        contract
+            .inputs
+            .iter()
+            .any(|spec| spec.shape.contains(&Axis::Dynamic("actions".into()))),
+        "typed candidate axis missing"
+    );
+    Ok(())
+}
+
+fn validate_typed_schema(
+    schema: &Value,
+    family: &str,
+    contract: &TypedOnnxContract,
+    limits: &TypedResourceLimits,
+) -> Result<()> {
+    const COMMON: [(&str, &str, &str); 19] = [
+        ("record_category", "int64", "batch,records,4"),
+        ("record_numeric", "float32", "batch,records,8"),
+        ("record_coord", "float32", "batch,records,2"),
+        ("record_spatial_valid", "bool", "batch,records"),
+        ("record_mask", "bool", "batch,records"),
+        ("relation_index", "int64", "batch,relations,2"),
+        ("relation_category", "int64", "batch,relations,2"),
+        ("relation_numeric", "float32", "batch,relations,4"),
+        ("relation_mask", "bool", "batch,relations"),
+        ("candidate_category", "int64", "batch,actions,nodes,4"),
+        ("candidate_numeric", "float32", "batch,actions,nodes,8"),
+        ("candidate_coord", "float32", "batch,actions,nodes,2"),
+        ("candidate_coord_valid", "bool", "batch,actions,nodes"),
+        ("candidate_parent", "int64", "batch,actions,nodes"),
+        ("candidate_order", "int64", "batch,actions,nodes"),
+        ("candidate_target_index", "int64", "batch,actions,nodes"),
+        ("candidate_node_mask", "bool", "batch,actions,nodes"),
+        ("candidate_mask", "bool", "batch,actions"),
+        ("condition", "float32", "batch,8"),
+    ];
+    const SPATIAL: [(&str, &str, &str); 2] = [
+        ("spatial", "float32", "batch,6,height,width"),
+        ("layout_mask", "bool", "batch,1,height,width"),
+    ];
+    let fields = schema
+        .as_object()
+        .context("typed feature schema must be an object")?;
+    ensure!(
+        fields.len() == 11
+            && [
+                "inputs",
+                "input_order",
+                "category_vocabulary",
+                "category_slots",
+                "numeric_slots",
+                "spatial_channels",
+                "coordinate_frame",
+                "history_version",
+                "limits",
+                "candidate_tree",
+                "padding"
+            ]
+            .iter()
+            .all(|name| fields.contains_key(*name)),
+        "unsupported typed feature schema fields"
+    );
+    let inputs = schema["inputs"]
+        .as_object()
+        .context("typed feature inputs must be an object")?;
+    ensure!(
+        inputs.len() == 21,
+        "typed feature schema input count mismatch"
+    );
+    let shape = |description: &str| -> Vec<Value> {
+        description
+            .split(',')
+            .map(|axis| match axis.parse::<usize>() {
+                Ok(size) => json!(size),
+                Err(_) => json!(axis),
+            })
+            .collect()
+    };
+    for (name, dtype, dimensions) in SPATIAL.iter().chain(COMMON.iter()) {
+        ensure!(
+            inputs.get(*name) == Some(&json!({"dtype": dtype, "shape": shape(dimensions)})),
+            "typed feature schema tensor {name} mismatch"
+        );
+    }
+    let mut a_order: Vec<&str> = SPATIAL.iter().map(|(name, _, _)| *name).collect();
+    let b_order: Vec<&str> = COMMON.iter().map(|(name, _, _)| *name).collect();
+    a_order.extend(&b_order);
+    ensure!(
+        schema["input_order"] == json!({"mask-resnet": a_order, "entity-transformer": b_order}),
+        "typed feature schema input order mismatch"
+    );
+    let expected: Vec<&(&str, &str, &str)> = if family == "mask-resnet" {
+        SPATIAL.iter().chain(COMMON.iter()).collect()
+    } else {
+        COMMON.iter().collect()
+    };
+    ensure!(
+        contract.inputs.len() == expected.len(),
+        "typed ONNX input count/family mismatch"
+    );
+    for (spec, &(name, dtype, dimensions)) in contract.inputs.iter().zip(expected) {
+        let actual_dtype = match spec.dtype {
+            TensorDtype::Float32 => "float32",
+            TensorDtype::Int64 => "int64",
+            TensorDtype::Bool => "bool",
+        };
+        let actual_shape: Vec<Value> = spec
+            .shape
+            .iter()
+            .map(|axis| match axis {
+                Axis::Fixed(size) => json!(size),
+                Axis::Dynamic(name) => json!(name),
+            })
+            .collect();
+        ensure!(
+            spec.name == name && actual_dtype == dtype && actual_shape == shape(dimensions),
+            "typed ONNX tensor {name} does not match feature schema"
+        );
+    }
+    let vocabulary = schema["category_vocabulary"]
+        .as_array()
+        .context("typed category vocabulary missing")?;
+    ensure!(
+        !vocabulary.is_empty() && vocabulary.len() <= 65_536 && vocabulary[0] == "",
+        "invalid typed category vocabulary"
+    );
+    let mut unique = BTreeSet::new();
+    for item in vocabulary {
+        let label = item.as_str().context("typed category must be a string")?;
+        ensure!(
+            label.len() <= 128 && unique.insert(label),
+            "invalid or duplicate typed category"
+        );
+    }
+    ensure!(
+        schema["category_slots"]
+            == json!({"record": ["kind", "field", "symbol", "owner"],
+            "relation": ["kind", "field"], "candidate": ["kind", "field", "symbol", "owner"]})
+            && schema["numeric_slots"]
+                == json!({
+                "record": ["scalar", "has_scalar", "span_length", "ordinal", "row_start", "col_start", "row_end", "col_end"],
+                "relation": ["ordinal", "has_ordinal", "delta_row", "delta_col"],
+                "candidate": ["scalar", "has_scalar", "child_count", "depth", "row_start", "col_start", "row_end", "col_end"],
+                "condition": ["viewer_white", "turn_is_viewer", "actions_remaining_16", "move_count_512", "full_move_256",
+                    "opponent_hand_count_16", "own_card_count_32", "history_event_count_512"]})
+            && schema["spatial_channels"]
+                == json!(["empty", "unknown", "hole", "occupied", "own", "opponent"])
+            && schema["coordinate_frame"]
+                == "absolute public Coord mapped to local row/column in current geometry; no viewer rotation"
+            && schema["history_version"] == "public-history-summary-v2"
+            && schema["candidate_tree"]
+                == "root index zero; child parent index, array order, public record target index or -1"
+            && schema["padding"]
+                == "layout_mask false only for batch padding; hole remains within layout",
+        "unsupported typed feature semantics"
+    );
+    let schema_limits = schema["limits"]
+        .as_object()
+        .context("typed feature limits missing")?;
+    ensure!(
+        schema_limits.len() == 7,
+        "typed feature limits fields mismatch"
+    );
+    for (feature, axis) in [
+        ("max_batch", "batch"),
+        ("max_records", "records"),
+        ("max_relations", "relations"),
+        ("max_candidates", "actions"),
+        ("max_candidate_nodes", "nodes"),
+    ] {
+        let actual = schema_limits
+            .get(feature)
+            .and_then(Value::as_u64)
+            .context("invalid typed feature limit")?;
+        ensure!(
+            (1..=*limits
+                .axis_maxima
+                .get(axis)
+                .context("missing typed axis limit")? as u64)
+                .contains(&actual),
+            "typed feature limit {feature} exceeds deployment limit"
+        );
+    }
+    let board_axis = schema_limits
+        .get("max_board_axis")
+        .and_then(Value::as_u64)
+        .context("invalid typed board limit")?;
+    let input_bytes = schema_limits
+        .get("max_input_bytes")
+        .and_then(Value::as_u64)
+        .context("invalid typed input byte limit")?;
+    ensure!(
+        board_axis >= 1
+            && ["height", "width"]
+                .iter()
+                .all(|name| board_axis <= limits.axis_maxima[*name] as u64)
+            && (1..=limits.max_input_bytes as u64).contains(&input_bytes),
+        "typed feature geometry/input limits exceed deployment limits"
+    );
+    Ok(())
+}
+
 // The ONNX boundary reads official protobuf fields needed for the contract.
 // Unknown ordinary metadata is retained by the backend; unsupported external
 // data, functions and nested graphs are explicitly rejected here.
@@ -441,6 +941,8 @@ struct AttributeProto {
 }
 #[derive(Clone, PartialEq, Message)]
 struct TensorProto {
+    #[prost(int64, repeated, tag = "1")]
+    dims: Vec<i64>,
     #[prost(int32, tag = "2")]
     dtype: i32,
     #[prost(float, repeated, tag = "4")]
@@ -645,6 +1147,139 @@ fn validate_graph(bytes: &[u8], config: &ModelConfig) -> Result<()> {
             }
             for t in &attr.tensors {
                 tensor(t)?;
+            }
+        }
+    }
+    for output in ["policy_logits", "value"] {
+        let mut pending = vec![output];
+        let mut visited = BTreeSet::new();
+        while let Some(name) = pending.pop() {
+            if visited.insert(name)
+                && let Some(node) = producers.get(name)
+                && !["Shape", "Size"].contains(&node.op.as_str())
+            {
+                pending.extend(node.inputs.iter().map(String::as_str));
+            }
+        }
+        ensure!(
+            visited.contains("condition"),
+            "FiLM condition is disconnected from an output"
+        );
+    }
+    Ok(())
+}
+
+fn validate_typed_graph(bytes: &[u8], contract: &TypedOnnxContract) -> Result<()> {
+    let model = ModelProto::decode(bytes)?;
+    ensure!(
+        model.opset.len() == 1
+            && ["", "ai.onnx"].contains(&model.opset[0].domain.as_str())
+            && model.opset[0].version == 18
+            && model.functions.is_empty(),
+        "ONNX requires opset18 without custom functions/domains"
+    );
+    let graph = model.graph.context("ONNX graph missing")?;
+    ensure!(
+        graph.sparse.is_empty() && graph.nodes.len() <= 100_000,
+        "unsupported sparse graph or graph node limit"
+    );
+    ensure!(
+        graph.inputs.len() == contract.inputs.len()
+            && graph.outputs.len() == contract.outputs.len(),
+        "ONNX input/output count mismatch"
+    );
+    for (actual, expected) in graph
+        .inputs
+        .iter()
+        .zip(&contract.inputs)
+        .chain(graph.outputs.iter().zip(&contract.outputs))
+    {
+        ensure!(
+            actual.name == expected.name,
+            "ONNX tensor name/order mismatch"
+        );
+        let tensor_type = actual
+            .kind
+            .as_ref()
+            .and_then(|value| value.tensor.as_ref())
+            .context("ONNX tensor type missing")?;
+        let shape = tensor_type
+            .shape
+            .as_ref()
+            .context("ONNX tensor shape missing")?;
+        ensure!(
+            tensor_type.dtype == expected.dtype.onnx_id()
+                && shape.dims.len() == expected.shape.len(),
+            "ONNX typed dtype/rank mismatch"
+        );
+        for (actual_dim, expected_dim) in shape.dims.iter().zip(&expected.shape) {
+            match (&actual_dim.size, expected_dim) {
+                (Some(dimension::Size::Fixed(value)), Axis::Fixed(required))
+                    if *value == *required as i64 => {}
+                (Some(dimension::Size::Symbol(value)), Axis::Dynamic(required))
+                    if value == required => {}
+                _ => anyhow::bail!("ONNX typed shape/dynamic symbol mismatch"),
+            }
+        }
+    }
+    let input_names: BTreeSet<&str> = graph.inputs.iter().map(|v| v.name.as_str()).collect();
+    let mut initializer_names = BTreeSet::new();
+    let mut parameter_elements: u128 = 0;
+    for initializer in &graph.initializers {
+        ensure!(
+            !initializer.name.is_empty()
+                && !input_names.contains(initializer.name.as_str())
+                && initializer_names.insert(initializer.name.as_str()),
+            "ONNX initializer name is empty, duplicate, or shadows an input"
+        );
+        tensor(initializer)?;
+        parameter_elements = parameter_elements
+            .checked_add(initializer.dims.iter().try_fold(1u128, |acc, dim| {
+                ensure!(*dim >= 0, "negative ONNX initializer dimension");
+                acc.checked_mul(*dim as u128)
+                    .context("initializer shape overflow")
+            })?)
+            .context("initializer element overflow")?;
+    }
+    ensure!(
+        parameter_elements <= 64_000_000,
+        "model parameter budget exceeds 64 million"
+    );
+    let mut producers = BTreeMap::new();
+    for node in &graph.nodes {
+        ensure!(
+            ["", "ai.onnx"].contains(&node.domain.as_str()) && !node.op.is_empty(),
+            "unsupported ONNX node domain"
+        );
+        for output in &node.outputs {
+            if output.is_empty() {
+                continue;
+            }
+            ensure!(
+                !input_names.contains(output.as_str())
+                    && !initializer_names.contains(output.as_str()),
+                "ONNX node output shadows an input or initializer"
+            );
+            ensure!(
+                producers.insert(output.as_str(), node).is_none(),
+                "duplicate ONNX producer"
+            );
+        }
+        for attribute in &node.attributes {
+            ensure!(
+                attribute.float.is_finite()
+                    && attribute.floats.iter().all(|value| value.is_finite())
+                    && attribute.graph.is_none()
+                    && attribute.graphs.is_empty()
+                    && attribute.sparse_tensor.is_none()
+                    && attribute.sparse_tensors.is_empty(),
+                "nested/sparse graph or non-finite attribute unsupported"
+            );
+            if let Some(value) = &attribute.tensor {
+                tensor(value)?;
+            }
+            for value in &attribute.tensors {
+                tensor(value)?;
             }
         }
     }

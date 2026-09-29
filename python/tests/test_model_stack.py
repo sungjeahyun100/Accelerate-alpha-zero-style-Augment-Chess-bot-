@@ -18,10 +18,186 @@ import torch
 from accelerate_chess.encoding import EncoderSpec, PublicEncoder, PublicObservation, batch_positions, canonical_json, decode_json_tail
 from accelerate_chess.network.artifacts import MAX_MANIFEST_BYTES, OnnxEvaluator, _validate_graph, export_onnx, load_adapter, load_base, load_manifest, save_adapter, save_base
 from accelerate_chess.network.model import AdapterDescriptor, ModelConfig, PolicyValueNetwork, is_adapter_parameter, masked_policy, tensor_state_hash
+from accelerate_chess.network.mask_resnet import MaskResNetConfig, MaskResNetPolicyValueNetwork
+from accelerate_chess.network.typed_context import TypedContextConfig
 import accelerate_chess.training as training_module
 from accelerate_chess.training import DatasetCursor, create_optimizer, load_training_checkpoint, save_training_checkpoint
 
 torch.set_num_threads(1)
+
+
+def _mask_resnet_case():
+    """Small typed public state with a linked record and ordered target child."""
+    torch.manual_seed(20260929)
+    context = TypedContextConfig((4, 4, 4, 4), (4, 4), (4, 4, 4, 4), hidden_dim=8)
+    config = MaskResNetConfig(board_channels=6, typed_context=context, channels=8,
+                              residual_blocks=2, lora_rank=2, lora_alpha=2.)
+    model = MaskResNetPolicyValueNetwork(config).eval()
+    spatial = torch.randn(1, 6, 5, 7)
+    layout_mask = torch.ones(1, 1, 5, 7, dtype=torch.bool)
+    record_category = torch.zeros(1, 3, 4, dtype=torch.int64)
+    record_category[0, 1, 0] = 1
+    record_category[0, 2, 0] = 2
+    record_numeric = torch.zeros(1, 3, 8)
+    record_numeric[0, 1, 0] = .5
+    record_coord = torch.tensor([[[0., 0.], [2., 3.], [4., 6.]]])
+    record_spatial_valid = torch.tensor([[False, True, True]])
+    record_mask = torch.ones(1, 3, dtype=torch.bool)
+    relation_index = torch.tensor([[[1, 2]]], dtype=torch.int64)
+    relation_category = torch.zeros(1, 1, 2, dtype=torch.int64)
+    relation_numeric = torch.zeros(1, 1, 4)
+    relation_mask = torch.ones(1, 1, dtype=torch.bool)
+    candidate_category = torch.zeros(1, 3, 2, 4, dtype=torch.int64)
+    candidate_category[0, :, 0, 0] = torch.tensor([0, 1, 2])
+    candidate_numeric = torch.zeros(1, 3, 2, 8)
+    candidate_numeric[0, :, 0, 0] = torch.tensor([.25, .5, .75])
+    candidate_coord = torch.zeros(1, 3, 2, 2)
+    candidate_coord[0, :, 1, :] = torch.tensor([2., 3.])
+    candidate_coord_valid = torch.tensor([[[False, True]] * 3])
+    candidate_parent = torch.tensor([[[-1, 0]] * 3], dtype=torch.int64)
+    candidate_order = torch.tensor([[[0, 0]] * 3], dtype=torch.int64)
+    candidate_target_index = torch.tensor([[[-1, 1]] * 3], dtype=torch.int64)
+    candidate_node_mask = torch.ones(1, 3, 2, dtype=torch.bool)
+    candidate_mask = torch.ones(1, 3, dtype=torch.bool)
+    condition = torch.zeros(1, 8)
+    inputs = (spatial, layout_mask, record_category, record_numeric, record_coord,
+              record_spatial_valid, record_mask, relation_index, relation_category,
+              relation_numeric, relation_mask, candidate_category, candidate_numeric,
+              candidate_coord, candidate_coord_valid, candidate_parent, candidate_order,
+              candidate_target_index, candidate_node_mask, candidate_mask, condition)
+    return model, inputs
+
+
+def _mask_resnet_select_candidates(inputs, selection):
+    selected = list(inputs)
+    for index in range(11, 20):
+        selected[index] = inputs[index][:, selection]
+    return tuple(selected)
+
+
+def test_mask_resnet_padding_and_candidate_partition_invariance():
+    model, inputs = _mask_resnet_case()
+    logits, value = model.evaluate(*inputs)
+    assert logits.shape == (1, 3) and value.shape == (1, 1)
+    assert torch.isfinite(logits).all() and torch.isfinite(value).all()
+
+    padded = list(inputs)
+    padded[0] = torch.randn(1, 6, 10, 12)
+    padded[0][:, :, :5, :7] = inputs[0]
+    padded[1] = torch.zeros(1, 1, 10, 12, dtype=torch.bool)
+    padded[1][:, :, :5, :7] = True
+    padded_logits, padded_value = model.evaluate(*padded)
+    torch.testing.assert_close(padded_logits, logits, atol=1e-5, rtol=1e-4)
+    torch.testing.assert_close(padded_value, value, atol=1e-5, rtol=1e-4)
+
+    permuted = _mask_resnet_select_candidates(inputs, [2, 0, 1])
+    permutation_logits, permutation_value = model.evaluate(*permuted)
+    torch.testing.assert_close(permutation_logits, logits[:, [2, 0, 1]], atol=1e-6, rtol=1e-5)
+    torch.testing.assert_close(permutation_value, value, atol=0, rtol=0)
+    first_logits, first_value = model.evaluate(*_mask_resnet_select_candidates(inputs, slice(0, 1)))
+    rest_logits, rest_value = model.evaluate(*_mask_resnet_select_candidates(inputs, slice(1, 3)))
+    torch.testing.assert_close(torch.cat((first_logits, rest_logits), dim=1), logits, atol=1e-6, rtol=1e-5)
+    torch.testing.assert_close(first_value, value, atol=0, rtol=0)
+    torch.testing.assert_close(rest_value, value, atol=0, rtol=0)
+
+    changed = list(inputs)
+    changed[12] = inputs[12] + .7
+    changed_logits, changed_value = model.evaluate(*changed)
+    assert not torch.allclose(changed_logits, logits)
+    torch.testing.assert_close(changed_value, value, atol=0, rtol=0)
+
+
+def test_mask_resnet_film_adapter_merge_and_input_limits():
+    model, inputs = _mask_resnet_case()
+    with torch.no_grad():
+        model.spatial.condition_projection[0].weight.zero_()
+        model.spatial.condition_projection[0].bias.zero_()
+        model.spatial.condition_projection[0].weight[0, 0] = 1.
+        model.spatial.blocks[0].film.weight[model.config.channels, 0] = 2.
+        model.spatial.blocks[0].conv2.lora_b.fill_(.03)
+    base_hash = model.base_hash
+    adapter_parameters = tuple(model.configure_training("adapter"))
+    assert adapter_parameters and all(parameter.requires_grad for parameter in adapter_parameters)
+    assert all(not parameter.requires_grad for name, parameter in model.named_parameters()
+               if not is_adapter_parameter(name))
+    model.eval()
+    conditioned = list(inputs)
+    conditioned[-1] = torch.ones_like(inputs[-1])
+    neutral_logits, neutral_value = model.evaluate(*inputs)
+    active_logits, active_value = model.evaluate(*conditioned)
+    assert not torch.allclose(active_logits, neutral_logits)
+    assert not torch.allclose(active_value, neutral_value)
+
+    adapter_hash = tensor_state_hash(model.adapter_state())
+    optimizer = torch.optim.SGD(adapter_parameters, lr=.01)
+    training_logits, training_value = model(*conditioned)
+    (training_logits.mean() + training_value.mean()).backward()
+    optimizer.step()
+    optimizer.zero_grad(set_to_none=True)
+    assert tensor_state_hash(model.adapter_state()) != adapter_hash
+    assert model.base_hash == base_hash
+    active_logits, active_value = model.evaluate(*conditioned)
+
+    original_hash = tensor_state_hash(model.state_dict())
+    merged = model.merged_copy(model.adapter_descriptor("a" * 64), "a" * 64)
+    merged_logits, merged_value = merged.evaluate(*conditioned)
+    torch.testing.assert_close(merged_logits, active_logits, atol=1e-5, rtol=1e-4)
+    torch.testing.assert_close(merged_value, active_value, atol=1e-5, rtol=1e-4)
+    assert tensor_state_hash(model.state_dict()) == original_hash and model.base_hash == base_hash
+    with pytest.raises(ValueError, match="compatibility"):
+        model.merged_copy(model.adapter_descriptor("a" * 64), "b" * 64)
+
+    empty_layout = list(inputs)
+    empty_layout[1] = torch.zeros_like(inputs[1])
+    with pytest.raises(ValueError, match="layout cell"):
+        model.evaluate(*empty_layout)
+    too_wide = list(inputs)
+    too_wide[0] = torch.zeros(1, 6, 5, 33)
+    too_wide[1] = torch.ones(1, 1, 5, 33, dtype=torch.bool)
+    with pytest.raises(ValueError, match="geometry"):
+        model.evaluate(*too_wide)
+
+
+def test_mask_resnet_warm_start_copies_only_compatible_residual_base_weights():
+    target, _ = _mask_resnet_case()
+    source = PolicyValueNetwork(ModelConfig(board_channels=3, condition_dim=4, action_dim=5,
+                                            channels=8, residual_blocks=2, lora_rank=2,
+                                            lora_alpha=2.)).eval()
+    with torch.no_grad():
+        for index, block in enumerate(source.blocks):
+            block.conv1.base.weight.fill_(index + .1)
+            block.conv2.base.weight.fill_(index + .2)
+            block.bn1.running_mean.fill_(index + .3)
+            block.film.weight.fill_(index + .4)
+    source_hash = tensor_state_hash(source.state_dict())
+    before = {name: value.detach().clone() for name, value in target.state_dict().items()}
+    copied = target.warm_start_residual_convolutions(source)
+    assert copied == tuple(f"spatial.blocks.{block}.{conv}.base.weight"
+                           for block in range(2) for conv in ("conv1", "conv2"))
+    for name, value in target.state_dict().items():
+        if name in copied:
+            parts = name.split(".")
+            expected = getattr(source.blocks[int(parts[2])], parts[3]).base.weight
+            torch.testing.assert_close(value, expected, atol=0, rtol=0)
+        else:
+            torch.testing.assert_close(value, before[name], atol=0, rtol=0)
+    assert tensor_state_hash(source.state_dict()) == source_hash
+
+    target_hash = tensor_state_hash(target.state_dict())
+    incompatible = PolicyValueNetwork(ModelConfig(board_channels=3, condition_dim=4, action_dim=5,
+                                                  channels=4, residual_blocks=2, lora_rank=2,
+                                                  lora_alpha=2.)).eval()
+    with pytest.raises(ValueError, match="incompatible residual weight"):
+        target.warm_start_residual_convolutions(incompatible)
+    missing = PolicyValueNetwork(ModelConfig(board_channels=3, condition_dim=4, action_dim=5,
+                                             channels=8, residual_blocks=1, lora_rank=2,
+                                             lora_alpha=2.)).eval()
+    with pytest.raises(ValueError, match="block count"):
+        target.warm_start_residual_convolutions(missing)
+    source.blocks[1].conv2 = torch.nn.Identity()
+    with pytest.raises(ValueError, match="missing residual weight"):
+        target.warm_start_residual_convolutions(source)
+    assert tensor_state_hash(target.state_dict()) == target_hash
 
 
 @lru_cache(maxsize=1)

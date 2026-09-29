@@ -9,11 +9,31 @@ import numpy as np
 import pytest
 
 from accelerate_chess import (Position, NativeError, StaleActionError,
-                              ConditioningMismatchError, site_catalog)
+                              ConditioningMismatchError, site_catalog,
+                              site_observation_policy)
 
 
 def _digest(value):
     return hashlib.sha256(jcs.canonicalize(value)).hexdigest()
+
+
+def test_frozen_catalog_and_observation_policy_are_versioned_owned_copies():
+    v6 = site_catalog()
+    v7_version = "augment-site-20260928-e5ed84fcf8e72a24"
+    v7 = site_catalog(v7_version)
+    policy = site_observation_policy(v7_version)
+    assert v6["rulesVersion"] != v7_version
+    assert v7["rulesVersion"] == policy["rulesVersion"] == v7_version
+    assert next(file for file in v7["source"]["files"]
+                if file["name"] == "main-OahWs0tU.js")["sha256"] == (
+        "e5ed84fcf8e72a24e6a8cfeb9050787387a616c55184e6501fca2077e302c45c"
+    )
+    v7["cards"].clear()
+    policy["rulesVersion"] = "changed"
+    assert len(site_catalog(v7_version)["cards"]) == 256
+    assert site_observation_policy(v7_version)["rulesVersion"] == v7_version
+    with pytest.raises(ValueError, match="unknown rules version"):
+        site_catalog("unknown")
 
 
 def _state():

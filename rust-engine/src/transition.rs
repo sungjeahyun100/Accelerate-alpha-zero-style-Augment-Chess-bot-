@@ -3,6 +3,13 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) fn card_actions(state: &GameState, card: &CardSlot) -> Result<Vec<Action>> {
+    if state.ruleset_id == RULES_VERSION_V7 {
+        match crate::card_registry::action_policy(state, card) {
+            Ok(_) => {}
+            Err(EngineError::IllegalAction) => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        }
+    }
     let candidates = card_ui_actions(state, card)?;
     let mut accepted = Vec::new();
     for action in candidates {
@@ -17,6 +24,13 @@ pub(crate) fn validate_card_action(
     card: &CardSlot,
     action: &Action,
 ) -> Result<bool> {
+    if state.ruleset_id == RULES_VERSION_V7 {
+        match crate::card_registry::action_policy(state, card) {
+            Ok(_) => {}
+            Err(EngineError::IllegalAction) => return Ok(false),
+            Err(error) => return Err(error),
+        }
+    }
     if let Some(accepted) = crate::card_effects::validate(state, card, action)? {
         return Ok(accepted);
     }
@@ -260,14 +274,13 @@ pub(crate) fn apply_draft_passive(
             }
         }
     }
+    let used_at = crate::draft::frozen_timestamp_for_ruleset(&state.ruleset_id)?;
     let stored = &mut state.deck_slots.get_mut(color)[slot];
     stored.used = true;
     stored.recovering = false;
     stored.source_order.retain(|name| name != "recovering");
     stored.extra.insert("passiveApplied".into(), json!(true));
-    stored
-        .extra
-        .insert("usedAt".into(), json!(crate::draft::frozen_timestamp()?));
+    stored.extra.insert("usedAt".into(), json!(used_at));
     crate::replay::add_log(
         state,
         format!(
@@ -303,8 +316,8 @@ fn apply_democracy(state: &mut GameState, color: Color) -> Result<bool> {
 pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
     let actor = action.color;
     let before = Sides {
-        white: state.observe(Color::White),
-        black: state.observe(Color::Black),
+        white: state.try_observe(Color::White)?,
+        black: state.try_observe(Color::Black)?,
         white_first: true,
     };
     let captures = match action.kind {
@@ -318,17 +331,36 @@ pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>
     };
     prune_board_potion_effects(state)?;
     crate::replay::settle(state)?;
-    let transition = |viewer| {
-        let after = state.observe(viewer);
+    let transition = |viewer| -> Result<PublicTransition> {
+        let after = state.try_observe(viewer)?;
         let before = before.get(viewer);
         let mut board_changes = Vec::new();
-        for row in 0..8 {
-            for col in 0..8 {
+        if before.board.len() != after.board.len()
+            || before
+                .board
+                .iter()
+                .zip(&after.board)
+                .any(|(old, new)| old.len() != new.len())
+        {
+            return Err(EngineError::UnsupportedFeature(
+                "public transition across a changed board extent".into(),
+            ));
+        }
+        for row in 0..before.board.len() {
+            for col in 0..before.board[row].len() {
                 if before.board[row][col] != after.board[row][col] {
                     board_changes.push(BoardChange {
                         square: Square {
-                            row: row as u8,
-                            col: col as u8,
+                            row: u8::try_from(row).map_err(|_| {
+                                EngineError::UnsupportedFeature(
+                                    "public transition row exceeds wire coordinate".into(),
+                                )
+                            })?,
+                            col: u8::try_from(col).map_err(|_| {
+                                EngineError::UnsupportedFeature(
+                                    "public transition column exceeds wire coordinate".into(),
+                                )
+                            })?,
                         },
                         before: before.board[row][col].clone(),
                         after: after.board[row][col].clone(),
@@ -341,7 +373,7 @@ pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>
             .as_ref()
             .map(|result| serde_json::to_value(result).expect("result serializes"));
         let result = json!({"protocolVersion":"accelerate-result-v1","status":if winner.is_some(){"terminal"}else{"ongoing"},"winner":if matches!(state.result(),Some(GameResult::White|GameResult::Black)){json!(state.winner)}else{Value::Null},"outcome":winner,"reason":if state.result().is_some(){state.extra.get("replayEndReason").cloned().unwrap_or(json!(""))}else{json!("")}});
-        PublicTransition {
+        Ok(PublicTransition {
             kind: "transition".into(),
             actor,
             next_actor: state.decision_actor(),
@@ -356,7 +388,7 @@ pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>
                 .unwrap_or_default(),
             captures: state.public_captures(),
             result,
-        }
+        })
     };
     let mut exact = action.clone();
     exact.position_key = None;
@@ -366,8 +398,8 @@ pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>
         action: exact,
         turn_changed: state.turn != before.white.turn,
         public: Sides {
-            white: transition(Color::White),
-            black: transition(Color::Black),
+            white: transition(Color::White)?,
+            black: transition(Color::Black)?,
             white_first: true,
         },
     };
@@ -394,7 +426,7 @@ fn apply_move(state: &mut GameState, action: &Action, threat_probe: bool) -> Res
     // The automatic OPENING card may restore only these fields if that move
     // made its effect impossible. It deliberately leaves clock, RNG and move
     // bookkeeping at their post-move values.
-    if !threat_probe && should_store_first_move_undo(state, action.color) {
+    if !threat_probe && should_store_first_move_undo(state, action.color)? {
         let undo = capture_first_move_undo(state, action.color);
         state.extra.insert("firstMoveUndo".into(), undo);
     }
@@ -1170,6 +1202,10 @@ fn finish_move(state: &mut GameState, actor: Color) -> Result<()> {
     crate::replay::normalize_color_booleans(state, "skipTurn");
     if state.actions_remaining > 1 {
         state.actions_remaining -= 1;
+        // The source probes for an action immediately after consuming one of
+        // the current player's extra moves.  This can settle an immobile
+        // position and can advance the source RNG through a card probe.
+        crate::flow::check_no_action_loss(state)?;
         return Ok(());
     }
     if !crate::flow::commit_turn_clock(state, actor)? {
@@ -1199,6 +1235,19 @@ fn finish_move(state: &mut GameState, actor: Color) -> Result<()> {
     *turns = turns
         .checked_add(1)
         .ok_or_else(|| EngineError::InvalidState("turn count overflow".into()))?;
+    if state.ruleset_id == RULES_VERSION_V7 {
+        // The frozen client's completed-turn Othello scan follows the actor's
+        // mistake-card reset and precedes pending gales and later turn ticks.
+        crate::replay::normalize_color_booleans(state, "mistakeCard");
+        state
+            .extra
+            .get_mut("mistakeCard")
+            .expect("normalized colors")[actor.as_str()] = json!(false);
+        crate::turn_effects_v7::settle_after_completed_turn(state, actor)?;
+        if state.mode == "gameover" {
+            return Ok(());
+        }
+    }
     crate::threat::tick_protection(state, actor, "sacrificeProtection");
     tick_card_frozen_and_poison(state, actor)?;
     if crate::flow::tick_deathmatch(state, actor)? {
@@ -1279,13 +1328,13 @@ fn finish_move(state: &mut GameState, actor: Color) -> Result<()> {
     Ok(())
 }
 
-fn first_move_auto_card(card: &CardSlot) -> bool {
+fn first_move_auto_card(card: &CardSlot, definitions: &crate::draft::Definitions) -> bool {
     if card.vacant || card.used || !crate::observation::truth(card.extra.get("firstTurnCard")) {
         return false;
     }
     // libraryCardPhase prefers the frozen definition over the stored card's
     // mutable phase. The two exceptional IDs are also accepted by the source.
-    let phase = crate::draft::definitions()
+    let phase = definitions
         .definitions
         .iter()
         .find(|definition| definition["id"] == card.id)
@@ -1299,10 +1348,15 @@ fn first_move_auto_card(card: &CardSlot) -> bool {
         )
 }
 
-fn should_store_first_move_undo(state: &GameState, actor: Color) -> bool {
-    !state.flag("firstMoveCardsForced", actor)
+fn should_store_first_move_undo(state: &GameState, actor: Color) -> Result<bool> {
+    let definitions = crate::draft::definitions_for_ruleset(&state.ruleset_id)?;
+    Ok(!state.flag("firstMoveCardsForced", actor)
         && *state.turns_taken.get(actor) == 0
-        && state.deck_slots.get(actor).iter().any(first_move_auto_card)
+        && state
+            .deck_slots
+            .get(actor)
+            .iter()
+            .any(|card| first_move_auto_card(card, definitions)))
 }
 
 // main88121 captures exactly the fields restored by main90846. The remaining
@@ -1412,11 +1466,12 @@ fn resolve_first_move_cards(state: &mut GameState, actor: Color) -> Result<()> {
     if state.flag("firstMoveCardsForced", actor) || *state.turns_taken.get(actor) != 0 {
         return Ok(());
     }
+    let definitions = crate::draft::definitions_for_ruleset(&state.ruleset_id)?;
     let cards = state
         .deck_slots
         .get(actor)
         .iter()
-        .filter(|card| first_move_auto_card(card))
+        .filter(|card| first_move_auto_card(card, definitions))
         .cloned()
         .collect::<Vec<_>>();
     if cards.is_empty() {
@@ -1523,6 +1578,7 @@ fn resolve_first_move_cards(state: &mut GameState, actor: Color) -> Result<()> {
             }
         }
         crate::replay::queue_forced_opening_card(state, actor, &card)?;
+        let used_at = crate::draft::frozen_timestamp_for_ruleset(&state.ruleset_id)?;
         let live_card = state
             .deck_slots
             .get_mut(actor)
@@ -1530,9 +1586,7 @@ fn resolve_first_move_cards(state: &mut GameState, actor: Color) -> Result<()> {
             .find(|candidate| candidate.instance_id == card.instance_id)
             .ok_or_else(|| EngineError::InvalidState("automatic card instance was lost".into()))?;
         live_card.used = true;
-        live_card
-            .extra
-            .insert("usedAt".into(), json!(crate::draft::frozen_timestamp()?));
+        live_card.extra.insert("usedAt".into(), json!(used_at));
         crate::flow::note_card_event(state)?;
         crate::replay::add_log(
             state,
@@ -1869,6 +1923,9 @@ fn apply_card(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
         })
         .ok_or(EngineError::IllegalAction)?;
     let card = state.deck_slots.get(color)[slot].clone();
+    if state.ruleset_id == RULES_VERSION_V7 {
+        crate::card_registry::action_policy(state, &card)?;
+    }
     let captures = apply_card_raw(state, &card, action)?;
     // Potion and black-box effects can reveal metadata on this exact instance.
     // Source finishCard receives that updated object, including replay/log data.
@@ -1941,11 +1998,17 @@ fn finish_card(
     captures: Vec<Piece>,
 ) -> Result<Vec<Piece>> {
     let color = state.turn;
+    let v7_settle = if state.ruleset_id == RULES_VERSION_V7 {
+        Some(crate::card_registry::settle_policy(state, card)?)
+    } else {
+        None
+    };
     if card.extra.get("devCard") != Some(&json!(true)) {
+        let used_at = crate::draft::frozen_timestamp_for_ruleset(&state.ruleset_id)?;
         state.deck_slots.get_mut(color)[slot].used = true;
         state.deck_slots.get_mut(color)[slot]
             .extra
-            .insert("usedAt".into(), json!(crate::draft::frozen_timestamp()?));
+            .insert("usedAt".into(), json!(used_at));
         state.cards_used_this_turn = Sides::new(
             state.cards_used_this_turn.white,
             state.cards_used_this_turn.black,
@@ -1956,9 +2019,10 @@ fn finish_card(
             .ok_or_else(|| EngineError::InvalidState("card count overflow".into()))?;
         crate::flow::note_card_event(state)?;
     }
-    if !crate::draft::is_passive_definition(
+    if !crate::draft::is_passive_definition_for_ruleset(
+        &state.ruleset_id,
         &serde_json::to_value(card).map_err(EngineError::serialization)?,
-    ) && card.extra.get("phase").and_then(Value::as_str) != Some("RULE")
+    )? && card.extra.get("phase").and_then(Value::as_str) != Some("RULE")
     {
         crate::flow::mark_progress(state);
     }
@@ -1998,7 +2062,23 @@ fn finish_card(
     update_palaces(state)?;
     resolve_herald_threats(state, color)?;
     crate::flow::check_star_limit(state)?;
-    if card.id == "brainwash" && state.mode == "play" {
+    if let Some(settle) = v7_settle {
+        if settle.end_move {
+            if settle.clear_extra_actions {
+                state.actions_remaining = 1;
+                if let Some(effects) = state
+                    .extra
+                    .get_mut("effects")
+                    .and_then(Value::as_object_mut)
+                {
+                    effects.insert("extraMove".into(), json!(0));
+                }
+            }
+            finish_move(state, color)?;
+        } else {
+            crate::flow::check_no_action_loss(state)?;
+        }
+    } else if card.id == "brainwash" && state.mode == "play" {
         // main86914/86999: brainwash consumes the rest of its owner's turn,
         // including extra actions, before recording the card replay frame.
         state.actions_remaining = 1;
@@ -2109,7 +2189,7 @@ fn apply_otherworld(state: &mut GameState) -> Result<()> {
                 8 - square.row
             ))
         });
-    let entry = json!({"id":format!("otherworld-{}-{suffix}",crate::draft::frozen_timestamp()?),
+    let entry = json!({"id":format!("otherworld-{}-{suffix}",crate::draft::frozen_timestamp_for_ruleset(&state.ruleset_id)?),
         "color":color,"pieceId":piece.id,"row":square.row,"col":square.col,
         "origin":origin,"dueMoveCount":due,"remainingHalfTurns":28});
     clear_piece(state, &piece.id);

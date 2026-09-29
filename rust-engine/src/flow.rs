@@ -5,21 +5,30 @@ use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
 pub(crate) fn end_game(state: &mut GameState, winner: Option<Color>, reason: &str) -> Result<()> {
+    let needs_end_timestamp = state
+        .extra
+        .get("replayEndedAt")
+        .is_none_or(|v| v.is_null() || v.as_str() == Some(""));
+    let ended_at = if needs_end_timestamp {
+        let catalog_source = match state.ruleset_id.as_str() {
+            RULES_VERSION_V6 => include_str!("../../bridge/catalog/site-20260927.json"),
+            RULES_VERSION_V7 => include_str!("../../bridge/catalog/site-20260928.json"),
+            other => {
+                return Err(EngineError::UnsupportedFeature(format!(
+                    "end-game source for rules version {other}"
+                )));
+            }
+        };
+        let catalog: Value = serde_json::from_str(catalog_source).expect("adopted catalog");
+        Some(catalog["source"]["frozenAt"].clone())
+    } else {
+        None
+    };
     pause_clock(state)?;
     state.mode = "gameover".into();
     state.winner = winner.map(|color| color.as_str().into());
-    if state
-        .extra
-        .get("replayEndedAt")
-        .is_none_or(|v| v.is_null() || v.as_str() == Some(""))
-    {
-        let catalog: Value =
-            serde_json::from_str(include_str!("../../bridge/catalog/site-20260927.json"))
-                .expect("adopted catalog");
-        state.extra.insert(
-            "replayEndedAt".into(),
-            catalog["source"]["frozenAt"].clone(),
-        );
+    if let Some(ended_at) = ended_at {
+        state.extra.insert("replayEndedAt".into(), ended_at);
     }
     state.extra.insert("replayEndReason".into(), json!(reason));
     for field in [
@@ -119,7 +128,8 @@ fn clock_remaining(state: &GameState, color: Color) -> Result<Option<f64>> {
         && clock["lastStartedAt"].as_f64().is_some_and(|v| v != 0.0)
     {
         stored
-            - (crate::draft::frozen_timestamp()? as f64 - clock["lastStartedAt"].as_f64().unwrap())
+            - (crate::draft::frozen_timestamp_for_ruleset(&state.ruleset_id)? as f64
+                - clock["lastStartedAt"].as_f64().unwrap())
     } else {
         stored
     };
@@ -183,7 +193,9 @@ pub(crate) fn start_clock(state: &mut GameState) -> Result<()> {
         return Ok(());
     }
     clock["runningColor"] = json!(state.turn);
-    clock["lastStartedAt"] = json!(crate::draft::frozen_timestamp()?);
+    clock["lastStartedAt"] = json!(crate::draft::frozen_timestamp_for_ruleset(
+        &state.ruleset_id
+    )?);
     Ok(())
 }
 
@@ -246,7 +258,27 @@ pub(crate) fn check_no_action_loss(state: &mut GameState) -> Result<bool> {
             "no-action chain normalization".into(),
         ));
     }
-    if crate::transition::available_card_action(state, state.turn)?
+    // The client excludes cards while an extra move is forced. Its untargeted
+    // card probe may consume the real RNG, so the order matters even when a
+    // legal board move is eventually found.
+    let forced_extra_move = state.board.iter().flatten().flatten().any(|piece| {
+        piece.color == state.turn
+            && [
+                "thiefSecondMove",
+                "frenzyExtraMove",
+                "fileSurgeSecondMove",
+                "rookLiftSecondMove",
+                "ironMonarchExtraMove",
+                "underpromotionSecondMove",
+                "checkerChainCapture",
+                "madHorseSecondMove",
+                "platformExtraMove",
+                "desperado",
+            ]
+            .into_iter()
+            .any(|key| crate::observation::truth(piece.extra.get(key)))
+    });
+    if (!forced_extra_move && crate::transition::available_card_action(state, state.turn)?)
         || !crate::movement::legal_move_actions(state)?.is_empty()
     {
         return Ok(false);
@@ -260,6 +292,23 @@ pub(crate) fn check_no_action_loss(state: &mut GameState) -> Result<bool> {
                     && crate::observation::number(piece.extra.get("mana")).unwrap_or(0.0) >= 1.0)
     }) {
         return Ok(false);
+    }
+    // The source's hasAnyLegalMove probes football regardless of its neutral
+    // color. The current Rust move enumerator covers only actor-colored
+    // pieces; a football can therefore defeat the apparent empty-action
+    // conclusion. Until source getLegalMoves is fully connected for this
+    // piece, do not declare a v7 loss from that incomplete enumeration.
+    if state.ruleset_id == RULES_VERSION_V7
+        && state
+            .board
+            .iter()
+            .flatten()
+            .flatten()
+            .any(|piece| piece.kind == "football")
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "v7 no-action football legality".into(),
+        ));
     }
     end_game(
         state,
@@ -290,7 +339,9 @@ pub(crate) fn commit_turn_clock(state: &mut GameState, color: Color) -> Result<b
         .filter(|value| [0.0, 3000.0, 5000.0, 7000.0, 10000.0, 15000.0].contains(value))
         .unwrap_or(10000.0);
     let clock = state.extra.get_mut("clock").expect("existing clock");
-    clock["lastStartedAt"] = json!(crate::draft::frozen_timestamp()?);
+    clock["lastStartedAt"] = json!(crate::draft::frozen_timestamp_for_ruleset(
+        &state.ruleset_id
+    )?);
     clock[format!("{}Ms", color.as_str())] = json!(if remaining > 0.0 {
         remaining + increment
     } else {
@@ -320,16 +371,15 @@ pub(crate) fn star_total(state: &GameState, color: Color) -> f64 {
         .get(color)
         .iter()
         .filter(|card| !card.vacant)
-        .map(CardSlot::star_value)
-        .sum()
+        .fold(0.0, |sum, card| sum + card.star_value())
 }
 
 pub(crate) fn record_position(state: &mut GameState) -> Result<u64> {
     let mut seen = BTreeSet::new();
     let mut pieces = Vec::new();
-    for row in 0..8 {
-        for col in 0..8 {
-            let Some(piece) = state.at(Square { row, col }) else {
+    for (row, cells) in state.board.iter().enumerate() {
+        for (col, cell) in cells.iter().enumerate() {
+            let Some(piece) = cell.as_ref() else {
                 continue;
             };
             if piece.kind == "wall" || !seen.insert(piece.id.clone()) {
@@ -353,7 +403,7 @@ pub(crate) fn record_position(state: &mut GameState) -> Result<u64> {
                 piece.kind,
                 attribute("hp"),
                 attribute("ammo"),
-                u8::from(piece.flag("frozen") || piece.number("frozen") > 0)
+                u8::from(crate::observation::truth(piece.extra.get("frozen")))
             ));
         }
     }
@@ -407,22 +457,40 @@ fn shotgun_color(state: &GameState) -> Option<Color> {
                 .any(|c| !c.vacant && c.id == "shotgun-king")
     })
 }
-pub(crate) fn resolve_stars(state: &mut GameState) -> Result<()> {
-    let winner = shotgun_color(state).map(Color::opponent).or_else(|| {
-        let white = star_total(state, Color::White);
-        let black = star_total(state, Color::Black);
-        if white < black {
-            Some(Color::White)
-        } else if black < white {
-            Some(Color::Black)
+pub(crate) fn resolve_stars(state: &mut GameState, reason: &str) -> Result<()> {
+    let prefix = if reason.is_empty() {
+        String::new()
+    } else {
+        format!("{reason}: ")
+    };
+    if let Some(color) = shotgun_color(state) {
+        return end_game(
+            state,
+            Some(color.opponent()),
+            &format!("{prefix}샷건 킹은 장기전 판정에서 패배합니다."),
+        );
+    }
+    let white = star_total(state, Color::White);
+    let black = star_total(state, Color::Black);
+    let scores = format!("({white} : {black})");
+    if white == black {
+        end_game(
+            state,
+            None,
+            &format!("{prefix}별 합계가 같아 무승부입니다. {scores}"),
+        )
+    } else {
+        let winner = if white < black {
+            Color::White
         } else {
-            None
-        }
-    });
-    pause_clock(state)?;
-    state.mode = "gameover".into();
-    state.winner = winner.map(|color| color.as_str().into());
-    Ok(())
+            Color::Black
+        };
+        end_game(
+            state,
+            Some(winner),
+            &format!("{prefix}덱의 별이 더 적습니다. {scores}"),
+        )
+    }
 }
 
 pub(crate) fn mark_progress(state: &mut GameState) {
@@ -477,7 +545,7 @@ pub(crate) fn tick_deathmatch(state: &mut GameState, moving_color: Color) -> Res
         .min(interval);
     dm.insert("halfTurnsSinceProgress".into(), json!(count));
     if count >= interval {
-        resolve_stars(state)?;
+        resolve_stars(state, "")?;
         Ok(true)
     } else {
         Ok(false)
@@ -489,7 +557,7 @@ pub(crate) fn check_termination(state: &mut GameState) -> Result<bool> {
         return Ok(true);
     }
     if shotgun_color(state).is_none() && record_position(state)? >= 3 {
-        resolve_stars(state)?;
+        resolve_stars(state, "3회 동형반복")?;
         return Ok(true);
     }
     check_star_limit(state)
@@ -540,7 +608,7 @@ pub(crate) fn check_star_limit(state: &mut GameState) -> Result<bool> {
                 ),
             )?;
         } else {
-            resolve_stars(state)?;
+            resolve_stars(state, &format!("{limit}수"))?;
             return Ok(true);
         }
     }
@@ -561,3 +629,7 @@ pub(crate) fn note_card_event(state: &mut GameState) -> Result<()> {
     );
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "flow_v7_tests.rs"]
+mod flow_v7_tests;

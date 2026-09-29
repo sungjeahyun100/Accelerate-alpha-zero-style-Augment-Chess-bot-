@@ -1,6 +1,9 @@
 # 실행 계약 v1
 
-현재 실행·저장·차분 비교의 기준은 [runtime-v1.schema.json](../schemas/runtime-v1.schema.json)과
+이 계약은 기존 v6 실행·저장·차분 비교의 기준이며, v7 최종 구현에서는 버전·관측 정책·
+typed 모델 입력을 명시적으로 분리한다. 새 계약의 단계별 경계는
+[구현 지시서](../../docs/IMPLEMENTATION-DIRECTIVES.md)에 있다. v6 기준은
+[runtime-v1.schema.json](../schemas/runtime-v1.schema.json)과
 [runtime-contract.js](../tools/runtime-contract.js)다. Position·Action envelope는 v1을 유지하고,
 공개 관측은 아래 Observation v2 계약을 사용한다.
 기존 bridge-draft-0 문서와 예시는 과거 검토 자료로 보존한다. v1 채택은 전체 규칙 구현의

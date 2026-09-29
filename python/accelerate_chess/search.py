@@ -53,7 +53,7 @@ def _copy(value: Any) -> Any:
     return json.loads(canonical_json(value))
 
 
-def _public(observation: Mapping[str, Any]) -> dict[str, Any]:
+def _public(observation: Mapping[str, Any], typed_spec=None) -> dict[str, Any]:
     # Identity is recomputed before any field can become a tracker/NN feature.
     PublicObservation.from_native(observation)
     PublicEncoder._reject_private(observation)
@@ -61,8 +61,16 @@ def _public(observation: Mapping[str, Any]) -> dict[str, Any]:
     if len(encoded.encode()) > MAX_PUBLIC_BYTES:
         raise SearchBudgetError("public observation exceeds the 8 MiB trace boundary")
     result = json.loads(encoded)
-    if len(result["board"]) != 8 or any(len(row) != 8 for row in result["board"]):
-        raise InformationMismatchError("public board must be 8 by 8")
+    if typed_spec is None:
+        if (not isinstance(result["board"], list) or len(result["board"]) != 8
+                or any(not isinstance(row, list) or len(row) != 8 for row in result["board"])):
+            raise InformationMismatchError("legacy public tracker requires an 8 by 8 board")
+    else:
+        from .ir import TypedEncoderSpec, validate_typed_public_observation
+
+        if not isinstance(typed_spec, TypedEncoderSpec):
+            raise TypeError("typed public tracker needs a source-bound TypedEncoderSpec")
+        validate_typed_public_observation(result, typed_spec)
     return result
 
 
@@ -113,10 +121,12 @@ class PublicTracker:
     error. append() records each environment action, even if its public effect
     is empty. The caller may attach only a choice made by this viewer.
     """
-    def __init__(self, initial: Mapping[str, Any], *, max_steps: int = 100_000, max_bytes: int = MAX_PUBLIC_BYTES):
+    def __init__(self, initial: Mapping[str, Any], *, typed_spec=None,
+                 max_steps: int = 100_000, max_bytes: int = MAX_PUBLIC_BYTES):
         if type(max_steps) is not int or not 1 <= max_steps <= 100_000 or type(max_bytes) is not int or not 1024 <= max_bytes <= MAX_PUBLIC_BYTES:
             raise ValueError("trace limits are out of range")
-        self._initial = _public(initial)
+        self.typed_spec = typed_spec
+        self._initial = _public(initial, typed_spec)
         if self._initial["history"]:
             raise MissingHistoryError("reconstruction requires the initial public frame and every subsequent step")
         self.viewer = self._initial["viewer"]
@@ -147,7 +157,7 @@ class PublicTracker:
         self._append(observation, own_intent=own_intent, commit=False)
 
     def _append(self, observation, *, own_intent, commit):
-        after = _public(observation)
+        after = _public(observation, self.typed_spec)
         if after["viewer"] != self.viewer:
             raise InformationMismatchError("a tracker cannot change its viewer")
         history = after["history"]
@@ -182,7 +192,7 @@ class PublicTracker:
             _apply_patch(body, step.patch)
             events.extend(_copy(step.events))
             frame = {**body, "history": events}
-            _public(frame)
+            _public(frame, self.typed_spec)
             yield step, frame
 
     def _frames_since(self, revision: int):
@@ -191,7 +201,7 @@ class PublicTracker:
         if revision + 1 == self.steps:
             # append already validated this full frame and its history. Check
             # the owned current frame once, without replaying every old patch.
-            yield self._steps[-1], _public({**self._body, "history": self._events})
+            yield self._steps[-1], _public({**self._body, "history": self._events}, self.typed_spec)
             return
         for index, frame in enumerate(self.frames()):
             if index >= revision:
@@ -202,10 +212,10 @@ class PublicTracker:
                       "steps": [{"patch": step.patch, "events": step.events, "ownIntent": step.own_intent} for step in self._steps]})
 
     @classmethod
-    def from_snapshot(cls, trace: Mapping[str, Any]):
+    def from_snapshot(cls, trace: Mapping[str, Any], *, typed_spec=None):
         if not isinstance(trace, Mapping) or set(trace) != {"protocolVersion", "viewer", "initial", "steps"} or trace["protocolVersion"] != TRACE_VERSION or not isinstance(trace["steps"], list):
             raise InformationMismatchError("invalid public trace envelope")
-        tracker = cls(trace["initial"])
+        tracker = cls(trace["initial"], typed_spec=typed_spec)
         if trace["viewer"] != tracker.viewer:
             raise InformationMismatchError("public trace viewer mismatch")
         frame = tracker.latest
@@ -268,13 +278,14 @@ class TransitionProposal:
 
 class NativeSourceFactory:
     """Narrow source-rule constructor/conditioning calls; no Python rules."""
-    def __init__(self, public_config: Mapping[str, Any]):
+    def __init__(self, public_config: Mapping[str, Any], *, typed_spec=None):
         if not isinstance(public_config, Mapping):
             raise TypeError("source factory accepts only public game configuration")
         PublicEncoder._reject_private(public_config)
         if set(public_config) - {"gameStyle", "draftDelete", "ruleCardIds", "starWinLimit", "deathmatchEnabled", "deathmatchLimitTurns"}:
             raise ValueError("source factory configuration contains fields outside the public GameConfig contract")
         self._config = _copy(public_config)
+        self.typed_spec = typed_spec
         from ._native import Action, Position
         self._action_type = Action
         self._position_type = Position
@@ -285,7 +296,7 @@ class NativeSourceFactory:
             raise SourceCapabilityError("native source-conditioned initial factory is unavailable")
         from ._native import ConditioningMismatchError
         try:
-            return constructor(self._config, _public(public_initial), independent_seed)
+            return constructor(self._config, _public(public_initial, self.typed_spec), independent_seed)
         except ConditioningMismatchError:
             return None
 
@@ -310,7 +321,7 @@ class NativeSourceFactory:
             "source-weighted-conditional-step-v1")
 
     def prepare_transition(self, position, expected, independent_seed):
-        before = _public(position.observe(expected["viewer"]))
+        before = _public(position.observe(expected["viewer"]), self.typed_spec)
         public = before["publicState"]
         if (public.get("mode") != "draft" or public.get("phase") != "OPENING"
                 or _actor(position) == expected["viewer"] or "draft" in public
@@ -327,7 +338,7 @@ class NativeSourceFactory:
         if not isinstance(proposal, Mapping) or set(proposal) != {"position", "importance_weight", "source_probability", "proposal_probability"}:
             raise InformationMismatchError("native source proposal metadata has an invalid shape")
         result = TransitionProposal(**proposal, profile="source-weighted-offer-proposal-v1")
-        if _public(result.position.observe(expected["viewer"])) != before:
+        if _public(result.position.observe(expected["viewer"]), self.typed_spec) != before:
             raise InformationMismatchError("latent conditioning changed the prior public observation")
         return result
 
@@ -398,13 +409,16 @@ class BeliefLimits:
     proposals: int = 512
     page_size: int = 64
     actions_per_transition: int = 4096
-    elapsed_ms: int = 5000
+    # None keeps proposal/action work finite while an external runner watches wall time.
+    elapsed_ms: int | None = 5000
 
     def __post_init__(self):
-        for name, maximum in (("particles", 1024), ("proposals", 100_000), ("page_size", 4096), ("actions_per_transition", 65_536), ("elapsed_ms", 3_600_000)):
+        for name, maximum in (("particles", 1024), ("proposals", 100_000), ("page_size", 4096), ("actions_per_transition", 65_536)):
             value = getattr(self, name)
             if type(value) is not int or not 1 <= value <= maximum:
                 raise ValueError(f"belief {name} is outside its finite limit")
+        if self.elapsed_ms is not None and (type(self.elapsed_ms) is not int or not 1 <= self.elapsed_ms <= 3_600_000):
+            raise ValueError("belief elapsed_ms is outside its finite limit")
         if self.proposals < self.particles:
             raise ValueError("belief proposal budget must cover its requested particles")
 
@@ -418,13 +432,20 @@ class ParticleBelief:
     Log weights are normalized before bootstrap resampling. The opponent prior
     is explicit and uniform; the chance prior uses independent source draws.
     """
-    def __init__(self, tracker: PublicTracker, factory: SourceParticleFactory, *, seed: int, limits: BeliefLimits = BeliefLimits(), cancelled: Callable[[], bool] | None = None):
+    def __init__(self, tracker: PublicTracker, factory: SourceParticleFactory, *, seed: int, limits: BeliefLimits = BeliefLimits(), cancelled: Callable[[], bool] | None = None, clock: Callable[[], float] | None = None):
         if not isinstance(tracker, PublicTracker) or type(seed) is not int or not 0 <= seed < 2**64:
             raise TypeError("belief requires a public tracker and independent uint64 belief seed")
+        if clock is not None and not callable(clock):
+            raise TypeError("belief clock must be callable")
+        if (isinstance(factory, NativeSourceFactory)
+                and getattr(getattr(factory, "typed_spec", None), "digest", None)
+                != getattr(getattr(tracker, "typed_spec", None), "digest", None)):
+            raise ValueError("native source factory and public tracker use different typed contracts")
         self.tracker, self.factory, self.limits = tracker, factory, limits
         self.seed = seed
         self._rng = np.random.default_rng(seed)
         self._cancelled = cancelled or (lambda: False)
+        self._clock = clock if clock is not None else time.monotonic
         self._particles: list[Any] = []
         self._revision = -1
         self.proposals_used = 0
@@ -432,16 +453,19 @@ class ParticleBelief:
         self._effective_sample_size = 0.
         self.rebuild()
 
-    def _check(self, started: float):
+    def _public(self, observation):
+        return _public(observation, self.tracker.typed_spec)
+
+    def _check(self, started: float | None):
         if self._cancelled():
             raise SearchBudgetError("belief reconstruction cancelled")
-        if (time.monotonic() - started) * 1000 >= self.limits.elapsed_ms:
+        if started is not None and (self._clock() - started) * 1000 >= self.limits.elapsed_ms:
             raise SearchBudgetError("belief reconstruction time budget exhausted")
 
     def _seed(self) -> int:
         return int(self._rng.integers(0, 2**32, dtype=np.uint64))
 
-    def _advance(self, position: Any, step: TraceStep, expected: Mapping[str, Any], started: float):
+    def _advance(self, position: Any, step: TraceStep, expected: Mapping[str, Any], started: float | None):
         if _actor(position) != step.events[0]["actor"]:
             return None
         prepare = getattr(self.factory, "prepare_transition", None)
@@ -450,7 +474,7 @@ class ParticleBelief:
             return None
         if not isinstance(proposal, TransitionProposal):
             raise InformationMismatchError("source transition proposal must carry validated density metadata")
-        if proposal.source_probability is not None and _public(proposal.position.observe(self.tracker.viewer)) != _public(position.observe(self.tracker.viewer)):
+        if proposal.source_probability is not None and self._public(proposal.position.observe(self.tracker.viewer)) != self._public(position.observe(self.tracker.viewer)):
             raise InformationMismatchError("latent proposal changed the prior public observation")
         self._proposal_profiles.add(proposal.profile)
         position = proposal.position
@@ -470,7 +494,7 @@ class ParticleBelief:
             if not isinstance(child, TransitionProposal):
                 raise InformationMismatchError("conditioned source transition must carry validated density metadata")
             self._proposal_profiles.add(child.profile)
-            if _public(child.position.observe(self.tracker.viewer)) != expected:
+            if self._public(child.position.observe(self.tracker.viewer)) != expected:
                 return None
             return child.position, math.log(child.importance_weight)
 
@@ -533,7 +557,7 @@ class ParticleBelief:
         return particles, float(1. / np.square(weights).sum())
 
     def rebuild(self) -> None:
-        started = time.monotonic()
+        started = self._clock() if self.limits.elapsed_ms is not None else None
         initial = self.tracker.initial
         weighted: list[tuple[Any, float]] = []
         proposals = 0
@@ -543,7 +567,7 @@ class ParticleBelief:
             position = self.factory.sample_initial(initial, self._seed())
             if position is None:
                 continue
-            if _public(position.observe(self.tracker.viewer)) != initial:
+            if self._public(position.observe(self.tracker.viewer)) != initial:
                 raise InformationMismatchError("source-conditioned initial particle does not match the full public frame")
             log_weight = 0.
             for step, frame in self.tracker.frames():
@@ -567,7 +591,7 @@ class ParticleBelief:
             return
         if self._revision > self.tracker.steps:
             raise InformationMismatchError("public tracker revision went backwards")
-        started = time.monotonic()
+        started = self._clock() if self.limits.elapsed_ms is not None else None
         surviving = self._particles
         for step, frame in self.tracker._frames_since(self._revision):
             weighted = [child for position in surviving if (child := self._advance(position, step, frame, started)) is not None]
@@ -601,21 +625,25 @@ class SearchLimits:
     max_depth: int = 32
     max_nodes: int = 4096
     max_edges: int = 65_536
-    elapsed_ms: int = 1000
+    # Iterations, depth, nodes and examined actions still bound a clockless run.
+    elapsed_ms: int | None = 1000
     page_size: int = 64
     max_candidates: int = 256
     max_examined_actions: int = 4096
     leaf_batch_size: int = 4
     max_inference_elements: int = MAX_INFERENCE_ELEMENTS
+    max_inference_bytes: int = 64 * 1024 * 1024
     widening_constant: float = 4.
     widening_exponent: float = .5
     cpuct: float = 1.5
 
     def __post_init__(self):
-        for name, maximum in (("iterations", 1_000_000), ("max_depth", 256), ("max_nodes", 1_000_000), ("max_edges", 1_000_000), ("elapsed_ms", 3_600_000), ("page_size", 4096), ("max_candidates", 4096), ("max_examined_actions", 65_536), ("leaf_batch_size", 64), ("max_inference_elements", MAX_INFERENCE_ELEMENTS)):
+        for name, maximum in (("iterations", 1_000_000), ("max_depth", 256), ("max_nodes", 1_000_000), ("max_edges", 1_000_000), ("page_size", 4096), ("max_candidates", 4096), ("max_examined_actions", 65_536), ("leaf_batch_size", 64), ("max_inference_elements", MAX_INFERENCE_ELEMENTS), ("max_inference_bytes", 64 * 1024 * 1024)):
             value = getattr(self, name)
             if type(value) is not int or not 1 <= value <= maximum:
                 raise ValueError(f"search {name} is outside its finite limit")
+        if self.elapsed_ms is not None and (type(self.elapsed_ms) is not int or not 1 <= self.elapsed_ms <= 3_600_000):
+            raise ValueError("search elapsed_ms is outside its finite limit")
         if self.max_candidates > self.max_examined_actions or not math.isfinite(self.cpuct) or not 0 < self.cpuct <= 100 or not math.isfinite(self.widening_constant) or not 0 < self.widening_constant <= 4096 or not 0 < self.widening_exponent <= 1:
             raise ValueError("invalid progressive widening/PUCT contract")
 
@@ -714,14 +742,20 @@ def _allowed(intent: Mapping[str, Any], observation: Mapping[str, Any]) -> bool:
 
 class InformationSetSearch:
     """Availability-count PUCT, sampled chance, and finite progressive widening."""
-    def __init__(self, encoder: PublicEncoder, evaluator: ProductionEvaluator, *, limits: SearchLimits = SearchLimits()):
+    def __init__(self, encoder: PublicEncoder, evaluator: ProductionEvaluator, *, limits: SearchLimits = SearchLimits(), clock: Callable[[], float] | None = None):
         if not isinstance(evaluator, ProductionEvaluator):
             raise TypeError("production search requires the explicit native Rust ProductionEvaluator")
+        if clock is not None and not callable(clock):
+            raise TypeError("search clock must be callable")
         if encoder.spec.digest != evaluator.spec.digest:
             raise ValueError("search encoder and native evaluator contracts differ")
         if encoder.spec.action_encoding != "public-decision-intent-v1":
             raise ValueError("production search requires an explicit public-decision-intent-v1 model contract")
         self.encoder, self.evaluator, self.limits = encoder, evaluator, limits
+        self._clock = clock if clock is not None else time.monotonic
+
+    def _verify_public(self, observation):
+        return _public(observation)
 
     def _evaluate_many(self, requests, state):
         # Check before encoding/stacking. Padding is explicit and rows retain
@@ -771,7 +805,7 @@ class InformationSetSearch:
         """
         viewer, root_key = root["viewer"], root["informationStateKey"]
         position = belief.draw()
-        if _actor(position) != viewer or _public(position.observe(viewer)) != root:
+        if _actor(position) != viewer or self._verify_public(position.observe(viewer)) != root:
             raise InformationMismatchError("root belief viewer must equal the actual decision actor and match the public frame")
         path: list[tuple[_Node, _Edge]] = []
         try:
@@ -781,7 +815,7 @@ class InformationSetSearch:
                 value, value_actor = self._outcome(position, actor), actor
                 if value is not None:
                     break
-                observation = _public(position.observe(actor))
+                observation = self._verify_public(position.observe(actor))
                 if observation["viewer"] != actor:
                     raise InformationMismatchError("neural observation viewer must be the decision actor")
                 key = observation["informationStateKey"]
@@ -854,7 +888,7 @@ class InformationSetSearch:
                 value_actor = _actor(position)
                 value = self._outcome(position, value_actor)
                 if value is None:
-                    _, value = yield _public(position.observe(value_actor)), [], belief.summary
+                    _, value = yield self._verify_public(position.observe(value_actor)), [], belief.summary
             check()
             for node, edge in reversed(path):
                 edge.visits += 1
@@ -871,14 +905,14 @@ class InformationSetSearch:
         root = belief.tracker.latest
         root_key = root["informationStateKey"]
         state = _SearchState()
-        started = time.monotonic()
+        started = self._clock() if self.limits.elapsed_ms is not None else None
         cancelled = cancelled or (lambda: False)
 
         def check():
             if cancelled():
                 state.stop, state.partial = "cancelled", True
                 raise _SimulationStopped()
-            if (time.monotonic() - started) * 1000 >= self.limits.elapsed_ms:
+            if started is not None and (self._clock() - started) * 1000 >= self.limits.elapsed_ms:
                 state.stop, state.partial = "elapsed", True
                 raise _SimulationStopped()
 
@@ -922,3 +956,69 @@ class InformationSetSearch:
                             belief_summary=_copy(belief.summary),
                             model_sha256=getattr(getattr(self.evaluator, "session", None), "model_sha256", None),
                             inference_batches=state.inference_batches, max_inference_batch=state.max_inference_batch)
+
+
+class TypedInformationSetSearch(InformationSetSearch):
+    """The same information-set tree with the explicit typed v3 model input."""
+
+    def __init__(self, encoder, evaluator: ProductionEvaluator, *, limits: SearchLimits = SearchLimits(), clock: Callable[[], float] | None = None):
+        from .ir import TypedEncoder
+
+        if not isinstance(encoder, TypedEncoder) or not isinstance(evaluator, ProductionEvaluator):
+            raise TypeError("typed search requires a TypedEncoder and native ProductionEvaluator")
+        if encoder.spec.digest != evaluator.spec.digest:
+            raise ValueError("typed search encoder and native evaluator contracts differ")
+        if evaluator.architecture_family not in ("mask-resnet", "entity-transformer"):
+            raise ValueError("typed search requires a validated v3 architecture family")
+        if clock is not None and not callable(clock):
+            raise TypeError("search clock must be callable")
+        self.encoder, self.evaluator, self.limits = encoder, evaluator, limits
+        self._clock = clock if clock is not None else time.monotonic
+
+    def _verify_public(self, observation):
+        return _public(observation, self.encoder.spec)
+
+    def run(self, belief: ParticleBelief, *, cancelled: Callable[[], bool] | None = None) -> SearchResult:
+        if (not isinstance(belief, ParticleBelief)
+                or getattr(belief.tracker.typed_spec, "digest", None) != self.encoder.spec.digest):
+            raise ValueError("typed search needs a source-bound public tracker with the same encoder contract")
+        return super().run(belief, cancelled=cancelled)
+
+    def _evaluate_many(self, requests, state):
+        from .ir import ObservationIR, batch_typed_positions
+
+        positions = [self.encoder.encode(ObservationIR.from_public(observation, self.encoder.spec,
+                        belief_summary=summary), intents)
+                     for observation, intents, summary in requests]
+        batch = batch_typed_positions(positions)
+        family = self.evaluator.architecture_family
+        order = self.encoder.spec.feature_schema["input_order"][family]
+        inputs = dict(zip(order, batch.as_family_inputs(family), strict=True))
+        if not all(isinstance(array, np.ndarray) for array in inputs.values()):
+            raise InformationMismatchError("typed encoder returned a non-array model input")
+        if sum(array.nbytes for array in inputs.values()) > min(self.limits.max_inference_bytes,
+                                                                 self.encoder.spec.max_input_bytes):
+            raise SearchBudgetError("requested typed leaf batch exceeds the declared inference input budget")
+        logits, values = self.evaluator.evaluate_typed(inputs)
+        count = len(requests)
+        candidates = batch.candidate_mask
+        if (candidates.dtype != np.bool_ or candidates.shape[0] != count
+                or logits.shape != candidates.shape or values.shape != (count, 1)
+                or not np.isfinite(logits).all() or not np.isfinite(values).all()
+                or np.abs(values).max() > 1.00001):
+            raise InformationMismatchError("native typed evaluator returned invalid policy/value")
+        expected = np.arange(candidates.shape[1])[None, :] < np.asarray([len(intents) for _, intents, _ in requests])[:, None]
+        if not np.array_equal(candidates, expected):
+            raise InformationMismatchError("typed candidate mask does not match public intents")
+        state.inference_batches += 1
+        state.max_inference_batch = max(state.max_inference_batch, count)
+        results = []
+        for row, (_, intents, _) in enumerate(requests):
+            if not intents:
+                results.append((np.empty(0), float(values[row, 0])))
+                continue
+            scores = logits[row, candidates[row]].astype(np.float64)
+            probabilities = np.exp(scores - scores.max())
+            probabilities /= probabilities.sum()
+            results.append((probabilities, float(values[row, 0])))
+        return results

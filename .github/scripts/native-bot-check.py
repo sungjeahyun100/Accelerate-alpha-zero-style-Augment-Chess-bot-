@@ -52,6 +52,37 @@ def sha(path):
         return hashlib.file_digest(file, "sha256").hexdigest()
 
 
+def rust_scope():
+    """Confirm the workspace run still contains the new core contract tests."""
+    _, _, _, reports, _ = locations()
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    result = subprocess.run(
+        ["cargo", "test", "-p", "accelerate-engine", "--locked", "--", "--list"],
+        cwd=REPOSITORY, env=environment, capture_output=True, text=True,
+        check=True, timeout=180,
+    )
+    required = (
+        "geometry_maps_rectangles_and_signed_extents_without_relabeling_coordinates",
+        "synthetic_resize_requires_new_cells_and_an_explicit_clipping_policy",
+        "child_search_uses_parent_square_but_preserves_original_origin_and_board",
+        "shift_checks_third_party_collision_mutual_overlap_and_stops_on_first_piece",
+        "explicit_stack_matches_independent_recursive_oracle_for_singletons",
+    )
+    listed = {line.removesuffix(": test").rsplit("::", 1)[-1]
+              for line in result.stdout.splitlines() if line.endswith(": test")}
+    missing = [name for name in required if name not in listed]
+    if missing:
+        raise RuntimeError(f"Rust workspace omitted required geometry or MoveProgram tests: {missing}")
+    reports.mkdir(parents=True, exist_ok=True)
+    (reports / "rust-test-list.txt").write_text(result.stdout, encoding="utf-8")
+    (reports / "rust-scope.json").write_text(json.dumps({
+        "crate": "accelerate-engine", "required_tests": list(required),
+        "listed": True, "execution": "cargo test --workspace --locked in the preceding CI step",
+        "scope": "geometry and MoveProgram code contracts; full v7 rules parity remains pending",
+    }, indent=2) + "\n", encoding="utf-8")
+
+
 def configure():
     root, system, build, reports, _ = locations()
     reports.mkdir(parents=True, exist_ok=True)
@@ -108,9 +139,13 @@ def unpack(archive, destination):
         source.extractall(destination, members=members, filter="data")
     project = destination / roots.pop()
     required = ["Cargo.toml", "Cargo.lock", "pyproject.toml", "NOTICE.md", "rust-engine/src/lib.rs",
-                "bridge/native/src/lib.rs", "bridge/runtime/src/lib.rs"]
-    required += [f"bridge/catalog/{name}-20260927.json" for name in
-                 ("site", "observation", "initial-state", "draft", "card-definitions")]
+                "bridge/native/src/lib.rs", "bridge/runtime/src/lib.rs",
+                "python/accelerate_chess/ir.py",
+                "python/accelerate_chess/network/typed_context.py",
+                "python/accelerate_chess/network/mask_resnet.py",
+                "python/accelerate_chess/network/entity_transformer.py"]
+    required += [f"bridge/catalog/{name}-{date}.json" for date in ("20260927", "20260928")
+                 for name in ("site", "observation", "initial-state", "draft", "card-definitions")]
     for relative in required:
         if not (project / relative).is_file():
             raise RuntimeError(f"source distribution missing {relative}")
@@ -149,14 +184,23 @@ from pathlib import Path
 import jcs
 from accelerate_chess import Position, ActionStream, InferenceSession, site_observation_policy
 from accelerate_chess.encoding import EncoderSpec
+from accelerate_chess.ir import TypedEncoderSpec
 import accelerate_chess as package
 import accelerate_chess.encoding as encoding
+import accelerate_chess.ir as typed_ir
+import accelerate_chess.network.entity_transformer as entity_transformer
+import accelerate_chess.network.mask_resnet as mask_resnet
+import accelerate_chess.network.typed_context as typed_context
 import accelerate_chess._native as native
 checkout, policy_source, wheel, report = map(Path, sys.argv[1:])
 native_path = Path(native.__file__).resolve()
 module_paths = {'native_module': native_path,
     'python_package': Path(package.__file__).resolve(),
-    'encoder_module': Path(encoding.__file__).resolve()}
+    'encoder_module': Path(encoding.__file__).resolve(),
+    'typed_ir_module': Path(typed_ir.__file__).resolve(),
+    'entity_model_module': Path(entity_transformer.__file__).resolve(),
+    'resnet_model_module': Path(mask_resnet.__file__).resolve(),
+    'typed_context_module': Path(typed_context.__file__).resolve()}
 for path in module_paths.values():
     if path.is_relative_to(checkout.resolve()) or not path.is_relative_to(Path(sys.prefix).resolve()):
         raise RuntimeError('packaging smoke must import native and Python code from the installed wheel')
@@ -208,6 +252,17 @@ if spec.observation_policy_hash != policy_hash or spec.contract()['observation_p
 restored = EncoderSpec.from_dict(spec.to_dict(), observation_policy=source_policy)
 if restored.contract() != spec.contract():
     raise RuntimeError('installed encoder policy contract does not roundtrip')
+latest_catalog_source = json.loads((policy_source.parent / 'site-20260928.json').read_text(encoding='utf-8'))
+latest_policy_source = json.loads((policy_source.parent / 'observation-20260928.json').read_text(encoding='utf-8'))
+latest_version = latest_catalog_source['rulesVersion']
+latest_catalog = native.site_catalog(latest_version)
+latest_policy = native.site_observation_policy(latest_version)
+if (jcs.canonicalize(latest_catalog) != jcs.canonicalize(latest_catalog_source)
+        or jcs.canonicalize(latest_policy) != jcs.canonicalize(latest_policy_source)):
+    raise RuntimeError('installed v7 catalog or observation policy differs from the source distribution')
+typed_spec = TypedEncoderSpec.from_catalog(latest_catalog, observation_policy=latest_policy)
+if typed_spec.catalog_hash != hashlib.sha256(jcs.canonicalize(latest_catalog)).hexdigest():
+    raise RuntimeError('installed typed encoder catalog hash differs from v7 catalog')
 policy.clear()
 if jcs.canonicalize(site_observation_policy()) != policy_bytes:
     raise RuntimeError('observation policy must return an independently owned value')
@@ -225,6 +280,9 @@ report.write_text(json.dumps({
     'owned_copy': True,
     'encoder_spec_hash': spec.digest,
     'encoder_contract_roundtrip': True,
+    'v7_catalog_sha256': hashlib.sha256(jcs.canonicalize(latest_catalog)).hexdigest(),
+    'v7_observation_policy_sha256': hashlib.sha256(jcs.canonicalize(latest_policy)).hexdigest(),
+    'typed_encoder_hash': typed_spec.digest,
 }, indent=2) + '\\n', encoding='utf-8')
 print('installed native:', native_path)
 """, REPOSITORY, project / "bridge/catalog/observation-20260927.json",
@@ -243,6 +301,7 @@ def tests():
     reports.mkdir(parents=True, exist_ok=True)
     report = reports / "pytest.xml"
     run(python, "-m", "pytest", "python/tests/test_native.py", "python/tests/test_model_stack.py",
+        "python/tests/test_ir.py", "python/tests/test_entity_transformer.py",
         "python/tests/test_inference_runtime.py", "python/tests/test_search.py", "python/tests/test_session.py",
         "-p", "no:cacheprovider",
         "--junitxml", report, "-ra")
@@ -250,7 +309,8 @@ def tests():
     if not suites or any(int(suite.get("skipped", "0")) for suite in suites):
         raise RuntimeError("native bot CI requires real tests with no skips")
     cases = [case for suite in suites for case in suite.findall("testcase")]
-    for module, minimum in (("test_native", 6), ("test_model_stack", 7), ("test_inference_runtime", 6),
+    for module, minimum in (("test_native", 6), ("test_model_stack", 7), ("test_ir", 7),
+                            ("test_entity_transformer", 7), ("test_inference_runtime", 6),
                             ("test_search", 11), ("test_session", 4)):
         if sum(case.get("classname", "").endswith(module) for case in cases) < minimum:
             raise RuntimeError(f"missing required checks for {module}")
@@ -262,9 +322,22 @@ def tests():
     for mode, required in default_checks.items():
         if not any(case.get("name") == required for case in cases):
             raise RuntimeError(f"missing actual default {mode} conditioning completion check")
+    typed_checks = {
+        "source_bound_ir": "test_source_bound_spec_and_public_v2_geometry_cells",
+        "variable_geometry": "test_synthetic_geometry_padding_and_candidate_split",
+        "candidate_independence": "test_candidate_permutation_split_and_padding_preserve_state_value",
+        "mask_resnet": "test_mask_resnet_padding_and_candidate_partition_invariance",
+        "typed_manifest": "test_typed_v3_transformer_export_and_manifest_contract",
+        "entity_ort_tract": "test_typed_v3_native_backend_parity_and_input_boundary[entity-transformer]",
+        "resnet_ort_tract": "test_typed_v3_native_backend_parity_and_input_boundary[mask-resnet]",
+    }
+    for boundary, required in typed_checks.items():
+        if not any(case.get("name") == required for case in cases):
+            raise RuntimeError(f"missing installed typed {boundary} check")
     (reports / "test-scope.json").write_text(json.dumps({
-        "implementation": "installed wheel; native/model/ort/tract/search/replay/CLI",
+        "implementation": "installed wheel; native/typed IR/two model families/ort/tract/search/replay/CLI",
         "skips": 0, "default_weighted_conditioning_modes": list(default_checks),
+        "typed_contract_checks": list(typed_checks),
         "scope": "code and bounded synthetic checks; full rules/catalog coverage is a separate pending gate",
         "actual_learning_campaign": False,
     }, indent=2) + "\n", encoding="utf-8")
@@ -422,7 +495,7 @@ def current_client():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=("configure", "build", "tests", "frozen", "current-client"))
+    parser.add_argument("phase", choices=("configure", "rust-scope", "build", "tests", "frozen", "current-client"))
     phase = parser.parse_args().phase
-    {"configure": configure, "build": build, "tests": tests, "frozen": frozen,
+    {"configure": configure, "rust-scope": rust_scope, "build": build, "tests": tests, "frozen": frozen,
      "current-client": current_client}[phase]()

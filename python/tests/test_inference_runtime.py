@@ -13,8 +13,12 @@ import torch
 
 from accelerate_chess import InferenceSession, ProductionEvaluator
 from accelerate_chess.encoding import EncoderSpec
-from accelerate_chess.network.artifacts import export_onnx, load_manifest
+from accelerate_chess.network.artifacts import export_onnx, export_typed_onnx, load_manifest
 from accelerate_chess.network.model import ModelConfig, PolicyValueNetwork, tensor_state_hash
+from accelerate_chess.ir import TypedEncoderSpec
+from accelerate_chess.network.typed_context import TypedContextConfig
+from accelerate_chess.network.entity_transformer import EntityTransformer, EntityTransformerConfig
+from accelerate_chess.network.mask_resnet import MaskResNetConfig, MaskResNetPolicyValueNetwork
 
 torch.set_num_threads(1)
 
@@ -47,6 +51,137 @@ def _arrays(spec, batch, actions):
     return (generator.normal(size=(batch, spec.board_channels, 8, 8)).astype(np.float32),
             generator.normal(size=(batch, spec.condition_dim)).astype(np.float32),
             generator.normal(size=(batch, actions, spec.action_dim)).astype(np.float32))
+
+
+def _typed_spec():
+    root = Path(__file__).resolve().parents[2] / "bridge" / "catalog"
+    catalog = json.loads((root / "site-20260928.json").read_text(encoding="utf-8"))
+    policy = json.loads((root / "observation-20260928.json").read_text(encoding="utf-8"))
+    return TypedEncoderSpec.from_catalog(catalog, observation_policy=policy)
+
+
+def _typed_arrays(spec, family, *, batch=2, records=3, relations=2, actions=2, nodes=3, height=5, width=7):
+    extents = {"batch": batch, "records": records, "relations": relations,
+               "actions": actions, "nodes": nodes, "height": height, "width": width}
+    order = spec.feature_schema["input_order"][family]
+    result = {}
+    for name in order:
+        metadata = spec.feature_schema["inputs"][name]
+        shape = tuple(extents.get(axis, axis) for axis in metadata["shape"])
+        dtype = {"float32": np.float32, "int64": np.int64, "bool": np.bool_}[metadata["dtype"]]
+        result[name] = np.zeros(shape, dtype=dtype)
+    result["record_mask"][:] = True
+    result["candidate_mask"][:] = True
+    result["candidate_node_mask"][:, :, 0] = True
+    result["candidate_parent"][:] = -1
+    result["candidate_target_index"][:] = -1
+    if family == "mask-resnet":
+        result["layout_mask"][:] = True
+    return result
+
+
+def test_typed_v3_transformer_export_and_manifest_contract():
+    import onnxruntime
+
+    spec = _typed_spec()
+    vocabulary = len(spec.category_vocabulary)
+    context = TypedContextConfig((vocabulary,) * 4, (vocabulary,) * 2, (vocabulary,) * 4,
+                                 hidden_dim=16)
+    model = EntityTransformer(EntityTransformerConfig(context, blocks=1, heads=4, ffn_dim=32,
+                                                       lora_rank=2, lora_alpha=2.)).eval()
+    arrays = _typed_arrays(spec, "entity-transformer")
+    reference = model.evaluate(*(torch.from_numpy(value) for value in arrays.values()))
+    manifest_path = export_typed_onnx(model, spec, _root() / "typed-transformer", arrays,
+                                      architecture_family="entity-transformer")
+    manifest = load_manifest(manifest_path, spec)
+    assert manifest["version"] == "onnx-policy-value-v3"
+    assert manifest["model_io_version"] == "typed-policy-value-v1"
+    assert {item["dtype"] for item in manifest["onnx"]["inputs"]} == {"float32", "int64", "bool"}
+    session = onnxruntime.InferenceSession(str(manifest_path.with_name("model.onnx")),
+                                           providers=["CPUExecutionProvider"])
+    result = session.run(["policy_logits", "value"], arrays)
+    for actual, expected in zip(result, reference, strict=True):
+        np.testing.assert_allclose(actual, expected.detach().numpy(), atol=1e-5, rtol=1e-4)
+    changed = deepcopy(manifest)
+    changed["onnx"]["inputs"][0]["dtype"] = "float32"
+    invalid = _root() / "typed-transformer-invalid"
+    invalid.mkdir(parents=True, exist_ok=True)
+    (invalid / "model.onnx").write_bytes(manifest_path.with_name("model.onnx").read_bytes())
+    (invalid / "manifest.json").write_text(json.dumps(changed), encoding="utf-8")
+    with pytest.raises(ValueError, match="contract"):
+        load_manifest(invalid / "manifest.json", spec)
+
+
+@pytest.mark.parametrize("family", ("entity-transformer", "mask-resnet"))
+def test_typed_v3_native_backend_parity_and_input_boundary(family):
+    spec = _typed_spec()
+    vocabulary = len(spec.category_vocabulary)
+    context = TypedContextConfig((vocabulary,) * 4, (vocabulary,) * 2, (vocabulary,) * 4,
+                                 hidden_dim=16)
+    if family == "entity-transformer":
+        model = EntityTransformer(EntityTransformerConfig(context, blocks=1, heads=4, ffn_dim=32,
+                                                           lora_rank=2, lora_alpha=2.)).eval()
+    else:
+        model = MaskResNetPolicyValueNetwork(MaskResNetConfig(6, context, channels=8,
+                                                               residual_blocks=1, lora_rank=2,
+                                                               lora_alpha=2.)).eval()
+    arrays = _typed_arrays(spec, family)
+    with torch.no_grad():
+        reference = model.evaluate(*(torch.from_numpy(value) for value in arrays.values()))
+    manifest_path = export_typed_onnx(model, spec, _root() / f"typed-native-{family}", arrays,
+                                      architecture_family=family)
+    for backend in ("ort", "tract"):
+        evaluator = ProductionEvaluator(manifest_path, spec, backend)
+        assert evaluator.architecture_family == family
+        assert evaluator.spec.digest == spec.digest
+        observed = evaluator.evaluate_typed(arrays)
+        assert tuple(value.shape for value in observed) == ((2, 2), (2, 1))
+        for actual, expected in zip(observed, reference, strict=True):
+            np.testing.assert_allclose(actual, expected.detach().numpy(), atol=1e-5, rtol=1e-4)
+        strided = {name: np.asfortranarray(value) for name, value in arrays.items()}
+        for actual, expected in zip(evaluator.evaluate_typed(strided), observed, strict=True):
+            np.testing.assert_array_equal(actual, expected)
+        invalid = {name: value.copy() for name, value in arrays.items()}
+        invalid["record_category"][0, 0, 0] = vocabulary
+        with pytest.raises(ValueError, match="vocabulary"):
+            evaluator.evaluate_typed(invalid)
+        invalid = {name: value.copy() for name, value in arrays.items()}
+        invalid["candidate_node_mask"][0, 0, 1] = True
+        invalid["candidate_parent"][0, 0, 1] = 2
+        with pytest.raises(ValueError, match="parent"):
+            evaluator.evaluate_typed(invalid)
+        invalid = dict(arrays)
+        invalid["record_category"] = invalid["record_category"].astype(np.float32)
+        with pytest.raises((TypeError, ValueError)):
+            evaluator.evaluate_typed(invalid)
+        invalid = dict(arrays)
+        invalid["candidate_numeric"] = invalid["candidate_numeric"][:, :, :1, :]
+        with pytest.raises(ValueError, match="axis"):
+            evaluator.evaluate_typed(invalid)
+
+
+def test_typed_v3_rejects_self_consistent_wrong_feature_schema():
+    spec = _typed_spec()
+    vocabulary = len(spec.category_vocabulary)
+    context = TypedContextConfig((vocabulary,) * 4, (vocabulary,) * 2, (vocabulary,) * 4,
+                                 hidden_dim=16)
+    model = EntityTransformer(EntityTransformerConfig(context, blocks=1, heads=4, ffn_dim=32,
+                                                       lora_rank=2, lora_alpha=2.)).eval()
+    arrays = _typed_arrays(spec, "entity-transformer")
+    manifest_path = export_typed_onnx(model, spec, _root() / "typed-schema-source", arrays,
+                                      architecture_family="entity-transformer")
+    altered = deepcopy(json.loads(manifest_path.read_text(encoding="utf-8")))
+    altered["encoder"]["feature_schema"]["numeric_slots"]["record"][0] = "private_scalar"
+    altered["encoder"]["feature_schema_hash"] = hashlib.sha256(jcs.canonicalize(altered["encoder"]["feature_schema"])).hexdigest()
+    altered["encoder_hash"] = hashlib.sha256(jcs.canonicalize(altered["encoder"])).hexdigest()
+    invalid = _root() / "typed-schema-invalid"
+    invalid.mkdir(parents=True, exist_ok=True)
+    (invalid / "model.onnx").write_bytes(manifest_path.with_name("model.onnx").read_bytes())
+    (invalid / "manifest.json").write_text(json.dumps(altered), encoding="utf-8")
+    with pytest.raises(ValueError, match="feature schema"):
+        load_manifest(invalid / "manifest.json")
+    with pytest.raises(ValueError, match="feature semantics"):
+        InferenceSession(invalid / "manifest.json")
 
 
 def test_v7_explicit_bundle_runs_both_backends_and_rejects_v6_spec():

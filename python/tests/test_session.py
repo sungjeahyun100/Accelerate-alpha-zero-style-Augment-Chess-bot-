@@ -18,7 +18,11 @@ import torch
 
 from accelerate_chess import cli
 from accelerate_chess.encoding import PublicEncoder, batch_positions, canonical_json
-from accelerate_chess.network.artifacts import export_onnx, load_manifest, save_base
+from accelerate_chess.ir import TypedEncoder, TypedEncoderSpec
+from accelerate_chess.network.entity_transformer import EntityTransformer, EntityTransformerConfig
+from accelerate_chess.network.mask_resnet import MaskResNetConfig, MaskResNetPolicyValueNetwork
+from accelerate_chess.network.typed_context import TypedContextConfig
+from accelerate_chess.network.artifacts import export_onnx, load_manifest, load_typed_base, save_base
 from accelerate_chess.network.model import ModelConfig, PolicyValueNetwork, tensor_state_hash
 from accelerate_chess.replay import MAX_REPLAY_BYTES, EpisodeRecorder, ReplayEpisode, atomic_json, read_json, reserve_slot, writer_claim
 from accelerate_chess.search import PublicTracker, SearchResult
@@ -65,6 +69,211 @@ def synthetic_episode(*, terminal=True):
         position = child
     recorder.finish("white" if terminal else None, "synthetic-source-terminal" if terminal else "verification-limit")
     return recorder
+
+
+def synthetic_typed_contract():
+    policy = observation_policy()
+    catalog = {"schemaVersion": 1, "rulesVersion": policy["rulesVersion"],
+               "catalogVersion": "synthetic-typed-v1", "pieceTypes": ["pawn", "wall"],
+               "cards": [{"id": "slime", "draftCategory": "MIDDLE"}], "actionTypes": ["move"]}
+    return TypedEncoderSpec.from_catalog(catalog, observation_policy=policy), catalog, policy
+
+
+def test_typed_replay_requires_source_bound_ir_and_model_io_contract(session_directory, monkeypatch):
+    contract, catalog, policy = synthetic_typed_contract()
+    position = TestPosition()
+    recorder = EpisodeRecorder({viewer: position.observe(viewer) for viewer in ("white", "black")},
+        contract, environment_seed=37, belief_seed=71, evidence_kind="synthetic",
+        architecture_family="mask-resnet")
+    intent = TestAction(0, 0).public_intent()
+    key = canonical_json(intent)
+    decision = SearchResult(intent, key, ({"action_key": key, "intent": intent, "visits": 2,
+        "availability": 2, "probability": 1., "value": .25},), position.observe("white")["informationStateKey"],
+        2, "iterations", True, False, 1, 1, contract.digest)
+    recorder.record_decision("white", decision)
+    child = position.apply(position.bind_public_intent(intent)).position
+    recorder.advance({viewer: child.observe(viewer) for viewer in ("white", "black")},
+                     actor="white", intent=intent)
+    recorder.finish(None, "finite-verification-limit")
+    path = session_directory / "typed-episode.json"
+    recorder.save(path)
+    episode = ReplayEpisode.load(path, contract)
+    assert episode.architecture_family == "mask-resnet"
+    assert episode.outcome == {"status": "unfinished", "winner": None, "reason": "finite-verification-limit"}
+    assert len(episode.decisions) == 1 and episode.decisions[0]["transition_completed"]
+    assert list(episode.examples()) == []
+    with pytest.raises(ValueError, match="no terminal policy/value targets"):
+        ReplayDataset([path], contract)
+    assert (episode.spec.ir_version, episode.spec.descriptor_version, episode.spec.encoder_version) == (
+        "semantic-ir-v1", "move-program-v1", "typed-input-v1")
+    assert episode.spec.digest == recorder.snapshot()["metadata"]["encoder_hash"]
+    assert recorder.snapshot()["metadata"]["adapter_hash"] is None
+    with pytest.raises(ValueError, match="exact source-bound encoder spec"):
+        ReplayEpisode.load(path)
+    changed_catalog = {**catalog, "catalogVersion": "synthetic-typed-v2"}
+    different = TypedEncoderSpec.from_catalog(changed_catalog, observation_policy=policy)
+    with pytest.raises(ValueError, match="exact source-bound encoder spec"):
+        ReplayEpisode.load(path, different)
+    altered = deepcopy(recorder.snapshot())
+    altered["metadata"]["model_io_version"] = "legacy-float32-v2"
+    altered["replay_hash"] = hashlib.sha256(canonical_json({key: value for key, value in altered.items()
+                                                               if key != "replay_hash"}).encode()).hexdigest()
+    with pytest.raises(ValueError, match="model/IR provenance"):
+        ReplayEpisode(altered, contract)
+    altered = deepcopy(recorder.snapshot())
+    altered["metadata"]["adapter_hash"] = "b" * 64
+    altered["replay_hash"] = hashlib.sha256(canonical_json({key: value for key, value in altered.items()
+                                                               if key != "replay_hash"}).encode()).hexdigest()
+    with pytest.raises(ValueError, match="adapter hash and descriptor"):
+        ReplayEpisode(altered, contract)
+    mixed_family = deepcopy(recorder.snapshot())
+    mixed_family["metadata"]["architecture_family"] = "entity-transformer"
+    mixed_family["replay_hash"] = hashlib.sha256(canonical_json({key: value for key, value in mixed_family.items()
+                                                                    if key != "replay_hash"}).encode()).hexdigest()
+    mixed_path = session_directory / "other-family-episode.json"
+    atomic_json(mixed_path, mixed_family)
+    with pytest.raises(ValueError, match="architecture differs"):
+        ReplayDataset([path, mixed_path], contract)
+
+    class TypedEvaluator:
+        def __init__(self, manifest, expected_spec, backend, *, threads):
+            assert expected_spec.digest == contract.digest
+            self.architecture_family = "mask-resnet"
+            self.session = self
+            self.model_sha256 = "a" * 64
+
+        def evaluate_typed(self, inputs):
+            assert tuple(inputs) == tuple(contract.feature_schema["input_order"]["mask-resnet"])
+            return (np.zeros(inputs["candidate_mask"].shape, np.float32),
+                    np.zeros((len(inputs["candidate_mask"]), 1), np.float32))
+
+    monkeypatch.setattr(cli, "ProductionEvaluator", TypedEvaluator)
+    args = cli.parser().parse_args(["--model-family", "mask-resnet", "evaluate",
+        "--manifest", str(session_directory / "unused-v3-manifest.json"), "--replay", str(path),
+        "--run-id", "typed-evaluation"])
+    report = cli.evaluate(args, session_directory, contract, lambda: False)
+    assert report["version"] == "accelerate-evaluation-v2"
+    assert report["architecture_family"] == "mask-resnet"
+    assert report["samples"] == 1 and "value_mse" not in report["metrics"][0]
+    sample = cli._typed_sample_inputs(path, contract, "mask-resnet")
+    assert tuple(sample) == tuple(contract.feature_schema["input_order"]["mask-resnet"])
+    assert sample["candidate_mask"].shape == (1, 1) and bool(sample["candidate_mask"][0, 0])
+    public_sample = session_directory / "typed-public-sample.json"
+    atomic_json(public_sample, {"version": "typed-inference-sample-v1",
+        "architecture_family": "mask-resnet", "encoder_hash": contract.digest,
+        "observation": position.observe("white"), "intents": [intent], "belief_summary": None})
+    bootstrapped = cli._typed_sample_inputs(None, contract, "mask-resnet", sample_public=public_sample)
+    assert all(np.array_equal(bootstrapped[name], sample[name]) for name in sample)
+    mismatched_sample = read_json(public_sample)
+    mismatched_sample["encoder_hash"] = "b" * 64
+    atomic_json(public_sample, mismatched_sample)
+    with pytest.raises(ValueError, match="source/model contract"):
+        cli._typed_sample_inputs(None, contract, "mask-resnet", sample_public=public_sample)
+    with pytest.raises(ValueError, match="family"):
+        cli._typed_sample_inputs(path, contract, "entity-transformer")
+    manifest_path = session_directory / "source-bound-v3.json"
+    manifest_path.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(cli, "load_manifest", lambda manifest, expected: {
+        "version": "onnx-policy-value-v3", "model_sha256": "a" * 64,
+        "architecture_family": "mask-resnet", "model_io_version": "typed-policy-value-v1"})
+    activate_args = cli.parser().parse_args(["--model-family", "mask-resnet", "activate",
+        "--manifest", str(manifest_path), "--sample-replay", str(path), "--expected-sha256", "a" * 64])
+    activation = cli.activate(activate_args, session_directory, contract)
+    assert activation["version"] == "accelerate-activation-v2"
+    assert read_json(activation["activation"])["architecture_family"] == "mask-resnet"
+    active_args = cli.parser().parse_args(["--model-family", "mask-resnet", "choose", "--trace", "unused"])
+    assert cli._manifest(active_args, session_directory, contract) == manifest_path.resolve()
+
+
+@pytest.mark.parametrize("family", ["mask-resnet", "entity-transformer"])
+def test_typed_cli_initializes_source_bound_base_without_deploying(session_directory, family):
+    source = Path(__file__).resolve().parents[2] / "bridge" / "catalog"
+    catalog = read_json(source / "site-20260928.json")
+    policy = read_json(source / "observation-20260928.json")
+    contract = TypedEncoderSpec.from_catalog(catalog, observation_policy=policy)
+    args = cli.parser().parse_args(["--model-family", family, "init", "--slot", family,
+        "--channels", "16", "--blocks", "1", "--rank", "2"])
+    result = cli.initialize(args, session_directory, contract)
+    model, loaded_spec = load_typed_base(result["base"], contract)
+    assert loaded_spec.digest == contract.digest and result["base_hash"] == model.base_hash
+    assert result["architecture_family"] == family and result["manifest"] is None
+    assert not (session_directory / "models" / family / "deployment").exists()
+    with pytest.raises(FileExistsError, match="explicit --overwrite"):
+        cli.initialize(args, session_directory, contract)
+
+
+def test_mask_resnet_cli_warm_start_copies_only_legacy_residual_weights(session_directory):
+    source = Path(__file__).resolve().parents[2] / "bridge" / "catalog"
+    contract = TypedEncoderSpec.from_catalog(read_json(source / "site-20260928.json"),
+        observation_policy=read_json(source / "observation-20260928.json"))
+    legacy_contract = spec()
+    legacy = PolicyValueNetwork(ModelConfig(legacy_contract.board_channels,
+        legacy_contract.condition_dim, legacy_contract.action_dim, channels=8,
+        residual_blocks=1, lora_rank=2, lora_alpha=2.))
+    legacy_path = session_directory / "legacy-base.pt"
+    save_base(legacy, legacy_contract, legacy_path)
+    args = cli.parser().parse_args(["--model-family", "mask-resnet", "init", "--slot", "warm",
+        "--channels", "8", "--blocks", "1", "--rank", "2", "--warm-start-legacy-base", str(legacy_path)])
+    result = cli.initialize(args, session_directory, contract)
+    initialized, _ = load_typed_base(result["base"], contract)
+    assert len(result["warm_start"]["transferred_tensors"]) == 2
+    torch.testing.assert_close(initialized.spatial.blocks[0].conv1.base.weight,
+                               legacy.blocks[0].conv1.base.weight, rtol=0, atol=0)
+    torch.testing.assert_close(initialized.spatial.blocks[0].conv2.base.weight,
+                               legacy.blocks[0].conv2.base.weight, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("family,mode", [("mask-resnet", "base"), ("entity-transformer", "adapter")])
+def test_typed_synthetic_optimizer_checkpoint_resume(session_directory, family, mode):
+    contract, _, _ = synthetic_typed_contract()
+    position = TestPosition(1, reaction=True)
+    recorder = EpisodeRecorder({viewer: position.observe(viewer) for viewer in ("white", "black")},
+        contract, environment_seed=37, belief_seed=71, evidence_kind="synthetic",
+        architecture_family=family)
+    for step in range(2):
+        frame = position.observe("white")
+        intent = TestAction(step, 1).public_intent()
+        key = canonical_json(intent)
+        recorder.record_decision("white", SearchResult(intent, key, ({"action_key": key, "intent": intent,
+            "visits": 2, "availability": 2, "probability": 1., "value": .25},),
+            frame["informationStateKey"], 2, "iterations", True, False, 1, 1, contract.digest))
+        if step == 1:
+            position.chance = True
+        child = position.apply(position.bind_public_intent(intent)).position
+        recorder.advance({viewer: child.observe(viewer) for viewer in ("white", "black")},
+                         actor="white", intent=intent)
+        position = child
+    recorder.finish("white", "synthetic-source-terminal")
+    path = session_directory / f"{family}-episode.json"
+    recorder.save(path)
+    dataset = ReplayDataset([path], contract)
+    assert len(dataset) == 2 and dataset[0].value == 1.
+    context = TypedContextConfig((len(contract.category_vocabulary),) * 4,
+                                 (len(contract.category_vocabulary),) * 2,
+                                 (len(contract.category_vocabulary),) * 4, hidden_dim=16)
+    if family == "mask-resnet":
+        model = MaskResNetPolicyValueNetwork(MaskResNetConfig(6, context, channels=8,
+            residual_blocks=1, lora_rank=2, lora_alpha=2.))
+    else:
+        model = EntityTransformer(EntityTransformerConfig(context, blocks=1, heads=2,
+            ffn_dim=32, lora_rank=2, lora_alpha=2.))
+    prior = deepcopy(model)
+    optimizer = create_optimizer(model, mode=mode)
+    cursor = DatasetCursor(dataset, seed=19)
+    report = optimize(model, optimizer, TypedEncoder(contract), cursor,
+                      limits=TrainingLimits(steps=1, batch_size=1, elapsed_ms=30_000))
+    assert report["steps"] == 1 and report["stop_reason"] == "steps"
+    checkpoint = session_directory / f"{family}-resume.pt"
+    saved_hash = save_training_checkpoint(model, optimizer, contract, cursor, checkpoint,
+                                          completed_steps=1)
+    resumed = prior
+    resumed_optimizer = create_optimizer(resumed, mode=mode)
+    resumed_cursor = DatasetCursor(dataset, seed=19)
+    assert load_training_checkpoint(resumed, resumed_optimizer, contract, resumed_cursor,
+                                    checkpoint) == 1
+    assert saved_hash and resumed_cursor.snapshot() == cursor.snapshot()
+    for name, value in model.state_dict().items():
+        torch.testing.assert_close(resumed.state_dict()[name], value, rtol=0, atol=0)
 
 
 def test_atomic_public_json_saves_do_not_share_a_temporary_file(session_directory, monkeypatch):
@@ -416,7 +625,15 @@ def test_export_refuses_existing_file_or_link_and_aliased_slot(session_directory
         with pytest.raises(FileExistsError, match="new --slot"):
             cli.export(args, root, spec())
         assert link.is_symlink() == linked and target.read_bytes() == b"outside target"
-        assert link.read_bytes() == (b"outside target" if linked else b"prior onnx")
+        if linked:
+            # Packaged Windows Python can create a symlink whose APPDATA target
+            # is redirected by the host and cannot be dereferenced. The raw
+            # link target and the untouched target file still prove rejection.
+            assert os.path.normcase(str(link.readlink()).removeprefix("\\\\?\\")) == os.path.normcase(str(target))
+            if link.exists():
+                assert link.read_bytes() == b"outside target"
+        else:
+            assert link.read_bytes() == b"prior onnx"
 
         alias = root / "models" / "aliased"
         alias_args = cli.parser().parse_args(["export", "--base", "base.pt", "--slot", "aliased"])

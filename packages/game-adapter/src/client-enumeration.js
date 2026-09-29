@@ -7,6 +7,9 @@ function installEnumerationSource() {
 ${completeCardTargets.toString()}
 ${completeWizardActions.toString()}
 ${orderedSelections.toString()}
+${orderedCardTargetPlan.toString()}
+${orderedSquareTargets.toString()}
+${boundedOrderedTargetCount.toString()}
 ${freeMoveTargetGroups.toString()}
 ${iterateFreeMoveTargets.toString()}
 ${iterateCandidatePayloads.toString()}
@@ -56,9 +59,13 @@ function completeCardTargets(card, color) {
       return targets;
     }
     if (card.effect === "twins" || card.effect === "chain") return (card.effect === "twins" ? twinPairCandidates(color) : chainPairCandidates(color)).map(pair => ({ selections: pair.map(({ row, col }) => ({ row, col })) }));
-    if (card.effect === "portalGun") { combinations(getTargetSquares(card), 2, 2, selections => ({ selections })); return targets; }
-    if (card.effect === "hypocrisy") { combinations(hypocrisyCandidateSquares(), 4, 4, selections => ({ selections })); return targets; }
-    const ranges = { cleanupPieces: [1, INTERNAL_CLEANUP_LIMIT], chameleonMutation: [1, 3], emergencyEvacuation: [1, 3], panic: [2, 2], spy: [1, 2], pawnStorm: [1, 8] };
+    const ordered = orderedCardTargetPlan(card);
+    if (ordered) {
+      boundedOrderedTargetCount(ordered.squares.length, ordered.length, __maxCandidates);
+      for (const target of orderedSquareTargets(ordered.squares, ordered.length)) emit(target);
+      return targets;
+    }
+    const ranges = { cleanupPieces: [1, INTERNAL_CLEANUP_LIMIT], chameleonMutation: [1, 3], emergencyEvacuation: [1, 3], spy: [1, 2], pawnStorm: [1, 8] };
     if (ranges[card.effect]) { combinations(uniqueTargetSquaresForCard(card), ...ranges[card.effect], selections => ({ selections })); return targets; }
     if (card.effect === "freeMove") {
       for (const target of iterateFreeMoveTargets(color)) emit(target);
@@ -86,6 +93,42 @@ function* orderedSelections(groups, maxPlans = 3) {
     }
   }
   yield* visit([], new Set());
+}
+// These three effects have source-observed order-sensitive results. Other
+// multi-target families retain their existing combination enumeration.
+function orderedCardTargetPlan(card) {
+  const length = card.effect === "hypocrisy" ? 4 : ["portalGun", "panic"].includes(card.effect) ? 2 : 0;
+  if (!length) return null;
+  const raw = card.effect === "hypocrisy" ? hypocrisyCandidateSquares() :
+    card.effect === "portalGun" ? getTargetSquares(card) : uniqueTargetSquaresForCard(card);
+  const seen = new Set(), squares = [];
+  for (const square of raw) {
+    if (!Number.isInteger(square?.row) || !Number.isInteger(square?.col)) throw new Error("Invalid ordered card target square.");
+    const key = `${square.row},${square.col}`;
+    if (!seen.has(key)) { seen.add(key); squares.push({ row: square.row, col: square.col }); }
+  }
+  return { squares, length };
+}
+// At most four selected squares are retained, even if the full surface is large.
+function* orderedSquareTargets(squares, length) {
+  const selected = [], used = new Set();
+  function* visit() {
+    if (selected.length === length) { yield { selections: selected.slice() }; return; }
+    for (let index = 0; index < squares.length; index++) if (!used.has(index)) {
+      used.add(index); selected.push(squares[index]);
+      yield* visit();
+      selected.pop(); used.delete(index);
+    }
+  }
+  yield* visit();
+}
+function boundedOrderedTargetCount(squareCount, length, limit) {
+  if (squareCount < length) return 0;
+  let count = 1;
+  for (let selected = 0; selected < length; selected++) {
+    count *= squareCount - selected;
+    if (count > limit) throw new Error("Complete target enumeration exceeded its explicit candidate budget; use actionStream.");
+  }
 }
 function freeMoveTargetGroups(color) {
   const originalTurn = state.turn, groups = [], seen = new Set();
@@ -118,15 +161,25 @@ function* iterateCandidatePayloads(color, cardId = null) {
   const cards = playerDeck(color).filter(card => card && (!cardId || card.id === cardId)).map(card => ({ instanceId: card.instanceId, effect: card.effect }));
   for (const card of cards) {
     const options = { cardsOnly: true, includeCards: true, exhaustiveCards: true, cardFilter: current => current.instanceId === card.instanceId };
-    if (card.effect === "freeMove") {
+    if (card.effect === "freeMove" || ["portalGun", "hypocrisy", "panic"].includes(card.effect)) {
       const originalTargets = collectAiCardTargets;
       let marker;
       try {
-        collectAiCardTargets = current => current.effect === "freeMove" ? [undefined] : [];
+        collectAiCardTargets = current => current.instanceId === card.instanceId ? [undefined] : [];
         marker = collectValidAiActions(color, options)[0];
       } finally { collectAiCardTargets = originalTargets; }
-      if (marker) for (const target of iterateFreeMoveTargets(color)) {
-        emitted = true; yield { ...marker, target };
+      if (marker) {
+        let targets;
+        if (card.effect === "freeMove") targets = iterateFreeMoveTargets(color);
+        else {
+          const current = playerDeck(color).find(entry => entry?.instanceId === card.instanceId);
+          const plan = current && orderedCardTargetPlan(current);
+          if (!plan) throw new Error("Ordered card disappeared during source enumeration.");
+          targets = orderedSquareTargets(plan.squares, plan.length);
+        }
+        for (const target of targets) {
+          emitted = true; yield { ...marker, target };
+        }
       }
     } else for (const action of checked(collectValidAiActions(color, options))) {
       emitted = true; yield action;

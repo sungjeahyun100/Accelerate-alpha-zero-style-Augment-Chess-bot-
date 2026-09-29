@@ -203,6 +203,69 @@ pub(crate) fn legal_move_actions(state: &GameState) -> Result<Vec<Action>> {
     Ok(actions)
 }
 
+/// The frozen v7 `hasAnyLegalMove(color)` temporarily makes `color` the turn,
+/// then examines every board cell whose occupant belongs to that player or is
+/// a football. A neutral or opposite-colored football can therefore prevent
+/// no-action loss. The callback owns the still-incomplete v7 `getLegalMoves`
+/// and optional move predicate; this selector never falls back to v6 moves.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "v7 terminal waits for the complete source getLegalMoves callback"
+    )
+)]
+pub(crate) fn has_any_legal_move_v7_with(
+    state: &GameState,
+    color: Color,
+    mut has_allowed_move: impl FnMut(&GameState, &Piece, Square) -> Result<bool>,
+) -> Result<bool> {
+    if state.ruleset_id != RULES_VERSION_V7 {
+        return Err(EngineError::UnsupportedFeature(
+            "v7 legal-move probe requires v7 rules profile".into(),
+        ));
+    }
+    let mut probe = state.clone();
+    probe.validate_v7_snapshot_shape_and_identify()?;
+    probe.turn = color;
+    for row in 0..8 {
+        for col in 0..8 {
+            let square = Square { row, col };
+            let Some(piece) = probe.at(square) else {
+                continue;
+            };
+            if piece.kind == "wall" || piece.color != color && piece.kind != "football" {
+                continue;
+            }
+            if has_allowed_move(&probe, piece, square)? {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// The typed card/RULE veto portion of a v7 movement capture. The caller must
+/// also apply the source target, ability, terrain and action-option policies;
+/// a `true` result alone does not authorize a capture. Malformed live counters
+/// are returned as errors rather than quietly producing a legal move.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "v7 public movement waits for complete source capture policy"
+    )
+)]
+pub(crate) fn v7_movement_capture_constraints_allow(
+    state: &GameState,
+    attacker: &Piece,
+    target: &Piece,
+) -> Result<bool> {
+    let constraints =
+        crate::card_constraints::CaptureConstraints::from_source_state(state, attacker)?;
+    Ok(!constraints.piece_veto() && !constraints.game_veto(attacker, target))
+}
+
 /// A cursor stores one piece/card family at a time. Enumeration never allocates
 /// the complete Cartesian action space; a family's dedicated cursor can replace
 /// its bounded batch as compound cards are ported.
@@ -665,6 +728,12 @@ pub(crate) fn resolve_move_intent(state: &GameState, value: &Value) -> Result<Ac
 }
 
 fn ensure_supported(state: &GameState) -> Result<()> {
+    if state.ruleset_id == RULES_VERSION_V7 {
+        return Err(EngineError::UnsupportedFeature(
+            "v7 public legal movement requires source-equivalent candidate and restriction coverage"
+                .into(),
+        ));
+    }
     ensure_supported_interactions(state, true)
 }
 fn ensure_supported_interactions(state: &GameState, require_execution_support: bool) -> Result<()> {
@@ -2385,4 +2454,138 @@ fn large_rays(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget>
         }
     }
     moves
+}
+
+#[cfg(test)]
+mod v7_movement_tests {
+    use super::*;
+    use crate::geometry::Offset;
+    use crate::move_program::{
+        ActivationCondition, MoveNode, MoveProgram, MoveProgramLimits, MoveProgramSet, Primitive,
+        SpatialMoveBoard,
+    };
+
+    fn empty_v7() -> GameState {
+        let mut state = GameState::new(GameConfig::default(), 17).unwrap();
+        state.board = vec![vec![None; 8]; 8];
+        state.ruleset_id = RULES_VERSION_V7.into();
+        state
+    }
+
+    #[test]
+    fn no_action_loss_probe_considers_football_under_requested_turn() {
+        let mut state = empty_v7();
+        state.turn = Color::White;
+        state.board[2][0] = Some(Piece::new("rook", Color::White, "opponent"));
+        state.board[3][2] = Some(Piece::new("rook", Color::Black, "kicker"));
+        state.board[3][3] = Some(Piece::new("football", PieceColor::Neutral, "ball"));
+        state.board[3][4] = Some(Piece::new("wall", PieceColor::Neutral, "wall"));
+        let mut probed = Vec::new();
+        let has_move = has_any_legal_move_v7_with(&state, Color::Black, |probe, piece, square| {
+            assert_eq!(probe.turn, Color::Black);
+            probed.push((piece.id.clone(), square));
+            Ok(piece.kind == "football")
+        })
+        .unwrap();
+        assert!(has_move);
+        assert_eq!(state.turn, Color::White);
+        assert_eq!(
+            probed,
+            vec![
+                ("kicker".into(), Square { row: 3, col: 2 }),
+                ("ball".into(), Square { row: 3, col: 3 }),
+            ]
+        );
+    }
+
+    #[test]
+    fn v7_capture_constraint_projection_propagates_invalid_counters() {
+        let mut state = empty_v7();
+        let mut queen = Piece::new("queen", Color::White, "attacker");
+        let pawn = Piece::new("pawn", Color::Black, "target");
+        state.set_flag("genevaConvention", Color::Black, true);
+        assert!(!v7_movement_capture_constraints_allow(&state, &queen, &pawn).unwrap());
+        queen.extra.insert("regencyHeir".into(), json!(true));
+        assert!(v7_movement_capture_constraints_allow(&state, &queen, &pawn).unwrap());
+        queen.extra.insert("promotionRushUntil".into(), json!(2));
+        assert!(!v7_movement_capture_constraints_allow(&state, &queen, &pawn).unwrap());
+        *state.turns_taken.get_mut(Color::White) = 2;
+        assert!(v7_movement_capture_constraints_allow(&state, &queen, &pawn).unwrap());
+        queen
+            .extra
+            .insert("capturesMade".into(), json!("not-a-number"));
+        assert!(matches!(
+            v7_movement_capture_constraints_allow(&state, &queen, &pawn),
+            Err(EngineError::InvalidState(_))
+        ));
+    }
+
+    #[test]
+    fn v7_public_enumeration_stays_closed_while_draft_probe_remains_available() {
+        let mut state = empty_v7();
+        let rook = Piece::new("rook", Color::White, "rook");
+        let from = Square { row: 4, col: 4 };
+        state.board[4][4] = Some(rook.clone());
+        assert!(matches!(
+            legal_move_actions(&state),
+            Err(EngineError::UnsupportedFeature(_))
+        ));
+        assert!(!piece_moves(&state, &rook, from).unwrap().is_empty());
+        state.ruleset_id = RULES_VERSION_V6.into();
+        assert!(!piece_moves(&state, &rook, from).unwrap().is_empty());
+    }
+
+    #[test]
+    fn v7_spatial_projection_can_feed_a_bounded_program_cursor() {
+        fn deny_capture(_: &crate::SpatialState, _: &str, _: &str, _: bool) -> bool {
+            false
+        }
+        fn deny_shift(_: &crate::SpatialState, _: &str, _: &str) -> bool {
+            false
+        }
+        let mut state = empty_v7();
+        state.board[4][4] = Some(Piece::new("rook", Color::White, "rook"));
+        let program = MoveProgramSet {
+            base: MoveProgram {
+                source_id: "probe-only".into(),
+                roots: vec![MoveNode {
+                    primitive: Primitive::Move,
+                    direction: Offset::new(0, 1),
+                    max_distance: Some(1),
+                    activation_condition: ActivationCondition::Any,
+                    activate_at_parent_distance: None,
+                    children: Vec::new(),
+                }],
+            },
+            modifiers: Vec::new(),
+        };
+        let spatial = crate::SpatialState::from_v7_source(&state).unwrap();
+        let board = SpatialMoveBoard {
+            state: &spatial,
+            capture: deny_capture,
+            shift: deny_shift,
+        };
+        let mut cursor = program
+            .cursor(&board, "rook", MoveProgramLimits::default())
+            .unwrap();
+        let page = cursor.next_page(1, 1).unwrap();
+        assert_eq!(page.examined, 1);
+        assert_eq!(page.raw.len(), 1);
+        assert_eq!(page.raw[0].intent.selected, crate::Coord::new(4, 5));
+
+        state
+            .extra
+            .insert("collapsedCells".into(), json!([{"row":4,"col":5}]));
+        let spatial = crate::SpatialState::from_v7_source(&state).unwrap();
+        let board = SpatialMoveBoard {
+            state: &spatial,
+            capture: deny_capture,
+            shift: deny_shift,
+        };
+        let mut cursor = program
+            .cursor(&board, "rook", MoveProgramLimits::default())
+            .unwrap();
+        let page = cursor.next_page(1, 1).unwrap();
+        assert!(page.raw.is_empty());
+    }
 }

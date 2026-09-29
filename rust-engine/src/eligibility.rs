@@ -355,16 +355,16 @@ fn random_box(state: &mut GameState, color: Color, want_passive: bool, depth: u8
     let own = active_ids(state, Some(color));
     let acquired = active_ids(state, None);
     let mut available = false;
-    for candidate in &crate::draft::definitions().definitions {
+    for candidate in &crate::draft::definitions_for_ruleset(&state.ruleset_id)?.definitions {
         let id = candidate["id"].as_str().expect("definition id");
         let is_passive = passive(candidate);
         if is_passive != want_passive
             || matches!(id, "white-box" | "black-box" | "shotgun-king")
             || acquired.contains(id)
-            || crate::draft::conflicts(id, &own)
-            || crate::draft::category(candidate) == "RULE"
+            || crate::draft::conflicts_with_ruleset(&state.ruleset_id, id, &own)
+            || crate::draft::category_with_ruleset(&state.ruleset_id, candidate) == "RULE"
             || (!want_passive
-                && (crate::draft::category(candidate) == "GUN"
+                && (crate::draft::category_with_ruleset(&state.ruleset_id, candidate) == "GUN"
                     || matches!(id, "horde" | "london-system" | "big-rook" | "initiative")))
             || (want_passive && matches!(id, "big-rook" | "big-bishop"))
         {
@@ -428,7 +428,7 @@ fn drawable(
     }
     let id = card["id"].as_str().expect("definition id");
     let own = active_ids(state, Some(color));
-    if crate::draft::conflicts(id, &own) {
+    if crate::draft::conflicts_with_ruleset(&state.ruleset_id, id, &own) {
         return Ok(false);
     }
     let enemy = color.opponent();
@@ -538,10 +538,13 @@ fn drawable(
                 "wall" | "football" | "blackHole" | "coffin"
             )
         })),
-        "rule-ticket" => Some(crate::draft::definitions().definitions.iter().any(|c| {
-            crate::draft::category(c) == "RULE"
-                && !active_ids(state, None).contains(c["id"].as_str().expect("id"))
-        })),
+        "rule-ticket" => {
+            let definitions = crate::draft::definitions_for_ruleset(&state.ruleset_id)?;
+            Some(definitions.definitions.iter().any(|c| {
+                crate::draft::category_with_ruleset(&state.ruleset_id, c) == "RULE"
+                    && !active_ids(state, None).contains(c["id"].as_str().expect("id"))
+            }))
+        }
         "calling-card" => Some(any(state, enemy, |piece, _| {
             nonroyal(piece)
                 && !matches!(

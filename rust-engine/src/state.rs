@@ -945,6 +945,7 @@ pub struct Observation {
 pub(crate) struct ObservationPolicy {
     protocol_version: String,
     projection_version: String,
+    rules_version: String,
     pub(crate) state_public_fields: Vec<String>,
     pub(crate) piece_public_fields: Vec<String>,
     pub(crate) card_public_fields: Vec<String>,
@@ -956,31 +957,81 @@ pub(crate) struct ObservationPolicy {
     pub(crate) selection_schema: Value,
     pub(crate) deathmatch_schema: Value,
 }
+struct ObservationSource {
+    policy: ObservationPolicy,
+    hash: String,
+}
+
+fn parse_observation_source(source: &str, ruleset_id: &str) -> Result<ObservationSource> {
+    let value: Value = serde_json::from_str(source).map_err(EngineError::serialization)?;
+    let hash = format!(
+        "{:x}",
+        Sha256::digest(serde_jcs::to_vec(&value).map_err(EngineError::serialization)?)
+    );
+    let policy: ObservationPolicy =
+        serde_json::from_value(value).map_err(EngineError::serialization)?;
+    if policy.rules_version != ruleset_id {
+        return Err(EngineError::InvalidState(
+            "observation policy and rules version disagree".into(),
+        ));
+    }
+    Ok(ObservationSource { policy, hash })
+}
+
+fn observation_source_for_ruleset(ruleset_id: &str) -> Result<&'static ObservationSource> {
+    static V6: std::sync::OnceLock<Result<ObservationSource>> = std::sync::OnceLock::new();
+    static V7: std::sync::OnceLock<Result<ObservationSource>> = std::sync::OnceLock::new();
+    let source = match ruleset_id {
+        RULES_VERSION_V6 => V6.get_or_init(|| {
+            parse_observation_source(
+                include_str!("../../bridge/catalog/observation-20260927.json"),
+                RULES_VERSION_V6,
+            )
+        }),
+        RULES_VERSION_V7 => V7.get_or_init(|| {
+            parse_observation_source(
+                include_str!("../../bridge/catalog/observation-20260928.json"),
+                RULES_VERSION_V7,
+            )
+        }),
+        other => {
+            return Err(EngineError::UnsupportedFeature(format!(
+                "observation policy for rules version {other}"
+            )));
+        }
+    };
+    source.as_ref().map_err(Clone::clone)
+}
+
+pub(crate) fn observation_policy_for_ruleset(
+    ruleset_id: &str,
+) -> Result<&'static ObservationPolicy> {
+    Ok(&observation_source_for_ruleset(ruleset_id)?.policy)
+}
+
+pub(crate) fn observation_policy_hash_for_ruleset(ruleset_id: &str) -> Result<&'static str> {
+    Ok(&observation_source_for_ruleset(ruleset_id)?.hash)
+}
+
+pub(crate) fn observation_protocol_for_ruleset(ruleset_id: &str) -> Result<&'static str> {
+    Ok(&observation_policy_for_ruleset(ruleset_id)?.protocol_version)
+}
+
+pub(crate) fn observation_projection_for_ruleset(ruleset_id: &str) -> Result<&'static str> {
+    Ok(&observation_policy_for_ruleset(ruleset_id)?.projection_version)
+}
+
 pub(crate) fn observation_protocol() -> &'static str {
-    &observation_policy().protocol_version
+    observation_protocol_for_ruleset(RULES_VERSION_V6).expect("frozen v6 observation policy")
 }
 pub(crate) fn observation_projection() -> &'static str {
-    &observation_policy().projection_version
+    observation_projection_for_ruleset(RULES_VERSION_V6).expect("frozen v6 observation policy")
 }
 pub(crate) fn observation_policy_hash() -> &'static str {
-    static HASH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    HASH.get_or_init(|| {
-        let policy: Value = serde_json::from_str(include_str!(
-            "../../bridge/catalog/observation-20260927.json"
-        ))
-        .expect("adopted observation metadata");
-        let canonical = serde_jcs::to_vec(&policy).expect("policy canonicalizes");
-        format!("{:x}", Sha256::digest(canonical))
-    })
+    observation_policy_hash_for_ruleset(RULES_VERSION_V6).expect("frozen v6 observation policy")
 }
 pub(crate) fn observation_policy() -> &'static ObservationPolicy {
-    static POLICY: std::sync::OnceLock<ObservationPolicy> = std::sync::OnceLock::new();
-    POLICY.get_or_init(|| {
-        serde_json::from_str(include_str!(
-            "../../bridge/catalog/observation-20260927.json"
-        ))
-        .expect("adopted observation metadata")
-    })
+    observation_policy_for_ruleset(RULES_VERSION_V6).expect("frozen v6 observation policy")
 }
 fn public_object(value: Value, names: &[String]) -> Value {
     Value::Object(
@@ -1082,6 +1133,23 @@ impl GameState {
                 EngineError::InvalidState("unknown rules version".into())
             });
         }
+        self.validate_source_shape_and_identify()
+    }
+
+    /// Validate the source-shaped v7 DTO and repeated piece identities only.
+    /// The caller must set `ruleset_id` from the verified outer Position
+    /// envelope first. This does not admit v7 to any executable Position API;
+    /// source action, result, and observation semantics still need porting.
+    pub fn validate_v7_snapshot_shape_and_identify(&mut self) -> Result<()> {
+        if self.ruleset_id != RULES_VERSION_V7 {
+            return Err(EngineError::InvalidState(
+                "v7 snapshot shape requires the v7 rules version".into(),
+            ));
+        }
+        self.validate_source_shape_and_identify()
+    }
+
+    fn validate_source_shape_and_identify(&mut self) -> Result<()> {
         for value in self.extra.values() {
             validate_json_value(value, 1)?;
         }
@@ -1105,6 +1173,8 @@ impl GameState {
         for event in &self.history {
             validate_json_value(event, 2)?;
         }
+        // GameState is the frozen source DTO for official v6/v7 games. Synthetic
+        // variable geometry is validated by BoardGeometry in SpatialState.
         if self.board.len() != 8 || self.board.iter().any(|row| row.len() != 8) {
             return Err(EngineError::InvalidState("board must be 8x8".into()));
         }
@@ -1159,100 +1229,108 @@ impl GameState {
                 ));
             }
         }
-        for event in &self.history {
-            let event: PublicEvent = serde_json::from_value(event.clone()).map_err(|error| {
-                EngineError::InvalidState(format!("invalid game history event: {error}"))
-            })?;
-            if event.protocol_version != "accelerate-game-event-v1"
-                || event.action.position_key.is_some()
-                || event.actor != event.action.color
-                || event
-                    .action
-                    .from
-                    .is_some_and(|square| square.row >= 8 || square.col >= 8)
-                || event
-                    .action
-                    .destination
-                    .as_ref()
-                    .is_some_and(|square| square.row >= 8 || square.col >= 8)
-            {
-                return Err(EngineError::InvalidState(
-                    "unsupported history protocol, action actor or internal action binding".into(),
-                ));
-            }
-            for transition in [&event.public.white, &event.public.black] {
-                if transition.kind != "transition"
-                    || transition.phase.is_empty()
-                    || transition.actor != event.actor
-                    || transition
-                        .board_changes
-                        .iter()
-                        .any(|change| change.square.row >= 8 || change.square.col >= 8)
+        // PublicEvent is the v6 replay protocol. A v7 snapshot may carry a
+        // different history shape, which is bounded above but not interpreted
+        // until the v7 replay contract is implemented.
+        if self.ruleset_id == RULES_VERSION_V6 {
+            for event in &self.history {
+                let event: PublicEvent =
+                    serde_json::from_value(event.clone()).map_err(|error| {
+                        EngineError::InvalidState(format!("invalid game history event: {error}"))
+                    })?;
+                if event.protocol_version != "accelerate-game-event-v1"
+                    || event.action.position_key.is_some()
+                    || event.actor != event.action.color
+                    || event
+                        .action
+                        .from
+                        .is_some_and(|square| square.row >= 8 || square.col >= 8)
+                    || event
+                        .action
+                        .destination
+                        .as_ref()
+                        .is_some_and(|square| square.row >= 8 || square.col >= 8)
                 {
                     return Err(EngineError::InvalidState(
-                        "invalid public history transition".into(),
+                        "unsupported history protocol, action actor or internal action binding"
+                            .into(),
                     ));
                 }
-                let result: ResultRecord = serde_json::from_value(transition.result.clone())
-                    .map_err(|error| {
-                        EngineError::InvalidState(format!("invalid history result: {error}"))
-                    })?;
-                result.validate()?;
-                for value in transition
-                    .board_changes
-                    .iter()
-                    .flat_map(|change| [&change.before, &change.after])
-                    .flatten()
-                {
-                    crate::observation::validate_public_piece(value, "history.piece")?;
-                }
-                crate::observation::validate_public_cards(
-                    &transition.own_cards,
-                    "history.ownCards",
-                )?;
-                crate::observation::validate_public_cards(
-                    &transition.revealed_opponent_cards,
-                    "history.revealedOpponentCards",
-                )?;
-                for capture in transition
-                    .captures
-                    .white
-                    .iter()
-                    .chain(&transition.captures.black)
-                {
-                    if capture.as_object().is_none_or(|object| {
-                        !object.contains_key("type")
-                            || !object.contains_key("color")
-                            || object.keys().any(|name| {
-                                !matches!(
-                                    name.as_str(),
-                                    "type" | "color" | "logDir" | "windmillMode"
-                                )
-                            })
-                    }) {
+                for transition in [&event.public.white, &event.public.black] {
+                    if transition.kind != "transition"
+                        || transition.phase.is_empty()
+                        || transition.actor != event.actor
+                        || transition
+                            .board_changes
+                            .iter()
+                            .any(|change| change.square.row >= 8 || change.square.col >= 8)
+                    {
                         return Err(EngineError::InvalidState(
-                            "nonpublic capture data in history".into(),
+                            "invalid public history transition".into(),
                         ));
                     }
-                }
-                if transition.captures.white.len() > 12 || transition.captures.black.len() > 12 {
-                    return Err(EngineError::InvalidState(
-                        "public captures exceed the site display window".into(),
-                    ));
-                }
-                for card in transition
-                    .own_cards
-                    .iter()
-                    .chain(&transition.revealed_opponent_cards)
-                {
-                    if card.as_object().is_none_or(|object| {
-                        object
-                            .keys()
-                            .any(|name| !observation_policy().card_public_fields.contains(name))
-                    }) {
+                    let result: ResultRecord = serde_json::from_value(transition.result.clone())
+                        .map_err(|error| {
+                            EngineError::InvalidState(format!("invalid history result: {error}"))
+                        })?;
+                    result.validate()?;
+                    for value in transition
+                        .board_changes
+                        .iter()
+                        .flat_map(|change| [&change.before, &change.after])
+                        .flatten()
+                    {
+                        crate::observation::validate_public_piece(value, "history.piece")?;
+                    }
+                    crate::observation::validate_public_cards(
+                        &transition.own_cards,
+                        "history.ownCards",
+                    )?;
+                    crate::observation::validate_public_cards(
+                        &transition.revealed_opponent_cards,
+                        "history.revealedOpponentCards",
+                    )?;
+                    for capture in transition
+                        .captures
+                        .white
+                        .iter()
+                        .chain(&transition.captures.black)
+                    {
+                        if capture.as_object().is_none_or(|object| {
+                            !object.contains_key("type")
+                                || !object.contains_key("color")
+                                || object.keys().any(|name| {
+                                    !matches!(
+                                        name.as_str(),
+                                        "type" | "color" | "logDir" | "windmillMode"
+                                    )
+                                })
+                        }) {
+                            return Err(EngineError::InvalidState(
+                                "nonpublic capture data in history".into(),
+                            ));
+                        }
+                    }
+                    if transition.captures.white.len() > 12 || transition.captures.black.len() > 12
+                    {
                         return Err(EngineError::InvalidState(
-                            "nonpublic card data in history".into(),
+                            "public captures exceed the site display window".into(),
                         ));
+                    }
+                    for card in transition
+                        .own_cards
+                        .iter()
+                        .chain(&transition.revealed_opponent_cards)
+                    {
+                        if card.as_object().is_none_or(|object| {
+                            object
+                                .keys()
+                                .any(|name| !observation_policy().card_public_fields.contains(name))
+                        }) {
+                            return Err(EngineError::InvalidState(
+                                "nonpublic card data in history".into(),
+                            ));
+                        }
                     }
                 }
             }
@@ -1297,13 +1375,26 @@ impl GameState {
         Ok(())
     }
     pub fn observe(&self, viewer: Color) -> Observation {
-        let policy = observation_policy();
+        assert_eq!(
+            self.ruleset_id, RULES_VERSION_V6,
+            "GameState::observe is the legacy v6-only infallible projection"
+        );
+        self.observe_checked(viewer)
+            .expect("validated v6 state has a pinned observation policy")
+    }
+
+    fn observe_checked(&self, viewer: Color) -> Result<Observation> {
+        let policy = observation_policy_for_ruleset(&self.ruleset_id)?;
+        let definitions = crate::draft::definitions_for_ruleset(&self.ruleset_id)?;
         let state_value = serde_json::to_value(self).expect("validated state serializes");
         let mut public_state = public_object(state_value, &policy.state_public_fields)
             .as_object()
             .expect("state object")
             .clone();
-        public_state.insert("projectionVersion".into(), json!(observation_projection()));
+        public_state.insert(
+            "projectionVersion".into(),
+            json!(observation_projection_for_ruleset(&self.ruleset_id)?),
+        );
         public_state.insert(
             "deathmatchStatus".into(),
             crate::observation::deathmatch_status(self),
@@ -1316,9 +1407,9 @@ impl GameState {
         );
         public_state.insert(
             "observationPolicyHash".into(),
-            json!(observation_policy_hash()),
+            json!(observation_policy_hash_for_ruleset(&self.ruleset_id)?),
         );
-        let project_cards = |color: Color| {
+        let project_cards = |color: Color| -> Result<Vec<Value>> {
             self.deck_slots
                 .get(color)
                 .iter()
@@ -1333,15 +1424,17 @@ impl GameState {
                         .expect("projected card")
                         .shift_remove("revealed");
                     view["slot"] = json!(slot);
-                    if let Some(revealed) = crate::observation::card_revelation(card) {
+                    if let Some(revealed) =
+                        crate::observation::card_revelation_for_ruleset(card, &self.ruleset_id)?
+                    {
                         view["revealed"] = revealed;
                     }
-                    view
+                    Ok(view)
                 })
-                .collect::<Vec<Value>>()
+                .collect()
         };
-        let own_cards = project_cards(viewer);
-        let other_cards = project_cards(viewer.opponent());
+        let own_cards = project_cards(viewer)?;
+        let other_cards = project_cards(viewer.opponent())?;
         public_state.insert("revealedOpponentCards".into(), json!(other_cards));
         public_state.insert(
             "ownStarTotal".into(),
@@ -1396,10 +1489,12 @@ impl GameState {
                     .into_iter()
                     .flatten()
                     .filter_map(|entry| entry.get("ruleId").and_then(Value::as_str))
-                    .filter(|id| crate::draft::definitions()
-                        .definitions
-                        .iter()
-                        .any(|card| card.get("id").and_then(Value::as_str) == Some(*id)))
+                    .filter(|id| {
+                        definitions
+                            .definitions
+                            .iter()
+                            .any(|card| card.get("id").and_then(Value::as_str) == Some(*id))
+                    })
                     .collect::<Vec<_>>()
             ),
         );
@@ -1496,14 +1591,19 @@ impl GameState {
                                 .expect("projected card")
                                 .shift_remove("revealed");
                             if let Ok(card) = serde_json::from_value::<CardSlot>(card.clone())
-                                && let Some(revealed) = crate::observation::card_revelation(&card)
+                                && let Some(revealed) =
+                                    crate::observation::card_revelation_for_ruleset(
+                                        &card,
+                                        &self.ruleset_id,
+                                    )?
                             {
                                 view["revealed"] = revealed;
                             }
-                            view
+                            Ok(view)
                         })
-                        .collect::<Vec<_>>()
+                        .collect::<Result<Vec<_>>>()
                 })
+                .transpose()?
                 .unwrap_or_default();
             public_state.insert("draft".into(),json!({"kind":draft.get("kind").and_then(Value::as_str).unwrap_or(style),"phase":draft.get("phase"),"color":draft.get("color"),"choices":choices}));
         }
@@ -1556,7 +1656,7 @@ impl GameState {
             })
             .collect();
         let mut observation = Observation {
-            protocol_version: observation_protocol().into(),
+            protocol_version: observation_protocol_for_ruleset(&self.ruleset_id)?.into(),
             viewer,
             turn: self.turn,
             board,
@@ -1573,13 +1673,19 @@ impl GameState {
             .remove("informationStateKey");
         let bytes = serde_jcs::to_vec(&content).expect("validated observation canonicalizes");
         observation.information_state_key = format!("{:x}", Sha256::digest(bytes));
-        observation
+        Ok(observation)
     }
     /// Full viewer-facing projection, including the site's highlight surface.
     /// Unsupported active rules are explicit errors at the language boundary.
     pub fn try_observe(&self, viewer: Color) -> Result<Observation> {
+        if self.ruleset_id != RULES_VERSION_V6 {
+            return Err(EngineError::UnsupportedFeature(format!(
+                "observation execution for rules version {}",
+                self.ruleset_id
+            )));
+        }
         let hints = crate::movement::public_hints(self, viewer)?;
-        let mut observation = self.observe(viewer);
+        let mut observation = self.observe_checked(viewer)?;
         observation.public_state.insert("legalHints".into(), hints);
         crate::observation::validate_projection(&observation)?;
         observation.refresh_key();

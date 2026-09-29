@@ -21,37 +21,66 @@ pub(crate) fn definitions() -> &'static Definitions {
         .expect("adopted card definitions")
     })
 }
-pub(crate) fn frozen_timestamp() -> Result<i64> {
-    static TIME: OnceLock<std::result::Result<i64, String>> = OnceLock::new();
-    TIME.get_or_init(|| {
-        let catalog: Value =
-            serde_json::from_str(include_str!("../../bridge/catalog/site-20260927.json"))
-                .map_err(|e| e.to_string())?;
-        let text = catalog["source"]["frozenAt"]
-            .as_str()
-            .ok_or("freeze timestamp missing")?;
-        let number = |start: usize, end: usize| {
-            text.get(start..end)
-                .ok_or("invalid freeze timestamp")?
-                .parse::<i64>()
-                .map_err(|e| e.to_string())
-        };
-        let year = number(0, 4)?;
-        let month = number(5, 7)?;
-        let day = number(8, 10)?;
-        let adjusted = year - i64::from(month <= 2);
-        let era = adjusted.div_euclid(400);
-        let yoe = adjusted - era * 400;
-        let shifted = month + if month > 2 { -3 } else { 9 };
-        let doy = (153 * shifted + 2) / 5 + day - 1;
-        let days = era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
-        Ok(
-            (((days * 24 + number(11, 13)?) * 60 + number(14, 16)?) * 60 + number(17, 19)?) * 1000
-                + number(20, 23)?,
-        )
-    })
-    .clone()
-    .map_err(EngineError::InvalidState)
+
+/// Explicit source selection for callers entering the v7 rule path. The
+/// legacy helper above keeps existing v6 draw and replay behavior unchanged.
+pub(crate) fn definitions_for_ruleset(rules_version: &str) -> Result<&'static Definitions> {
+    static V7: OnceLock<Definitions> = OnceLock::new();
+    match rules_version {
+        RULES_VERSION_V6 => Ok(definitions()),
+        RULES_VERSION_V7 => Ok(V7.get_or_init(|| {
+            serde_json::from_str(include_str!(
+                "../../bridge/catalog/card-definitions-20260928.json"
+            ))
+            .expect("adopted v7 card definitions")
+        })),
+        other => Err(EngineError::UnsupportedFeature(format!(
+            "card definitions for rules version {other}"
+        ))),
+    }
+}
+fn timestamp_from_catalog(source: &str) -> std::result::Result<i64, String> {
+    let catalog: Value = serde_json::from_str(source).map_err(|e| e.to_string())?;
+    let text = catalog["source"]["frozenAt"]
+        .as_str()
+        .ok_or("freeze timestamp missing")?;
+    let number = |start: usize, end: usize| {
+        text.get(start..end)
+            .ok_or("invalid freeze timestamp")?
+            .parse::<i64>()
+            .map_err(|e| e.to_string())
+    };
+    let year = number(0, 4)?;
+    let month = number(5, 7)?;
+    let day = number(8, 10)?;
+    let adjusted = year - i64::from(month <= 2);
+    let era = adjusted.div_euclid(400);
+    let yoe = adjusted - era * 400;
+    let shifted = month + if month > 2 { -3 } else { 9 };
+    let doy = (153 * shifted + 2) / 5 + day - 1;
+    let days = era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
+    Ok(
+        (((days * 24 + number(11, 13)?) * 60 + number(14, 16)?) * 60 + number(17, 19)?) * 1000
+            + number(20, 23)?,
+    )
+}
+pub(crate) fn frozen_timestamp_for_ruleset(rules_version: &str) -> Result<i64> {
+    static V6: OnceLock<std::result::Result<i64, String>> = OnceLock::new();
+    static V7: OnceLock<std::result::Result<i64, String>> = OnceLock::new();
+    let timestamp = match rules_version {
+        RULES_VERSION_V6 => V6.get_or_init(|| {
+            timestamp_from_catalog(include_str!("../../bridge/catalog/site-20260927.json"))
+        }),
+        RULES_VERSION_V7 => V7.get_or_init(|| {
+            timestamp_from_catalog(include_str!("../../bridge/catalog/site-20260928.json"))
+        }),
+        other => {
+            return Err(EngineError::UnsupportedFeature(format!(
+                "frozen timestamp for rules version {other}"
+            )));
+        }
+    };
+    timestamp.clone().map_err(EngineError::InvalidState)
 }
 #[derive(Deserialize)]
 struct Weights {
@@ -72,6 +101,51 @@ fn weights() -> &'static Weights {
             .expect("adopted draft weights")
     })
 }
+fn weights_for_ruleset(rules_version: &str) -> Result<&'static Weights> {
+    static V7: OnceLock<Weights> = OnceLock::new();
+    match rules_version {
+        RULES_VERSION_V6 => Ok(weights()),
+        RULES_VERSION_V7 => Ok(V7.get_or_init(|| {
+            serde_json::from_str(include_str!("../../bridge/catalog/draft-20260928.json"))
+                .expect("adopted v7 draft weights")
+        })),
+        other => Err(EngineError::UnsupportedFeature(format!(
+            "draft weights for rules version {other}"
+        ))),
+    }
+}
+
+/// The weight table is source data, separate from the hand-card definition.
+/// A missing ID is rejected rather than silently assigned zero draw weight.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "typed draft weight query awaits v7 RULE selection integration"
+    )
+)]
+pub(crate) fn draft_weight_for_ruleset(
+    rules_version: &str,
+    card_id: &str,
+    opening: bool,
+) -> Result<(String, f64)> {
+    let entry = weights_for_ruleset(rules_version)?
+        .weights
+        .iter()
+        .find(|entry| entry.id == card_id)
+        .ok_or_else(|| EngineError::InvalidState(format!("draft weight missing for {card_id}")))?;
+    let weight = if opening {
+        entry.opening_weight
+    } else {
+        entry.weight
+    };
+    if !weight.is_finite() || weight < 0.0 {
+        return Err(EngineError::InvalidState(format!(
+            "draft weight invalid for {card_id}"
+        )));
+    }
+    Ok((entry.phase.clone(), weight))
+}
 fn weights_by_id() -> &'static HashMap<&'static str, &'static Weight> {
     static DATA: OnceLock<HashMap<&'static str, &'static Weight>> = OnceLock::new();
     DATA.get_or_init(|| {
@@ -83,18 +157,34 @@ fn weights_by_id() -> &'static HashMap<&'static str, &'static Weight> {
         by_id
     })
 }
-fn weight_for(card: &Value) -> Option<&'static Weight> {
+fn weights_by_id_v7() -> &'static HashMap<&'static str, &'static Weight> {
+    static DATA: OnceLock<HashMap<&'static str, &'static Weight>> = OnceLock::new();
+    DATA.get_or_init(|| {
+        let weights = weights_for_ruleset(RULES_VERSION_V7).expect("adopted v7 draft weights");
+        let mut by_id = HashMap::with_capacity(weights.weights.len());
+        for weight in &weights.weights {
+            // Source find() chooses the first definition if IDs repeat.
+            by_id.entry(weight.id.as_str()).or_insert(weight);
+        }
+        by_id
+    })
+}
+fn weight_for_card(rules_version: &str, card: &Value) -> Option<&'static Weight> {
     card.get("id")
         .and_then(Value::as_str)
-        .and_then(|id| weights_by_id().get(id).copied())
+        .and_then(|id| match rules_version {
+            RULES_VERSION_V6 => weights_by_id().get(id).copied(),
+            RULES_VERSION_V7 => weights_by_id_v7().get(id).copied(),
+            _ => None,
+        })
 }
-pub(crate) fn category(card: &Value) -> &str {
-    weight_for(card)
+pub(crate) fn category_with_ruleset(rules_version: &str, card: &Value) -> &'static str {
+    weight_for_card(rules_version, card)
         .map(|weight| weight.phase.as_str())
         .unwrap_or("")
 }
-fn weight(card: &Value, opening: bool) -> f64 {
-    weight_for(card)
+fn weight_with_ruleset(rules_version: &str, card: &Value, opening: bool) -> f64 {
+    weight_for_card(rules_version, card)
         .map(|weight| {
             if opening {
                 weight.opening_weight
@@ -163,7 +253,11 @@ fn weighted_pick<'a>(
     if pool.is_empty() {
         return Ok(None);
     }
-    let sum = pool.iter().map(|card| weight(card, opening)).sum::<f64>();
+    let rules_version = state.ruleset_id.clone();
+    let sum = pool
+        .iter()
+        .map(|card| weight_with_ruleset(&rules_version, card, opening))
+        .sum::<f64>();
     let random = state.rng.sample()?;
     if sum <= 0.0 {
         return Ok(pool
@@ -172,15 +266,26 @@ fn weighted_pick<'a>(
     }
     let mut roll = random * sum;
     for &card in pool {
-        roll -= weight(card, opening);
+        roll -= weight_with_ruleset(&rules_version, card, opening);
         if roll <= 0.0 {
             return Ok(Some(card));
         }
     }
     Ok(pool.last().copied())
 }
-pub(crate) fn conflicts(id: &str, unavailable: &BTreeSet<String>) -> bool {
-    definitions().constants["LATEST_MUTUALLY_EXCLUSIVE_DRAFT_CARD_GROUPS"]
+pub(crate) fn conflicts_with_ruleset(
+    rules_version: &str,
+    id: &str,
+    unavailable: &BTreeSet<String>,
+) -> bool {
+    let definitions = match rules_version {
+        RULES_VERSION_V6 => definitions(),
+        RULES_VERSION_V7 => {
+            definitions_for_ruleset(RULES_VERSION_V7).expect("adopted v7 definitions")
+        }
+        _ => return true,
+    };
+    definitions.constants["LATEST_MUTUALLY_EXCLUSIVE_DRAFT_CARD_GROUPS"]
         .as_array()
         .expect("conflict groups")
         .iter()
@@ -198,8 +303,8 @@ pub(crate) fn conflicts(id: &str, unavailable: &BTreeSet<String>) -> bool {
                     .any(|other| other != id && unavailable.contains(other))
         })
 }
-fn grand_conflicts(id: &str, unavailable: &BTreeSet<String>) -> bool {
-    conflicts(id, unavailable)
+fn grand_conflicts(rules_version: &str, id: &str, unavailable: &BTreeSet<String>) -> bool {
+    conflicts_with_ruleset(rules_version, id, unavailable)
         || matches!(id, "democracy" | "queens-gambit")
             && unavailable.contains(if id == "democracy" {
                 "queens-gambit"
@@ -220,14 +325,18 @@ fn grand_pool(state: &mut GameState) -> Result<Vec<Value>> {
     for (phase, count) in [("OPENING", 4), ("MIDDLE", 10), ("PIECE", 7), ("END", 7)] {
         let mut picked = Vec::new();
         for _ in 0..count {
-            let pool = definitions()
+            let pool = definitions_for_ruleset(&state.ruleset_id)?
                 .definitions
                 .iter()
                 .filter(|card| {
-                    category(card) == phase
+                    category_with_ruleset(&state.ruleset_id, card) == phase
                         && card["id"] != "shotgun-king"
                         && !unavailable.contains(card["id"].as_str().expect("card id"))
-                        && !grand_conflicts(card["id"].as_str().expect("card id"), &unavailable)
+                        && !grand_conflicts(
+                            &state.ruleset_id,
+                            card["id"].as_str().expect("card id"),
+                            &unavailable,
+                        )
                 })
                 .collect::<Vec<_>>();
             let Some(card) = weighted_pick(state, &pool, false)? else {
@@ -280,12 +389,12 @@ fn mixed_pool(
     unavailable: &BTreeSet<String>,
 ) -> Result<Vec<&'static Value>> {
     let mut pool = Vec::new();
-    for card in &definitions().definitions {
+    for card in &definitions_for_ruleset(&state.ruleset_id)?.definitions {
         let id = card["id"].as_str().expect("id");
         if id == "shotgun-king"
             || unavailable.contains(id)
-            || conflicts(id, unavailable)
-            || !categories.contains(&category(card))
+            || conflicts_with_ruleset(&state.ruleset_id, id, unavailable)
+            || !categories.contains(&category_with_ruleset(&state.ruleset_id, card))
         {
             continue;
         }
@@ -344,11 +453,14 @@ pub(crate) fn propose_unobserved_normal_offer(
         let mut p = 1.0;
         for _ in 0..3 {
             let pool = mixed_pool(state, &["OPENING", "MIDDLE", "PIECE"], color, &unavailable)?;
-            let total = pool.iter().map(|card| weight(card, true)).sum::<f64>();
+            let total = pool
+                .iter()
+                .map(|card| weight_with_ruleset(&state.ruleset_id, card, true))
+                .sum::<f64>();
             let selected = weighted_pick(state, &pool, true)?.ok_or_else(|| {
                 EngineError::ConditioningMismatch("empty unconditional normal offer".into())
             })?;
-            p *= weight(selected, true) / total;
+            p *= weight_with_ruleset(&state.ruleset_id, selected, true) / total;
             picked.push(clone_card(state, selected)?);
             unavailable.insert(selected["id"].as_str().expect("id").to_owned());
         }
@@ -418,7 +530,10 @@ fn balanced_normal_proposal(
         .extra
         .get_mut("openingAutoNoticeShown")
         .ok_or_else(|| EngineError::InvalidState("opening notice state missing".into()))?
-        [color.as_str()] = json!(best.iter().any(|card| category(card) == "OPENING"));
+        [color.as_str()] = json!(
+        best.iter()
+            .any(|card| category_with_ruleset(&state.ruleset_id, card) == "OPENING")
+    );
     Ok((source_probability, proposal_probability))
 }
 
@@ -434,7 +549,10 @@ fn observed_normal_trace(
     let mut matches = true;
     for observed in public {
         let source = mixed_pool(state, &["OPENING", "MIDDLE", "PIECE"], color, &unavailable)?;
-        let source_sum = source.iter().map(|card| weight(card, true)).sum::<f64>();
+        let source_sum = source
+            .iter()
+            .map(|card| weight_with_ruleset(&state.ruleset_id, card, true))
+            .sum::<f64>();
         if !source_sum.is_finite() || source_sum <= 0.0 {
             return Err(EngineError::ConditioningMismatch(
                 "empty observed OPENING source pool".into(),
@@ -447,7 +565,10 @@ fn observed_normal_trace(
             source
                 .iter()
                 .copied()
-                .find(|card| card["id"] == observed["id"] && weight(card, true) > 0.0)
+                .find(|card| {
+                    card["id"] == observed["id"]
+                        && weight_with_ruleset(&state.ruleset_id, card, true) > 0.0
+                })
                 .ok_or_else(|| {
                     EngineError::ConditioningMismatch(
                         "observed OPENING sequence violates source eligibility or exclusives"
@@ -459,7 +580,7 @@ fn observed_normal_trace(
                 EngineError::ConditioningMismatch("empty observed offer proposal".into())
             })?
         };
-        source_probability *= weight(selected, true) / source_sum;
+        source_probability *= weight_with_ruleset(&state.ruleset_id, selected, true) / source_sum;
         matches &= selected["id"] == observed["id"];
         picked.push(clone_card(state, selected)?);
         unavailable.insert(selected["id"].as_str().expect("id").to_owned());
@@ -479,7 +600,10 @@ fn normal_offer_trace(
     let mut proposal_probability = 1.0;
     for index in 0..3 {
         let source = mixed_pool(state, &["OPENING", "MIDDLE", "PIECE"], color, &unavailable)?;
-        let source_sum = source.iter().map(|card| weight(card, true)).sum::<f64>();
+        let source_sum = source
+            .iter()
+            .map(|card| weight_with_ruleset(&state.ruleset_id, card, true))
+            .sum::<f64>();
         if !source_sum.is_finite() || source_sum <= 0.0 {
             return Err(EngineError::ConditioningMismatch(
                 "empty hidden OPENING source pool".into(),
@@ -497,10 +621,17 @@ fn normal_offer_trace(
                 if index == 2 {
                     return id == required;
                 }
-                !conflicts(required, &BTreeSet::from([id.to_owned()]))
+                !conflicts_with_ruleset(
+                    &state.ruleset_id,
+                    required,
+                    &BTreeSet::from([id.to_owned()]),
+                )
             })
             .collect::<Vec<_>>();
-        let proposal_sum = proposal.iter().map(|card| weight(card, true)).sum::<f64>();
+        let proposal_sum = proposal
+            .iter()
+            .map(|card| weight_with_ruleset(&state.ruleset_id, card, true))
+            .sum::<f64>();
         if force
             && (!proposal_sum.is_finite()
                 || proposal_sum <= 0.0
@@ -514,7 +645,7 @@ fn normal_offer_trace(
             .ok_or_else(|| {
                 EngineError::ConditioningMismatch("empty hidden offer proposal".into())
             })?;
-        let selected_weight = weight(selected, true);
+        let selected_weight = weight_with_ruleset(&state.ruleset_id, selected, true);
         source_probability *= selected_weight / source_sum;
         proposal_probability *= if proposal_sum > 0.0 && proposal.contains(&selected) {
             selected_weight / proposal_sum
@@ -654,7 +785,10 @@ fn mixed_draw_trace(
         if pool.is_empty() {
             break;
         }
-        let total = pool.iter().map(|card| weight(card, opening)).sum::<f64>();
+        let total = pool
+            .iter()
+            .map(|card| weight_with_ruleset(&state.ruleset_id, card, opening))
+            .sum::<f64>();
         if !total.is_finite() || total <= 0.0 {
             return Err(EngineError::UnsupportedFeature(
                 "nonpositive weighted CHAOS source pool".into(),
@@ -664,7 +798,10 @@ fn mixed_draw_trace(
             state.rng.sample()?;
             pool.iter()
                 .copied()
-                .find(|card| card["id"] == tilt.ids[index] && weight(card, opening) > 0.0)
+                .find(|card| {
+                    card["id"] == tilt.ids[index]
+                        && weight_with_ruleset(&state.ruleset_id, card, opening) > 0.0
+                })
                 .ok_or_else(|| {
                     EngineError::ConditioningMismatch(
                         "conditioned CHAOS sequence violates source draw predicates".into(),
@@ -673,7 +810,7 @@ fn mixed_draw_trace(
         } else {
             weighted_pick(state, &pool, opening)?.expect("nonempty source pool")
         };
-        let chance = weight(selected, opening) / total;
+        let chance = weight_with_ruleset(&state.ruleset_id, selected, opening) / total;
         p *= chance;
         tilted *= if index < tilt.ids.len() {
             if selected["id"] == tilt.ids[index] {
@@ -718,14 +855,22 @@ pub(crate) fn selected_draft_cards(state: &GameState, action: &Action) -> Result
         .map(|card| vec![card.clone()])
         .ok_or(EngineError::IllegalAction)
 }
-fn exclusive_opening(card: &Value) -> bool {
-    definitions().constants["EXCLUSIVE_OPENING_CARD_IDS"]
+fn exclusive_opening(rules_version: &str, card: &Value) -> bool {
+    let definitions = match rules_version {
+        RULES_VERSION_V6 => definitions(),
+        RULES_VERSION_V7 => {
+            definitions_for_ruleset(RULES_VERSION_V7).expect("adopted v7 definitions")
+        }
+        _ => return true,
+    };
+    definitions.constants["EXCLUSIVE_OPENING_CARD_IDS"]
         .as_array()
         .expect("ids")
         .contains(&card["id"])
 }
-fn forbidden_bundle(first: &Value, second: &Value) -> bool {
-    (category(first) == "OPENING" && category(second) == "OPENING")
+fn forbidden_bundle(rules_version: &str, first: &Value, second: &Value) -> bool {
+    (category_with_ruleset(rules_version, first) == "OPENING"
+        && category_with_ruleset(rules_version, second) == "OPENING")
         || (first["id"] == "democracy" && second["id"] == "queens-gambit")
         || (first["id"] == "queens-gambit" && second["id"] == "democracy")
 }
@@ -743,11 +888,12 @@ fn arrange_chaos_with(
     mut choices: Vec<Value>,
     mut replacement: impl FnMut(&mut GameState, &BTreeSet<String>) -> Result<Option<Value>>,
 ) -> Result<Vec<Value>> {
+    let rules_version = state.ruleset_id.clone();
     if choices.len() != 6 {
         return Ok(choices);
     }
     for start in (0..6).step_by(2) {
-        if !forbidden_bundle(&choices[start], &choices[start + 1]) {
+        if !forbidden_bundle(&rules_version, &choices[start], &choices[start + 1]) {
             continue;
         }
         let swap = (0..6).find(|&index| {
@@ -755,8 +901,8 @@ fn arrange_chaos_with(
                 return false;
             }
             let partner = if index % 2 == 0 { index + 1 } else { index - 1 };
-            !forbidden_bundle(&choices[start], &choices[index])
-                && !forbidden_bundle(&choices[start + 1], &choices[partner])
+            !forbidden_bundle(&rules_version, &choices[start], &choices[index])
+                && !forbidden_bundle(&rules_version, &choices[start + 1], &choices[partner])
         });
         if let Some(swap) = swap {
             choices.swap(start + 1, swap);
@@ -771,25 +917,32 @@ fn arrange_chaos_with(
         }
     }
     for start in (0..6).step_by(2) {
-        let Some(exclusive) = (start..start + 2).find(|&index| exclusive_opening(&choices[index]))
+        let Some(exclusive) =
+            (start..start + 2).find(|&index| exclusive_opening(&rules_version, &choices[index]))
         else {
             continue;
         };
         let partner = if exclusive == start { start + 1 } else { start };
-        if category(&choices[partner]) != "OPENING" {
+        if category_with_ruleset(&rules_version, &choices[partner]) != "OPENING" {
             continue;
         }
-        let partner_exclusive = exclusive_opening(&choices[partner]);
+        let partner_exclusive = exclusive_opening(&rules_version, &choices[partner]);
         let swap = (0..6).find(|&index| {
-            if index / 2 == start / 2 || category(&choices[index]) == "OPENING" {
+            if index / 2 == start / 2
+                || category_with_ruleset(&rules_version, &choices[index]) == "OPENING"
+            {
                 return false;
             }
             let source = index / 2 * 2;
-            if choices[source..source + 2].iter().any(exclusive_opening) {
+            if choices[source..source + 2]
+                .iter()
+                .any(|card| exclusive_opening(&rules_version, card))
+            {
                 return false;
             }
             let other = if index % 2 == 0 { index + 1 } else { index - 1 };
-            !partner_exclusive || category(&choices[other]) != "OPENING"
+            !partner_exclusive
+                || category_with_ruleset(&rules_version, &choices[other]) != "OPENING"
         });
         if let Some(swap) = swap {
             choices.swap(partner, swap);
@@ -925,7 +1078,9 @@ pub(crate) fn start_draft(state: &mut GameState, color: Color, phase: &str) -> R
     }
     if phase == "OPENING"
         && state.move_count == 0
-        && choices.iter().any(|card| category(card) == "OPENING")
+        && choices
+            .iter()
+            .any(|card| category_with_ruleset(&state.ruleset_id, card) == "OPENING")
     {
         state
             .extra
@@ -970,7 +1125,8 @@ fn start_draft_clock(state: &mut GameState, color: Color, grand_pick: Option<usi
         clock["grandPickIndex"] = json!(pick.min(12));
     }
     if clock["enabled"] == true {
-        clock[format!("{}StartedAt", color.as_str())] = json!(frozen_timestamp()?);
+        clock[format!("{}StartedAt", color.as_str())] =
+            json!(frozen_timestamp_for_ruleset(&state.ruleset_id)?);
     }
     state.extra.insert("draftClock".into(), clock);
     Ok(())
@@ -1004,7 +1160,7 @@ pub(crate) fn condition_grand_initial_choices(
                 .get("id")
                 .and_then(Value::as_str)
                 .ok_or_else(|| EngineError::InvalidState("public grand card id missing".into()))?;
-            let definition = definitions()
+            let definition = definitions_for_ruleset(&state.ruleset_id)?
                 .definitions
                 .iter()
                 .find(|card| card["id"].as_str() == Some(id))
@@ -1012,10 +1168,10 @@ pub(crate) fn condition_grand_initial_choices(
                     EngineError::InvalidState(format!("unknown public grand card {id}"))
                 })?;
             if id == "shotgun-king"
-                || category(definition) != phase
-                || weight(definition, false) <= 0.0
+                || category_with_ruleset(&state.ruleset_id, definition) != phase
+                || weight_with_ruleset(&state.ruleset_id, definition, false) <= 0.0
                 || unavailable.contains(id)
-                || grand_conflicts(id, &unavailable)
+                || grand_conflicts(&state.ruleset_id, id, &unavailable)
             {
                 return Err(EngineError::InvalidState("public grand pool violates source categories, weights, uniqueness or exclusives".into()));
             }
@@ -1069,16 +1225,19 @@ pub(crate) fn condition_opening_offer(
         let id = view["id"]
             .as_str()
             .ok_or_else(|| EngineError::InvalidState("initial offer definition missing".into()))?;
-        let definition = definitions()
+        let definition = definitions_for_ruleset(&state.ruleset_id)?
             .definitions
             .iter()
             .find(|card| card["id"] == id)
             .ok_or_else(|| EngineError::InvalidState(format!("unknown initial offer {id}")))?;
         if id == "shotgun-king"
             || unavailable.contains(id)
-            || conflicts(id, &unavailable)
-            || !matches!(category(definition), "OPENING" | "MIDDLE" | "PIECE")
-            || weight(definition, true) <= 0.0
+            || conflicts_with_ruleset(&state.ruleset_id, id, &unavailable)
+            || !matches!(
+                category_with_ruleset(&state.ruleset_id, definition),
+                "OPENING" | "MIDDLE" | "PIECE"
+            )
+            || weight_with_ruleset(&state.ruleset_id, definition, true) <= 0.0
             || !crate::eligibility::draft_drawable(&mut probe, definition, color)?
         {
             return Err(EngineError::ConditioningMismatch("initial offer violates source pool availability, categories, weights or exclusives".into()));
@@ -1099,9 +1258,13 @@ pub(crate) fn condition_opening_offer(
     }
     if chaos
         && conditioned.chunks(2).any(|cards| {
-            forbidden_bundle(&cards[0], &cards[1])
-                || (cards.iter().any(exclusive_opening)
-                    && cards.iter().all(|card| category(card) == "OPENING"))
+            forbidden_bundle(&state.ruleset_id, &cards[0], &cards[1])
+                || (cards
+                    .iter()
+                    .any(|card| exclusive_opening(&state.ruleset_id, card))
+                    && cards
+                        .iter()
+                        .all(|card| category_with_ruleset(&state.ruleset_id, card) == "OPENING"))
         })
     {
         return Err(EngineError::ConditioningMismatch(
@@ -1111,7 +1274,9 @@ pub(crate) fn condition_opening_offer(
     // Public conditioning changes supported past draw outcomes only. Predicate
     // probes use a clone; independent future RNG and hidden opposing offers are
     // not overwritten with actual private metadata.
-    let opening = conditioned.iter().any(|card| category(card) == "OPENING");
+    let opening = conditioned
+        .iter()
+        .any(|card| category_with_ruleset(&state.ruleset_id, card) == "OPENING");
     state
         .extra
         .get_mut("draft")
@@ -1126,6 +1291,22 @@ pub(crate) fn condition_opening_offer(
 }
 
 pub(crate) fn initialize(config: GameConfig, seed: u64) -> Result<GameState> {
+    initialize_for_ruleset(config, seed, RULES_VERSION_V6)
+}
+
+pub(crate) fn initialize_for_ruleset(
+    config: GameConfig,
+    seed: u64,
+    rules_version: &str,
+) -> Result<GameState> {
+    if !matches!(rules_version, RULES_VERSION_V6 | RULES_VERSION_V7) {
+        return Err(EngineError::UnsupportedFeature(format!(
+            "initial game rules version {rules_version}"
+        )));
+    }
+    if rules_version == RULES_VERSION_V7 {
+        crate::card_registry::registry_for(rules_version)?;
+    }
     if seed > u64::from(u32::MAX)
         || !matches!(config.game_style.as_str(), "normal" | "chaos" | "grand")
         || config.star_win_limit == 0
@@ -1140,12 +1321,20 @@ pub(crate) fn initialize(config: GameConfig, seed: u64) -> Result<GameState> {
             "initial RULE activation".into(),
         ));
     }
-    let raw: Value = serde_json::from_str(include_str!(
-        "../../bridge/catalog/initial-state-20260927.json"
-    ))
-    .expect("adopted reset defaults");
+    let initial = if rules_version == RULES_VERSION_V7 {
+        include_str!("../../bridge/catalog/initial-state-20260928.json")
+    } else {
+        include_str!("../../bridge/catalog/initial-state-20260927.json")
+    };
+    let raw: Value = serde_json::from_str(initial).expect("adopted reset defaults");
+    if raw["rulesVersion"].as_str() != Some(rules_version) {
+        return Err(EngineError::InvalidState(
+            "initial source rules version mismatch".into(),
+        ));
+    }
     let mut state: GameState =
         serde_json::from_value(raw["state"].clone()).map_err(EngineError::serialization)?;
+    state.ruleset_id = rules_version.into();
     state.rng = RngState::seeded(seed);
     for col in 0..8 {
         for row in [0, 7] {
@@ -1286,9 +1475,10 @@ pub(crate) fn legal_actions(state: &GameState) -> Result<Vec<Action>> {
     if owned.len() >= 6 {
         return Ok(Vec::new());
     }
-    let exclusive = definitions().constants["EXCLUSIVE_OPENING_CARD_IDS"]
-        .as_array()
-        .expect("exclusive opening ids");
+    let exclusive =
+        definitions_for_ruleset(&state.ruleset_id)?.constants["EXCLUSIVE_OPENING_CARD_IDS"]
+            .as_array()
+            .expect("exclusive opening ids");
     draft["choices"]
         .as_array()
         .ok_or_else(|| EngineError::InvalidState("grand choices missing".into()))?
@@ -1297,7 +1487,11 @@ pub(crate) fn legal_actions(state: &GameState) -> Result<Vec<Action>> {
             let already_picked = picks
                 .iter()
                 .any(|pick| pick["instanceId"] == card["instanceId"]);
-            let conflicts_with_owned = conflicts(card["id"].as_str().expect("card id"), &owned);
+            let conflicts_with_owned = conflicts_with_ruleset(
+                &state.ruleset_id,
+                card["id"].as_str().expect("card id"),
+                &owned,
+            );
             let exclusive_opening_conflict = exclusive.contains(&card["id"])
                 && owned.iter().any(|id| exclusive.contains(&json!(id)));
             !(already_picked || conflicts_with_owned || exclusive_opening_conflict)
@@ -1353,7 +1547,7 @@ pub(crate) fn apply_pick(state: &mut GameState, action: &Action) -> Result<Vec<P
         .checked_add(1)
         .ok_or_else(|| EngineError::InvalidState("card acquisition order overflow".into()))?;
     let mut stored = card.clone();
-    let phase = category(&card);
+    let phase = category_with_ruleset(&state.ruleset_id, &card);
     stored["deckCard"] = json!(true);
     stored["firstTurnCard"] = json!(state.move_count == 0 && phase == "OPENING");
     stored["slot"] = json!(slot);
@@ -1422,9 +1616,6 @@ pub(crate) fn apply_pick(state: &mut GameState, action: &Action) -> Result<Vec<P
         state.extra.insert("draftLocked".into(), json!(false));
         start_draft_clock(state, next, Some(order))?;
     } else {
-        let catalog: Value =
-            serde_json::from_str(include_str!("../../bridge/catalog/site-20260927.json"))
-                .expect("adopted card catalog");
         let mut acquired = state.extra["draft"]["picks"]
             .as_array()
             .expect("grand picks")
@@ -1457,14 +1648,10 @@ pub(crate) fn apply_pick(state: &mut GameState, action: &Action) -> Result<Vec<P
                 continue;
             };
             let card = &state.deck_slots.get(side)[slot];
-            if catalog["cards"]
-                .as_array()
-                .expect("catalog cards")
-                .iter()
-                .any(|definition| {
-                    definition["id"] == card.id && definition["activation"] == "PASSIVE"
-                })
-            {
+            if is_passive_definition_for_ruleset(
+                &state.ruleset_id,
+                &serde_json::to_value(card).map_err(EngineError::serialization)?,
+            )? {
                 crate::transition::apply_draft_passive(state, side, slot)?;
             }
         }
@@ -1544,7 +1731,7 @@ fn apply_regular_pick(state: &mut GameState, action: &Action, draft: &Value) -> 
             .position(|card| card.vacant)
             .ok_or(EngineError::IllegalAction)?;
         let mut stored = clone_card(state, card)?;
-        let category = category(card);
+        let category = category_with_ruleset(&state.ruleset_id, card);
         let pending = matches!(phase, "MIDDLE" | "END") && matches!(category, "MIDDLE" | "END");
         stored["deckCard"] = json!(true);
         stored["nextTurnPending"] = json!(pending);
@@ -1569,7 +1756,7 @@ fn apply_regular_pick(state: &mut GameState, action: &Action, draft: &Value) -> 
             serde_json::from_value(stored.clone()).map_err(EngineError::serialization)?;
         // queueCardGainNotation -> createHistoryNotationId consumes one draw.
         crate::replay::queue_gain(state, color, &stored, phase)?;
-        if selected.len() == 1 && is_passive_definition(card) {
+        if selected.len() == 1 && is_passive_definition_for_ruleset(&state.ruleset_id, card)? {
             crate::transition::apply_draft_passive(state, color, slot)?;
         }
         crate::flow::note_card_event(state)?;
@@ -1583,7 +1770,7 @@ fn apply_regular_pick(state: &mut GameState, action: &Action, draft: &Value) -> 
             )
         });
         for (slot, card) in &acquired {
-            if is_passive_definition(card) {
+            if is_passive_definition_for_ruleset(&state.ruleset_id, card)? {
                 crate::transition::apply_draft_passive(state, color, *slot)?;
             }
         }
@@ -1684,4 +1871,15 @@ pub(crate) fn is_passive_definition(card: &Value) -> bool {
             .collect()
     })
     .contains(card["id"].as_str().unwrap_or(""))
+}
+pub(crate) fn is_passive_definition_for_ruleset(rules_version: &str, card: &Value) -> Result<bool> {
+    if rules_version == RULES_VERSION_V6 {
+        return Ok(is_passive_definition(card));
+    }
+    let id = card
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| EngineError::InvalidState("card definition id missing".into()))?;
+    let definition = crate::card_registry::definition_for(rules_version, id)?;
+    Ok(definition.activation == Some(crate::card_registry::CardActType::Passive))
 }

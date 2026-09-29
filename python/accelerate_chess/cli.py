@@ -20,14 +20,24 @@ import torch
 
 from .encoding import EncoderSpec, PublicEncoder, canonical_json
 from .inference import ProductionEvaluator
-from .network.artifacts import export_onnx, file_sha256, load_adapter, load_base, load_manifest, save_adapter, save_base
+from .network.artifacts import (export_onnx, export_typed_onnx, file_sha256, load_adapter, load_base,
+                                load_manifest, load_typed_adapter, load_typed_base, save_adapter, save_base,
+                                save_typed_adapter, save_typed_base)
 from .network.model import ModelConfig, PolicyValueNetwork
 from .replay import EpisodeRecorder, ReplayEpisode, artifact_root, atomic_json, read_json, reserve_slot, slot, writer_claim
-from .search import BeliefLimits, InformationSetSearch, NativeSourceFactory, ParticleBelief, PublicTracker, SearchLimits
+from .search import (BeliefLimits, InformationSetSearch, NativeSourceFactory, ParticleBelief,
+                     PublicTracker, SearchLimits, TypedInformationSetSearch)
 from .training import DatasetCursor, ReplayDataset, TrainingLimits, create_optimizer, load_training_checkpoint, optimize, save_training_checkpoint
 
 
-def default_spec(catalog_path: str | None = None, *, observation_policy: dict | None = None):
+class _ExplicitBlocks(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        namespace.blocks = values
+        namespace.blocks_explicit = True
+
+
+def default_spec(catalog_path: str | None = None, *, observation_policy: dict | None = None,
+                 model_family: str = "legacy-resnet"):
     if observation_policy is None:
         from ._native import site_observation_policy
         observation_policy = site_observation_policy()
@@ -36,7 +46,14 @@ def default_spec(catalog_path: str | None = None, *, observation_policy: dict | 
     else:
         from ._native import site_catalog
         catalog = site_catalog()
-    return EncoderSpec.from_catalog(catalog, observation_policy=observation_policy, history_encoding="public-history-summary-v1", action_encoding="public-decision-intent-v1")
+    if model_family == "legacy-resnet":
+        return EncoderSpec.from_catalog(catalog, observation_policy=observation_policy,
+            history_encoding="public-history-summary-v1", action_encoding="public-decision-intent-v1")
+    if model_family in ("mask-resnet", "entity-transformer"):
+        from .ir import TypedEncoderSpec
+
+        return TypedEncoderSpec.from_catalog(catalog, observation_policy=observation_policy)
+    raise ValueError("unknown explicit model family")
 
 
 def _configuration(args):
@@ -50,10 +67,22 @@ def _manifest(args, root, spec):
     if args.manifest:
         return Path(args.manifest).resolve()
     activation = read_json(slot(root, "models", "active") / "activation.json")
-    if set(activation) != {"version", "manifest", "manifest_sha256", "model_sha256", "encoder_hash", "backend"} or activation["version"] != "accelerate-activation-v1" or activation["encoder_hash"] != spec.digest or activation["backend"] not in ("ort", "tract"):
-        raise ValueError("active model reference is incompatible")
+    fields = {"version", "manifest", "manifest_sha256", "model_sha256", "encoder_hash", "backend"}
+    if args.model_family == "legacy-resnet":
+        if set(activation) != fields or activation["version"] != "accelerate-activation-v1":
+            raise ValueError("active model reference is incompatible")
+    elif (set(activation) != fields | {"architecture_family", "model_io_version"}
+          or activation["version"] != "accelerate-activation-v2"
+          or activation["architecture_family"] != args.model_family
+          or activation["model_io_version"] != "typed-policy-value-v1"):
+        raise ValueError("active typed model reference is incompatible")
+    if activation["encoder_hash"] != spec.digest or activation["backend"] not in ("ort", "tract"):
+        raise ValueError("active model encoder or verification backend is incompatible")
     path = Path(activation["manifest"])
-    if file_sha256(path) != activation["manifest_sha256"] or load_manifest(path, spec)["model_sha256"] != activation["model_sha256"]:
+    manifest = load_manifest(path, spec)
+    if (file_sha256(path) != activation["manifest_sha256"]
+            or manifest["model_sha256"] != activation["model_sha256"]
+            or args.model_family != "legacy-resnet" and manifest["architecture_family"] != args.model_family):
         raise ValueError("activated artifact changed since explicit activation")
     return path
 
@@ -62,26 +91,118 @@ def _search(args, spec, manifest, backend):
     limits = SearchLimits(iterations=args.iterations, max_depth=args.depth, elapsed_ms=args.search_ms,
                           max_nodes=args.nodes, max_edges=args.edges, max_candidates=args.candidates,
                           leaf_batch_size=args.leaf_batch_size)
-    return InformationSetSearch(PublicEncoder(spec), ProductionEvaluator(manifest, spec, backend, threads=args.threads), limits=limits)
+    evaluator = ProductionEvaluator(manifest, spec, backend, threads=args.threads)
+    if args.model_family == "legacy-resnet":
+        return InformationSetSearch(PublicEncoder(spec), evaluator, limits=limits)
+    from .ir import TypedEncoder
+
+    if evaluator.architecture_family != args.model_family:
+        raise ValueError("typed manifest architecture differs from the explicit CLI family")
+    return TypedInformationSetSearch(TypedEncoder(spec), evaluator, limits=limits)
+
+
+def _typed_model(args, spec):
+    from .network import (EntityTransformer, EntityTransformerConfig, MaskResNetConfig,
+                          MaskResNetPolicyValueNetwork, TypedContextConfig)
+
+    vocabulary = len(spec.category_vocabulary)
+    context = TypedContextConfig((vocabulary,) * 4, (vocabulary,) * 2,
+                                 (vocabulary,) * 4, hidden_dim=args.channels)
+    blocks = args.blocks if args.blocks_explicit or args.model_family == "mask-resnet" else 4
+    if args.model_family == "mask-resnet":
+        config = MaskResNetConfig(len(spec.feature_schema["spatial_channels"]), context,
+            channels=args.channels, residual_blocks=blocks, lora_rank=args.rank,
+            lora_alpha=float(args.rank), max_board_axis=spec.max_board_axis,
+            max_candidates=spec.max_candidates, max_batch=spec.max_batch)
+        return MaskResNetPolicyValueNetwork(config), blocks
+    if args.model_family == "entity-transformer":
+        config = EntityTransformerConfig(context, blocks=blocks, lora_rank=args.rank,
+                                         lora_alpha=float(args.rank))
+        return EntityTransformer(config), blocks
+    raise ValueError("typed model initialization needs an explicit A or B family")
+
+
+def _typed_loaded_family(model):
+    from .network import EntityTransformer, MaskResNetPolicyValueNetwork
+
+    if isinstance(model, MaskResNetPolicyValueNetwork):
+        return "mask-resnet"
+    if isinstance(model, EntityTransformer):
+        return "entity-transformer"
+    raise ValueError("typed base checkpoint did not reconstruct a supported model family")
+
+
+def _typed_sample_inputs(replay_path, spec, family, *, sample_public=None):
+    from .ir import ObservationIR, TypedEncoder, batch_typed_positions
+
+    if bool(replay_path) == bool(sample_public):
+        raise ValueError("typed export or activation needs exactly one public sample or replay")
+    if replay_path:
+        episode = ReplayEpisode.load(replay_path, spec)
+        if episode.architecture_family != family or not episode.decisions:
+            raise ValueError("typed sample replay family or public decision is missing")
+        record = episode.decisions[0]
+        observation = episode.trackers[record["actor"]].frame_at(record["trace_step"])
+        intents = [candidate["intent"] for candidate in record["candidates"]]
+        belief_summary = record["belief_summary"]
+    else:
+        sample = read_json(sample_public)
+        if (not isinstance(sample, dict) or set(sample) != {"version", "architecture_family", "encoder_hash",
+                "observation", "intents", "belief_summary"}
+                or sample["version"] != "typed-inference-sample-v1"
+                or sample["architecture_family"] != family or sample["encoder_hash"] != spec.digest
+                or not isinstance(sample["intents"], list) or not sample["intents"]):
+            raise ValueError("typed public sample source/model contract is invalid")
+        observation, intents, belief_summary = (sample["observation"], sample["intents"],
+                                                 sample["belief_summary"])
+    ir = ObservationIR.from_public(observation, spec, belief_summary=belief_summary)
+    batch = batch_typed_positions([TypedEncoder(spec).encode(ir, intents)])
+    if not np.array_equal(batch.candidate_mask[0],
+                          np.arange(batch.candidate_mask.shape[1]) < len(intents)):
+        raise ValueError("typed sample replay candidate mask differs from public intents")
+    order = spec.feature_schema["input_order"][family]
+    return dict(zip(order, batch.as_family_inputs(family), strict=True))
 
 
 def initialize(args, root, spec):
+    if args.model_family == "entity-transformer" and args.warm_start_legacy_base:
+        raise ValueError("legacy residual warm start is available only for mask-resnet")
+    if args.model_family == "legacy-resnet" and args.warm_start_legacy_base:
+        raise ValueError("legacy residual warm start requires the new mask-resnet family")
+    if (root / "models" / args.slot).is_symlink():
+        raise ValueError("model slot is a symlink; choose a new --slot")
     directory = slot(root, "models", args.slot)
     base = directory / "base.pt"
-    if base.exists() and not args.overwrite:
+    if (base.exists() or base.is_symlink()) and not args.overwrite:
         raise FileExistsError("model slot already contains a base; explicit --overwrite is required")
     torch.manual_seed(args.seed)
+    if args.model_family != "legacy-resnet":
+        model, blocks = _typed_model(args, spec)
+        warmed = None
+        if args.warm_start_legacy_base:
+            legacy, _ = load_base(args.warm_start_legacy_base)
+            transferred = model.warm_start_residual_convolutions(legacy)
+            warmed = {"legacy_base_sha256": file_sha256(args.warm_start_legacy_base),
+                      "transferred_tensors": list(transferred)}
+        model.eval()
+        fingerprint = save_typed_base(model, spec, base)
+        return {"base": str(base), "base_hash": fingerprint, "manifest": None,
+                "encoder_hash": spec.digest, "architecture_family": args.model_family,
+                "architecture": {"channels": args.channels, "blocks": blocks, "rank": args.rank},
+                "warm_start": warmed, "activated": False}
+    blocks = args.blocks
     model = PolicyValueNetwork(ModelConfig(spec.board_channels, spec.condition_dim, spec.action_dim,
-                    channels=args.channels, residual_blocks=args.blocks, lora_rank=args.rank, lora_alpha=float(args.rank))).eval()
+                    channels=args.channels, residual_blocks=blocks, lora_rank=args.rank, lora_alpha=float(args.rank))).eval()
     fingerprint = save_base(model, spec, base)
     manifest = export_onnx(model, spec, directory / "deployment")
     return {"base": str(base), "base_hash": fingerprint, "manifest": str(manifest), "encoder_hash": spec.digest,
-            "architecture": {"channels": args.channels, "blocks": args.blocks, "rank": args.rank}, "activated": False}
+            "architecture": {"channels": args.channels, "blocks": blocks, "rank": args.rank}, "activated": False}
 
 
 def choose(args, root, spec, cancelled):
-    tracker = PublicTracker.from_snapshot(read_json(args.trace))
-    factory = NativeSourceFactory(_configuration(args))
+    typed_spec = spec if args.model_family != "legacy-resnet" else None
+    tracker = PublicTracker.from_snapshot(read_json(args.trace), typed_spec=typed_spec)
+    factory = NativeSourceFactory(_configuration(args), typed_spec=typed_spec)
     belief = ParticleBelief(tracker, factory, seed=args.belief_seed,
               limits=BeliefLimits(particles=args.particles, proposals=args.proposals, elapsed_ms=args.belief_ms), cancelled=cancelled)
     search = _search(args, spec, _manifest(args, root, spec), args.backend)
@@ -111,7 +232,11 @@ def selfplay(args, root, spec, cancelled):
     config = _configuration(args)
     output = reserve_slot(root, "datasets", args.run_id)
     try:
-        search = _search(args, spec, _manifest(args, root, spec), args.backend)
+        manifest_path = _manifest(args, root, spec)
+        deployment = load_manifest(manifest_path, spec) if args.model_family != "legacy-resnet" else None
+        if deployment is not None and deployment["architecture_family"] != args.model_family:
+            raise ValueError("typed selfplay model family differs from the deployment manifest")
+        search = _search(args, spec, manifest_path, args.backend)
         from ._native import Position
     except (Exception, KeyboardInterrupt) as error:
         _record_selfplay_failure(root, args.run_id, output / "episode-0000.json", None, error,
@@ -130,9 +255,14 @@ def selfplay(args, root, spec, cancelled):
             recorder = EpisodeRecorder({viewer: position.observe(viewer) for viewer in ("white", "black")}, spec,
                         environment_seed=(args.seed + game) % 2**32, belief_seed=args.belief_seed,
                         evidence_kind="bounded-verification" if args.verification else "selfplay",
-                        model_sha256=search.evaluator.session.model_sha256)
+                        model_sha256=search.evaluator.session.model_sha256,
+                        architecture_family=None if args.model_family == "legacy-resnet" else args.model_family,
+                        base_hash=deployment["base_hash"] if deployment is not None else None,
+                        adapter_hash=deployment["adapter_hash"] if deployment is not None else None,
+                        adapter_descriptor=deployment["adapter"] if deployment is not None else None)
             limits = BeliefLimits(particles=args.particles, proposals=args.proposals, elapsed_ms=args.belief_ms)
-            beliefs = {viewer: ParticleBelief(tracker, NativeSourceFactory(config), seed=args.belief_seed + index,
+            beliefs = {viewer: ParticleBelief(tracker, NativeSourceFactory(config,
+                        typed_spec=spec if args.model_family != "legacy-resnet" else None), seed=args.belief_seed + index,
                         limits=limits, cancelled=cancelled) for index, (viewer, tracker) in enumerate(recorder.trackers.items())}
             reason = "ply-limit"
             for _ in range(args.max_plies):
@@ -185,16 +315,22 @@ def train(args, root, spec, cancelled):
                 raise FileExistsError("training run slot already contains a checkpoint; pass --resume for this checkpoint or choose a new --run-id")
             if Path(args.resume).expanduser().resolve() != checkpoint.resolve():
                 raise FileExistsError("training run slot contains a different checkpoint; choose a new --run-id to resume from another checkpoint")
-        model, _ = load_base(args.base, spec)
+        typed = args.model_family != "legacy-resnet"
+        model, _ = load_typed_base(args.base, spec) if typed else load_base(args.base, spec)
+        if typed and _typed_loaded_family(model) != args.model_family:
+            raise ValueError("typed training base architecture differs from the explicit CLI family")
         if args.adapter:
             if args.mode != "adapter":
                 raise ValueError("adapter checkpoint cannot be used in base training mode")
-            load_adapter(model, spec, args.adapter)
+            if typed:
+                load_typed_adapter(model, spec, args.adapter)
+            else:
+                load_adapter(model, spec, args.adapter)
         if args.device == "cuda" and not torch.cuda.is_available():
             raise ValueError("requested CUDA device is unavailable")
         model.to(args.device)
         optimizer = create_optimizer(model, mode=args.mode, learning_rate=args.learning_rate)
-        dataset = ReplayDataset(args.replay, spec)
+        dataset = ReplayDataset(args.replay, spec, architecture_family=args.model_family if typed else None)
         cursor = DatasetCursor(dataset, args.seed)
         previous = load_training_checkpoint(model, optimizer, spec, cursor, args.resume) if args.resume else 0
         limits = TrainingLimits(steps=args.steps, batch_size=args.batch_size, elapsed_ms=args.elapsed_ms,
@@ -208,7 +344,13 @@ def train(args, root, spec, cancelled):
                 save_training_checkpoint(model, optimizer, spec, cursor, checkpoint, completed_steps=previous + completed)
                 last_saved = previous + completed
         try:
-            report = optimize(model, optimizer, PublicEncoder(spec), cursor, limits=limits, cancelled=cancelled, on_step=checkpoint_progress)
+            if typed:
+                from .ir import TypedEncoder
+
+                encoder = TypedEncoder(spec)
+            else:
+                encoder = PublicEncoder(spec)
+            report = optimize(model, optimizer, encoder, cursor, limits=limits, cancelled=cancelled, on_step=checkpoint_progress)
             save_training_checkpoint(model, optimizer, spec, cursor, checkpoint, completed_steps=previous + report["steps"])
         except (Exception, KeyboardInterrupt) as error:
             # Do not retry, lower resources or relabel data. A prior valid checkpoint
@@ -217,15 +359,26 @@ def train(args, root, spec, cancelled):
                         {"status": "failed", "error": type(error).__name__, "reason": str(error), "last_checkpointed_step": last_saved})
             raise
         if args.mode == "base":
-            save_base(model, spec, directory / "base.pt")
+            if typed:
+                save_typed_base(model, spec, directory / "base.pt")
+            else:
+                save_base(model, spec, directory / "base.pt")
         else:
-            save_adapter(model, spec, directory / "adapter.pt")
+            if typed:
+                save_typed_adapter(model, spec, directory / "adapter.pt")
+            else:
+                save_adapter(model, spec, directory / "adapter.pt")
         report.update({"checkpoint": str(checkpoint), "completed_steps": previous + report["steps"], "mode": args.mode})
+        if typed:
+            report["architecture_family"] = args.model_family
         atomic_json(slot(root, "reports", args.run_id) / "training.json", report)
         return report
 
 
 def export(args, root, spec):
+    typed = args.model_family != "legacy-resnet"
+    sample_inputs = _typed_sample_inputs(args.sample_replay, spec, args.model_family,
+                                         sample_public=args.sample_public) if typed else None
     raw_slot = root / "models" / args.slot
     if raw_slot.is_symlink():
         raise ValueError("deployment slot is a symlink; choose a new --slot")
@@ -236,10 +389,23 @@ def export(args, root, spec):
             raise IsADirectoryError("deployment output path is a directory; choose a new --slot")
         if any(path.exists() or path.is_symlink() for path in outputs):
             raise FileExistsError("deployment slot already contains model.onnx or manifest.json; choose a new --slot")
-        model, _ = load_base(args.base, spec)
-        descriptor = load_adapter(model, spec, args.adapter) if args.adapter else None
-        manifest = export_onnx(model, spec, directory, descriptor=descriptor)
-        return {"manifest": str(manifest), "model_sha256": load_manifest(manifest, spec)["model_sha256"], "activated": False}
+        model, _ = load_typed_base(args.base, spec) if typed else load_base(args.base, spec)
+        if typed and _typed_loaded_family(model) != args.model_family:
+            raise ValueError("typed export base architecture differs from the explicit CLI family")
+        if args.adapter:
+            descriptor = load_typed_adapter(model, spec, args.adapter) if typed else load_adapter(model, spec, args.adapter)
+        else:
+            descriptor = None
+        if typed:
+            manifest = export_typed_onnx(model, spec, directory, sample_inputs,
+                                         architecture_family=args.model_family, descriptor=descriptor)
+        else:
+            manifest = export_onnx(model, spec, directory, descriptor=descriptor)
+        result = {"manifest": str(manifest), "model_sha256": load_manifest(manifest, spec)["model_sha256"],
+                  "activated": False}
+        if typed:
+            result["architecture_family"] = args.model_family
+        return result
 
 
 def evaluate(args, root, spec, cancelled):
@@ -248,7 +414,15 @@ def evaluate(args, root, spec, cancelled):
     manifest = _manifest(args, root, spec)
     evaluator = ProductionEvaluator(manifest, spec, args.backend, threads=args.threads)
     episode = ReplayEpisode.load(args.replay, spec)
-    encoder = PublicEncoder(spec)
+    typed = args.model_family != "legacy-resnet"
+    if typed:
+        from .ir import ObservationIR, TypedEncoder, batch_typed_positions
+
+        if evaluator.architecture_family != args.model_family or episode.architecture_family != args.model_family:
+            raise ValueError("typed evaluation model and replay architecture differ")
+        encoder = TypedEncoder(spec)
+    else:
+        encoder = PublicEncoder(spec)
     metrics = []
     interrupted = False
     for record in episode.decisions[:args.max_samples]:
@@ -257,9 +431,25 @@ def evaluate(args, root, spec, cancelled):
             break
         observation = episode.trackers[record["actor"]].frame_at(record["trace_step"])
         candidates = record["candidates"]
-        encoded = encoder.encode(observation, [item["intent"] for item in candidates], belief_summary=record["belief_summary"])
-        logits, values = evaluator.evaluate(encoded.board[None], encoded.condition[None], encoded.action_features[None])
-        logits = logits[0].astype(np.float64)
+        intents = [item["intent"] for item in candidates]
+        if typed:
+            ir = ObservationIR.from_public(observation, spec, belief_summary=record["belief_summary"])
+            batch = batch_typed_positions([encoder.encode(ir, intents)])
+            order = spec.feature_schema["input_order"][args.model_family]
+            inputs = dict(zip(order, batch.as_family_inputs(args.model_family), strict=True))
+            logits, values = evaluator.evaluate_typed(inputs)
+            if not np.array_equal(batch.candidate_mask[0],
+                                  np.arange(batch.candidate_mask.shape[1]) < len(intents)):
+                raise ValueError("typed evaluation candidate mask differs from replay intents")
+            logits = logits[0, batch.candidate_mask[0]].astype(np.float64)
+        else:
+            encoded = encoder.encode(observation, intents, belief_summary=record["belief_summary"])
+            logits, values = evaluator.evaluate(encoded.board[None], encoded.condition[None], encoded.action_features[None])
+            logits = logits[0].astype(np.float64)
+        if (logits.shape != (len(intents),) or values.shape != (1, 1)
+                or not np.isfinite(logits).all() or not np.isfinite(values).all()
+                or np.abs(values).max() > 1.00001):
+            raise ValueError("evaluation returned invalid policy/value for the replay candidates")
         log_policy = logits - (logits.max() + np.log(np.exp(logits - logits.max()).sum()))
         policy = np.array([item["probability"] for item in candidates])
         metric = {"policy_ce": float(-(policy * log_policy).sum()), "value_prediction": float(values[0, 0])}
@@ -269,29 +459,49 @@ def evaluate(args, root, spec, cancelled):
             metric["value_mse"] = (metric["value_prediction"] - target)**2
         metrics.append(metric)
     stop_reason = "cancelled" if interrupted else ("sample-limit" if len(episode.decisions) > args.max_samples else "complete")
-    report = {"version": "accelerate-evaluation-v1", "samples": len(metrics),
+    report = {"version": "accelerate-evaluation-v2" if typed else "accelerate-evaluation-v1", "samples": len(metrics),
               "decisions_available": len(episode.decisions), "sample_limit": args.max_samples,
               "stop_reason": stop_reason, "metrics": metrics, "backend": args.backend,
               "episode_status": episode.outcome["status"], "replay_hash": episode.replay_hash,
               "encoder_hash": spec.digest, "model_sha256": evaluator.session.model_sha256,
               "activated": False}
+    if typed:
+        report["architecture_family"] = args.model_family
     atomic_json(slot(root, "reports", args.run_id) / "evaluation.json", report)
     return report
 
 
 def activate(args, root, spec):
+    typed = args.model_family != "legacy-resnet"
+    sample_inputs = _typed_sample_inputs(args.sample_replay, spec, args.model_family,
+                                         sample_public=args.sample_public) if typed else None
     manifest_path = Path(args.manifest).resolve()
     manifest = load_manifest(manifest_path, spec)
     if len(args.expected_sha256) != 64 or manifest["model_sha256"] != args.expected_sha256:
         raise ValueError("explicit activation SHA-256 does not match the verified artifact")
+    if typed and manifest["architecture_family"] != args.model_family:
+        raise ValueError("typed activation architecture differs from the explicit CLI family")
     evaluator = ProductionEvaluator(manifest_path, spec, args.backend, threads=args.threads)
-    logits, value = evaluator.evaluate(np.zeros((1, spec.board_channels, 8, 8), np.float32),
-        np.zeros((1, spec.condition_dim), np.float32), np.zeros((1, 1, spec.action_dim), np.float32))
-    if not np.isfinite(logits).all() or not np.isfinite(value).all():
+    if typed:
+        if evaluator.architecture_family != args.model_family:
+            raise ValueError("typed activation runtime architecture differs from the explicit CLI family")
+        logits, value = evaluator.evaluate_typed(sample_inputs)
+        expected_shape = sample_inputs["candidate_mask"].shape
+    else:
+        logits, value = evaluator.evaluate(np.zeros((1, spec.board_channels, 8, 8), np.float32),
+            np.zeros((1, spec.condition_dim), np.float32), np.zeros((1, 1, spec.action_dim), np.float32))
+        expected_shape = (1, 1)
+    if (logits.shape != expected_shape or value.shape != (1, 1)
+            or not np.isfinite(logits).all() or not np.isfinite(value).all()
+            or np.abs(value).max() > 1.00001):
         raise ValueError("activation native inference smoke returned non-finite outputs")
-    reference = {"version": "accelerate-activation-v1", "manifest": str(manifest_path),
+    reference = {"version": "accelerate-activation-v2" if typed else "accelerate-activation-v1",
+                 "manifest": str(manifest_path),
                  "manifest_sha256": file_sha256(manifest_path), "model_sha256": manifest["model_sha256"],
                  "encoder_hash": spec.digest, "backend": args.backend}
+    if typed:
+        reference.update({"architecture_family": args.model_family,
+                          "model_io_version": manifest["model_io_version"]})
     path = slot(root, "models", "active") / "activation.json"
     atomic_json(path, reference)
     return {"activation": str(path), **reference}
@@ -301,15 +511,21 @@ def parser():
     main = argparse.ArgumentParser(prog="accelerate-chess")
     main.add_argument("--artifact-root", help="external fixed artifact root; defaults to host APPDATA/Accelerate")
     main.add_argument("--catalog", help="explicit frozen catalog JSON; installed native catalog is the default")
+    main.add_argument("--observation-policy", help="explicit frozen observation policy JSON; installed native policy is the default")
+    main.add_argument("--model-family", choices=("legacy-resnet", "mask-resnet", "entity-transformer"),
+                      default="legacy-resnet", help="select a versioned model input contract")
     main.add_argument("--threads", type=int, default=1, help="CPU threads for Torch and Rust ort (1..64); tract requires 1")
     commands = main.add_subparsers(dest="command", required=True)
     init = commands.add_parser("init")
     init.add_argument("--slot", default="default")
     init.add_argument("--seed", type=int, default=42)
     init.add_argument("--channels", type=int, default=128)
-    init.add_argument("--blocks", type=int, default=8)
+    init.set_defaults(blocks_explicit=False)
+    init.add_argument("--blocks", type=int, default=8, action=_ExplicitBlocks,
+                      help="residual or Transformer block count; defaults to 8 or 4")
     init.add_argument("--rank", type=int, default=8)
     init.add_argument("--overwrite", action="store_true")
+    init.add_argument("--warm-start-legacy-base", help="mask-resnet only: copy matching legacy residual convolutions; never resume optimizer state")
     for name in ("choose", "selfplay"):
         command = commands.add_parser(name)
         command.add_argument("--config", help="public GameConfig JSON; defaults to source normal mode")
@@ -354,6 +570,9 @@ def parser():
     command.add_argument("--base", required=True)
     command.add_argument("--adapter")
     command.add_argument("--slot", default="deployment")
+    export_sample = command.add_mutually_exclusive_group()
+    export_sample.add_argument("--sample-replay", help="typed model only: public replay used to derive exact ONNX input shapes")
+    export_sample.add_argument("--sample-public", help="typed model only: versioned public observation and intents used to bootstrap export")
     command = commands.add_parser("evaluate")
     command.add_argument("--manifest")
     command.add_argument("--backend", choices=("ort", "tract"), default="ort", help="explicit execution backend; tract requires --threads 1")
@@ -364,6 +583,9 @@ def parser():
     command.add_argument("--manifest", required=True)
     command.add_argument("--expected-sha256", required=True)
     command.add_argument("--backend", choices=("ort", "tract"), default="ort", help="backend used to verify activation; recorded as provenance, with no automatic runtime selection")
+    activation_sample = command.add_mutually_exclusive_group()
+    activation_sample.add_argument("--sample-replay", help="typed model only: source-bound public replay for native inference smoke")
+    activation_sample.add_argument("--sample-public", help="typed model only: versioned public observation and intents for native inference smoke")
     return main
 
 
@@ -382,7 +604,9 @@ def main(arguments=None):
         if hasattr(args, "belief_seed") and not 0 <= args.belief_seed < 2**32 - 1:
             raise ValueError("independent belief seed must fit uint32 including its second viewer")
         torch.set_num_threads(args.threads)
-        root, spec = artifact_root(args.artifact_root), default_spec(args.catalog)
+        root = artifact_root(args.artifact_root)
+        policy = read_json(args.observation_policy) if args.observation_policy else None
+        spec = default_spec(args.catalog, observation_policy=policy, model_family=args.model_family)
         cancelled = lambda: stopped
         if args.command == "init":
             result = initialize(args, root, spec)

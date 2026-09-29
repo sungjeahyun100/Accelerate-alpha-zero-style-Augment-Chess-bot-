@@ -72,11 +72,15 @@ jobs:
         run: |
           cargo fmt --all --check
           cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Rust workspace tests
-        run: cargo test --workspace --locked
+      # The workspace run includes canonical geometry, composite MoveProgram,
+      # independent core checks, and the retained v6 engine tests.
+      - name: Rust workspace tests including geometry and MoveProgram
+        run: |
+          cargo test --workspace --locked
+          python .github/scripts/native-bot-check.py rust-scope
       - name: Locked dependencies and sdist to installed wheel
         run: python .github/scripts/native-bot-check.py build
-      - name: Installed native, model, ort / tract, search and bounded CLI tests
+      - name: Installed native, typed IR, both models, ort / tract, search and bounded CLI tests
         run: python .github/scripts/native-bot-check.py tests
       - name: Preserve validation reports
         if: always()

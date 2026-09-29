@@ -4,7 +4,8 @@ mod conversion;
 mod inference;
 use accelerate_engine::{
     Action as EngineAction, ActionStream as EngineActionStream, Color, EngineError, GameConfig,
-    GameResult, Position as EnginePosition, RngState, StepResult as EngineStepResult,
+    GameResult, Position as EnginePosition, RULES_VERSION_V6, RULES_VERSION_V7, RngState,
+    StepResult as EngineStepResult,
 };
 use numpy::PyArray2;
 use pyo3::{
@@ -32,12 +33,34 @@ fn catalog() -> &'static Value {
             .expect("checked source catalog")
     })
 }
+fn catalog_for_ruleset(rules_version: &str) -> PyResult<&'static Value> {
+    static V7: OnceLock<Value> = OnceLock::new();
+    match rules_version {
+        RULES_VERSION_V6 => Ok(catalog()),
+        RULES_VERSION_V7 => Ok(V7.get_or_init(|| {
+            serde_json::from_str(include_str!("../../catalog/site-20260928.json"))
+                .expect("checked v7 source catalog")
+        })),
+        _ => Err(PyValueError::new_err("unknown rules version")),
+    }
+}
 fn observation_policy() -> &'static Value {
     static POLICY: OnceLock<Value> = OnceLock::new();
     POLICY.get_or_init(|| {
         serde_json::from_str(include_str!("../../catalog/observation-20260927.json"))
             .expect("checked source observation policy")
     })
+}
+fn observation_policy_for_ruleset(rules_version: &str) -> PyResult<&'static Value> {
+    static V7: OnceLock<Value> = OnceLock::new();
+    match rules_version {
+        RULES_VERSION_V6 => Ok(observation_policy()),
+        RULES_VERSION_V7 => Ok(V7.get_or_init(|| {
+            serde_json::from_str(include_str!("../../catalog/observation-20260928.json"))
+                .expect("checked v7 observation policy")
+        })),
+        _ => Err(PyValueError::new_err("unknown rules version")),
+    }
 }
 fn error(error: EngineError) -> PyErr {
     match error {
@@ -231,8 +254,9 @@ impl Position {
         Ok(action)
     }
     fn wrap(inner: EnginePosition) -> PyResult<Self> {
+        let selected_catalog = catalog_for_ruleset(&inner.state().ruleset_id)?;
         if inner.state().ruleset_id
-            != catalog()["rulesVersion"]
+            != selected_catalog["rulesVersion"]
                 .as_str()
                 .ok_or_else(|| NativeError::new_err("rules version missing"))?
         {
@@ -246,7 +270,7 @@ impl Position {
         object.remove("history");
         let rng = value(&inner.state().rng)?;
         let history = value(&inner.state().history)?;
-        let mut envelope = json!({"protocolVersion": POSITION_VERSION, "rulesVersion": catalog()["rulesVersion"], "catalogVersion": catalog()["catalogVersion"], "state": state, "rng": rng, "history": history});
+        let mut envelope = json!({"protocolVersion": POSITION_VERSION, "rulesVersion": selected_catalog["rulesVersion"], "catalogVersion": selected_catalog["catalogVersion"], "state": state, "rng": rng, "history": history});
         let position_id = digest(&envelope)?;
         envelope["positionId"] = json!(position_id);
         Ok(Self {
@@ -272,9 +296,13 @@ impl Position {
         if object.len() != fields.len() || fields.iter().any(|key| !object.contains_key(*key)) {
             return Err(PyValueError::new_err("unexpected snapshot fields"));
         }
+        let rules_version = snapshot["rulesVersion"]
+            .as_str()
+            .ok_or_else(|| PyValueError::new_err("snapshot rules version must be text"))?;
+        let selected_catalog = catalog_for_ruleset(rules_version)?;
         if snapshot["protocolVersion"] != POSITION_VERSION
-            || snapshot["rulesVersion"] != catalog()["rulesVersion"]
-            || snapshot["catalogVersion"] != catalog()["catalogVersion"]
+            || snapshot["rulesVersion"] != selected_catalog["rulesVersion"]
+            || snapshot["catalogVersion"] != selected_catalog["catalogVersion"]
         {
             return Err(PyValueError::new_err("snapshot version mismatch"));
         }
@@ -298,9 +326,6 @@ impl Position {
         }
         let history: Vec<Value> = serde_json::from_value(snapshot["history"].clone())
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        let rules_version = snapshot["rulesVersion"]
-            .as_str()
-            .ok_or_else(|| PyValueError::new_err("snapshot rules version must be text"))?;
         let imported = Self::wrap(
             EnginePosition::from_snapshot_value_with_rules_version(
                 Value::Object(state.clone()),
@@ -661,14 +686,22 @@ impl StepResult {
 
 /// Return an owned copy of the same frozen catalog compiled into the engine boundary.
 #[pyfunction]
-fn site_catalog(py: Python<'_>) -> PyResult<Py<PyAny>> {
-    conversion::to_python(py, catalog())
+#[pyo3(signature = (rules_version=None))]
+fn site_catalog(py: Python<'_>, rules_version: Option<&str>) -> PyResult<Py<PyAny>> {
+    conversion::to_python(
+        py,
+        catalog_for_ruleset(rules_version.unwrap_or(RULES_VERSION_V6))?,
+    )
 }
 
 /// Return an owned copy of the public projection policy compiled into this wheel.
 #[pyfunction]
-fn site_observation_policy(py: Python<'_>) -> PyResult<Py<PyAny>> {
-    conversion::to_python(py, observation_policy())
+#[pyo3(signature = (rules_version=None))]
+fn site_observation_policy(py: Python<'_>, rules_version: Option<&str>) -> PyResult<Py<PyAny>> {
+    conversion::to_python(
+        py,
+        observation_policy_for_ruleset(rules_version.unwrap_or(RULES_VERSION_V6))?,
+    )
 }
 
 #[pymodule]
@@ -699,6 +732,7 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
             .as_str()
             .ok_or_else(|| NativeError::new_err("catalog rules version missing"))?,
     )?;
+    module.add("RULES_VERSION_V7", RULES_VERSION_V7)?;
     module.add(
         "CATALOG_VERSION",
         catalog()["catalogVersion"]

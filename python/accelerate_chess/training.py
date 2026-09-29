@@ -22,10 +22,11 @@ import torch
 
 from .encoding import EncoderSpec, PublicEncoder, batch_positions, canonical_json
 from .network.artifacts import MAX_ARTIFACT_BYTES, _validate_state
-from .network.model import ModelConfig, PolicyValueNetwork, tensor_state_hash
+from .network.model import PolicyValueNetwork, tensor_state_hash
 from .replay import ReplayEpisode, TrainingExample
 
 TRAINING_VERSION = "accelerate-training-checkpoint-v1"
+TYPED_TRAINING_VERSION = "accelerate-training-checkpoint-v2"
 
 
 def _sha(path):
@@ -35,10 +36,18 @@ def _sha(path):
 
 class ReplayDataset:
     """Index references, retaining at most one decoded episode at a time."""
-    def __init__(self, paths: Sequence[str | Path], spec: EncoderSpec, *, max_files: int = 4096, max_bytes: int = 1_073_741_824, max_examples: int = 1_000_000):
+    def __init__(self, paths: Sequence[str | Path], spec: EncoderSpec, *, architecture_family: str | None = None,
+                 max_files: int = 4096, max_bytes: int = 1_073_741_824, max_examples: int = 1_000_000):
+        from .ir import TypedEncoderSpec
+
         if not paths or len(paths) > max_files or not 1 <= max_files <= 4096 or not 1 <= max_examples <= 1_000_000 or not 1 <= max_bytes <= 1_073_741_824:
             raise ValueError("dataset needs explicit finite replay inputs and limits")
+        typed = isinstance(spec, TypedEncoderSpec)
+        if (typed and architecture_family not in (None, "mask-resnet", "entity-transformer")
+                or not typed and architecture_family is not None):
+            raise ValueError("dataset model family differs from the encoder contract")
         self.spec = spec
+        self.architecture_family = architecture_family
         self.paths = tuple(Path(path).resolve() for path in paths)
         if len(set(self.paths)) != len(self.paths) or sum(path.stat().st_size for path in self.paths) > max_bytes:
             raise ValueError("duplicate replay inputs or dataset byte budget exceeded")
@@ -46,6 +55,11 @@ class ReplayDataset:
         self.index: list[tuple[int, int]] = []
         for file_index, path in enumerate(self.paths):
             episode = ReplayEpisode.load(path, spec)
+            if typed:
+                if self.architecture_family is None:
+                    self.architecture_family = episode.architecture_family
+                elif episode.architecture_family != self.architecture_family:
+                    raise ValueError("typed replay architecture differs from the dataset family")
             if episode.outcome["status"] != "terminal":
                 continue
             for decision in range(len(episode.decisions)):
@@ -54,7 +68,10 @@ class ReplayDataset:
                 self.index.append((file_index, decision))
         if not self.index:
             raise ValueError("dataset contains no terminal policy/value targets; unfinished episodes were excluded")
-        self.digest = hashlib.sha256(canonical_json({"files": self._hashes, "index": self.index, "encoder": spec.digest}).encode()).hexdigest()
+        identity = {"files": self._hashes, "index": self.index, "encoder": spec.digest}
+        if typed:
+            identity["architecture_family"] = self.architecture_family
+        self.digest = hashlib.sha256(canonical_json(identity).encode()).hexdigest()
         self._cached_file = -1
         self._cached_episode = None
 
@@ -167,9 +184,28 @@ def create_optimizer(model: PolicyValueNetwork, *, mode: str, learning_rate: flo
 
 
 def optimize(model, optimizer, encoder: PublicEncoder, cursor: DatasetCursor, *, limits: TrainingLimits = TrainingLimits(), cancelled: Callable[[], bool] | None = None, on_step: Callable[[int], None] | None = None):
+    from .ir import TypedEncoder
+    from .network.mask_resnet import MaskResNetPolicyValueNetwork
+    from .network.entity_transformer import EntityTransformer
+
     if not isinstance(optimizer, torch.optim.AdamW) or encoder.spec.digest != cursor.dataset.spec.digest:
         raise ValueError("optimization requires matching model/dataset contracts and AdamW")
-    if (model.config.board_channels, model.config.condition_dim, model.config.action_dim) != (encoder.spec.board_channels, encoder.spec.condition_dim, encoder.spec.action_dim):
+    typed = isinstance(encoder, TypedEncoder)
+    if typed:
+        if isinstance(model, MaskResNetPolicyValueNetwork):
+            family, context = "mask-resnet", model.config.typed_context
+            if model.config.board_channels != len(encoder.spec.feature_schema["spatial_channels"]):
+                raise ValueError("typed ResNet spatial channels differ from the encoder")
+        elif isinstance(model, EntityTransformer):
+            family, context = "entity-transformer", model.config.typed
+        else:
+            raise ValueError("typed optimization needs a typed A or B model")
+        if cursor.dataset.architecture_family != family:
+            raise ValueError("typed dataset teacher family differs from the trained model")
+        vocabulary = len(encoder.spec.category_vocabulary)
+        if (context.record_category_sizes, context.relation_category_sizes, context.candidate_category_sizes) != ((vocabulary,) * 4, (vocabulary,) * 2, (vocabulary,) * 4):
+            raise ValueError("typed model category vocabulary differs from the encoder")
+    elif not isinstance(encoder, PublicEncoder) or not isinstance(model, PolicyValueNetwork) or (model.config.board_channels, model.config.condition_dim, model.config.action_dim) != (encoder.spec.board_channels, encoder.spec.condition_dim, encoder.spec.action_dim):
         raise ValueError("optimizer model feature dimensions differ")
     if {id(parameter) for group in optimizer.param_groups for parameter in group["params"]} != {id(parameter) for parameter in model.parameters() if parameter.requires_grad}:
         raise ValueError("optimizer parameters differ from the base/adapter training mode")
@@ -188,11 +224,22 @@ def optimize(model, optimizer, encoder: PublicEncoder, cursor: DatasetCursor, *,
             reason = "cancelled" if cancelled() else "elapsed"
             break
         examples = cursor.next_batch(limits.batch_size)
-        model.config.validate_working_set(len(examples), max(1, max(len(example.intents) for example in examples)))
-        encoded = batch_positions([encoder.encode(example.observation, example.intents, belief_summary=example.belief_summary) for example in examples])
-        tensors = tuple(torch.from_numpy(array).to(next(model.parameters()).device) for array in (encoded.board, encoded.condition, encoded.action_features))
+        if typed:
+            from .ir import ObservationIR, batch_typed_positions
+
+            encoded = batch_typed_positions([encoder.encode(ObservationIR.from_public(example.observation,
+                encoder.spec, belief_summary=example.belief_summary), example.intents) for example in examples])
+            arrays = encoded.as_family_inputs(family)
+            action_mask = encoded.candidate_mask
+        else:
+            model.config.validate_working_set(len(examples), max(1, max(len(example.intents) for example in examples)))
+            encoded = batch_positions([encoder.encode(example.observation, example.intents,
+                belief_summary=example.belief_summary) for example in examples])
+            arrays = (encoded.board, encoded.condition, encoded.action_features)
+            action_mask = encoded.action_mask
+        tensors = tuple(torch.from_numpy(array).to(next(model.parameters()).device) for array in arrays)
         model.validate_inputs(*tensors)
-        policy = torch.zeros(encoded.action_mask.shape, device=tensors[0].device)
+        policy = torch.zeros(action_mask.shape, device=tensors[0].device)
         for row, example in enumerate(examples):
             if len(example.policy) != len(example.intents) or not np.isfinite(example.policy).all() or any(probability < 0 for probability in example.policy) or abs(sum(example.policy) - 1) > 1e-6 or example.value not in (-1., 0., 1.) or example.actor != example.observation["viewer"]:
                 raise ValueError("training policy/value target is invalid")
@@ -200,7 +247,7 @@ def optimize(model, optimizer, encoder: PublicEncoder, cursor: DatasetCursor, *,
         targets = torch.tensor([[example.value] for example in examples], device=policy.device)
         optimizer.zero_grad(set_to_none=True)
         logits, value = model(*tensors)
-        mask = torch.from_numpy(encoded.action_mask).to(policy.device)
+        mask = torch.from_numpy(action_mask).to(policy.device)
         log_policy = torch.log_softmax(logits.masked_fill(~mask, -torch.inf), dim=1)
         policy_loss = -(policy * log_policy.masked_fill(~mask, 0)).sum(dim=1).mean()
         value_loss = torch.nn.functional.mse_loss(value, targets)
@@ -320,17 +367,40 @@ def _validate_optimizer(state, optimizer, model, names):
                 raise ValueError("checkpoint optimizer tensor shape/value mismatch")
 
 
+def _typed_model_family(model):
+    from .network.mask_resnet import MaskResNetPolicyValueNetwork
+    from .network.entity_transformer import EntityTransformer
+
+    if isinstance(model, MaskResNetPolicyValueNetwork):
+        return "mask-resnet"
+    if isinstance(model, EntityTransformer):
+        return "entity-transformer"
+    raise ValueError("typed checkpoint needs a typed A or B model")
+
+
 def save_training_checkpoint(model, optimizer, spec: EncoderSpec, cursor: DatasetCursor, path, *, completed_steps: int):
+    from .ir import TypedEncoderSpec
+
     if type(completed_steps) is not int or completed_steps < 0 or cursor.dataset.spec.digest != spec.digest or model.merged:
         raise ValueError("invalid training checkpoint progress/contract")
+    typed = isinstance(spec, TypedEncoderSpec)
+    if not typed and not isinstance(spec, EncoderSpec):
+        raise TypeError("training checkpoint needs a supported encoder spec")
+    if not typed and not isinstance(model, PolicyValueNetwork):
+        raise TypeError("legacy training checkpoint needs the legacy ResNet model")
     base, adapter = model.base_state(), model.adapter_state()
-    state = {"version": TRAINING_VERSION, "mode": model.training_mode, "training": model.training,
+    state = {"version": TYPED_TRAINING_VERSION if typed else TRAINING_VERSION,
+             "mode": model.training_mode, "training": model.training,
              "config": asdict(model.config), "encoder": spec.to_dict(), "encoder_hash": spec.digest,
              "base": {name: tensor.detach().cpu().clone() for name, tensor in base.items()},
              "adapter": {name: tensor.detach().cpu().clone() for name, tensor in adapter.items()},
              "base_hash": tensor_state_hash(base), "adapter_hash": tensor_state_hash(adapter),
              "optimizer": deepcopy(optimizer.state_dict()), "optimizer_names": _optimizer_names(model, optimizer),
              "rng": _rng_snapshot(), "cursor": cursor.snapshot(), "completed_steps": completed_steps}
+    if typed:
+        state.update({"architecture_family": _typed_model_family(model),
+                      "feature_schema_hash": spec.feature_schema_hash,
+                      "model_io_version": "typed-policy-value-v1"})
     _validate_optimizer(state["optimizer"], optimizer, model, state["optimizer_names"])
     state["checkpoint_hash"] = _tree_hash(state)
     path = Path(path)
@@ -352,15 +422,32 @@ def save_training_checkpoint(model, optimizer, spec: EncoderSpec, cursor: Datase
 
 
 def load_training_checkpoint(model, optimizer, spec: EncoderSpec, cursor: DatasetCursor, path) -> int:
+    from .ir import TypedEncoderSpec
+
     path = Path(path)
     if path.stat().st_size > MAX_ARTIFACT_BYTES:
         raise ValueError("training checkpoint exceeds the artifact budget")
     payload = torch.load(path, map_location="cpu", weights_only=True, mmap=True)
     fields = {"version", "mode", "training", "config", "encoder", "encoder_hash", "base", "adapter", "base_hash", "adapter_hash", "optimizer", "optimizer_names", "rng", "cursor", "completed_steps", "checkpoint_hash"}
-    if not isinstance(payload, dict) or set(payload) != fields or payload["version"] != TRAINING_VERSION:
+    typed = isinstance(spec, TypedEncoderSpec)
+    if not typed and not isinstance(spec, EncoderSpec):
+        raise TypeError("training checkpoint needs a supported encoder spec")
+    if not typed and not isinstance(model, PolicyValueNetwork):
+        raise TypeError("legacy training checkpoint needs the legacy ResNet model")
+    if typed:
+        fields.update({"architecture_family", "feature_schema_hash", "model_io_version"})
+    if not isinstance(payload, dict) or set(payload) != fields or payload["version"] != (TYPED_TRAINING_VERSION if typed else TRAINING_VERSION):
         raise ValueError("training checkpoint format mismatch")
-    saved_spec, config = EncoderSpec.from_dict(payload["encoder"], observation_policy=spec.observation_policy), ModelConfig(**payload["config"])
-    if saved_spec.digest != spec.digest or payload["encoder_hash"] != spec.digest or config != model.config or payload["mode"] != model.training_mode or type(payload["training"]) is not bool or type(payload["completed_steps"]) is not int or payload["completed_steps"] < 0:
+    if typed:
+        if (payload["encoder"] != spec.to_dict() or payload["architecture_family"] != _typed_model_family(model)
+                or payload["feature_schema_hash"] != spec.feature_schema_hash
+                or payload["model_io_version"] != "typed-policy-value-v1"):
+            raise ValueError("typed training checkpoint model/encoder provenance mismatch")
+    else:
+        saved_spec = EncoderSpec.from_dict(payload["encoder"], observation_policy=spec.observation_policy)
+        if saved_spec.digest != spec.digest:
+            raise ValueError("training checkpoint encoder compatibility mismatch")
+    if payload["encoder_hash"] != spec.digest or payload["config"] != asdict(model.config) or payload["mode"] != model.training_mode or type(payload["training"]) is not bool or type(payload["completed_steps"]) is not int or payload["completed_steps"] < 0:
         raise ValueError("training checkpoint mode/model/encoder compatibility mismatch")
     if payload["mode"] == "adapter" and payload["base_hash"] != model.base_hash:
         raise ValueError("adapter training checkpoint cannot replace a different frozen base")

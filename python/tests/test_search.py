@@ -17,9 +17,11 @@ import pytest
 
 from accelerate_chess.encoding import EncoderSpec, PublicEncoder, canonical_json
 from accelerate_chess.inference import ProductionEvaluator
+from accelerate_chess.ir import TypedEncoder, TypedEncoderSpec
 from accelerate_chess.search import (BeliefLimits, InformationMismatchError, InformationSetSearch,
     MissingHistoryError, NativeSourceFactory, ParticleBelief, ParticleExhaustedError,
-    PublicTracker, SearchBudgetError, SearchLimits, TransitionProposal, _stream)
+    PublicTracker, SearchBudgetError, SearchLimits, TransitionProposal,
+    TypedInformationSetSearch, _stream)
 from test_model_stack import observation_policy
 
 
@@ -124,10 +126,20 @@ def spec():
         history_encoding="public-history-summary-v1", action_encoding="public-decision-intent-v1").with_observation_policy(policy)
 
 
-def belief(*, chance=False, reaction=False, particles=16):
-    tracker = PublicTracker(TestPosition(chance=chance, reaction=reaction).observe("white"))
+def belief(*, chance=False, reaction=False, particles=16, typed_spec=None):
+    tracker = PublicTracker(TestPosition(chance=chance, reaction=reaction).observe("white"),
+                            typed_spec=typed_spec)
     return ParticleBelief(tracker, TestFactory(chance=chance, reaction=reaction), seed=19,
         limits=BeliefLimits(particles=particles, proposals=particles * 2, elapsed_ms=1000))
+
+
+@lru_cache(maxsize=1)
+def typed_spec():
+    policy = observation_policy()
+    catalog = {"schemaVersion": 1, "rulesVersion": policy["rulesVersion"],
+               "catalogVersion": "synthetic-typed-v1", "pieceTypes": ["pawn", "wall"],
+               "cards": [{"id": "slime", "draftCategory": "MIDDLE"}], "actionTypes": ["move"]}
+    return TypedEncoderSpec.from_catalog(catalog, observation_policy=policy)
 
 
 def test_action_stream_counts_examined_candidates_and_rejects_zero_progress():
@@ -398,6 +410,90 @@ def test_progressive_widening_cancellation_and_finite_budgets():
         budget_search.run(belief())
 
 
+def test_work_limits_and_injected_clocks_have_separate_boundaries():
+    initial = TestPosition().observe("white")
+
+    def unexpected_clock():
+        raise AssertionError("a finite-work completion run must not read wall time")
+
+    posterior = ParticleBelief(PublicTracker(initial), TestFactory(), seed=19,
+        limits=BeliefLimits(particles=2, proposals=2, elapsed_ms=None), clock=unexpected_clock)
+    assert posterior.proposals_used == 2 and len(posterior._particles) == 2
+    search = InformationSetSearch(PublicEncoder(spec()), TestEvaluator(spec()),
+        limits=SearchLimits(iterations=1, max_depth=1, elapsed_ms=None), clock=unexpected_clock)
+    assert search.run(posterior).iterations == 1
+
+    belief_times = iter((0., .006))
+    with pytest.raises(SearchBudgetError, match="belief reconstruction time budget exhausted"):
+        ParticleBelief(PublicTracker(initial), TestFactory(), seed=19,
+            limits=BeliefLimits(particles=1, proposals=1, elapsed_ms=5), clock=lambda: next(belief_times))
+    with pytest.raises(SearchBudgetError, match="belief reconstruction cancelled"):
+        ParticleBelief(PublicTracker(initial), TestFactory(), seed=19,
+            limits=BeliefLimits(particles=1, proposals=1, elapsed_ms=None), cancelled=lambda: True)
+
+    search_times = iter((0., .006))
+    timed = InformationSetSearch(PublicEncoder(spec()), TestEvaluator(spec()),
+        limits=SearchLimits(iterations=1, max_depth=1, elapsed_ms=5), clock=lambda: next(search_times))
+    with pytest.raises(SearchBudgetError, match="no public decision was evaluated before elapsed"):
+        timed.run(posterior)
+    with pytest.raises(ValueError, match="elapsed_ms"):
+        BeliefLimits(elapsed_ms=0)
+    with pytest.raises(ValueError, match="elapsed_ms"):
+        SearchLimits(elapsed_ms=0)
+
+
+@pytest.mark.parametrize("family", ["mask-resnet", "entity-transformer"])
+def test_typed_search_keeps_public_intent_and_family_tensor_contract(family):
+    contract = typed_spec()
+
+    class TypedEvaluator(ProductionEvaluator):
+        def __init__(self):
+            self.spec = contract
+            self.inputs = []
+
+        @property
+        def architecture_family(self):
+            return family
+
+        def evaluate_typed(self, inputs):
+            self.inputs.append(inputs)
+            return (np.zeros(inputs["candidate_mask"].shape, np.float32),
+                    np.full((len(inputs["candidate_mask"]), 1), .25, np.float32))
+
+    evaluator = TypedEvaluator()
+    posterior = belief(particles=2, typed_spec=contract)
+    search = TypedInformationSetSearch(TypedEncoder(contract), evaluator,
+        limits=SearchLimits(iterations=1, max_depth=1, elapsed_ms=None))
+    result = search.run(posterior)
+    assert result.intent == TestAction(0, 0).public_intent()
+    assert result.encoder_hash == contract.digest and result.iterations == 1
+    assert evaluator.inputs
+    assert all(tuple(inputs) == tuple(contract.feature_schema["input_order"][family]) for inputs in evaluator.inputs)
+    assert all(inputs["candidate_mask"].dtype == np.bool_ for inputs in evaluator.inputs)
+
+
+def test_typed_tracker_binds_v7_public_projection_and_replays_exact_frames():
+    from test_ir import frame as v7_public_frame, signed, spec as v7_typed_spec
+
+    contract = v7_typed_spec()
+    observation = v7_public_frame()
+    tracker = PublicTracker(observation, typed_spec=contract)
+    assert tracker.latest == observation and tracker.typed_spec.digest == contract.digest
+    assert PublicTracker.from_snapshot(tracker.snapshot(), typed_spec=contract).latest == observation
+    changed = replace(contract, observation_policy_hash="b" * 64)
+    with pytest.raises(ValueError, match="policy|contract|provenance"):
+        PublicTracker(observation, typed_spec=changed)
+    with pytest.raises(ValueError, match="public|snapshot|contract"):
+        PublicTracker({**observation, "positionId": "hidden-private-id"}, typed_spec=contract)
+    rectangle = deepcopy(observation)
+    rectangle["board"] = [row[:7] for row in rectangle["board"][:5]]
+    rectangle["publicState"]["collapsedCells"] = []
+    signed(rectangle)
+    assert PublicTracker(rectangle, typed_spec=contract).latest == rectangle
+    with pytest.raises(InformationMismatchError, match="8 by 8"):
+        PublicTracker(rectangle)
+
+
 @pytest.mark.parametrize("mode,draft_delete", [("normal", True), ("chaos", True), ("grand", True), ("grand", False)])
 def test_native_supported_conditioned_modes_and_public_intent_integration(mode, draft_delete):
     """No skip: production source factory/intent are required for completion."""
@@ -408,12 +504,18 @@ def test_native_supported_conditioned_modes_and_public_intent_integration(mode, 
 
 
 @pytest.mark.parametrize("mode", ["normal", "chaos"])
-def test_native_default_weighted_conditioning_completion_gate(mode):
+def test_native_default_weighted_conditioning_completion_gate(mode, record_property):
     """No skip: default draft-to-play requires both public posteriors."""
     from accelerate_chess import Position, site_observation_policy
     catalog = json.loads((Path(__file__).parents[2] / "bridge/catalog/site-20260927.json").read_text(encoding="utf-8"))
     encoder = PublicEncoder(EncoderSpec.from_catalog(catalog, observation_policy=site_observation_policy(), history_encoding="public-history-summary-v1", action_encoding="public-decision-intent-v1"))
-    _native_mode_flow(mode, False, encoder, Position)
+    started = time.monotonic()
+    try:
+        _native_mode_flow(mode, False, encoder, Position)
+    finally:
+        # The CI subprocess has a finite wall watchdog. This property records
+        # duration without turning machine load into a rule-correctness gate.
+        record_property("wall_seconds", round(time.monotonic() - started, 3))
 
 
 def _native_mode_flow(mode, draft_delete, encoder, Position):
@@ -421,7 +523,7 @@ def _native_mode_flow(mode, draft_delete, encoder, Position):
     actual = Position.new_game(config, 37)
     trackers = {viewer: PublicTracker(actual.observe(viewer)) for viewer in ("white", "black")}
     beliefs = {viewer: ParticleBelief(tracker, NativeSourceFactory(config), seed=71 + index,
-        limits=BeliefLimits(particles=2, proposals=16, actions_per_transition=4096, elapsed_ms=5000))
+        limits=BeliefLimits(particles=2, proposals=16, actions_per_transition=4096, elapsed_ms=None))
         for index, (viewer, tracker) in enumerate(trackers.items())}
     # At most twelve grand picks and one actual play action. Candidates come
     # only from a sampled source world; the actual environment binds afterward.

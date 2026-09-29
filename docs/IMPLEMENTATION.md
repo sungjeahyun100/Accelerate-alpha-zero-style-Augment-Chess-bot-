@@ -1,9 +1,28 @@
 # 전체 구현 계획과 실행 checkpoint
 
 현재 전체 판정은 **NO-GO**다. 이는 코드 완성·정답 동등성에 대한 판정이며 실제 학습 또는
-봇 실력의 판정이 아니다. 사용자 채택 요구는 [DECISIONS](DECISIONS.md), 실제 실행 계약은
-[runtime-v1](../bridge/protocol/runtime-v1.md)에 있다. 아래 관측한 검사와 계획을 혼동하지 않는다.
+봇 실력의 판정이 아니다. 사용자 채택 요구는 [DECISIONS](DECISIONS.md), 상세 작업·경계·
+단계별 검증 지시는 [IMPLEMENTATION-DIRECTIVES](IMPLEMENTATION-DIRECTIVES.md)에 있다.
+기존 v6 실행 계약은 [runtime-v1](../bridge/protocol/runtime-v1.md)에 보존한다.
+아래 관측한 검사와 계획을 혼동하지 않는다.
 작업 브랜치는 feature/full-stack-implementation, 출발점은 bfc85c886b489f21f6f1037bc291ab0157c3dc6f다.
+
+## 2026-09-29 구현 checkpoint
+
+이번 checkpoint는 동결 v7 규칙을 실행 가능하게 선언하는 단계가 아니다. Rust `Position`의
+v7 생성·실행 guard와 `try_observe`의 동적 v7 투영 guard는 유지한다. 확인한 내용은 다음과 같다.
+
+| 범위 | 구현·관측한 근거 | 남은 경계 |
+|---|---|---|
+| 규칙 기반 | checked geometry와 단일 기물 identity·파생 점유, 가변 합성 보드·붕괴, 출처와 순서를 보존한 MoveProgram/lazy cursor, 테스트 전용 N-version을 추가했다. Rust 엔진 lib 102개 및 통합 13개가 로컬에서 통과했다. | v7 전체 public legal/bind/apply 및 source full state/history/RNG 동등성. |
+| 카드·턴 | v7 정의 256개와 보조 1개를 registry로 확인하고 초기 normal/chaos/grand 제안·첫 선택의 순서/RNG를 고정 원문에 국소 비교했다. Othello의 즉시·턴 완료 전향과 종료 흐름의 일부를 연결했다. | source-reachable 카드·RULE 전체 효과, 누락된 턴 경계 효과 조합. 미지원 조합은 오류로 닫는다. |
+| correctness adapter | Portal Gun·Hypocrisy·Panic의 순서 있는 선택을 원문처럼 열거한다. 새 직접 source 검사 4개와 관련 Node 검사 50개가 로컬에서 통과했다. | 모든 카드 전제조건·특수 phase와 Rust 차분 검증. |
+| 공개 AI 입력·모델 | v7 공개 관측과 합성 직사각형 상태를 분리한 Python typed IR, A mask-aware ResNet, B entity Transformer를 추가했다. 실제 source normal·chaos·grand의 행동자 관측/후보 2개씩을 IR→두 모델에 넣어 유한 출력을 확인했다. | v7 native Position에서 검증된 공개 관측·후보를 공급하는 실행 경로. |
+| 배포·탐색 | 별도 v3 typed ONNX manifest와 A/B ORT·tract 추론을 Linux 설치 wheel에서 검사했고, P6 검증 스냅샷의 runtime 검사 11개가 통과했다. Python의 유한 search/session·replay/CLI 경로를 확대했다. | 후속 소스 변경을 포함한 정확한 최종 wheel·Windows 설치 검증과 v7 native 3모드 bounded 실행. |
+| 통합 판정 | v7 normal·chaos·grand의 draft/play 6국면 차분 진입점은 원문 후보를 모두 소진하고 native v7 import가 `UnsupportedFeature`임을 명시적으로 보고한다. | 최종 동일 SHA의 Windows/Linux CI 성공, 전체 source-reachable 규칙 coverage와 코드 GO. |
+
+실제 학습은 수행하지 않았다. 위 수치는 서로 다른 국소 검사 범위의 관측값이며, 새 PR
+커밋의 CI 성공이나 규칙 전체 GO를 뜻하지 않는다.
 
 ## D0 의미 정렬과 적용 상태 (2026-09-29)
 
@@ -17,7 +36,7 @@
 | D-002 | ResNet 단독 최종 구조 지정을 대체 | 같은 허용 `ObservationIR`·public history·descriptor·candidate action에서 A: mask-aware ResNet과 B: entity Transformer를 비교한다. |
 | D-005 | 역할 유지, 적용 계열 확장 | FiLM은 ONNX 내부 조건화, LoRA는 분리 적응이다. B의 LoRA 위치·rank 등은 실험별 설정에 고정한다. |
 | D-007 | 유지 | Python-first encoding을 계속 사용한다. 실제 profiling으로 Python 인코딩 병목을 확인한 경우에만 Rust 이전을 재검토한다. O-001은 해결 상태다. |
-| D-009 | 전체 코드 GO 기준 유지 | 가변 보드·두 모델·대표 규칙의 기반 완료와 동결 사이트 전체 규칙의 최종 GO를 구분한다. 실제 학습은 제외한다. |
+| D-009 | 최종 대상 v7로 갱신 | 가변 보드·두 모델·대표 규칙의 기반 완료와 동결 v7 전체 규칙의 최종 GO를 구분한다. v6 호환은 유지하고 실제 학습은 제외한다. |
 | D-016 | 새 설계 | 엔진 상태와 모델 입력 분리, 내부 보드 크기 상수 제거, 검증 전용 N-version, 자동 runtime 대체 금지. |
 
 PR #29의 변경 파일에는 `rust-engine/`이 없다. 구현 완료는 게임 어댑터와 고정 v7
@@ -27,8 +46,9 @@ PR #29의 변경 파일에는 `rust-engine/`이 없다. 구현 완료는 게임 
 
 ## 채택 범위와 작업 순서
 
-1. 최초 동결 사이트 본체의 8x8 normal/chaos/grand, 공개 256 카드 catalog와 PR #29의
-   별도 고정 v7 게임 어댑터를 correctness 기준으로 유지한다. 이미 완료한 adapter를
+1. PR #29의 고정 v7 사이트 본체의 8×8 normal/chaos/grand, 공개 256 카드 catalog와
+   별도 게임 어댑터를 최종 correctness 기준으로 유지한다. 최초 동결 v6는 호환 범위다.
+   이미 완료한 adapter를
    재구현하지 않고, 검증하지 않은 조합·행동 경계를 원문과 비교한다.
 2. 순수 Rust 독립 규칙 엔진에 전체 기물·카드·RULE·특수 행동·초기/draft/종료를 포팅하고
    client oracle과 normalized full state/result/RNG를 비교한다. worker useful filter를 legal로 쓰지 않는다.
@@ -506,6 +526,12 @@ full history 및 exact execution payload용 모델은 별도 계약 hash를 가�
 탐색의 value 시점은 물리적인 turn 대신 실제 decision actor의 `observation.viewer`를 따른다.
 
 ## 동결 source와 재현
+
+이 절의 2026-09-27 source·profile·검사 수치는 v6 호환 경로의 역사적 근거다.
+이번 최종 GO의 v7 source는 [최신 어댑터 검증](ADAPTER-VERIFICATION.md)의
+`main-OahWs0tU.js`/`e5ed84fcf8e72a24e6a8cfeb9050787387a616c55184e6501fca2077e302c45c`와
+`augment-site-20260928-e5ed84fcf8e72a24`를 사용한다. 두 동결본을 서로의 규칙 동등성
+증거로 대체하지 않는다.
 
 동결 시각은 **2026-09-27T14:37:10.842Z**다. 날짜가 바뀌어도 이 source를 재동결하지 않는다.
 규칙 버전은 augment-site-20260927-abfe01a035813875, 공개 catalog hash는

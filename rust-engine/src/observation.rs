@@ -167,8 +167,11 @@ fn validate_surface(schema: &Value, value: &Value, path: &str, depth: usize) -> 
     Ok(())
 }
 
-pub(crate) fn validate_public_piece(piece: &Value, path: &str) -> Result<()> {
-    let policy = crate::state::observation_policy();
+fn validate_public_piece_with_policy(
+    piece: &Value,
+    path: &str,
+    policy: &crate::state::ObservationPolicy,
+) -> Result<()> {
     if piece.as_object().is_none_or(|fields| {
         fields
             .keys()
@@ -180,8 +183,14 @@ pub(crate) fn validate_public_piece(piece: &Value, path: &str) -> Result<()> {
     }
     validate_surface(&policy.public_piece_schema, piece, path, 0)
 }
-pub(crate) fn validate_public_cards(cards: &[Value], path: &str) -> Result<()> {
-    let policy = crate::state::observation_policy();
+pub(crate) fn validate_public_piece(piece: &Value, path: &str) -> Result<()> {
+    validate_public_piece_with_policy(piece, path, crate::state::observation_policy())
+}
+fn validate_public_cards_with_policy(
+    cards: &[Value],
+    path: &str,
+    policy: &crate::state::ObservationPolicy,
+) -> Result<()> {
     for card in cards {
         let fields = card
             .as_object()
@@ -205,8 +214,45 @@ pub(crate) fn validate_public_cards(cards: &[Value], path: &str) -> Result<()> {
     }
     Ok(())
 }
+pub(crate) fn validate_public_cards(cards: &[Value], path: &str) -> Result<()> {
+    validate_public_cards_with_policy(cards, path, crate::state::observation_policy())
+}
 pub(crate) fn validate_projection(observation: &Observation) -> Result<()> {
-    let policy = crate::state::observation_policy();
+    validate_projection_for_ruleset(observation, RULES_VERSION_V6)
+}
+
+/// Validate projected field shapes against the selected frozen policy. This
+/// does not establish dynamic source parity or admit a v7 executable Position.
+pub(crate) fn validate_projection_for_ruleset(
+    observation: &Observation,
+    ruleset_id: &str,
+) -> Result<()> {
+    let policy = crate::state::observation_policy_for_ruleset(ruleset_id)?;
+    if observation.protocol_version != crate::state::observation_protocol_for_ruleset(ruleset_id)?
+        || observation
+            .public_state
+            .get("projectionVersion")
+            .and_then(Value::as_str)
+            != Some(crate::state::observation_projection_for_ruleset(
+                ruleset_id,
+            )?)
+        || observation
+            .public_state
+            .get("rulesVersion")
+            .and_then(Value::as_str)
+            != Some(ruleset_id)
+        || observation
+            .public_state
+            .get("observationPolicyHash")
+            .and_then(Value::as_str)
+            != Some(crate::state::observation_policy_hash_for_ruleset(
+                ruleset_id,
+            )?)
+    {
+        return Err(EngineError::InvalidState(
+            "public observation policy identity mismatch".into(),
+        ));
+    }
     for (key, value) in &observation.public_state {
         if policy.state_public_fields.contains(key) {
             let schema = policy.state_value_schemas.get(key).ok_or_else(|| {
@@ -249,10 +295,10 @@ pub(crate) fn validate_projection(observation: &Observation) -> Result<()> {
     )?;
     for row in &observation.board {
         for piece in row.iter().flatten() {
-            validate_public_piece(piece, "board.piece")?;
+            validate_public_piece_with_policy(piece, "board.piece", policy)?;
         }
     }
-    validate_public_cards(&observation.own_cards, "ownCards")?;
+    validate_public_cards_with_policy(&observation.own_cards, "ownCards", policy)?;
     for key in ["revealedOpponentCards", "draft"] {
         let cards = if key == "draft" {
             observation
@@ -263,7 +309,7 @@ pub(crate) fn validate_projection(observation: &Observation) -> Result<()> {
             observation.public_state.get(key)
         };
         if let Some(cards) = cards.and_then(Value::as_array) {
-            validate_public_cards(cards, key)?;
+            validate_public_cards_with_policy(cards, key, policy)?;
         }
     }
     for event in &observation.history {
@@ -275,13 +321,13 @@ pub(crate) fn validate_projection(observation: &Observation) -> Result<()> {
         {
             for key in ["before", "after"] {
                 if let Some(piece) = change.get(key).filter(|v| !v.is_null()) {
-                    validate_public_piece(piece, "history.piece")?;
+                    validate_public_piece_with_policy(piece, "history.piece", policy)?;
                 }
             }
         }
         for key in ["ownCards", "revealedOpponentCards"] {
             if let Some(cards) = event.get(key).and_then(Value::as_array) {
-                validate_public_cards(cards, "history.cards")?;
+                validate_public_cards_with_policy(cards, "history.cards", policy)?;
             }
         }
     }
@@ -1797,7 +1843,21 @@ pub(crate) fn board_surface(state: &GameState, viewer: Color) -> Value {
     json!({"boardMarks":marks,"relationships":relationships,"overlays":overlays})
 }
 
-pub(crate) fn card_revelation(card: &CardSlot) -> Option<Value> {
+/// The three source revelation helpers and their roulette/potion ID sets are
+/// identical in the pinned v6 and v7 clients. Box-card membership still uses
+/// the selected ruleset catalog so a future catalog change cannot leak an ID.
+pub(crate) fn card_revelation_for_ruleset(
+    card: &CardSlot,
+    ruleset_id: &str,
+) -> Result<Option<Value>> {
+    let definitions = crate::draft::definitions_for_ruleset(ruleset_id)?;
+    Ok(card_revelation_with_definitions(card, definitions))
+}
+
+fn card_revelation_with_definitions(
+    card: &CardSlot,
+    definitions: &crate::draft::Definitions,
+) -> Option<Value> {
     let mut revealed = Fields::new();
     let box_id = card
         .extra
@@ -1925,7 +1985,7 @@ pub(crate) fn card_revelation(card: &CardSlot) -> Option<Value> {
     }
     if !box_id.is_empty()
         && (card.effect != "blackBox" || card.used)
-        && crate::draft::definitions()
+        && definitions
             .definitions
             .iter()
             .any(|c| c.get("id").and_then(Value::as_str) == Some(box_id))
@@ -1934,3 +1994,7 @@ pub(crate) fn card_revelation(card: &CardSlot) -> Option<Value> {
     }
     (!revealed.is_empty()).then_some(Value::Object(revealed))
 }
+
+#[cfg(test)]
+#[path = "observation_version_tests.rs"]
+mod observation_version_tests;

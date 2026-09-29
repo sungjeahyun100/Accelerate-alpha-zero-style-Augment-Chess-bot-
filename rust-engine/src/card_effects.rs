@@ -170,6 +170,7 @@ enum Mutation {
     Spy,
     Wanted,
     Brainwash,
+    Othello,
     Taboo,
     Cleanup,
     Hypocrisy,
@@ -230,6 +231,11 @@ fn current_random_pool(state: &GameState) -> Result<()> {
     Ok(())
 }
 fn validate_profile(state: &GameState, plan: Plan) -> Result<()> {
+    if matches!(plan.mutation, Mutation::Othello) && !september18(state) {
+        return Err(EngineError::UnsupportedFeature(
+            "legacy targeted Othello profile".into(),
+        ));
+    }
     if matches!(plan.mutation, Mutation::Scarecrow) && !september18(state) {
         return Err(EngineError::UnsupportedFeature(
             "legacy scarecrow installation reservations".into(),
@@ -324,6 +330,7 @@ fn plan(state: &GameState, card: &CardSlot) -> Option<Plan> {
         "brainwash" => (Exact(""), Brainwash),
         "taboo" => (Exact(""), Taboo),
         _ => match card.effect.as_str() {
+            "othello" if state.ruleset_id == RULES_VERSION_V7 => (Exact(""), Othello),
             "cleanupPieces" => (Exact(""), Cleanup),
             "hypocrisy" => (Exact(""), Hypocrisy),
             "portalGun" => (Exact(""), PortalGun),
@@ -418,6 +425,13 @@ fn plan(state: &GameState, card: &CardSlot) -> Option<Plan> {
         },
     };
     Some(Plan { source, mutation })
+}
+
+fn validate_pinned_card(state: &GameState, card: &CardSlot) -> Result<()> {
+    if state.ruleset_id == RULES_VERSION_V7 {
+        crate::card_registry::validate_instance(state, card)?;
+    }
+    Ok(())
 }
 
 fn grant_matches(state: &GameState, piece: &Piece, square: Square, field: &str) -> bool {
@@ -1020,6 +1034,7 @@ pub(crate) fn target_squares(state: &GameState, card: &CardSlot) -> Result<Optio
     let Some(plan) = plan(state, card) else {
         return Ok(None);
     };
+    validate_pinned_card(state, card)?;
     if !truthy(card.extra.get("target")) {
         // getTargetSquares itself does not check card.target. Most untargeted
         // cards have no isValidTarget branch; ghost and recurrence do.
@@ -1278,6 +1293,7 @@ pub(crate) fn actions(state: &GameState, card: &CardSlot) -> Result<Option<Vec<A
     let Some(plan) = plan(state, card) else {
         return Ok(None);
     };
+    validate_pinned_card(state, card)?;
     validate_profile(state, plan)?;
     if matches!(plan.mutation, Mutation::Cleanup) {
         let targets = ui_targets(state, plan, true)?;
@@ -1311,7 +1327,10 @@ pub(crate) fn actions(state: &GameState, card: &CardSlot) -> Result<Option<Vec<A
         }
         return Ok(Some(Vec::new()));
     }
-    if matches!(plan.mutation, Mutation::SideFlag(..) | Mutation::Coronation) {
+    if matches!(
+        plan.mutation,
+        Mutation::SideFlag(..) | Mutation::Coronation | Mutation::Othello
+    ) {
         return Ok(Some(vec![Action::card(state.turn, card, None)]));
     }
     if matches!(
@@ -1839,7 +1858,7 @@ fn apply_scarecrow(state: &mut GameState, action: &Action, plan: Plan) -> Result
     let actor = state.turn;
     let removed = crate::transition::scarecrow_remove(state, square, actor.opponent())?
         .ok_or(EngineError::IllegalAction)?;
-    let entry = json!({"id":format!("scarecrow-pending-{}",crate::draft::frozen_timestamp()?),"reserved":true,"color":actor,"by":actor,"row":square.row,"col":square.col,"remainingOwnTurns":3});
+    let entry = json!({"id":format!("scarecrow-pending-{}",crate::draft::frozen_timestamp_for_ruleset(&state.ruleset_id)?),"reserved":true,"color":actor,"by":actor,"row":square.row,"col":square.col,"remainingOwnTurns":3});
     state
         .extra
         .get_mut("pendingScarecrows")
@@ -1902,7 +1921,10 @@ fn apply_twins(state: &mut GameState, action: &Action) -> Result<()> {
         .chars()
         .take(6)
         .collect::<String>();
-    let bond = format!("twins-{}-{suffix}", crate::draft::frozen_timestamp()?);
+    let bond = format!(
+        "twins-{}-{suffix}",
+        crate::draft::frozen_timestamp_for_ruleset(&state.ruleset_id)?
+    );
     let partner_ids = [selected[1].id.clone(), selected[0].id.clone()];
     for (piece, partner_id) in selected.iter_mut().zip(partner_ids) {
         piece.extra.insert("twinBondId".into(), json!(bond));
@@ -2294,7 +2316,7 @@ fn apply_hypocrisy(state: &mut GameState, action: &Action) -> Result<()> {
             .take(5)
             .collect::<String>();
         let piece: Piece = serde_json::from_value(json!({
-            "id":format!("hypocrisy-{}-{index}-{suffix}", crate::draft::frozen_timestamp()?),
+            "id":format!("hypocrisy-{}-{index}-{suffix}", crate::draft::frozen_timestamp_for_ruleset(&state.ruleset_id)?),
             "type":"pawn",
             "color":enemy,
             "moved":true,
@@ -2353,7 +2375,7 @@ fn apply_portal_gun(state: &mut GameState, action: &Action) -> Result<()> {
         .get(state.turn)
         .checked_add(1)
         .ok_or_else(|| EngineError::UnsupportedFeature("portal trigger turn overflow".into()))?;
-    let timestamp = crate::draft::frozen_timestamp()?;
+    let timestamp = crate::draft::frozen_timestamp_for_ruleset(&state.ruleset_id)?;
     let suffix = crate::draft::random_suffix(state.rng.sample()?)?
         .chars()
         .take(5)
@@ -3145,7 +3167,10 @@ fn apply_chain(state: &mut GameState, action: &Action) -> Result<()> {
         return Err(EngineError::IllegalAction);
     }
     let suffix = crate::draft::random_suffix(state.rng.sample()?)?;
-    let id = format!("chain-{}-{suffix}", crate::draft::frozen_timestamp()?);
+    let id = format!(
+        "chain-{}-{suffix}",
+        crate::draft::frozen_timestamp_for_ruleset(&state.ruleset_id)?
+    );
     let new_bond = json!({"id":id,"aId":entries[0].1.id,"bId":entries[1].1.id,"by":state.turn});
     let mut bonds = match state.extra.get("chainBonds") {
         Some(Value::Array(entries)) => entries.iter().take(64).cloned().collect::<Vec<_>>(),
@@ -4314,6 +4339,7 @@ pub(crate) fn ui_validate(
     let Some(plan) = plan(state, card) else {
         return Ok(None);
     };
+    validate_pinned_card(state, card)?;
     let (minimum, maximum) = match plan.mutation {
         Mutation::Cleanup => (1, 3),
         Mutation::Hypocrisy => (4, 4),
@@ -4363,6 +4389,7 @@ pub(crate) fn validate(
     if plan(state, card).is_none() {
         return Ok(None);
     }
+    validate_pinned_card(state, card)?;
     let mut candidate = state.clone();
     match apply(&mut candidate, card, action) {
         Ok(Some(_)) => Ok(Some(true)),
@@ -4380,6 +4407,7 @@ pub(crate) fn apply(
     let Some(plan) = plan(state, card) else {
         return Ok(None);
     };
+    validate_pinned_card(state, card)?;
     validate_profile(state, plan)?;
     if action.kind != ActionKind::Card
         || action.color != state.turn
@@ -4426,6 +4454,14 @@ pub(crate) fn apply(
         }
         Mutation::Brainwash => {
             return Ok(Some(apply_brainwash(state, action)?));
+        }
+        Mutation::Othello => {
+            if action.target.is_some() {
+                return Err(EngineError::IllegalAction);
+            }
+            let actor = state.turn;
+            crate::turn_effects_v7::activate_othello(state, actor)?;
+            return Ok(Some(Vec::new()));
         }
         Mutation::Taboo => {
             apply_taboo(state, action)?;
@@ -4648,7 +4684,7 @@ pub(crate) fn apply(
             let suffix = crate::draft::random_suffix(state.rng.sample()?)?;
             let id = format!(
                 "judgment-exile-{}-{}",
-                crate::draft::frozen_timestamp()?,
+                crate::draft::frozen_timestamp_for_ruleset(&state.ruleset_id)?,
                 suffix.chars().take(6).collect::<String>()
             );
             let entry = json!({"id":id,"piece":piece,"returnPhase":return_phase,"exiledBy":state.turn,"from":selected});

@@ -15,7 +15,7 @@ D-001~D-003은 기존 결정입니다. D-004~D-006과 D-003 보완은 2026-09-27
 | D-002 | 수정 | ResNet 단독 채택을 공통 `ObservationIR` 위의 mask-aware ResNet(A)·entity Transformer(B) 비교로 갱신한다. 성능상 우위나 최종 모델은 미정이다. |
 | D-005 | 유지·확장 | FiLM 조건화와 분리 정적 LoRA 적응의 역할은 유지한다. Transformer의 LoRA 위치·rank 등은 모델별 실험 설정에 고정한다. |
 | D-007 | 유지 | Python-first encoding은 이미 채택됐다. O-001을 다시 열지 않으며 실제 profiling으로 병목을 확인한 뒤에만 Rust 이전을 검토한다. |
-| D-009 | 유지·단계화 | 전체 8×8 원문 규칙의 코드 GO 기준은 유지한다. 가변 geometry·두 모델·대표 규칙의 기반 완료는 별도 checkpoint이며 전체 GO가 아니다. |
+| D-009 | 대상 갱신·단계화 | 최종 코드 GO 대상은 PR #29가 고정한 v7의 8×8 normal·chaos·grand와 공개 256장이다. v6 호환과 가변 geometry·두 모델의 기반 완료는 각각 별도 checkpoint다. |
 | D-016 | 추가 | 엔진 상태와 AI 표현을 분리하고, 보드 크기 상수를 geometry로 옮기며, 검증용 N-version과 운영 오류 전파의 경계를 확정한다. |
 
 PR #29에는 `rust-engine/` 변경이 없다. 어댑터의 완료·검증 범위를 Rust의 v7 규칙 이관이나
@@ -178,12 +178,18 @@ PR #29에는 `rust-engine/` 변경이 없다. 어댑터의 완료·검증 범위
   관측됐다. worker의 useful-action filter와 AI target truncation은 전체 legal rules가 아니다.
 - **대안과 영향**: 매 실행의 최신 사이트를 자동 흡수하거나 과거 239개 카드 범위로
   축소하지 않는다. 동결 SHA·URL·시간과 비교 차이는 IMPLEMENTATION에 기록한다.
+- **2026-09-29 대상 갱신**: 이번 최종 코드 GO의 원문은 PR #29의
+  `augment-site-20260928-e5ed84fcf8e72a24`/headless-v7이다. 2026-09-27 동결본과
+  v6 snapshot·계약은 호환·회귀 범위로 유지하되, v6 결과를 v7 규칙 동등성의 증거로
+  대체하지 않는다. 두 버전의 source hash·catalog·관측 정책·실행 profile은 각각 고정한다.
 
 ## D-009: 공개 관측 기반 탐색과 이번 코드 완성 판정
 
 - **날짜**: 2026-09-27
 - **상태**: 사용자 채택
-- **결정**: 8x8 normal·chaos·grand 및 동결 256 카드의 전체 규칙을 구현 범위로 삼는다.
+- **결정**: D-008의 v7 동결본에 대한 8×8 normal·chaos·grand 및 공개 256 카드의
+  전체 규칙을 최종 구현 범위로 삼는다. 기존 v6 snapshot·replay·바인딩은 호환
+  범위로 유지하며 별도 v7 포팅 완료로 간주하지 않는다.
   탐색은 공개 Observation/history·실제 화면에서 제공하는 hint·belief에 기반한 ISMCTS로
   한다. 선택한 상대 카드는 사이트에서 공개되므로 임의로 숨기지 않는다.
   private full Position은 환경 실행 경계에서만 사용한다.
@@ -194,7 +200,7 @@ PR #29에는 `rust-engine/` 변경이 없다. 어댑터의 완료·검증 범위
   full next state·result·RNG를 비교한다. signature·몇 개 기본 기물·구조 검사만으로 GO를
   선언하지 않는다. 아직 실패·미구현·근거 부족인 항목은 실행 보고에 유지한다.
 - **2026-09-29 단계화**: D-016의 가변 geometry와 대표 규칙·두 모델·native 추론이
-  연결된 기반 checkpoint는 전체 규칙 GO와 구분한다. 기존 8×8 사이트 범위의
+  연결된 기반 checkpoint는 전체 규칙 GO와 구분한다. 고정 v7의 8×8 사이트 범위의
   코드 완료 기준은 축소하지 않는다. 붕괴처럼 유효 칸이 바뀌는 현재 규칙과 합성
   외곽 확장·축소 검증의 출처도 분리한다.
 
@@ -305,7 +311,7 @@ PR #29에는 `rust-engine/` 변경이 없다. 어댑터의 완료·검증 범위
 ## D-016: 모델 독립 가변 보드와 검증 전용 N-version
 
 - **날짜**: 2026-09-29
-- **상태**: 설계 채택, 구현·검증은 진행 전
+- **상태**: 설계 채택, 구현·검증 진행 중
 - **결정**: 엔진은 크기·좌표 경계를 소유하는 geometry, 변화하는 유효 칸·지형·연결,
   단일 기물 identity와 footprint, 파생 점유 조회를 구분한다. 보드 크기를 규칙 코어의
   고정 8×8 상수로 취급하지 않는다. 규칙 상태에서 허용 관측을 만든 뒤 D-007의 Python

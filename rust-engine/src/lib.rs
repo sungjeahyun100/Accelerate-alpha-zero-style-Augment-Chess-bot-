@@ -1,21 +1,29 @@
 //! Independent rules and immutable snapshots. No language or inference runtime is used here.
+mod card_constraints;
 mod card_effects;
+mod card_registry;
 mod conditioning;
 mod draft;
 mod eligibility;
 mod flow;
+pub mod geometry;
+pub mod move_program;
 mod movement;
 mod observation;
 mod opening;
 mod replay;
+mod spatial_state;
 mod state;
 #[cfg(test)]
 mod tests;
 mod threat;
 mod transition;
+mod turn_effects_v7;
 mod variant_movement;
 
+pub use geometry::{BoardGeometry, Coord, Offset};
 pub use movement::implemented_piece_types;
+pub use spatial_state::*;
 pub use state::*;
 
 use serde_json::{Map, Value};
@@ -67,7 +75,7 @@ impl Position {
     /// probes cannot advance this immutable position's future random stream.
     pub fn draft_availability(&self, color: Color) -> Result<Vec<(String, bool)>> {
         let mut state = self.state().clone();
-        crate::draft::definitions()
+        crate::draft::definitions_for_ruleset(&state.ruleset_id)?
             .definitions
             .iter()
             .map(|card| {

@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from os import PathLike
 from .encoding import EncoderSpec
+from .ir import TypedEncoderSpec
 
 
 class ProductionEvaluator:
-    def __init__(self, manifest_path: str | PathLike[str], expected_spec: EncoderSpec,
+    def __init__(self, manifest_path: str | PathLike[str], expected_spec: EncoderSpec | TypedEncoderSpec,
                  backend: str = "ort", **limits: int):
         from ._native import InferenceSession
 
@@ -17,5 +18,12 @@ class ProductionEvaluator:
     def backend(self) -> str:
         return self.session.backend
 
+    @property
+    def architecture_family(self) -> str:
+        return self.session.architecture_family
+
     def evaluate(self, board, condition, action_features):
         return self.session.evaluate(board, condition, action_features)
+
+    def evaluate_typed(self, inputs):
+        return self.session.evaluate_typed(inputs)

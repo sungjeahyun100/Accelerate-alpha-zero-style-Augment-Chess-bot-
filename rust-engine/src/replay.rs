@@ -297,7 +297,7 @@ fn queue_notation(
     let suffix = crate::draft::random_suffix(state.rng.sample()?)?;
     let id = format!(
         "{kind}-{}-{}",
-        crate::draft::frozen_timestamp()?,
+        crate::draft::frozen_timestamp_for_ruleset(&state.ruleset_id)?,
         suffix.chars().take(7).collect::<String>()
     );
     let text = trim(&text, 96);

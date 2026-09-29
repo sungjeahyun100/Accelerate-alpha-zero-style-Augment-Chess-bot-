@@ -19,6 +19,9 @@ from .encoding import EncoderSpec, PublicEncoder, canonical_json
 from .search import PublicTracker, SEARCH_VERSION, SearchResult
 
 REPLAY_VERSION = "accelerate-replay-v2"
+TYPED_REPLAY_VERSION = "accelerate-replay-v3"
+TYPED_MODEL_IO_VERSION = "typed-policy-value-v1"
+TYPED_FAMILIES = frozenset({"mask-resnet", "entity-transformer"})
 MAX_REPLAY_BYTES = 16 * 1024 * 1024
 
 
@@ -148,7 +151,7 @@ class TrainingExample:
 
 class EpisodeRecorder:
     """Store each projected event once; decisions reference public trace frames."""
-    def __init__(self, initial_observations: Mapping[str, Mapping[str, Any]], spec: EncoderSpec, *, environment_seed: int, belief_seed: int, evidence_kind: str = "bounded-verification", model_sha256: str | None = None):
+    def __init__(self, initial_observations: Mapping[str, Mapping[str, Any]], spec: EncoderSpec, *, environment_seed: int, belief_seed: int, evidence_kind: str = "bounded-verification", model_sha256: str | None = None, architecture_family: str | None = None, base_hash: str | None = None, adapter_hash: str | None = None, adapter_descriptor: Mapping[str, Any] | None = None):
         if set(initial_observations) != {"white", "black"}:
             raise ValueError("replay needs both viewers' initial public frames")
         if type(environment_seed) is not int or not 0 <= environment_seed < 2**32 or type(belief_seed) is not int or not 0 <= belief_seed < 2**64:
@@ -157,14 +160,45 @@ class EpisodeRecorder:
             raise ValueError("unknown replay evidence kind")
         if (model_sha256 is None and evidence_kind != "synthetic") or (model_sha256 is not None and (not isinstance(model_sha256, str) or len(model_sha256) != 64 or any(digit not in "0123456789abcdef" for digit in model_sha256))):
             raise ValueError("native replay needs the verified teacher model SHA-256")
-        self._encoder = PublicEncoder(spec)
-        self.trackers = {viewer: PublicTracker(self._encoder.validate_observation(frame).to_native()) for viewer, frame in initial_observations.items()}
+        self._typed = not isinstance(spec, EncoderSpec)
+        if self._typed:
+            from .ir import TypedEncoder, TypedEncoderSpec
+
+            if not isinstance(spec, TypedEncoderSpec):
+                raise TypeError("typed replay needs a source-bound TypedEncoderSpec")
+            if architecture_family not in TYPED_FAMILIES:
+                raise ValueError("typed replay needs the deployed architecture family")
+            if (base_hash is None and evidence_kind != "synthetic"
+                    or base_hash is not None and not _is_sha256(base_hash)):
+                raise ValueError("typed replay needs the verified base model hash")
+            _validate_adapter_provenance(architecture_family, spec.digest, base_hash,
+                                         adapter_hash, adapter_descriptor)
+            self._encoder = TypedEncoder(spec)
+            self._validate_public = lambda frame: _validated_typed_public(frame, spec)
+        else:
+            if (not isinstance(spec, EncoderSpec) or architecture_family is not None
+                    or base_hash is not None or adapter_hash is not None or adapter_descriptor is not None):
+                raise ValueError("legacy replay needs an EncoderSpec without a typed architecture family")
+            self._encoder = PublicEncoder(spec)
+            self._validate_public = lambda frame: self._encoder.validate_observation(frame).to_native()
+        self.trackers = {viewer: PublicTracker(self._validate_public(frame),
+            typed_spec=spec if self._typed else None) for viewer, frame in initial_observations.items()}
         if any(tracker.viewer != viewer for viewer, tracker in self.trackers.items()):
             raise ValueError("replay viewer identity mismatch")
         self.spec = spec
         self.metadata = {"environment_seed": environment_seed, "belief_seed": belief_seed, "evidence_kind": evidence_kind,
                          "rules_version": spec.rules_version, "catalog_hash": spec.catalog_hash,
                          "encoder_hash": spec.digest, "search_version": SEARCH_VERSION, "model_sha256": model_sha256}
+        if self._typed:
+            self.metadata.update({"architecture_family": architecture_family,
+                                  "model_io_version": TYPED_MODEL_IO_VERSION,
+                                  "ir_version": spec.ir_version, "descriptor_version": spec.descriptor_version,
+                                  "encoder_version": spec.encoder_version, "history_version": spec.history_version,
+                                  "observation_version": spec.observation_version,
+                                  "feature_schema_hash": spec.feature_schema_hash,
+                                  "base_hash": base_hash, "adapter_hash": adapter_hash,
+                                  "adapter_descriptor": json.loads(canonical_json(adapter_descriptor))
+                                  if adapter_descriptor is not None else None})
         if belief_seed > 2**53 - 1:
             self.metadata["belief_seed"] = str(belief_seed)
         self.decisions: list[dict[str, Any]] = []
@@ -188,7 +222,7 @@ class EpisodeRecorder:
     def advance(self, observations: Mapping[str, Mapping[str, Any]], *, actor: str, intent: Mapping[str, Any]):
         if set(observations) != {"white", "black"} or actor not in self.trackers:
             raise ValueError("advance requires both public projections and the actual decision actor")
-        observations = {viewer: self._encoder.validate_observation(frame).to_native() for viewer, frame in observations.items()}
+        observations = {viewer: self._validate_public(frame) for viewer, frame in observations.items()}
         # Validate both projections without partially advancing one tracker.
         for viewer, tracker in self.trackers.items():
             tracker.validate_append(observations[viewer], own_intent=intent if viewer == actor else None)
@@ -204,15 +238,49 @@ class EpisodeRecorder:
                         "reason": reason}
 
     def snapshot(self):
-        content = {"version": REPLAY_VERSION, "metadata": self.metadata, "encoder": self.spec.to_dict(), "observation_policy": self.spec.observation_policy,
+        content = {"version": TYPED_REPLAY_VERSION if self._typed else REPLAY_VERSION,
+                   "metadata": self.metadata, "encoder": self.spec.to_dict(),
                    "traces": {viewer: tracker.snapshot() for viewer, tracker in self.trackers.items()},
                    "decisions": self.decisions, "outcome": self.outcome}
+        if not self._typed:
+            content["observation_policy"] = self.spec.observation_policy
         return {**content, "replay_hash": _digest(content)}
 
     def save(self, path):
         payload = self.snapshot()
         ReplayEpisode(payload, self.spec)
         atomic_json(path, payload)
+
+
+def _validated_typed_public(frame, spec):
+    from .ir import ObservationIR
+
+    ObservationIR.from_public(frame, spec)
+    return json.loads(canonical_json(frame))
+
+
+def _is_sha256(value):
+    return isinstance(value, str) and len(value) == 64 and all(digit in "0123456789abcdef" for digit in value)
+
+
+def _validate_adapter_provenance(family, encoder_hash, base_hash, adapter_hash, descriptor):
+    if (adapter_hash is None) != (descriptor is None):
+        raise ValueError("typed replay adapter hash and descriptor must be recorded together")
+    if descriptor is None:
+        return
+    from .network.entity_transformer import TransformerAdapterDescriptor
+    from .network.model import AdapterDescriptor
+
+    if not _is_sha256(adapter_hash) or not isinstance(descriptor, Mapping):
+        raise ValueError("typed replay adapter hash or descriptor is invalid")
+    adapter_type = AdapterDescriptor if family == "mask-resnet" else TransformerAdapterDescriptor
+    try:
+        adapter = adapter_type(**descriptor)
+        adapter.validate_merge()
+    except (TypeError, ValueError) as error:
+        raise ValueError("typed replay adapter descriptor is unsupported") from error
+    if (adapter.base_hash, adapter.encoder_hash) != (base_hash, encoder_hash):
+        raise ValueError("typed replay adapter base or encoder provenance differs")
 
 
 def _validate_decision(record, trackers, spec):
@@ -245,7 +313,15 @@ def _validate_decision(record, trackers, spec):
         raise ValueError("replay visits and policy target do not agree")
     if record["belief_summary"] is not None and not isinstance(record["belief_summary"], dict):
         raise ValueError("replay belief summary must contain public JSON data")
-    PublicEncoder(spec).encode(observation, intents, belief_summary=record["belief_summary"])
+    if isinstance(spec, EncoderSpec):
+        PublicEncoder(spec).encode(observation, intents, belief_summary=record["belief_summary"])
+    else:
+        from .ir import ObservationIR, TypedEncoder, TypedEncoderSpec
+
+        if not isinstance(spec, TypedEncoderSpec):
+            raise TypeError("typed replay needs a source-bound TypedEncoderSpec")
+        TypedEncoder(spec).encode(ObservationIR.from_public(observation, spec,
+                                 belief_summary=record["belief_summary"]), intents)
     search = record["search"]
     if not isinstance(search, dict) or set(search) != {"iterations", "stop_reason", "partial_coverage", "legal_actions_exhausted", "version", "inference_batches", "max_inference_batch"} or search["version"] != SEARCH_VERSION or type(search["iterations"]) is not int or search["iterations"] < 1 or type(search["partial_coverage"]) is not bool or type(search["legal_actions_exhausted"]) is not bool or not isinstance(search["stop_reason"], str) or type(search["inference_batches"]) is not int or search["inference_batches"] < 0 or type(search["max_inference_batch"]) is not int or not 0 <= search["max_inference_batch"] <= 64:
         raise ValueError("invalid replay search provenance")
@@ -253,18 +329,51 @@ def _validate_decision(record, trackers, spec):
 
 class ReplayEpisode:
     def __init__(self, payload, expected_spec: EncoderSpec | None = None):
-        fields = {"version", "metadata", "encoder", "observation_policy", "traces", "decisions", "outcome", "replay_hash"}
         if not isinstance(payload, dict):
             raise ValueError("replay contract must be a JSON object")
         payload = json.loads(canonical_json(payload))
-        if not isinstance(payload, dict) or set(payload) != fields or payload["version"] != REPLAY_VERSION or payload["replay_hash"] != _digest({key: value for key, value in payload.items() if key != "replay_hash"}):
+        self._typed = payload.get("version") == TYPED_REPLAY_VERSION
+        fields = {"version", "metadata", "encoder", "traces", "decisions", "outcome", "replay_hash"}
+        if not self._typed:
+            fields.add("observation_policy")
+        if (set(payload) != fields or payload.get("version") not in (REPLAY_VERSION, TYPED_REPLAY_VERSION)
+                or payload["replay_hash"] != _digest({key: value for key, value in payload.items() if key != "replay_hash"})):
             raise ValueError("replay contract or content hash mismatch")
-        self.spec = EncoderSpec.from_dict(payload["encoder"], observation_policy=payload["observation_policy"])
-        if expected_spec is not None and expected_spec.digest != self.spec.digest:
-            raise ValueError("replay encoder compatibility mismatch")
+        if self._typed:
+            from .ir import TypedEncoderSpec
+
+            if not isinstance(expected_spec, TypedEncoderSpec) or payload["encoder"] != expected_spec.to_dict():
+                raise ValueError("typed replay requires its exact source-bound encoder spec")
+            self.spec = expected_spec
+        else:
+            self.spec = EncoderSpec.from_dict(payload["encoder"], observation_policy=payload["observation_policy"])
+            if expected_spec is not None and (not isinstance(expected_spec, EncoderSpec) or expected_spec.digest != self.spec.digest):
+                raise ValueError("replay encoder compatibility mismatch")
         metadata = payload["metadata"]
-        if not isinstance(metadata, dict) or set(metadata) != {"environment_seed", "belief_seed", "evidence_kind", "rules_version", "catalog_hash", "encoder_hash", "search_version", "model_sha256"} or (metadata["rules_version"], metadata["catalog_hash"], metadata["encoder_hash"], metadata["search_version"]) != (self.spec.rules_version, self.spec.catalog_hash, self.spec.digest, SEARCH_VERSION):
+        provenance = {"environment_seed", "belief_seed", "evidence_kind", "rules_version", "catalog_hash", "encoder_hash", "search_version", "model_sha256"}
+        if self._typed:
+            provenance.update({"architecture_family", "model_io_version", "ir_version", "descriptor_version",
+                               "encoder_version", "history_version", "observation_version", "feature_schema_hash",
+                               "base_hash", "adapter_hash", "adapter_descriptor"})
+        if (not isinstance(metadata, dict) or set(metadata) != provenance
+                or (metadata["rules_version"], metadata["catalog_hash"], metadata["encoder_hash"], metadata["search_version"])
+                != (self.spec.rules_version, self.spec.catalog_hash, self.spec.digest, SEARCH_VERSION)):
             raise ValueError("replay provenance differs from the model contracts")
+        if self._typed and (metadata["architecture_family"] not in TYPED_FAMILIES
+                or metadata["model_io_version"] != TYPED_MODEL_IO_VERSION
+                or (metadata["ir_version"], metadata["descriptor_version"], metadata["encoder_version"],
+                    metadata["history_version"], metadata["observation_version"], metadata["feature_schema_hash"])
+                != (self.spec.ir_version, self.spec.descriptor_version, self.spec.encoder_version,
+                    self.spec.history_version, self.spec.observation_version, self.spec.feature_schema_hash)):
+            raise ValueError("typed replay model/IR provenance differs from the encoder contract")
+        if self._typed:
+            if (metadata["base_hash"] is None and metadata["evidence_kind"] != "synthetic"
+                    or metadata["base_hash"] is not None and not _is_sha256(metadata["base_hash"])):
+                raise ValueError("typed replay base model provenance is invalid")
+            _validate_adapter_provenance(metadata["architecture_family"], self.spec.digest,
+                                         metadata["base_hash"], metadata["adapter_hash"],
+                                         metadata["adapter_descriptor"])
+        self.architecture_family = metadata["architecture_family"] if self._typed else None
         model_hash = metadata["model_sha256"]
         if (model_hash is None and metadata["evidence_kind"] != "synthetic") or (model_hash is not None and (not isinstance(model_hash, str) or len(model_hash) != 64 or any(digit not in "0123456789abcdef" for digit in model_hash))):
             raise ValueError("replay teacher model SHA-256 is invalid")
@@ -275,12 +384,17 @@ class ReplayEpisode:
             raise ValueError("invalid replay seed/evidence provenance")
         if not isinstance(payload["traces"], dict) or set(payload["traces"]) != {"white", "black"}:
             raise ValueError("replay public traces are missing")
-        self.trackers = {viewer: PublicTracker.from_snapshot(trace) for viewer, trace in payload["traces"].items()}
-        encoder = PublicEncoder(self.spec)
+        self.trackers = {viewer: PublicTracker.from_snapshot(trace,
+            typed_spec=self.spec if self._typed else None) for viewer, trace in payload["traces"].items()}
+        if self._typed:
+            validate_public = lambda frame: _validated_typed_public(frame, self.spec)
+        else:
+            encoder = PublicEncoder(self.spec)
+            validate_public = encoder.validate_observation
         for tracker in self.trackers.values():
-            encoder.validate_observation(tracker.initial)
+            validate_public(tracker.initial)
             for _, frame in tracker.frames():
-                encoder.validate_observation(frame)
+                validate_public(frame)
         if any(tracker.viewer != viewer for viewer, tracker in self.trackers.items()) or len({tracker.steps for tracker in self.trackers.values()}) != 1:
             raise ValueError("replay public projection steps do not agree")
         self.decisions = payload["decisions"]
