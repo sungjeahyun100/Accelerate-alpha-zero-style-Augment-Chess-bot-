@@ -123,6 +123,33 @@ def check_rejection(
     return failure("mismatch", "native accepted source-rejected wrong-actor action")
 
 
+def check_stale(
+    applied_position: Any, old_action: Any, source_snapshot: dict[str, Any], native: Any
+) -> dict[str, Any] | None:
+    before = applied_position.snapshot()
+    before_result = applied_position.result
+    for route in ("snapshot", "apply"):
+        try:
+            if route == "snapshot":
+                applied_position.bind_snapshot(source_snapshot)
+            else:
+                applied_position.apply(old_action)
+        except native.StaleActionError:
+            pass
+        except native.UnsupportedFeatureError as exc:
+            return failure("unsupported", f"native stale {route} path unsupported: {exc}")
+        except Exception as exc:
+            return failure("stale-error", f"native stale {route} path: {type(exc).__name__}: {exc}")
+        else:
+            return failure("mismatch", f"native accepted stale action through {route}")
+        changed = difference(before, applied_position.snapshot())
+        if changed:
+            return failure("mismatch", f"stale {route} mutated applied position", path=changed)
+        if applied_position.result != before_result:
+            return failure("mismatch", f"stale {route} changed applied result")
+    return None
+
+
 def compare_case(case: dict[str, Any], native: Any) -> dict[str, Any]:
     result: dict[str, Any] = {"name": case["name"], "mode": case["position"]["state"]["mode"]}
     try:
@@ -199,10 +226,15 @@ def compare_case(case: dict[str, Any], native: Any) -> dict[str, Any]:
         observed = compare_observations(step.position, sample["observations"], native, f"sample {index}")
         if observed:
             return {**result, **observed, "sample": index}
+        stale = check_stale(step.position, action, sample["action"], native)
+        if stale:
+            return {**result, **stale, "sample": index}
         if difference(case["position"], position.snapshot()):
             return {**result, **failure("mismatch", "apply mutated source native position", sample=index)}
     return {**result, "status": "pass", "legalCount": len(actual), "nativeExamined": examined,
-            "bound": len(expected), "applied": len(case["samples"]), "rejected": 1, "publicViewers": 2}
+            "bound": len(expected), "applied": len(case["samples"]), "rejected": 1,
+            "staleBindRejected": len(case["samples"]), "staleApplyRejected": len(case["samples"]),
+            "publicViewers": 2}
 
 
 def main() -> None:
@@ -239,7 +271,11 @@ def main() -> None:
     if request["phase"] == "preflight":
         print(json.dumps({"status": "ready", "nativeModule": native.__file__}))
         return
-    cases = [compare_case(case, native) for case in request["cases"]]
+    source_cases = request.get("cases")
+    if not isinstance(source_cases, list) or not source_cases:
+        print(json.dumps(failure("probe-error", "native comparison requires at least one source case")))
+        return
+    cases = [compare_case(case, native) for case in source_cases]
     status = "pass" if all(case["status"] == "pass" for case in cases) else "fail"
     print(json.dumps({"status": status, "nativeModule": native.__file__, "cases": cases}, allow_nan=False))
 

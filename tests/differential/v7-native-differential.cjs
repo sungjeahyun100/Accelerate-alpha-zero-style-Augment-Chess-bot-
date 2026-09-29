@@ -16,6 +16,9 @@ const MAX_ACTIONS = 4096;
 const MAX_EXAMINED = 65536;
 const MAX_BATCH_BYTES = 16 * 1024 * 1024;
 const STYLES = ["normal", "chaos", "grand"];
+const NO_CASE_FAILURE_STATUSES = new Set([
+  "native-timeout", "native-unavailable", "native-unsupported", "probe-error", "version-mismatch",
+]);
 // Three small assertions extracted from the external seed19-active-only source
 // manifest. The complete source positions stay outside Git and are regenerated.
 const ACTIVE_SEED19 = Object.freeze({
@@ -84,6 +87,15 @@ function buildCase(adapter, contract, name, position) {
       throw new Error(`${name}: source sample failed full-history apply`);
     contract.validatePosition(step.position);
     contract.validateResult(step.result);
+    if (step.position.positionId === action.positionId)
+      throw new Error(`${name}: source sample retained the old Position identity`);
+    let staleRejected = false;
+    try { adapter.apply(step.position, action); }
+    catch (error) {
+      if (!(error instanceof TypeError) || !/Stale or incompatible action/.test(error.message)) throw error;
+      staleRejected = true;
+    }
+    if (!staleRejected) throw new Error(`${name}: source accepted a stale action`);
     const nextObservations = Object.fromEntries(["white", "black"].map(viewer => {
       const observation = adapter.observe(step.position, viewer);
       contract.validateObservation(observation);
@@ -98,7 +110,8 @@ function buildCase(adapter, contract, name, position) {
     input: { name, position, result, observations, actions, rejectPayload, samples },
     summary: { name, mode: position.state.mode, positionDigest: contract.digest(position), legalCount: actions.length,
       sourceExamined: examined, actionTypes, sampleTypes: samples.map(sample => sample.action.payload.type),
-      sampleCount: samples.length, rejectCount: 1, observationViewers: Object.keys(observations) },
+      sampleCount: samples.length, rejectCount: 1, staleRejectCount: samples.length,
+      observationViewers: Object.keys(observations) },
   };
 }
 
@@ -207,7 +220,21 @@ function main() {
     else {
       const comparison = nativeProbe(args.python, { phase: "compare", ...identity, cases: cases.map(item => item.input) });
       report.native = comparison;
-      report.status = comparison.status === "pass" ? "pass" : comparison.status;
+      if (!Array.isArray(comparison?.cases) && NO_CASE_FAILURE_STATUSES.has(comparison?.status) &&
+          typeof comparison.reason === "string" && comparison.reason.trim()) {
+        report.status = comparison.status;
+        report.reason = comparison.reason;
+      } else if (!comparison || !Array.isArray(comparison.cases) || comparison.cases.length !== cases.length ||
+          comparison.cases.some((item, index) => item?.name !== cases[index].input.name)) {
+        report.status = "probe-error";
+        report.reason = "native comparison returned missing, extra, or reordered case results";
+      } else if (comparison.status === "pass" && comparison.cases.some(item => item.status !== "pass")) {
+        report.status = "probe-error";
+        report.reason = "native comparison reported pass with a nonpassing case";
+      } else if (!["pass", "fail"].includes(comparison.status)) {
+        report.status = "probe-error";
+        report.reason = "native comparison returned an invalid aggregate status";
+      } else report.status = comparison.status;
     }
   } catch (error) {
     report.status = "setup-error";
