@@ -1014,12 +1014,37 @@ class TypedInformationSetSearch(InformationSetSearch):
         positions = [self.encoder.encode(ObservationIR.from_public(observation, self.encoder.spec,
                         belief_summary=summary), intents)
                      for observation, intents, summary in requests]
-        batch = batch_typed_positions(positions)
+        if not positions:
+            raise InformationMismatchError("typed leaf batch is empty")
         family = self.evaluator.architecture_family
         order = self.encoder.spec.feature_schema["input_order"][family]
+        # Each position is already encoded, so the exact padded dimensions are
+        # known before allocating the batch. The model family determines which
+        # of those tensors count toward its inference resource limits.
+        estimated_elements = estimated_bytes = 0
+        for name in order:
+            if any(name not in position.inputs for position in positions):
+                raise InformationMismatchError("typed encoder returned incomplete model inputs")
+            arrays = [position.inputs[name] for position in positions]
+            if (any(not isinstance(array, np.ndarray) for array in arrays)
+                    or any(array.ndim != arrays[0].ndim or array.dtype != arrays[0].dtype
+                           for array in arrays)):
+                raise InformationMismatchError("typed encoder returned incompatible model inputs")
+            shape = (len(arrays), *(max(array.shape[axis] for array in arrays)
+                                    for axis in range(arrays[0].ndim)))
+            elements = math.prod(shape)
+            estimated_elements += elements
+            estimated_bytes += elements * arrays[0].dtype.itemsize
+        if estimated_elements > self.limits.max_inference_elements:
+            raise SearchBudgetError("requested typed leaf batch exceeds the declared inference element budget")
+        if estimated_bytes > min(self.limits.max_inference_bytes, self.encoder.spec.max_input_bytes):
+            raise SearchBudgetError("requested typed leaf batch exceeds the declared inference input budget")
+        batch = batch_typed_positions(positions)
         inputs = dict(zip(order, batch.as_family_inputs(family), strict=True))
         if not all(isinstance(array, np.ndarray) for array in inputs.values()):
             raise InformationMismatchError("typed encoder returned a non-array model input")
+        if sum(array.size for array in inputs.values()) > self.limits.max_inference_elements:
+            raise SearchBudgetError("requested typed leaf batch exceeds the declared inference element budget")
         if sum(array.nbytes for array in inputs.values()) > min(self.limits.max_inference_bytes,
                                                                  self.encoder.spec.max_input_bytes):
             raise SearchBudgetError("requested typed leaf batch exceeds the declared inference input budget")

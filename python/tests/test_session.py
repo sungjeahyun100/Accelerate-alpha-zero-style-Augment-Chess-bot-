@@ -12,7 +12,7 @@ import signal
 import sys
 from tempfile import TemporaryDirectory
 from threading import Barrier, Lock
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import numpy as np
 import pytest
@@ -27,7 +27,7 @@ from accelerate_chess.network.typed_context import TypedContextConfig
 from accelerate_chess.network.artifacts import export_onnx, load_manifest, load_typed_base, save_base
 from accelerate_chess.network.model import ModelConfig, PolicyValueNetwork, tensor_state_hash
 from accelerate_chess.replay import MAX_REPLAY_BYTES, EpisodeRecorder, ReplayEpisode, atomic_json, read_json, reserve_slot, writer_claim
-from accelerate_chess.search import PublicTracker, SearchResult
+from accelerate_chess.search import PublicTracker, SearchBudgetError, SearchResult
 from accelerate_chess.training import (DatasetCursor, ReplayDataset, TrainingLimits, _rng_snapshot,
     _tree_hash, create_optimizer, load_training_checkpoint, optimize, save_training_checkpoint)
 from test_search import TestAction, TestPosition, spec
@@ -793,6 +793,54 @@ def test_selfplay_deadline_includes_setup_and_errors_remain_failures(session_dir
     assert failure["status"] == "execution-failed" and failure["replay_saved"] is True
     assert ReplayEpisode.load(path, spec()).outcome == {
         "status": "unfinished", "winner": None, "reason": "RuntimeError: native transition failed"}
+
+
+def test_selfplay_search_cancellation_keeps_unfinished_replay_without_failure_report(session_directory, monkeypatch):
+    root = session_directory / "cancelled-selfplay"
+    native = ModuleType("accelerate_chess._native")
+
+    class InitialPosition:
+        @staticmethod
+        def new_game(*args):
+            return TestPosition(1, reaction=True)
+
+    native.Action = TestAction
+    native.Position = InitialPosition
+    monkeypatch.setitem(sys.modules, "accelerate_chess._native", native)
+    monkeypatch.setattr(cli, "_manifest", lambda *args: root / "unused-manifest.json")
+    for stage, message in (("belief", "belief reconstruction cancelled"),
+                           ("search", "no public decision was evaluated before cancelled"),
+                           ("real-error", "belief reconstruction time budget exhausted")):
+        signal = {"set": False}
+
+        def belief(*args, **kwargs):
+            if stage != "search":
+                signal["set"] = True
+                raise SearchBudgetError(message)
+            return object()
+
+        def run(*args, **kwargs):
+            signal["set"] = True
+            raise SearchBudgetError(message)
+
+        monkeypatch.setattr(cli, "ParticleBelief", belief)
+        monkeypatch.setattr(cli, "_search", lambda *args: SimpleNamespace(
+            evaluator=SimpleNamespace(session=SimpleNamespace(model_sha256="a" * 64)), run=run))
+        args = cli.parser().parse_args(["selfplay", "--run-id", stage, "--max-plies", "1"])
+        episode_path = root / "datasets" / stage / "episode-0000.json"
+        if stage == "real-error":
+            with pytest.raises(SearchBudgetError, match="time budget exhausted"):
+                cli.selfplay(args, root, spec(), lambda: signal["set"])
+            failure = read_json(root / "reports" / stage / "failure.json")
+            assert failure["status"] == "execution-failed"
+            assert ReplayEpisode.load(episode_path, spec()).outcome["status"] == "unfinished"
+        else:
+            report = cli.selfplay(args, root, spec(), lambda: signal["set"])
+            assert report["stop_reason"] == "cancelled" and len(report["episodes"]) == 1
+            episode = ReplayEpisode.load(episode_path, spec())
+            assert episode.outcome == {"status": "unfinished", "winner": None, "reason": "cancelled"}
+            assert episode.decisions == [] and list(episode.examples()) == []
+            assert not (root / "reports" / stage / "failure.json").exists()
 
 
 def test_evaluation_report_identifies_complete_limited_and_cancelled_samples(session_directory, monkeypatch):

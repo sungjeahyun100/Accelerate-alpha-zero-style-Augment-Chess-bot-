@@ -547,7 +547,7 @@ def test_work_limits_and_injected_clocks_have_separate_boundaries():
 
 
 @pytest.mark.parametrize("family", ["mask-resnet", "entity-transformer"])
-def test_typed_search_keeps_public_intent_and_family_tensor_contract(family):
+def test_typed_search_keeps_public_intent_and_family_tensor_contract(family, monkeypatch):
     contract = typed_spec()
 
     class TypedEvaluator(ProductionEvaluator):
@@ -574,6 +574,25 @@ def test_typed_search_keeps_public_intent_and_family_tensor_contract(family):
     assert evaluator.inputs
     assert all(tuple(inputs) == tuple(contract.feature_schema["input_order"][family]) for inputs in evaluator.inputs)
     assert all(inputs["candidate_mask"].dtype == np.bool_ for inputs in evaluator.inputs)
+
+    exact_limit = max(sum(array.size for array in inputs.values()) for inputs in evaluator.inputs)
+    exact = TypedInformationSetSearch(TypedEncoder(contract), evaluator,
+        limits=SearchLimits(iterations=1, max_depth=1, elapsed_ms=None,
+                            max_inference_elements=exact_limit))
+    assert exact.run(belief(particles=2, typed_spec=contract)).iterations == 1
+
+    elements = min(sum(array.size for array in inputs.values()) for inputs in evaluator.inputs)
+    assert elements > 1
+    capped = TypedInformationSetSearch(TypedEncoder(contract), evaluator,
+        limits=SearchLimits(iterations=1, max_depth=1, elapsed_ms=None,
+                            max_inference_elements=elements - 1))
+
+    def padding_must_not_run(_):
+        raise AssertionError("oversized typed batch must fail before padding")
+
+    monkeypatch.setattr("accelerate_chess.ir.batch_typed_positions", padding_must_not_run)
+    with pytest.raises(SearchBudgetError, match="inference element budget"):
+        capped.run(belief(particles=2, typed_spec=contract))
 
 
 def test_typed_tracker_binds_v7_public_projection_and_replays_exact_frames():

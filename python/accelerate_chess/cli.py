@@ -26,7 +26,7 @@ from .network.artifacts import (export_onnx, export_typed_onnx, file_sha256, loa
 from .network.model import ModelConfig, PolicyValueNetwork
 from .replay import EpisodeRecorder, ReplayEpisode, artifact_root, atomic_json, read_json, reserve_slot, slot, writer_claim
 from .search import (BeliefLimits, InformationSetSearch, NativeSourceFactory, ParticleBelief,
-                     PublicTracker, SearchLimits, TypedInformationSetSearch)
+                     PublicTracker, SearchBudgetError, SearchLimits, TypedInformationSetSearch)
 from .training import DatasetCursor, ReplayDataset, TrainingLimits, create_optimizer, load_training_checkpoint, optimize, save_training_checkpoint
 
 
@@ -232,6 +232,14 @@ def _record_selfplay_failure(root, run_id, path, recorder, error, *, save_attemp
         error.add_note(f"selfplay failure report could not be saved: {type(report_error).__name__}: {report_error}")
 
 
+def _cancelled_search_budget(error, cancelled):
+    # A signal alone must not relabel an unrelated source/runtime failure.
+    return (isinstance(error, SearchBudgetError)
+            and str(error) in ("belief reconstruction cancelled",
+                               "no public decision was evaluated before cancelled")
+            and cancelled())
+
+
 def selfplay(args, root, spec, cancelled):
     if not 1 <= args.games <= 64 or not 1 <= args.max_plies <= 4096 or not 1 <= args.elapsed_ms <= 86_400_000:
         raise ValueError("selfplay needs finite games, plies and elapsed time limits")
@@ -251,9 +259,11 @@ def selfplay(args, root, spec, cancelled):
                                  save_attempted=False, replay_saved=False)
         raise
     episodes = []
+    stopped_reason = None
     for game in range(args.games):
         was_cancelled = cancelled()
         if was_cancelled or (time.monotonic() - started) * 1000 >= args.elapsed_ms:
+            stopped_reason = "cancelled" if was_cancelled else "elapsed"
             break
         recorder = None
         save_attempted = replay_saved = False
@@ -304,13 +314,27 @@ def selfplay(args, root, spec, cancelled):
             replay_saved = True
             episodes.append({"path": str(path), **recorder.outcome})
             if reason in ("cancelled", "elapsed"):
+                stopped_reason = reason
                 break
         except (Exception, KeyboardInterrupt) as error:
+            if recorder is not None and position.result is None and _cancelled_search_budget(error, cancelled):
+                try:
+                    recorder.finish(None, "cancelled")
+                    save_attempted = True
+                    recorder.save(path)
+                    replay_saved = True
+                except (Exception, KeyboardInterrupt) as save_error:
+                    _record_selfplay_failure(root, args.run_id, path, recorder, save_error,
+                                             save_attempted=save_attempted, replay_saved=replay_saved)
+                    raise
+                episodes.append({"path": str(path), **recorder.outcome})
+                stopped_reason = "cancelled"
+                break
             _record_selfplay_failure(root, args.run_id, path, recorder, error,
                                      save_attempted=save_attempted, replay_saved=replay_saved)
             raise
     was_cancelled = cancelled()
-    report = {"episodes": episodes, "stop_reason": "cancelled" if was_cancelled else ("elapsed" if (time.monotonic() - started) * 1000 >= args.elapsed_ms else "games"),
+    report = {"episodes": episodes, "stop_reason": stopped_reason or ("cancelled" if was_cancelled else ("elapsed" if (time.monotonic() - started) * 1000 >= args.elapsed_ms else "games")),
               "games_requested": args.games, "evidence_kind": "bounded-verification" if args.verification else "selfplay"}
     atomic_json(slot(root, "reports", args.run_id) / "selfplay.json", report)
     return report
