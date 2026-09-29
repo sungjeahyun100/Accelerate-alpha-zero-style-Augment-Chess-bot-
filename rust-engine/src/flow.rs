@@ -674,12 +674,34 @@ pub(crate) fn check_star_limit(state: &mut GameState) -> Result<bool> {
             .and_then(Value::as_bool)
             == Some(true)
         {
-            let turns = state
-                .extra
-                .get("deathmatchLimitTurns")
-                .and_then(Value::as_u64)
-                .filter(|value| *value > 0)
-                .unwrap_or(10);
+            // The v7 client normalizes this setting and stores the normalized
+            // value before constructing the deathmatch interval. Preserve the
+            // existing v6 branch while its older source contract remains in use.
+            let turns = if state.ruleset_id == RULES_VERSION_V7 {
+                let rounded = crate::observation::number(state.extra.get("deathmatchLimitTurns"))
+                    .filter(|value| *value > 0.0)
+                    .map(|value| value.round().max(1.0))
+                    .unwrap_or(10.0);
+                // The doubled interval must stay exactly representable by
+                // the client's Number-based counter and by our wire snapshot.
+                if rounded >= (1_u64 << 52) as f64 {
+                    return Err(EngineError::InvalidState(
+                        "deathmatch interval exceeds exact integer bound".into(),
+                    ));
+                }
+                let turns = rounded as u64;
+                state
+                    .extra
+                    .insert("deathmatchLimitTurns".into(), json!(turns));
+                turns
+            } else {
+                state
+                    .extra
+                    .get("deathmatchLimitTurns")
+                    .and_then(Value::as_u64)
+                    .filter(|value| *value > 0)
+                    .unwrap_or(10)
+            };
             let interval = turns
                 .checked_mul(2)
                 .ok_or_else(|| EngineError::InvalidState("deathmatch interval overflow".into()))?;

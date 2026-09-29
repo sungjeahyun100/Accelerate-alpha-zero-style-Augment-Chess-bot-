@@ -214,6 +214,15 @@ pub(crate) fn evaluate_royal_capture(
             "royal threat automatic piece reaction".into(),
         ));
     }
+    if state.ruleset_id == RULES_VERSION_V7 {
+        // Source collectValidAiActions(includeCards:false) is an internal,
+        // ordered candidate stream. The public legal stream cannot stand in
+        // for it, even if public v7 movement becomes available separately.
+        // The v7 capture executor also remains unverified.
+        return Err(EngineError::UnsupportedFeature(
+            "v7 royal threat ordered AiNoCards candidates and capture execution".into(),
+        ));
+    }
     let window = clone_window(state, defender);
     let automatic = window.board.iter().flatten().flatten().any(|piece| {
         crate::observation::truth(piece.extra.get("logDir"))
@@ -343,4 +352,22 @@ pub(crate) fn play_move_sound(state: &mut GameState, default: &str, color: Color
         last.insert("soundName".into(), json!("checkDanger"));
     }
     Ok(executed)
+}
+
+#[cfg(test)]
+mod v7_threat_gate_tests {
+    use super::*;
+
+    #[test]
+    fn unavailable_internal_ai_probe_fails_without_mutating_state_or_rng() {
+        let mut state = GameState::new(GameConfig::default(), 19).unwrap();
+        state.ruleset_id = RULES_VERSION_V7.into();
+        state.mode = "play".into();
+        let before = state.clone();
+        assert!(matches!(
+            evaluate_royal_capture(&mut state, Color::White),
+            Err(EngineError::UnsupportedFeature(reason)) if reason.contains("AiNoCards")
+        ));
+        assert_eq!(state, before);
+    }
 }

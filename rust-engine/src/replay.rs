@@ -640,10 +640,47 @@ pub(crate) fn begin_move(state: &mut GameState, actor: Color) -> Result<GameStat
         .insert("moveReplay".into(), Value::Object(replay));
     Ok(before)
 }
+fn board_dimensions(board: &Value) -> Result<(usize, usize)> {
+    let rows = board
+        .as_array()
+        .ok_or_else(|| EngineError::InvalidState("replay board must be an array".into()))?;
+    let cols = rows
+        .first()
+        .map(|row| {
+            row.as_array()
+                .map(Vec::len)
+                .ok_or_else(|| EngineError::InvalidState("replay board rows must be arrays".into()))
+        })
+        .transpose()?
+        .unwrap_or(0);
+    if rows.is_empty() || cols == 0 {
+        return Err(EngineError::InvalidState(
+            "replay board dimensions must be nonzero".into(),
+        ));
+    }
+    if rows
+        .iter()
+        .any(|row| row.as_array().is_none_or(|cells| cells.len() != cols))
+    {
+        return Err(EngineError::InvalidState(
+            "replay board must be rectangular".into(),
+        ));
+    }
+    Ok((rows.len(), cols))
+}
+
 fn board_delta(before: &Value, after: &Value) -> Result<Vec<Value>> {
+    let (rows, cols) = board_dimensions(before)?;
+    if board_dimensions(after)? != (rows, cols) {
+        // Source behavior for a rule that resizes the board needs its own
+        // captured replay proof. Never omit cells outside the old 8x8 scan.
+        return Err(EngineError::UnsupportedFeature(
+            "replay board resize".into(),
+        ));
+    }
     let mut cells = Vec::new();
-    for row in 0..8 {
-        for col in 0..8 {
+    for row in 0..rows {
+        for col in 0..cols {
             if !canonical_equal(&before[row][col], &after[row][col])? {
                 cells.push(
                     json!({"row":row,"col":col,"before":before[row][col],"after":after[row][col]}),
@@ -772,8 +809,11 @@ fn replay_delta(before: &Value, after: &Value) -> Result<Value> {
         }
         fields.push(json!({"key":key,"beforeExists":before.get(key).is_some(),"afterExists":after.get(key).is_some(),"before":before[key],"after":after[key]}));
     }
+    let (before_rows, before_cols) = board_dimensions(&before["board"])?;
+    let (after_rows, after_cols) = board_dimensions(&after["board"])?;
+    let cells = board_delta(&before["board"], &after["board"])?;
     Ok(
-        json!({"board":{"before":{"rows":8,"cols":8},"after":{"rows":8,"cols":8},"cells":board_delta(&before["board"],&after["board"])?},"fields":fields}),
+        json!({"board":{"before":{"rows":before_rows,"cols":before_cols},"after":{"rows":after_rows,"cols":after_cols},"cells":cells},"fields":fields}),
     )
 }
 fn notation_key(event: &Value) -> String {
@@ -1372,3 +1412,85 @@ const SOURCE_METADATA: &str = r##"{
     "shotgunKing": "샷건 킹"
   }
 }"##;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replay_delta_uses_board_shape_and_rejects_unproved_resize() {
+        let before = json!({"board":[[null,null,null],[null,null,null]]});
+        let after = json!({"board":[[null,null,null],[null,null,{"id":"piece"}]]});
+        let delta = replay_delta(&before, &after).unwrap();
+        assert_eq!(delta["board"]["before"], json!({"rows":2,"cols":3}));
+        assert_eq!(delta["board"]["after"], json!({"rows":2,"cols":3}));
+        assert_eq!(
+            delta["board"]["cells"],
+            json!([{"row":1,"col":2,"before":null,"after":{"id":"piece"}}])
+        );
+        assert!(matches!(
+            replay_delta(&before, &json!({"board":[[null,null],[null,null]]})),
+            Err(EngineError::UnsupportedFeature(_))
+        ));
+        assert!(matches!(
+            replay_delta(&before, &json!({"board":[[null],[null,null]]})),
+            Err(EngineError::InvalidState(_))
+        ));
+        for empty_board in [json!([]), json!([[]])] {
+            assert!(matches!(
+                replay_delta(&before, &json!({"board":empty_board})),
+                Err(EngineError::InvalidState(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn v7_seed19_first_pawn_notation_consumes_source_rng_once() {
+        // Frozen source e5ed84fc: normal, seed 19, active-only draft and
+        // White a2-a3. This is the notation boundary, not a completed move.
+        let mut state =
+            crate::draft::initialize_for_ruleset(GameConfig::default(), 19, RULES_VERSION_V7)
+                .unwrap();
+        let white = crate::draft::legal_actions(&state).unwrap().remove(1);
+        crate::transition::apply(&mut state, &white).unwrap();
+        canonicalize_position_frames(&mut state).unwrap();
+        let black = crate::draft::legal_actions(&state).unwrap().remove(0);
+        crate::transition::apply(&mut state, &black).unwrap();
+        canonicalize_position_frames(&mut state).unwrap();
+        assert_eq!(state.mode, "play");
+        assert_eq!(state.rng.cursor, 216);
+
+        let from = Square { row: 6, col: 0 };
+        let to = Square { row: 5, col: 0 };
+        let original = state.at(from).unwrap().clone();
+        let before = begin_move(&mut state, Color::White).unwrap();
+        let mut moved = original.clone();
+        moved.moved = true;
+        moved
+            .extra
+            .insert("coolGuyCapturedLast".into(), json!(false));
+        state.board[6][0] = None;
+        state.board[5][0] = Some(moved);
+        queue_move(
+            &mut state,
+            &before,
+            &original,
+            from,
+            to,
+            &MoveTarget::at(to),
+            false,
+        )
+        .unwrap();
+        assert_eq!(state.rng.cursor, 217);
+        assert_eq!(state.rng.state, 3_566_449_230);
+        assert_eq!(
+            state.extra["pendingNotations"][0]["id"],
+            "move-1790581292828-tw65ask"
+        );
+        assert_eq!(state.extra["pendingNotations"][0]["text"], "a3");
+        assert_eq!(
+            state.extra["pendingNotations"][0]["description"],
+            "백 폰 a2에서 a3 이동"
+        );
+    }
+}

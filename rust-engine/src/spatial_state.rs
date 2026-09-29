@@ -170,6 +170,48 @@ impl SpatialPiece {
             source_order: self.source_order.clone(),
         }
     }
+
+    /// Explicit source anchor fields must agree with the canonical anchor.
+    /// Export also checks implicit fields because the source board recovers
+    /// those from its first occupied cell; internal source-profile states may
+    /// still use an unoccupied anchor without exporting to the legacy DTO.
+    fn validate_source_anchor(&self, for_legacy_export: bool) -> Result<()> {
+        let first_cell = if for_legacy_export {
+            Some(self.occupied_cells()?.into_iter().next().ok_or_else(|| {
+                EngineError::InvalidState(format!("piece {} has an empty footprint", self.id))
+            })?)
+        } else {
+            None
+        };
+        for (field, expected, fallback) in [
+            (
+                "anchorRow",
+                self.anchor.row,
+                first_cell.map(|cell| cell.row),
+            ),
+            (
+                "anchorCol",
+                self.anchor.col,
+                first_cell.map(|cell| cell.col),
+            ),
+        ] {
+            if let Some(value) = self.attributes.get(field) {
+                let source_value = value.as_i64().and_then(|number| i32::try_from(number).ok());
+                if source_value != Some(expected) {
+                    return Err(EngineError::InvalidState(format!(
+                        "piece {} {field} disagrees with canonical anchor",
+                        self.id
+                    )));
+                }
+            } else if fallback.is_some_and(|source_value| source_value != expected) {
+                return Err(EngineError::UnsupportedFeature(format!(
+                    "piece {} anchor cannot be represented without source {field}",
+                    self.id
+                )));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -402,6 +444,9 @@ impl SpatialState {
             }
         }
         for piece in self.pieces.iter() {
+            if self.profile != SpatialProfile::SyntheticGeometryV1 {
+                piece.validate_source_anchor(false)?;
+            }
             for value in piece.attributes.values() {
                 validate_json_value(value, 1)?;
             }
@@ -771,6 +816,7 @@ impl SpatialState {
         let mut output = template.clone();
         output.board = vec![vec![None; 8]; 8];
         for piece in self.pieces.iter() {
+            piece.validate_source_anchor(true)?;
             let source_piece = piece.to_legacy();
             for at in piece.occupied_cells()? {
                 output.board[at.row as usize][at.col as usize] = Some(source_piece.clone());

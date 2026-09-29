@@ -74,6 +74,27 @@ fn source_v7_normal_and_chaos_milestones_match_full_state_and_rng() {
             .extra
             .insert("middleDraftDone".into(), json!(middle_done));
         state.extra.insert("endDraftDone".into(), json!(false));
+        if style == "normal" && phase == "MIDDLE" {
+            // Direct checkRepetitionOrStarLimit on this same seed-37 opening
+            // state, with only the completed-turn count and limit settings
+            // injected, matches the frozen v7 client over the whole state.
+            let mut overtime = state.clone();
+            overtime.extra.insert("starWinLimit".into(), json!(10));
+            overtime
+                .extra
+                .insert("deathmatchEnabled".into(), json!(true));
+            overtime
+                .extra
+                .insert("deathmatchLimitTurns".into(), json!(1.6));
+            assert!(!check_termination(&mut overtime).unwrap());
+            assert_eq!(
+                digest(&overtime),
+                "c2af18ebaf3810e8e960df46a7c28418677abf7dd6ec1a8382e1c686ea7789c8",
+                "normal MIDDLE overtime entry full state"
+            );
+            assert_eq!(overtime.rng.cursor, 216);
+            assert_eq!(overtime.rng.state, 1_469_516_477);
+        }
         assert!(
             maybe_start_milestone_draft(&mut state).unwrap(),
             "{style} {phase}"
@@ -283,6 +304,64 @@ fn repetition_and_star_limit_write_the_exact_terminal_reason() {
         limit.extra["replayEndReason"],
         "2수: 별 합계가 같아 무승부입니다. (0 : 0)"
     );
+}
+
+#[test]
+fn v7_deathmatch_entry_normalizes_the_stored_turn_limit() {
+    // Frozen main-OahWs0tU.js startDeathmatch calls
+    // normalizeDeathmatchLimitTurns and writes its result to the state before
+    // deriving intervalHalfTurns. These synthetic limit-entry probes do not
+    // claim that the intervening two natural turns are executable in Rust.
+    for (input, normalized, interval) in [
+        (json!(1.6), 2, 4),
+        (json!("4"), 4, 8),
+        (Value::Null, 10, 20),
+    ] {
+        let mut state = play_state(RULES_VERSION_V7);
+        state.turns_taken = Sides::new(2, 2);
+        state.extra.insert("starWinLimit".into(), json!(2));
+        state.extra.insert("deathmatchEnabled".into(), json!(true));
+        state.extra.insert("deathmatchLimitTurns".into(), input);
+        let rng = state.rng.clone();
+        assert!(!check_star_limit(&mut state).unwrap());
+        assert_eq!(state.mode, "play");
+        assert_eq!(state.extra["deathmatchLimitTurns"], normalized);
+        assert_eq!(state.extra["deathmatch"]["intervalHalfTurns"], interval);
+        assert_eq!(state.extra["deathmatch"]["startedAtTurn"], 2);
+        assert_eq!(state.extra["endPhaseStartMove"], 2);
+        assert_eq!(state.rng, rng);
+        assert_eq!(
+            state.extra["logs"].as_array().unwrap().last().unwrap(),
+            &json!(format!(
+                "연장전 시작: 2수 이후 {normalized}수 동안 폰 이동, 포획, 액티브 카드 사용이 없으면 별이 더 적은 쪽이 승리합니다."
+            ))
+        );
+    }
+
+    let mut v6 = play_state(RULES_VERSION_V6);
+    v6.turns_taken = Sides::new(2, 2);
+    v6.extra.insert("starWinLimit".into(), json!(2));
+    v6.extra.insert("deathmatchEnabled".into(), json!(true));
+    v6.extra.insert("deathmatchLimitTurns".into(), json!(1.6));
+    assert!(!check_star_limit(&mut v6).unwrap());
+    assert_eq!(v6.extra["deathmatchLimitTurns"], 1.6);
+    assert_eq!(v6.extra["deathmatch"]["intervalHalfTurns"], 20);
+
+    let mut out_of_range = play_state(RULES_VERSION_V7);
+    out_of_range.turns_taken = Sides::new(2, 2);
+    out_of_range.extra.insert("starWinLimit".into(), json!(2));
+    out_of_range
+        .extra
+        .insert("deathmatchEnabled".into(), json!(true));
+    out_of_range
+        .extra
+        .insert("deathmatchLimitTurns".into(), json!(1_u64 << 52));
+    let before = out_of_range.clone();
+    assert!(matches!(
+        check_star_limit(&mut out_of_range),
+        Err(EngineError::InvalidState(_))
+    ));
+    assert_eq!(out_of_range, before);
 }
 
 #[test]
