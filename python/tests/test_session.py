@@ -410,6 +410,38 @@ def test_public_replay_terminal_labels_and_streamed_dataset(session_directory, m
     loaded = ReplayEpisode(external, spec())
     external["outcome"]["winner"] = "black"
     assert loaded.outcome["winner"] is None and list(loaded.examples()) == []
+    oversized = session_directory / "oversized-replay.json"
+    with oversized.open("wb") as output:
+        output.truncate(MAX_REPLAY_BYTES + 1)
+    with pytest.raises(ValueError, match="16 MiB storage boundary"):
+        ReplayDataset([oversized], spec())
+
+
+def test_pending_public_decision_rejects_conflicting_transition_without_mutation():
+    contract = spec()
+    position = TestPosition(1, reaction=True)
+    recorder = EpisodeRecorder({viewer: position.observe(viewer) for viewer in ("white", "black")},
+        contract, environment_seed=37, belief_seed=71, evidence_kind="synthetic")
+    intent = TestAction(0, 1).public_intent()
+    key = canonical_json(intent)
+    result = SearchResult(intent, key, ({"action_key": key, "intent": intent, "visits": 1,
+        "availability": 1, "probability": 1., "value": .2},),
+        position.observe("white")["informationStateKey"], 1, "iterations", True, False,
+        1, 1, contract.digest)
+    recorder.record_decision("white", result)
+    before = recorder.snapshot()
+    with pytest.raises(ValueError, match="already pending"):
+        recorder.record_decision("white", result)
+    child = position.apply(position.bind_public_intent(intent)).position
+    observations = {viewer: child.observe(viewer) for viewer in ("white", "black")}
+    with pytest.raises(ValueError, match="pending actor or selected intent"):
+        recorder.advance(observations, actor="black", intent=intent)
+    with pytest.raises(ValueError, match="pending actor or selected intent"):
+        recorder.advance(observations, actor="white", intent=TestAction(1, 1).public_intent())
+    assert recorder.snapshot() == before
+    recorder.advance(observations, actor="white", intent=intent)
+    assert recorder.decisions[0]["transition_completed"]
+    ReplayEpisode(recorder.snapshot(), contract)
 
 
 def test_synthetic_optimizer_and_rng_cursor_resume_preserve_failure_state(session_directory):
@@ -473,6 +505,21 @@ def test_synthetic_optimizer_and_rng_cursor_resume_preserve_failure_state(sessio
     with pytest.raises(ValueError, match="compatibility"):
         wrong_spec = replace(spec(), rules_version="wrong-site")
         load_training_checkpoint(restored, restored_optimizer, wrong_spec, restored_cursor, checkpoint)
+
+
+def test_optimizer_cancellation_is_classified_from_one_signal_read(session_directory):
+    replay = session_directory / "episode.json"
+    synthetic_episode().save(replay)
+    dataset = ReplayDataset([replay], spec())
+    model = PolicyValueNetwork(ModelConfig(spec().board_channels, spec().condition_dim,
+        spec().action_dim, channels=4, residual_blocks=1, lora_rank=2, lora_alpha=2.))
+    optimizer = create_optimizer(model, mode="base")
+    cursor = DatasetCursor(dataset, 19)
+    signals = iter((True, False))
+    report = optimize(model, optimizer, PublicEncoder(spec()), cursor,
+        limits=TrainingLimits(steps=1, batch_size=1), cancelled=lambda: next(signals))
+    assert report["steps"] == 0 and report["stop_reason"] == "cancelled"
+    assert cursor.offset == 0 and next(signals) is False
 
 
 def test_cli_defaults_are_explicit_intent_summary_and_full_resnet():
@@ -707,8 +754,45 @@ def test_selfplay_failed_replay_save_is_not_retried_and_writes_failure_report(se
         cli._record_selfplay_failure(root, "oversize", path, recorder, original,
                                      save_attempted=True, replay_saved=False)
         report = read_json(root / "reports" / "oversize" / "failure.json")
-        assert recorder.saves == 0 and report["error"] == "ValueError"
+        assert recorder.saves == 0 and report["status"] == "execution-failed"
+        assert report["error"] == "ValueError"
         assert report["replay_saved"] is False and report["episode"] == str(path)
+
+
+def test_selfplay_deadline_includes_setup_and_errors_remain_failures(session_directory, monkeypatch):
+    root = session_directory / "bounded-selfplay"
+    native = ModuleType("accelerate_chess._native")
+
+    class NeverStartedPosition:
+        @staticmethod
+        def new_game(*args):
+            raise AssertionError("an expired run must not start a native game")
+
+    native.Position = NeverStartedPosition
+    monkeypatch.setitem(sys.modules, "accelerate_chess._native", native)
+    monkeypatch.setattr(cli, "_manifest", lambda *args: root / "unused-manifest.json")
+    monkeypatch.setattr(cli, "_search", lambda *args: object())
+    ticks = 0
+
+    def clock():
+        nonlocal ticks
+        ticks += 1
+        return 0. if ticks == 1 else .02
+
+    monkeypatch.setattr(cli.time, "monotonic", clock)
+    args = cli.parser().parse_args(["selfplay", "--run-id", "setup-overrun", "--elapsed-ms", "10"])
+    report = cli.selfplay(args, root, spec(), lambda: False)
+    assert report["episodes"] == [] and report["stop_reason"] == "elapsed"
+    assert read_json(root / "reports" / "setup-overrun" / "selfplay.json") == report
+
+    failed = synthetic_episode(terminal=False)
+    path = root / "datasets" / "execution-error" / "episode-0000.json"
+    cli._record_selfplay_failure(root, "execution-error", path, failed,
+        RuntimeError("native transition failed"), save_attempted=False, replay_saved=False)
+    failure = read_json(root / "reports" / "execution-error" / "failure.json")
+    assert failure["status"] == "execution-failed" and failure["replay_saved"] is True
+    assert ReplayEpisode.load(path, spec()).outcome == {
+        "status": "unfinished", "winner": None, "reason": "RuntimeError: native transition failed"}
 
 
 def test_evaluation_report_identifies_complete_limited_and_cancelled_samples(session_directory, monkeypatch):

@@ -348,6 +348,61 @@ def test_fail_closed_limits_and_history_version():
     assert HISTORY_VERSION == "public-history-summary-v2"
 
 
+def test_synthetic_public_history_summary_is_typed_and_keeps_past_absolute_squares():
+    catalog, policy = source()
+    synthetic = TypedEncoderSpec.from_catalog(catalog, observation_policy=policy,
+                                              observation_version="synthetic-geometry-v1")
+    summary = {"version": HISTORY_VERSION, "event_count": 1,
+               "actor_counts": {"white": 1, "black": 0},
+               "decision_actor_changes": 1, "board_change_count": 1,
+               "recent_events": [{"actor": "white", "nextActor": "black", "phase": "OPENING",
+                                  "board_change_count": 1, "board_change_squares": [[-2, 4]],
+                                  "own_card_count": 0, "opponent_card_count": 0,
+                                  "outcome": None}], "history_hash": "a" * 64}
+    base = dict(spec=synthetic, geometry=BoardGeometry(0, 0, 1, 1), viewer="white",
+                turn="black", board=[[None]], cell_kinds=[["empty"]])
+    first = TypedEncoder(synthetic).encode(ObservationIR.from_components(
+        **base, history_summary=summary), [])
+    # The old event had no geometry. Its public coordinates remain absolute,
+    # even though neither is on the current 1x1 board.
+    numeric_values = first.inputs["record_numeric"][:, 0]
+    assert -2 in numeric_values and 4 in numeric_values
+    changed_digest = deepcopy(summary)
+    changed_digest["history_hash"] = "b" * 64
+    second = TypedEncoder(synthetic).encode(ObservationIR.from_components(
+        **base, history_summary=changed_digest), [])
+    for name in first.inputs:
+        np.testing.assert_array_equal(first.inputs[name], second.inputs[name])
+
+    malformed = [
+        {**summary, "hiddenCardCount": 2},
+        {**summary, "event_count": 2},
+        {**summary, "board_change_count": 0},
+        {**summary, "board_change_count": 2},
+        {**summary, "recent_events": []},
+        {**summary, "recent_events": [{**summary["recent_events"][0],
+                                       "nextActor": "white"}]},
+        {**summary, "recent_events": [{**summary["recent_events"][0],
+                                       "board_change_squares": [[-2, 4], [3, 5]]}]},
+        {**summary, "recent_events": [{**summary["recent_events"][0],
+                                       "board_change_squares": [[1_000_001, 4]]}]},
+        {**summary, "recent_events": [{**summary["recent_events"][0],
+                                       "actor": ["white"]}]},
+        {},
+    ]
+    for invalid in malformed:
+        with pytest.raises(ValueError, match="history"):
+            ObservationIR.from_components(**base, history_summary=invalid)
+
+    longer = {**summary, "event_count": 9, "actor_counts": {"white": 9, "black": 0},
+              "decision_actor_changes": 9, "board_change_count": 9,
+              "recent_events": summary["recent_events"] * 8}
+    ObservationIR.from_components(**base, history_summary=longer)
+    with pytest.raises(ValueError, match="recent event window"):
+        ObservationIR.from_components(**base, history_summary={
+            **longer, "recent_events": longer["recent_events"][:-1]})
+
+
 def test_candidate_actor_must_match_the_value_perspective_in_a_draft():
     ir = ObservationIR.from_public(frame(), spec())
     with pytest.raises(ValueError, match="candidate decision actor"):

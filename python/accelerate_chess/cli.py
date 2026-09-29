@@ -216,7 +216,7 @@ def choose(args, root, spec, cancelled):
 
 
 def _record_selfplay_failure(root, run_id, path, recorder, error, *, save_attempted, replay_saved):
-    failure = {"status": "unfinished" if recorder is not None else "initialization-failed",
+    failure = {"status": "execution-failed" if recorder is not None else "initialization-failed",
                "episode": str(path) if recorder is not None else None,
                "replay_saved": replay_saved, "error": type(error).__name__, "reason": str(error)}
     if recorder is not None and not save_attempted:
@@ -235,6 +235,8 @@ def _record_selfplay_failure(root, run_id, path, recorder, error, *, save_attemp
 def selfplay(args, root, spec, cancelled):
     if not 1 <= args.games <= 64 or not 1 <= args.max_plies <= 4096 or not 1 <= args.elapsed_ms <= 86_400_000:
         raise ValueError("selfplay needs finite games, plies and elapsed time limits")
+    # The run deadline includes public config and model/runtime setup.
+    started = time.monotonic()
     config = _configuration(args)
     output = reserve_slot(root, "datasets", args.run_id)
     try:
@@ -248,10 +250,10 @@ def selfplay(args, root, spec, cancelled):
         _record_selfplay_failure(root, args.run_id, output / "episode-0000.json", None, error,
                                  save_attempted=False, replay_saved=False)
         raise
-    started = time.monotonic()
     episodes = []
     for game in range(args.games):
-        if cancelled() or (time.monotonic() - started) * 1000 >= args.elapsed_ms:
+        was_cancelled = cancelled()
+        if was_cancelled or (time.monotonic() - started) * 1000 >= args.elapsed_ms:
             break
         recorder = None
         save_attempted = replay_saved = False
@@ -275,20 +277,23 @@ def selfplay(args, root, spec, cancelled):
                 if position.result is not None:
                     reason = "source-terminal"
                     break
-                if cancelled() or (time.monotonic() - started) * 1000 >= args.elapsed_ms:
-                    reason = "cancelled" if cancelled() else "elapsed"
+                was_cancelled = cancelled()
+                if was_cancelled or (time.monotonic() - started) * 1000 >= args.elapsed_ms:
+                    reason = "cancelled" if was_cancelled else "elapsed"
                     break
                 actor = position.decision_actor
                 if recorder.trackers[actor].latest != position.observe(actor):
                     raise ValueError("environment public projection diverged from the complete replay")
                 result = search.run(beliefs[actor], cancelled=cancelled)
                 recorder.record_decision(actor, result)
-                if cancelled() or result.stop_reason == "cancelled" or (time.monotonic() - started) * 1000 >= args.elapsed_ms:
-                    reason = "cancelled" if cancelled() or result.stop_reason == "cancelled" else "elapsed"
+                was_cancelled = cancelled()
+                if was_cancelled or result.stop_reason == "cancelled" or (time.monotonic() - started) * 1000 >= args.elapsed_ms:
+                    reason = "cancelled" if was_cancelled or result.stop_reason == "cancelled" else "elapsed"
                     break
                 action = position.bind_public_intent(result.intent)
-                if cancelled() or (time.monotonic() - started) * 1000 >= args.elapsed_ms:
-                    reason = "cancelled" if cancelled() else "elapsed"
+                was_cancelled = cancelled()
+                if was_cancelled or (time.monotonic() - started) * 1000 >= args.elapsed_ms:
+                    reason = "cancelled" if was_cancelled else "elapsed"
                     break
                 child = position.apply(action).position
                 recorder.advance({viewer: child.observe(viewer) for viewer in ("white", "black")}, actor=actor, intent=result.intent)
@@ -304,7 +309,8 @@ def selfplay(args, root, spec, cancelled):
             _record_selfplay_failure(root, args.run_id, path, recorder, error,
                                      save_attempted=save_attempted, replay_saved=replay_saved)
             raise
-    report = {"episodes": episodes, "stop_reason": "cancelled" if cancelled() else ("elapsed" if (time.monotonic() - started) * 1000 >= args.elapsed_ms else "games"),
+    was_cancelled = cancelled()
+    report = {"episodes": episodes, "stop_reason": "cancelled" if was_cancelled else ("elapsed" if (time.monotonic() - started) * 1000 >= args.elapsed_ms else "games"),
               "games_requested": args.games, "evidence_kind": "bounded-verification" if args.verification else "selfplay"}
     atomic_json(slot(root, "reports", args.run_id) / "selfplay.json", report)
     return report

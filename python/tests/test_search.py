@@ -326,6 +326,46 @@ def test_public_trace_identity_complete_history_and_belief_filter():
         TransitionProposal(TestPosition(), float("nan"))
 
 
+def test_native_source_chance_requires_conditioning_and_explicit_densities(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    initial = TestPosition().observe("white")
+    initial["publicState"].update(mode="draft", phase="OPENING", revealedOpponentCards=[])
+    sign(initial)
+    expected = deepcopy(initial)
+    expected["publicState"]["revealedOpponentCards"] = [{"id": "slime", "instanceId": "revealed", "used": False}]
+    sign(expected)
+    factory = object.__new__(NativeSourceFactory)
+    factory.typed_spec = None
+
+    class MissingCondition:
+        decision_actor = "black"
+
+        def observe(self, viewer):
+            return initial
+
+    with pytest.raises(SourceCapabilityError, match="hidden opening offer conditioning"):
+        factory.prepare_transition(MissingCondition(), expected, 7)
+
+    monkeypatch.setitem(sys.modules, "accelerate_chess._native",
+                        SimpleNamespace(ConditioningMismatchError=type("ConditioningMismatchError", (Exception,), {})))
+
+    class MissingDensity(MissingCondition):
+        def condition_hidden_opening_draft(self, expected, seed):
+            return {"position": self, "importance_weight": 1.,
+                    "source_probability": None, "proposal_probability": None}
+
+        def apply_weighted_conditioned_public(self, action, expected, seed):
+            return {"step": SimpleNamespace(position=self), "importance_weight": 1.,
+                    "source_probability": None, "proposal_probability": None}
+
+    with pytest.raises(InformationMismatchError, match="source/proposal chance density"):
+        factory.prepare_transition(MissingDensity(), expected, 7)
+    with pytest.raises(InformationMismatchError, match="source/proposal chance density"):
+        factory.apply_conditioned(MissingDensity(), object(), expected, 7)
+
+
 def test_unmatched_public_trace_and_empty_belief_fail_explicitly():
     posterior = belief(particles=4)
     child = TestPosition().apply(TestAction(0, 0)).position.observe("white")
@@ -375,6 +415,27 @@ def test_puct_value_sign_uses_decision_actor_and_chance_is_sampled():
     assert stochastic.legal_actions_exhausted
     assert stochastic.max_inference_batch == 4 and stochastic.inference_batches == 20
     assert all(len(board) == 4 for board, _, _ in chance_search.evaluator.calls)
+
+
+@pytest.mark.parametrize("depth,nodes", [(1, 2), (2, 1), (2, 2)])
+def test_search_does_not_label_unconditioned_children_with_root_posterior(depth, nodes):
+    requests = []
+
+    class SummarySearch(InformationSetSearch):
+        def _evaluate_many(self, batch, state):
+            requests.extend((len(observation["history"]), summary)
+                            for observation, _, summary in batch)
+            return super()._evaluate_many(batch, state)
+
+    posterior = belief(particles=2)
+    result = SummarySearch(PublicEncoder(spec()), TestEvaluator(spec()),
+                           limits=SearchLimits(iterations=1, max_depth=depth,
+                                               max_nodes=nodes, leaf_batch_size=1,
+                                               elapsed_ms=None)).run(posterior)
+    assert requests[0] == (0, posterior.summary)
+    assert requests[1] == (1, None)
+    assert result.belief_summary == posterior.summary
+    assert result.policy[0]["visits"] == 1
 
 
 def test_hidden_execution_flags_do_not_change_public_features_or_choice():

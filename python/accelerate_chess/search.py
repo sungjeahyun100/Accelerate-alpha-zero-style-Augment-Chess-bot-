@@ -313,6 +313,8 @@ class NativeSourceFactory:
             return None
         if not isinstance(proposal, Mapping) or set(proposal) != {"step", "importance_weight", "source_probability", "proposal_probability"}:
             raise InformationMismatchError("native conditioned step metadata has an invalid shape")
+        if proposal["source_probability"] is None or proposal["proposal_probability"] is None:
+            raise InformationMismatchError("native conditioned step lacks source/proposal chance density")
         step = proposal["step"]
         if step is None or not hasattr(step, "position"):
             raise InformationMismatchError("native conditioned step has no child position")
@@ -331,7 +333,7 @@ class NativeSourceFactory:
             return TransitionProposal(position)
         condition = getattr(position, "condition_hidden_opening_draft", None)
         if condition is None:
-            return TransitionProposal(position)
+            raise SourceCapabilityError("native hidden opening offer conditioning is unavailable")
         from ._native import ConditioningMismatchError
         try:
             proposal = condition(expected, independent_seed)
@@ -339,6 +341,8 @@ class NativeSourceFactory:
             return None
         if not isinstance(proposal, Mapping) or set(proposal) != {"position", "importance_weight", "source_probability", "proposal_probability"}:
             raise InformationMismatchError("native source proposal metadata has an invalid shape")
+        if proposal["source_probability"] is None or proposal["proposal_probability"] is None:
+            raise InformationMismatchError("native source proposal lacks source/proposal chance density")
         result = TransitionProposal(**proposal, profile="source-weighted-offer-proposal-v1")
         if _public(result.position.observe(expected["viewer"]), self.typed_spec) != before:
             raise InformationMismatchError("latent conditioning changed the prior public observation")
@@ -689,6 +693,8 @@ class _SimulationStopped(Exception):
 
 @dataclass(frozen=True)
 class SearchResult:
+    """A public choice; belief_summary describes only the conditioned root."""
+
     intent: dict[str, Any]
     action_key: str
     policy: tuple[dict[str, Any], ...]
@@ -837,7 +843,7 @@ class InformationSetSearch:
                 if key not in state.nodes:
                     if len(state.nodes) >= self.limits.max_nodes:
                         state.stop, state.partial = "nodes", True
-                        _, value = yield observation, [], belief.summary
+                        _, value = yield observation, [], belief.summary if key == root_key else None
                         break
                     state.nodes[key] = _Node(actor)
                 node = state.nodes[key]
@@ -874,7 +880,10 @@ class InformationSetSearch:
                     state.root_exhausted &= covered
                 state.partial |= not covered
                 ordered = sorted(available)
-                probabilities, value = yield observation, [intents[item] for item in ordered], belief.summary
+                # The belief was conditioned on the root public trace only.
+                # A simulated child has a longer public history, but no child
+                # posterior has been reconstructed for it.
+                probabilities, value = yield observation, [intents[item] for item in ordered], (belief.summary if key == root_key else None)
                 check()
                 node.visits += 1
                 for item, probability in zip(ordered, probabilities):
@@ -903,7 +912,7 @@ class InformationSetSearch:
                 value_actor = _actor(position)
                 value = self._outcome(position, value_actor)
                 if value is None:
-                    _, value = yield self._verify_public(position.observe(value_actor)), [], belief.summary
+                    _, value = yield self._verify_public(position.observe(value_actor)), [], None
             check()
             for node, edge in reversed(path):
                 edge.visits += 1

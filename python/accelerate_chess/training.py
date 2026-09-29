@@ -23,15 +23,22 @@ import torch
 from .encoding import EncoderSpec, PublicEncoder, batch_positions, canonical_json
 from .network.artifacts import MAX_ARTIFACT_BYTES, _validate_state
 from .network.model import PolicyValueNetwork, tensor_state_hash
-from .replay import ReplayEpisode, TrainingExample
+from .replay import MAX_REPLAY_BYTES, ReplayEpisode, TrainingExample
 
 TRAINING_VERSION = "accelerate-training-checkpoint-v1"
 TYPED_TRAINING_VERSION = "accelerate-training-checkpoint-v2"
 
 
 def _sha(path):
+    digest = hashlib.sha256()
+    total = 0
     with Path(path).open("rb") as file:
-        return hashlib.file_digest(file, "sha256").hexdigest()
+        while chunk := file.read(min(1 << 20, MAX_REPLAY_BYTES - total + 1)):
+            total += len(chunk)
+            if total > MAX_REPLAY_BYTES:
+                raise ValueError("replay input exceeds the 16 MiB storage boundary")
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 class ReplayDataset:
@@ -220,8 +227,9 @@ def optimize(model, optimizer, encoder: PublicEncoder, cursor: DatasetCursor, *,
     metrics = []
     reason = "steps"
     for _ in range(limits.steps):
-        if cancelled() or (time.monotonic() - start) * 1000 >= limits.elapsed_ms:
-            reason = "cancelled" if cancelled() else "elapsed"
+        was_cancelled = cancelled()
+        if was_cancelled or (time.monotonic() - start) * 1000 >= limits.elapsed_ms:
+            reason = "cancelled" if was_cancelled else "elapsed"
             break
         examples = cursor.next_batch(limits.batch_size)
         if typed:

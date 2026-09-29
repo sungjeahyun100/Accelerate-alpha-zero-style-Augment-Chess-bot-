@@ -209,6 +209,9 @@ class EpisodeRecorder:
             raise ValueError("decision actor/public frame/model contract mismatch")
         if result.model_sha256 != self.metadata["model_sha256"]:
             raise ValueError("decision teacher model differs from the episode provenance")
+        if self.decisions and (not self.decisions[-1]["transition_completed"]
+                               or self.decisions[-1]["trace_step"] >= self.trackers[actor].steps):
+            raise ValueError("a replay decision is already pending at this public trace step")
         candidates = [{"intent": item["intent"], "visits": item["visits"], "probability": item["probability"], "action_key": item["action_key"]} for item in result.policy]
         record = {"actor": actor, "trace_step": self.trackers[actor].steps, "information_state_key": result.information_state_key,
                   "chosen_intent": result.intent, "candidates": candidates, "transition_completed": False,
@@ -222,14 +225,19 @@ class EpisodeRecorder:
     def advance(self, observations: Mapping[str, Mapping[str, Any]], *, actor: str, intent: Mapping[str, Any]):
         if set(observations) != {"white", "black"} or actor not in self.trackers:
             raise ValueError("advance requires both public projections and the actual decision actor")
+        pending = self.decisions[-1] if self.decisions and not self.decisions[-1]["transition_completed"] else None
+        if pending is not None and (pending["trace_step"] != self.trackers[actor].steps
+                                    or pending["actor"] != actor
+                                    or canonical_json(pending["chosen_intent"]) != canonical_json(intent)):
+            raise ValueError("public transition differs from the pending actor or selected intent")
         observations = {viewer: self._validate_public(frame) for viewer, frame in observations.items()}
         # Validate both projections without partially advancing one tracker.
         for viewer, tracker in self.trackers.items():
             tracker.validate_append(observations[viewer], own_intent=intent if viewer == actor else None)
         for viewer, tracker in self.trackers.items():
             tracker.append(observations[viewer], own_intent=intent if viewer == actor else None)
-        if self.decisions and self.decisions[-1]["actor"] == actor and self.decisions[-1]["trace_step"] == self.trackers[actor].steps - 1 and self.decisions[-1]["chosen_intent"] == intent:
-            self.decisions[-1]["transition_completed"] = True
+        if pending is not None:
+            pending["transition_completed"] = True
 
     def finish(self, outcome: str | None, reason: str):
         if outcome not in (None, "white", "black", "draw") or not isinstance(reason, str) or not reason:

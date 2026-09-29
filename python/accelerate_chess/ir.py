@@ -456,6 +456,7 @@ class ObservationIR:
         for value in (self.board, self.own_cards, self.public_state, self.history_summary, self.belief_summary, self.descriptors):
             _reject_private(value)
             canonical_json(value)
+        _validate_history_summary(self.history_summary)
         if self.belief_summary is not None:
             _validate_belief_summary(self.belief_summary)
         if not isinstance(self.information_state_key, str) or len(self.information_state_key) != 64 or any(c not in "0123456789abcdef" for c in self.information_state_key):
@@ -500,7 +501,8 @@ class ObservationIR:
         state = json.loads(canonical_json(public_state or {}))
         board_copy = json.loads(canonical_json(board))
         cards_copy = json.loads(canonical_json(own_cards))
-        history_copy = json.loads(canonical_json(history_summary or _empty_history_summary()))
+        history_copy = json.loads(canonical_json(
+            _empty_history_summary() if history_summary is None else history_summary))
         belief_copy = json.loads(canonical_json(belief_summary)) if belief_summary is not None else None
         descriptors_copy = json.loads(canonical_json(descriptors))
         _validate_descriptors(descriptors_copy)
@@ -526,6 +528,74 @@ def _empty_history_summary() -> dict[str, Any]:
             "decision_actor_changes": 0, "board_change_count": 0, "recent_events": []}
 
 
+def _validate_history_summary(summary: Mapping[str, Any]) -> None:
+    """Keep manually supplied summaries within the same public v2 feature shape.
+
+    Past event geometry is absent from Observation v2, so absolute change
+    coordinates are bounded independently of the current board.
+    """
+    expected = {"version", "event_count", "actor_counts", "decision_actor_changes",
+                "board_change_count", "recent_events"}
+    if not isinstance(summary, Mapping):
+        raise ValueError("typed public history summary has an unknown shape")
+    if summary.get("version") != HISTORY_VERSION:
+        raise ValueError("IR history summary version differs from typed contract")
+    if set(summary) not in (expected, expected | {"history_hash"}):
+        raise ValueError("typed public history summary has an unknown shape")
+    if "history_hash" in summary:
+        digest = summary["history_hash"]
+        if (not isinstance(digest, str) or len(digest) != 64
+                or any(character not in "0123456789abcdef" for character in digest)):
+            raise ValueError("public history digest must be lowercase SHA-256 metadata")
+    for name in ("event_count", "decision_actor_changes", "board_change_count"):
+        if type(summary[name]) is not int or summary[name] < 0:
+            raise ValueError(f"public history {name} must be a nonnegative integer")
+    counts = summary["actor_counts"]
+    if (not isinstance(counts, Mapping) or set(counts) != {"white", "black"}
+            or any(type(value) is not int or value < 0 for value in counts.values())
+            or sum(counts.values()) != summary["event_count"]
+            or summary["decision_actor_changes"] > summary["event_count"]):
+        raise ValueError("public history actor counts are inconsistent")
+    recent = summary["recent_events"]
+    if not isinstance(recent, (list, tuple)) or len(recent) != min(8, summary["event_count"]):
+        raise ValueError("public history recent event window is invalid")
+    recent_actor_counts = {"white": 0, "black": 0}
+    recent_changes = recent_actor_changes = 0
+    event_fields = {"actor", "nextActor", "phase", "board_change_count",
+                    "board_change_squares", "own_card_count", "opponent_card_count", "outcome"}
+    for event in recent:
+        if not isinstance(event, Mapping) or set(event) != event_fields:
+            raise ValueError("public history recent event has an unknown shape")
+        if (type(event["actor"]) is not str or event["actor"] not in counts
+                or type(event["nextActor"]) is not str or event["nextActor"] not in counts
+                or not isinstance(event["phase"], str) or not event["phase"]
+                or event["outcome"] not in (None, "white", "black", "draw")):
+            raise ValueError("public history recent event actor, phase or outcome is invalid")
+        for name in ("board_change_count", "own_card_count", "opponent_card_count"):
+            if type(event[name]) is not int or event[name] < 0:
+                raise ValueError(f"public history recent event {name} is invalid")
+        squares = event["board_change_squares"]
+        if (not isinstance(squares, (list, tuple))
+                or len(squares) != event["board_change_count"]):
+            raise ValueError("public history recent board changes are inconsistent")
+        for square in squares:
+            if (not isinstance(square, (list, tuple)) or len(square) != 2
+                    or any(type(value) is not int or abs(value) > 1_000_000 for value in square)):
+                raise ValueError("public history change needs bounded absolute coordinates")
+        recent_actor_counts[event["actor"]] += 1
+        recent_actor_changes += event["actor"] != event["nextActor"]
+        recent_changes += len(squares)
+    if (any(recent_actor_counts[color] > counts[color] for color in counts)
+            or recent_actor_changes > summary["decision_actor_changes"]
+            or recent_changes > summary["board_change_count"]):
+        raise ValueError("public history recent events exceed aggregate counts")
+    if (summary["event_count"] <= 8
+            and (recent_actor_counts != counts
+                 or recent_actor_changes != summary["decision_actor_changes"]
+                 or recent_changes != summary["board_change_count"])):
+        raise ValueError("public history aggregate counts differ from its complete recent events")
+
+
 def summarize_history_v2(history: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Bounded public history features; the full trace remains with replay.
 
@@ -541,7 +611,9 @@ def summarize_history_v2(history: Sequence[Mapping[str, Any]]) -> dict[str, Any]
     for event in history:
         if not isinstance(event, Mapping) or set(event) != required or event["kind"] != "transition":
             raise ValueError("typed history needs public Transition v1 events")
-        if event["actor"] not in counts or event["nextActor"] not in counts or not isinstance(event["phase"], str):
+        if (type(event["actor"]) is not str or event["actor"] not in counts
+                or type(event["nextActor"]) is not str or event["nextActor"] not in counts
+                or not isinstance(event["phase"], str)):
             raise ValueError("invalid public transition actor or phase")
         for key in ("boardChanges", "ownCards", "revealedOpponentCards"):
             if not isinstance(event[key], (list, tuple)):
