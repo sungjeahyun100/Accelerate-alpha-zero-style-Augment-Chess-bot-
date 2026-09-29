@@ -57,7 +57,9 @@ class MaskResNetConfig:
             raise ValueError("ResNet channels, block count, or LoRA rank exceed architecture limits")
         if self.max_batch > 64 or self.max_board_axis > 32 or self.max_candidates > 4096:
             raise ValueError("model runtime limits exceed the supported deployment profile")
-        if not math.isfinite(self.lora_alpha) or self.lora_alpha <= 0 or self.lora_dropout != 0:
+        if (type(self.lora_alpha) not in (int, float) or type(self.lora_dropout) not in (int, float)
+                or not math.isfinite(self.lora_alpha) or self.lora_alpha <= 0
+                or not math.isfinite(self.lora_dropout) or self.lora_dropout != 0):
             raise ValueError("static convolution LoRA requires positive alpha and dropout 0")
         if self.architecture_version != "mask-resnet-v2":
             raise ValueError("unsupported mask ResNet architecture version")

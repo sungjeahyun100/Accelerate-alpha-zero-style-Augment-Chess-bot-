@@ -22,8 +22,9 @@ from accelerate_chess.network.artifacts import (
     MAX_MANIFEST_BYTES, OnnxEvaluator, _typed_frozen_source, _validate_graph, export_onnx,
     export_typed_onnx, file_sha256, load_adapter, load_base, load_manifest, save_adapter, save_base,
 )
-from accelerate_chess.network.model import AdapterDescriptor, ModelConfig, PolicyValueNetwork, is_adapter_parameter, masked_policy, tensor_state_hash
+from accelerate_chess.network.entity_transformer import EntityTransformerConfig
 from accelerate_chess.network.mask_resnet import MaskResNetConfig, MaskResNetPolicyValueNetwork
+from accelerate_chess.network.model import AdapterDescriptor, ModelConfig, PolicyValueNetwork, is_adapter_parameter, masked_policy, tensor_state_hash
 from accelerate_chess.network.typed_context import TypedContextConfig
 import accelerate_chess.training as training_module
 from accelerate_chess.training import DatasetCursor, create_optimizer, load_training_checkpoint, save_training_checkpoint
@@ -82,6 +83,18 @@ def _mask_resnet_select_candidates(inputs, selection):
     for index in range(11, 20):
         selected[index] = inputs[index][:, selection]
     return tuple(selected)
+
+
+@pytest.mark.parametrize("family", ("mask-resnet", "entity-transformer"))
+@pytest.mark.parametrize("field,value", (("lora_alpha", True), ("lora_dropout", False)))
+def test_typed_model_configs_reject_boolean_lora_numbers(family, field, value):
+    context = TypedContextConfig((4,) * 4, (4,) * 2, (4,) * 4, hidden_dim=8)
+    if family == "mask-resnet":
+        config_type, arguments = MaskResNetConfig, {"board_channels": 6, "typed_context": context}
+    else:
+        config_type, arguments = EntityTransformerConfig, {"typed": context}
+    with pytest.raises(ValueError, match="LoRA"):
+        config_type(**arguments, **{field: value})
 
 
 def test_mask_resnet_padding_and_candidate_partition_invariance():

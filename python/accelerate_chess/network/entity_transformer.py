@@ -39,7 +39,9 @@ class EntityTransformerConfig:
                 raise ValueError(f"{name} must be a positive bounded integer")
         if self.blocks > 64 or self.typed.hidden_dim % self.heads or self.lora_rank > self.typed.hidden_dim:
             raise ValueError("invalid Transformer depth, head count, or LoRA rank")
-        if not math.isfinite(self.lora_alpha) or self.lora_alpha <= 0 or self.lora_dropout != 0:
+        if (type(self.lora_alpha) not in (int, float) or type(self.lora_dropout) not in (int, float)
+                or not math.isfinite(self.lora_alpha) or self.lora_alpha <= 0
+                or not math.isfinite(self.lora_dropout) or self.lora_dropout != 0):
             raise ValueError("static Transformer LoRA requires positive alpha and dropout zero")
         if self.architecture_version != "entity-transformer-film-lora-v1":
             raise ValueError("unsupported Transformer architecture version")
