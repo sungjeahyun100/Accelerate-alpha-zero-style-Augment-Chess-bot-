@@ -1,0 +1,12 @@
+{
+  "name": "@accelerate/adapter-contract",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node verify.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

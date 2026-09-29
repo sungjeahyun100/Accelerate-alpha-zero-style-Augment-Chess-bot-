@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:adapter-contract:v1",
+  "title": "Project-independent adapter contract v1",
+  "$defs": {
+    "ContractVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["major", "minor"],
+      "properties": {
+        "major": { "type": "integer", "minimum": 1 },
+        "minor": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "SchemaRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sha256"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "CallLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxWork", "maxResults"],
+      "properties": {
+        "maxWork": { "type": "integer", "minimum": 1 },
+        "maxResults": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "CapabilityDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "requestSchema", "responseSchema", "access"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "requestSchema": { "$ref": "#/$defs/SchemaRef" },
+        "responseSchema": { "$ref": "#/$defs/SchemaRef" },
+        "access": { "enum": ["read_only", "transactional"] }
+      }
+    },
+    "AdapterDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectId", "adapterId", "contractVersion", "implementationVersion", "capabilities", "deterministic", "callLimits"],
+      "properties": {
+        "projectId": { "type": "string", "minLength": 1 },
+        "adapterId": { "type": "string", "minLength": 1 },
+        "contractVersion": { "$ref": "#/$defs/ContractVersion" },
+        "implementationVersion": { "type": "string", "minLength": 1 },
+        "capabilities": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/CapabilityDescriptor" } },
+        "deterministic": { "type": "boolean" },
+        "callLimits": { "$ref": "#/$defs/CallLimits" }
+      }
+    },
+    "AdapterRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requestId", "projectId", "adapterId", "contractVersion", "implementationVersion", "capabilityId", "requestSchema", "responseSchema", "snapshotRevision", "limits", "payload"],
+      "properties": {
+        "requestId": { "type": "string", "minLength": 1 },
+        "projectId": { "type": "string", "minLength": 1 },
+        "adapterId": { "type": "string", "minLength": 1 },
+        "contractVersion": { "$ref": "#/$defs/ContractVersion" },
+        "implementationVersion": { "type": "string", "minLength": 1 },
+        "capabilityId": { "type": "string", "minLength": 1 },
+        "requestSchema": { "$ref": "#/$defs/SchemaRef" },
+        "responseSchema": { "$ref": "#/$defs/SchemaRef" },
+        "snapshotRevision": { "type": "string", "minLength": 1 },
+        "limits": { "$ref": "#/$defs/CallLimits" },
+        "payload": {}
+      }
+    },
+    "PageInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["examined", "cursor", "exhausted"],
+      "properties": {
+        "examined": { "type": "integer", "minimum": 0 },
+        "cursor": { "type": ["string", "null"], "minLength": 1 },
+        "exhausted": { "type": "boolean" }
+      },
+      "allOf": [
+        { "if": { "properties": { "exhausted": { "const": true } } }, "then": { "properties": { "cursor": { "type": "null" } } } },
+        { "if": { "properties": { "exhausted": { "const": false } } }, "then": { "properties": { "cursor": { "type": "string", "minLength": 1 } } } }
+      ]
+    },
+    "AdapterDiagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["severity", "code", "message"],
+      "properties": {
+        "severity": { "enum": ["info", "warning"] },
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    },
+    "AdapterResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requestId", "snapshotRevision", "responseSchema", "result", "page", "diagnostics"],
+      "properties": {
+        "requestId": { "type": "string", "minLength": 1 },
+        "snapshotRevision": { "type": "string", "minLength": 1 },
+        "responseSchema": { "$ref": "#/$defs/SchemaRef" },
+        "result": {},
+        "page": { "oneOf": [{ "$ref": "#/$defs/PageInfo" }, { "type": "null" }] },
+        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/AdapterDiagnostic" } }
+      }
+    },
+    "AdapterError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "code", "message", "adapterId", "capabilityId"],
+      "properties": {
+        "kind": { "enum": ["unsupported", "invalid_input", "stale_revision", "limit_exceeded", "cancelled", "execution_failed"] },
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 },
+        "adapterId": { "type": ["string", "null"], "minLength": 1 },
+        "capabilityId": { "type": ["string", "null"], "minLength": 1 }
+      }
+    },
+    "AdapterOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ok", "response"],
+          "properties": { "ok": { "const": true }, "response": { "$ref": "#/$defs/AdapterResponse" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ok", "error"],
+          "properties": { "ok": { "const": false }, "error": { "$ref": "#/$defs/AdapterError" } }
+        }
+      ]
+    }
+  }
+}
