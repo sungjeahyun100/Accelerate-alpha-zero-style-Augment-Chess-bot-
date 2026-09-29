@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from functools import lru_cache
 import hashlib
 import json
@@ -133,6 +134,12 @@ def test_source_bound_v7_observation_rejects_synthetic_rectangular_geometry():
     signed(old_public)
     with pytest.raises(ValueError, match="source-bound.*8x8"):
         validate_typed_public_observation(old_public, old_spec)
+    public_ir = ObservationIR.from_public(frame(), spec())
+    with pytest.raises(ValueError, match="source-bound.*8x8"):
+        replace(public_ir, geometry=BoardGeometry(0, 0, 1, 1),
+                board=((None,),), cell_kinds=(("empty",),))
+    with pytest.raises(ValueError, match="source-bound.*8x8"):
+        replace(public_ir, geometry=BoardGeometry(1, 0, 8, 8))
 
 
 def test_private_metadata_and_arbitrary_id_renaming_do_not_enter_features():
@@ -361,8 +368,10 @@ def test_synthetic_public_history_summary_is_typed_and_keeps_past_absolute_squar
                                   "outcome": None}], "history_hash": "a" * 64}
     base = dict(spec=synthetic, geometry=BoardGeometry(0, 0, 1, 1), viewer="white",
                 turn="black", board=[[None]], cell_kinds=[["empty"]])
-    first = TypedEncoder(synthetic).encode(ObservationIR.from_components(
-        **base, history_summary=summary), [])
+    synthetic_ir = ObservationIR.from_components(**base, history_summary=summary)
+    first = TypedEncoder(synthetic).encode(synthetic_ir, [])
+    with pytest.raises(ValueError, match="synthetic IR information state binding is stale"):
+        replace(synthetic_ir, viewer="black")
     # The old event had no geometry. Its public coordinates remain absolute,
     # even though neither is on the current 1x1 board.
     numeric_values = first.inputs["record_numeric"][:, 0]

@@ -418,7 +418,12 @@ def validate_typed_public_observation(observation: Mapping[str, Any], spec: Type
 
 @dataclass(frozen=True)
 class ObservationIR:
-    """Owned public semantic source. Arbitrary IDs are kept only for linking."""
+    """Owned public semantic source. Arbitrary IDs are kept only for linking.
+
+    Source-bound frames must enter through from_public, which checks the raw
+    signed observation and its visibility policy. Local dataclass invariants
+    cannot reconstruct that full frame from the projected IR alone.
+    """
 
     geometry: BoardGeometry
     viewer: str
@@ -439,6 +444,8 @@ class ObservationIR:
 
     def __post_init__(self) -> None:
         g = self.geometry
+        if not isinstance(g, BoardGeometry):
+            raise ValueError("IR geometry must be a BoardGeometry")
         if self.viewer not in ("white", "black") or self.turn not in ("white", "black"):
             raise ValueError("IR viewer and turn must be colors")
         if len(self.board) != g.height or len(self.cell_kinds) != g.height:
@@ -453,6 +460,9 @@ class ObservationIR:
             raise ValueError("IR opponent hand count is invalid")
         if self.observation_version not in (PUBLIC_OBSERVATION_VERSION, SYNTHETIC_OBSERVATION_VERSION):
             raise ValueError("unsupported IR observation version")
+        if (self.observation_version == PUBLIC_OBSERVATION_VERSION
+                and (g.origin_row, g.origin_col, g.height, g.width) != (0, 0, 8, 8)):
+            raise ValueError("source-bound public Observation v2 needs the site's 8x8 geometry")
         for value in (self.board, self.own_cards, self.public_state, self.history_summary, self.belief_summary, self.descriptors):
             _reject_private(value)
             canonical_json(value)
@@ -461,6 +471,14 @@ class ObservationIR:
             _validate_belief_summary(self.belief_summary)
         if not isinstance(self.information_state_key, str) or len(self.information_state_key) != 64 or any(c not in "0123456789abcdef" for c in self.information_state_key):
             raise ValueError("IR information state binding must be SHA-256")
+        if self.observation_version == SYNTHETIC_OBSERVATION_VERSION:
+            binding = _hash({"geometry": vars(g), "viewer": self.viewer, "turn": self.turn,
+                             "board": self.board, "cellKinds": self.cell_kinds,
+                             "cards": self.own_cards, "opponentHandCount": self.opponent_hand_count,
+                             "publicState": self.public_state, "history": self.history_summary,
+                             "belief": self.belief_summary, "descriptors": self.descriptors})
+            if binding != self.information_state_key:
+                raise ValueError("synthetic IR information state binding is stale")
 
     @classmethod
     def from_public(cls, observation: Mapping[str, Any], spec: TypedEncoderSpec,
