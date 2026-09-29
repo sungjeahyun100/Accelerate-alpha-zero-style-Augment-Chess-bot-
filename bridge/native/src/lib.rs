@@ -121,10 +121,10 @@ fn validate_v7_position_transport(snapshot: &Value) -> Result<(), &'static str> 
     ) {
         return Err("snapshot turn must be white or black");
     }
-    if !state
+    if state
         .get("mode")
         .and_then(Value::as_str)
-        .is_some_and(|mode| !mode.is_empty())
+        .is_none_or(str::is_empty)
     {
         return Err("snapshot mode must be nonempty text");
     }
@@ -147,15 +147,15 @@ fn validate_v7_position_transport(snapshot: &Value) -> Result<(), &'static str> 
     if rng["algorithm"] != "lcg32-v1" {
         return Err("unsupported RNG algorithm");
     }
-    if !rng["state"]
+    if rng["state"]
         .as_u64()
-        .is_some_and(|state| state <= u32::MAX as u64)
+        .is_none_or(|state| state > u32::MAX as u64)
     {
         return Err("snapshot RNG state must be uint32");
     }
-    if !rng["cursor"]
+    if rng["cursor"]
         .as_u64()
-        .is_some_and(|cursor| cursor <= 9_007_199_254_740_991)
+        .is_none_or(|cursor| cursor > 9_007_199_254_740_991)
     {
         return Err("snapshot RNG cursor must be a safe integer");
     }
