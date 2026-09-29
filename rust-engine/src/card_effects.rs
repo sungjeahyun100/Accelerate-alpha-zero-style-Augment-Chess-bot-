@@ -173,6 +173,8 @@ enum Mutation {
     Othello,
     Reposition,
     Taunt,
+    Symmetry,
+    IceSheet,
     Taboo,
     Cleanup,
     Hypocrisy,
@@ -336,8 +338,13 @@ fn plan(state: &GameState, card: &CardSlot) -> Option<Plan> {
             "relay" if state.ruleset_id == RULES_VERSION_V7 => {
                 (Exact(""), SideFlag("relay", false))
             }
+            "quantumMechanics" if state.ruleset_id == RULES_VERSION_V7 => {
+                (Exact(""), SideFlag("quantumPending", false))
+            }
             "reposition" if state.ruleset_id == RULES_VERSION_V7 => (Exact(""), Reposition),
             "taunt" if state.ruleset_id == RULES_VERSION_V7 => (Exact(""), Taunt),
+            "symmetry" if state.ruleset_id == RULES_VERSION_V7 => (Exact(""), Symmetry),
+            "iceSheet" if state.ruleset_id == RULES_VERSION_V7 => (Exact(""), IceSheet),
             "cleanupPieces" => (Exact(""), Cleanup),
             "hypocrisy" => (Exact(""), Hypocrisy),
             "portalGun" => (Exact(""), PortalGun),
@@ -1340,6 +1347,13 @@ pub(crate) fn actions(state: &GameState, card: &CardSlot) -> Result<Option<Vec<A
     ) {
         return Ok(Some(vec![Action::card(state.turn, card, None)]));
     }
+    if matches!(plan.mutation, Mutation::Symmetry) {
+        return Ok(Some(if state.flag("symmetry", state.turn) {
+            Vec::new()
+        } else {
+            vec![Action::card(state.turn, card, None)]
+        }));
+    }
     if matches!(
         plan.mutation,
         Mutation::Guard
@@ -1349,6 +1363,7 @@ pub(crate) fn actions(state: &GameState, card: &CardSlot) -> Result<Option<Vec<A
             | Mutation::LastResistance
             | Mutation::Reposition
             | Mutation::Taunt
+            | Mutation::IceSheet
             | Mutation::Wanted
     ) {
         let available = match plan.mutation {
@@ -1359,6 +1374,7 @@ pub(crate) fn actions(state: &GameState, card: &CardSlot) -> Result<Option<Vec<A
             Mutation::LastResistance => king_augment_square(state).is_some(),
             Mutation::Reposition => reposition_available(state),
             Mutation::Taunt => taunt_available(state),
+            Mutation::IceSheet => !ice_sheet_targets(state).is_empty(),
             Mutation::Wanted => !wanted_candidates(state).is_empty(),
             _ => unreachable!(),
         };
@@ -2700,6 +2716,63 @@ fn apply_taunt(state: &mut GameState, action: &Action) -> Result<()> {
             .ok_or_else(|| EngineError::InvalidState("taunt counter must be unsigned".into()))?,
     };
     counters.insert(target.into(), json!(previous.max(1)));
+    Ok(())
+}
+
+// v7 main-OahWs0tU.js:1824-1827,68514-68559,103402-103411. The three
+// special kinds are affected even when their current movement is not ranged.
+// A multi-cell piece is visited once by identity, in row-major board order.
+fn ice_sheet_targets(state: &GameState) -> Vec<(Square, Piece)> {
+    let mut seen = BTreeSet::new();
+    let mut targets = Vec::new();
+    for (row, cells) in state.board.iter().enumerate() {
+        for (col, piece) in cells.iter().enumerate() {
+            let Some(piece) = piece else { continue };
+            if piece.color != state.turn.opponent()
+                || !(["magicGirl", "berserker", "trickster"].contains(&piece.kind.as_str())
+                    || ranged_piece(state, piece))
+            {
+                continue;
+            }
+            let identity = if piece.id.is_empty() {
+                format!("{row}:{col}")
+            } else {
+                piece.id.clone()
+            };
+            if seen.insert(identity) {
+                targets.push((
+                    Square {
+                        row: row as u8,
+                        col: col as u8,
+                    },
+                    piece.clone(),
+                ));
+            }
+        }
+    }
+    targets
+}
+
+fn apply_ice_sheet(state: &mut GameState, action: &Action) -> Result<()> {
+    if action.target.is_some() {
+        return Err(EngineError::IllegalAction);
+    }
+    let targets = ice_sheet_targets(state);
+    if targets.is_empty() {
+        return Err(EngineError::IllegalAction);
+    }
+    let actor = state.turn;
+    for (square, mut piece) in targets {
+        piece
+            .extra
+            .insert("iceSheet".into(), json!({"by":actor,"remaining":3}));
+        mark_animation(state, &piece)?;
+        if piece.id.is_empty() {
+            state.board[square.row as usize][square.col as usize] = Some(piece);
+        } else {
+            write_piece(state, &piece);
+        }
+    }
     Ok(())
 }
 fn apply_side_flag(state: &mut GameState, field: &str, color: Color) -> Result<()> {
@@ -4604,6 +4677,24 @@ pub(crate) fn apply(
         }
         Mutation::Taunt => {
             apply_taunt(state, action)?;
+            return Ok(Some(Vec::new()));
+        }
+        Mutation::Symmetry => {
+            if action.target.is_some() || state.flag("symmetry", state.turn) {
+                return Err(EngineError::IllegalAction);
+            }
+            let color = state.turn.as_str();
+            let sides = state
+                .extra
+                .entry("symmetry")
+                .or_insert_with(|| json!({}))
+                .as_object_mut()
+                .ok_or_else(|| EngineError::InvalidState("symmetry must be a player map".into()))?;
+            sides.insert(color.into(), json!(true));
+            return Ok(Some(Vec::new()));
+        }
+        Mutation::IceSheet => {
+            apply_ice_sheet(state, action)?;
             return Ok(Some(Vec::new()));
         }
         Mutation::Taboo => {

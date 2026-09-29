@@ -435,6 +435,306 @@ fn v7_grand_first_play_taunt_matches_source_state_and_keeps_v6_fallback() {
 }
 
 #[test]
+fn v7_grand_first_play_targeted_cards_match_source_candidates_and_direct_rng() {
+    // Frozen v7 seed 19 grand: all twelve draft picks are real source offers.
+    // Each row is the first legal action of an independently reachable card.
+    let initial = seed19_grand_active_only();
+    for (id, target, count) in [
+        ("inertia", json!({"row":0,"col":0}), 5),
+        ("trojan-horse", json!({"row":7,"col":1}), 2),
+        ("grasshopper", json!({"row":7,"col":1}), 4),
+        (
+            "grappler",
+            json!({"row":7,"col":3,"minor":{"row":7,"col":1}}),
+            4,
+        ),
+    ] {
+        let card = initial
+            .deck_slots
+            .white
+            .iter()
+            .find(|card| card.id == id)
+            .unwrap();
+        let expected = Action::card(Color::White, card, Some(target));
+        let legal = crate::card_effects::actions(&initial, card)
+            .unwrap()
+            .unwrap();
+        assert_eq!(legal.len(), count, "{id} legal target count");
+        assert_eq!(legal[0], expected, "{id} first source payload");
+        let before = initial.clone();
+        assert_eq!(
+            crate::card_effects::validate(&initial, card, &expected).unwrap(),
+            Some(true),
+            "{id} source payload binding"
+        );
+        assert_eq!(initial, before, "{id} binding must not mutate state");
+        let mut effect_only = initial.clone();
+        crate::card_effects::apply(&mut effect_only, card, &expected)
+            .unwrap()
+            .unwrap();
+        assert_eq!(effect_only.rng, initial.rng, "{id} direct effect RNG");
+    }
+}
+
+#[test]
+fn v7_grand_black_symmetry_uses_source_flag_and_rejects_reactivation() {
+    // Source legal after White's a2-a3; the public v7 movement boundary is
+    // still closed, so only the card-local effect contract is exercised.
+    let mut state = seed19_grand_active_only();
+    state.turn = Color::Black;
+    let card = state
+        .deck_slots
+        .black
+        .iter()
+        .find(|card| card.id == "symmetry")
+        .unwrap()
+        .clone();
+    let action = Action::card(Color::Black, &card, None);
+    assert_eq!(state.extra.get("symmetry"), None);
+    assert_eq!(
+        crate::card_effects::actions(&state, &card).unwrap(),
+        Some(vec![action.clone()])
+    );
+    let mut effect_only = state.clone();
+    assert!(
+        crate::card_effects::apply(&mut effect_only, &card, &action)
+            .unwrap()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(effect_only.extra["symmetry"], json!({"black":true}));
+    assert_eq!(effect_only.rng, state.rng);
+    assert_eq!(
+        crate::card_effects::actions(&effect_only, &card).unwrap(),
+        Some(Vec::new())
+    );
+    assert_eq!(
+        crate::card_effects::validate(&effect_only, &card, &action).unwrap(),
+        Some(false)
+    );
+    let mut v6 = GameState::new(GameConfig::default(), 7).unwrap();
+    assert_eq!(crate::card_effects::actions(&v6, &card).unwrap(), None);
+    assert_eq!(
+        crate::card_effects::apply(&mut v6, &card, &action).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn v7_normal_black_ice_sheet_marks_source_five_targets_without_effect_rng() {
+    // Source legal after White's a2-a3. Recreate only the board/actor inputs
+    // read by the card effect while public v7 movement remains gated.
+    let mut state =
+        crate::draft::initialize_for_ruleset(GameConfig::default(), 19, RULES_VERSION_V7).unwrap();
+    let white_pick = crate::draft::legal_actions(&state).unwrap().remove(1);
+    crate::draft::apply_pick(&mut state, &white_pick).unwrap();
+    crate::replay::canonicalize_position_frames(&mut state).unwrap();
+    let black_pick = crate::draft::legal_actions(&state).unwrap().remove(0);
+    crate::transition::apply(&mut state, &black_pick).unwrap();
+    assert_eq!(state.mode, "play");
+    let mut pawn = state.board[6][0].take().unwrap();
+    pawn.moved = true;
+    state.board[5][0] = Some(pawn);
+    state.turn = Color::Black;
+    let card = state
+        .deck_slots
+        .black
+        .iter()
+        .find(|card| card.id == "ice-sheet")
+        .unwrap()
+        .clone();
+    let action = Action::card(Color::Black, &card, None);
+    assert_eq!(
+        crate::card_effects::actions(&state, &card).unwrap(),
+        Some(vec![action.clone()])
+    );
+    let mut effect_only = state.clone();
+    assert!(
+        crate::card_effects::apply(&mut effect_only, &card, &action)
+            .unwrap()
+            .unwrap()
+            .is_empty()
+    );
+    let iced = effect_only
+        .board
+        .iter()
+        .flatten()
+        .flatten()
+        .filter(|piece| piece.extra.get("iceSheet").is_some())
+        .collect::<Vec<_>>();
+    assert_eq!(iced.len(), 5);
+    assert_eq!(
+        iced.iter()
+            .map(|piece| piece.id.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "white-rook-02ifugfz7b6v",
+            "white-bishop-tthtdsu1jc",
+            "white-queen-1ou4c52pl2n",
+            "white-bishop-qyp71rr4ag",
+            "white-rook-dc8ui3a6p5m",
+        ]
+    );
+    assert!(
+        iced.iter()
+            .all(|piece| piece.extra["iceSheet"] == json!({"by":"black","remaining":3}))
+    );
+    assert_eq!(effect_only.rng, state.rng);
+    let mut special_targets = state.clone();
+    for (col, kind) in [(0, "magicGirl"), (2, "berserker"), (3, "trickster")] {
+        special_targets.board[7][col].as_mut().unwrap().kind = kind.into();
+    }
+    assert!(
+        !crate::card_effects::ranged_piece(
+            &special_targets,
+            special_targets.board[7][0].as_ref().unwrap()
+        ) && !crate::card_effects::ranged_piece(
+            &special_targets,
+            special_targets.board[7][2].as_ref().unwrap()
+        ) && !crate::card_effects::ranged_piece(
+            &special_targets,
+            special_targets.board[7][3].as_ref().unwrap()
+        )
+    );
+    crate::card_effects::apply(&mut special_targets, &card, &action)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        special_targets
+            .board
+            .iter()
+            .flatten()
+            .flatten()
+            .filter(|piece| piece.extra.get("iceSheet").is_some())
+            .count(),
+        5
+    );
+    let mut idless = state.clone();
+    for (row, col) in [(7, 0), (7, 7), (6, 1)] {
+        idless.board[row][col].as_mut().unwrap().id.clear();
+    }
+    crate::card_effects::apply(&mut idless, &card, &action)
+        .unwrap()
+        .unwrap();
+    assert!(
+        idless.board[7][0]
+            .as_ref()
+            .unwrap()
+            .extra
+            .contains_key("iceSheet")
+    );
+    assert!(
+        idless.board[7][7]
+            .as_ref()
+            .unwrap()
+            .extra
+            .contains_key("iceSheet")
+    );
+    assert!(
+        !idless.board[6][1]
+            .as_ref()
+            .unwrap()
+            .extra
+            .contains_key("iceSheet")
+    );
+    let mut no_targets = state.clone();
+    for cells in &mut no_targets.board {
+        for piece in cells {
+            if piece.as_ref().is_some_and(|piece| {
+                ["rook", "bishop", "queen"].contains(&piece.kind.as_str())
+                    && piece.color == Color::White
+            }) {
+                *piece = None;
+            }
+        }
+    }
+    assert_eq!(
+        crate::card_effects::actions(&no_targets, &card).unwrap(),
+        Some(Vec::new())
+    );
+    assert_eq!(
+        crate::card_effects::validate(&no_targets, &card, &action).unwrap(),
+        Some(false)
+    );
+    let mut v6 = GameState::new(GameConfig::default(), 7).unwrap();
+    assert_eq!(crate::card_effects::actions(&v6, &card).unwrap(), None);
+    assert_eq!(
+        crate::card_effects::apply(&mut v6, &card, &action).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn v7_normal_black_quantum_mechanics_sets_pending_without_effect_rng() {
+    // Frozen v7 seed 19: White takes Relay, Black takes the second offer,
+    // Quantum Mechanics. After White's a2-a3 it is a legal no-target card.
+    // Its later move resolution remains in the separate movement boundary.
+    let mut state =
+        crate::draft::initialize_for_ruleset(GameConfig::default(), 19, RULES_VERSION_V7).unwrap();
+    let white_pick = crate::draft::legal_actions(&state).unwrap().remove(1);
+    crate::draft::apply_pick(&mut state, &white_pick).unwrap();
+    crate::replay::canonicalize_position_frames(&mut state).unwrap();
+    let black_pick = crate::draft::legal_actions(&state).unwrap().remove(1);
+    crate::transition::apply(&mut state, &black_pick).unwrap();
+    let mut pawn = state.board[6][0].take().unwrap();
+    pawn.moved = true;
+    state.board[5][0] = Some(pawn);
+    state.turn = Color::Black;
+    let card = state.deck_slots.black[0].clone();
+    assert_eq!(card.id, "quantum-mechanics");
+    assert_eq!(
+        state.extra["quantumPending"],
+        json!({"black":false,"white":false})
+    );
+    assert_eq!(
+        action_policy(&state, &card).unwrap(),
+        CardActionPolicy {
+            actor: Color::Black,
+            slot: 0,
+            activation: CardActType::Active,
+            use_cost: CardUseCost::SpendInstance,
+            turn_policy: CardTurnPolicy::PreserveTurn,
+        }
+    );
+    let action = Action::card(Color::Black, &card, None);
+    assert_eq!(
+        crate::card_effects::actions(&state, &card).unwrap(),
+        Some(vec![action.clone()])
+    );
+    let invalid = Action::card(Color::Black, &card, Some(json!({"row":0,"col":0})));
+    assert_eq!(
+        crate::card_effects::validate(&state, &card, &invalid).unwrap(),
+        Some(false)
+    );
+    let original = state.clone();
+    crate::card_effects::apply(&mut state, &card, &action)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        state.extra["quantumPending"],
+        json!({"black":true,"white":false})
+    );
+    assert_eq!(state.rng, original.rng);
+    assert_eq!(state.history, original.history);
+    assert_eq!(
+        crate::card_effects::actions(&state, &card).unwrap(),
+        Some(vec![action.clone()]),
+        "the source still considers an already pending Quantum card playable"
+    );
+    let once = state.clone();
+    crate::card_effects::apply(&mut state, &card, &action)
+        .unwrap()
+        .unwrap();
+    assert_eq!(state, once);
+    let mut v6 = GameState::new(GameConfig::default(), 7).unwrap();
+    assert_eq!(crate::card_effects::actions(&v6, &card).unwrap(), None);
+    assert_eq!(
+        crate::card_effects::apply(&mut v6, &card, &action).unwrap(),
+        None
+    );
+}
+
+#[test]
 fn v7_selected_opening_rule_preserves_source_event_rng_and_draft_order() {
     // Independent SHA-pinned OracleRuntime.newGame({ruleCardIds}, 19) results.
     for (style, expected_cursor, expected_rng_state, expected_offer) in [
