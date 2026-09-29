@@ -5,18 +5,43 @@
 [runtime-v1](../bridge/protocol/runtime-v1.md)에 있다. 아래 관측한 검사와 계획을 혼동하지 않는다.
 작업 브랜치는 feature/full-stack-implementation, 출발점은 bfc85c886b489f21f6f1037bc291ab0157c3dc6f다.
 
+## D0 의미 정렬과 적용 상태 (2026-09-29)
+
+아래는 [DECISIONS](DECISIONS.md#재설계-d0-의미-정렬-2026-09-29)의 채택 관계다.
+결정의 변경과 코드 구현·검증은 별개이며, 아래의 과거 checkpoint 숫자는 당시 실행
+범위에 한정한다.
+
+| 결정 | 유지·수정·대체 | 이 계획에서 확인할 결과 |
+|---|---|---|
+| D-001·D-008 | 유지 | PR #29에서 완료한 고정 v7 사이트/JS 게임 어댑터를 correctness 기준으로 사용한다. Rust 탐색 규칙 실행으로 대체하지 않는다. |
+| D-002 | ResNet 단독 최종 구조 지정을 대체 | 같은 허용 `ObservationIR`·public history·descriptor·candidate action에서 A: mask-aware ResNet과 B: entity Transformer를 비교한다. |
+| D-005 | 역할 유지, 적용 계열 확장 | FiLM은 ONNX 내부 조건화, LoRA는 분리 적응이다. B의 LoRA 위치·rank 등은 실험별 설정에 고정한다. |
+| D-007 | 유지 | Python-first encoding을 계속 사용한다. 실제 profiling으로 Python 인코딩 병목을 확인한 경우에만 Rust 이전을 재검토한다. O-001은 해결 상태다. |
+| D-009 | 전체 코드 GO 기준 유지 | 가변 보드·두 모델·대표 규칙의 기반 완료와 동결 사이트 전체 규칙의 최종 GO를 구분한다. 실제 학습은 제외한다. |
+| D-016 | 새 설계 | 엔진 상태와 모델 입력 분리, 내부 보드 크기 상수 제거, 검증 전용 N-version, 자동 runtime 대체 금지. |
+
+PR #29의 변경 파일에는 `rust-engine/`이 없다. 구현 완료는 게임 어댑터와 고정 v7
+검증 계층에 대한 것이며, 아래 기록처럼 현재 Rust 엔진은 v7 Position을 실행하지
+못한다. PR #29의 bounded 256카드×3모드 표면 조사는 전체 조합 규칙 coverage의
+증거가 아니다. 완료된 adapter 재구현을 이번 작업에 추가하지 않는다.
+
 ## 채택 범위와 작업 순서
 
-1. 최초 동결 사이트 본체의 8x8 normal/chaos/grand, 공개 256 카드 catalog를 기준으로
-   Position/Action/Observation/history/RNG/result 계약과 offline oracle을 구현한다.
+1. 최초 동결 사이트 본체의 8x8 normal/chaos/grand, 공개 256 카드 catalog와 PR #29의
+   별도 고정 v7 게임 어댑터를 correctness 기준으로 유지한다. 이미 완료한 adapter를
+   재구현하지 않고, 검증하지 않은 조합·행동 경계를 원문과 비교한다.
 2. 순수 Rust 독립 규칙 엔진에 전체 기물·카드·RULE·특수 행동·초기/draft/종료를 포팅하고
    client oracle과 normalized full state/result/RNG를 비교한다. worker useful filter를 legal로 쓰지 않는다.
+   이 전체 목표 전에 geometry·단일 기물 상태·조합형 행마·대표 규칙을 연결한다.
 3. bridge의 독립 PyO3 crate를 maturin으로 패키징하고 immutable 객체, 배열 소유권, 오류,
    snapshot roundtrip, JSON/direct 호출 의미와 GIL 경계를 검증한다.
-4. Python에서 viewer 관측·공개 history·belief와 행동 의미 payload를 먼저 encoding한다.
-   raw full Position·private RNG·positionId가 특징에 들어가지 않는 검사를 유지한다.
-5. ResNet·FiLM·LoRA를 구현한다. FiLM 조건은 ONNX 입력/그래프에 남기고 static LoRA 병합은
-   원본을 보존한 복사본에서 한다. 기본 ort와 명시 선택 tract의 artifact·shape/dtype·유한값·수치 차이를 검사한다.
+4. Python에서 viewer 관측·공개 history·belief와 행동 의미 payload를 encoding한다.
+   공통 `ObservationIR`에서 A/B의 입력을 만들고 raw full Position·private RNG·positionId가
+   특징에 들어가지 않는 검사를 유지한다. Python 인코딩 병목의 실측 전에는 Rust로 옮기지 않는다.
+5. 같은 공개 입력 계약 위에 A: 가변 mask-aware ResNet과 B: entity Transformer를 연결한다.
+   FiLM 조건은 두 모델의 ONNX 입력/그래프에 남기고 static LoRA 병합은 원본을 보존한
+   복사본에서 한다. B의 LoRA 적용 위치·rank 등은 모델별 실험 설정과 artifact에 고정한다.
+   기본 ort와 명시 선택 tract의 입력 dtype·shape·유한값·수치 차이를 검사한다.
 6. 실제 decision actor·확률·숨은 정보·공개 hint에 기반한 bounded ISMCTS, legal iterator와
    progressive widening, batch inference·취소·실행 예산을 구현한다.
 7. bounded self-play/replay/CLI·dataset 기록·optimizer/evaluation checkpoint와 계약 version을
@@ -26,12 +51,45 @@
 optimizer/export와 bounded rollout은 구현 경로 검증이며 학습 성능으로 보고하지 않는다.
 Hypernetwork는 향후 extension의 생성·적용·병합 가능 여부만 준비한다.
 
+### 먼저 완료할 재설계 기반 checkpoint
+
+이는 D-009의 전체 코드 GO를 대체하지 않는다. 기존 8×8 실행 경로는 보존하면서
+보드 크기를 뜻하는 `8`·`7`·`64`의 좌표/순회/메모리 계산을 geometry에서 유도한다.
+사이트의 초기 배치·홈/승격·캐슬링 조건과 모델 rank 등 다른 의미의 숫자는
+기계적으로 치환하지 않는다. 새 조합형 Rust 경로는 명시 선택하고 실패나 미지원에서
+기존 Rust 경로·JS oracle·Python 참조판으로 자동 전환하지 않는다.
+
+| 단계 | 전달할 코드와 계약 | 기반 checkpoint의 증거 |
+|---|---|---|
+| P1 geometry·상태 | 크기·좌표·유효 칸·단일 기물/footprint·파생 점유, 붕괴와 별도 외곽 확장·축소 | 기존 8×8 결과 보존, 직사각형·보드 변경의 원자성·stale action 검사 |
+| P2 조합형 규칙·N-version | `moveChunk`의 원래 출발점·형제 독립·부모 거리, 대표 카드·제약; 별도 독립 참조 구현 | JS 원문과 검증 가능한 부분의 legal/apply/state/RNG 비교, 참조판과의 불일치 설명 |
+| P3 공개 IR·두 모델 | Python의 공통 허용 관측→plane/entity 입력, 같은 public history·descriptor·후보·value 관점 | 숨은 정보 비누출, empty/unknown/collapse/padding 구분, 순열·후보 분할·유한 출력 |
+| P4 export·파인튜닝·탐색 | 모델 계열별 typed ONNX bundle, 두 backend, 기존 ResNet 호환 가중치 이전, 유한 탐색 | 실제 설치 wheel의 두 backend, 복사 병합·resume/warm-start 검사, 보드 변화 전후 실행 |
+| P5 통합 | 같은 최종 커밋의 관련 검사와 미지원 항목 기록 | Windows/Linux 결과와 재설계 기반 완료를 확인; 전체 규칙 GO와 따로 보고 |
+
+고정 v7 붕괴는 외곽 칸의 사용·기물 상태를 바꾸지만 외곽 배열 크기는 유지한다.
+대국 중 실제 크기 변경은 별도 합성 profile에서 검증한다. 외곽 축소로 잘리는 기물·
+footprint·링크·예약 효과에 지정된 처리 결과가 없으면 적용을 거부한다. 변경된 Position에
+이전 행동·cursor를 재사용하지 않는다. 합성 크기 변경을 공식 사이트 카드의 의미
+동등성 증거로 쓰지 않는다.
+
+핵심 geometry·점유·행마의 독립 N-version은 테스트에서만 실행한다. Python 참조판은
+운영 규칙 엔진이 아니고, 불일치를 다수결로 해결하지 않는다. PR #29의 JS 어댑터는
+고정 사이트와 Rust의 correctness 비교용이다. 운영 탐색은 선택한 Rust 엔진과 선택한
+ONNX backend 하나를 호출하고 실패·한도·미지원 오류를 그대로 전파한다.
+
+기존 ResNet checkpoint는 동일 계약의 optimizer/RNG/cursor **resume**과 새 입력 계약으로의
+**warm-start**를 구분한다. 후자는 원본을 보존하고 의미·shape가 맞는 가중치만 이전하며
+새 입력·조건·행동층은 초기화한다. Transformer는 별도 base를 사용한다. 실제 학습 없이
+작은 synthetic 갱신·저장/재개·원본 보존 검사만 수행한다.
+
 ## 관측한 checkpoint와 아직 필요한 증거
 
 | 영역 | 실제 구현/관측 | 코드 완성·의미 coverage의 남은 조건 |
 |---|---|---|
 | 사이트·계약 | 동결 loader, v1 schema/JSON validators, 실제 client 초기/draft/전이/종료 adapter 구현; 관측 미분류 52개 원문 감사 완료, Deathmatch 경고 자격을 projection v3에 반영 | 전체 256 효과·선택 순서·특수 phase·lazy action 경계의 동등성 미완료 |
 | Oracle 검사 | depth0 settlement·potion 정리·bounded terminal microtask·lazy premove·client 전용 loader, cold renderer·clock admission의 Node 계약 17개 통과; 시계 반례 16개 일치; profile v5의 원자적 새게임·replay 재캡처, profile v6의 관측 후 행동 3개 반례 통과 | 전체 catalog·populated browser의 future RNG 동등성은 별도 조건 |
+| PR #29 v7 어댑터 | 공식 client hash 고정, 8×8 normal/chaos/grand 원문 실행·관측 검증, 256카드×3모드 bounded 표면 조사와 Ubuntu/Windows adapter CI 성공 | 어댑터 구현은 완료. 모든 카드 전제조건·조합의 `completeRuleCoverage` 및 Rust v7 포팅 증거는 아님 |
 | 과거 fixture | 349개, 757 sampled action을 최신 worker에 비교 | worker hash 불일치; 최신 client 전체 정답을 대신할 수 없음 |
 | Rust 규칙 | dcc0667과 default-flow의 기본 전이, Potion production 44개·양측 관측 88개, 별도 quiet/enPassant 12개(후속 이동 7개)·Quiet 지원 62개, 첫 수 자동 OPENING 세 모드의 전체 state/RNG/history 비교가 각 고정 소스에서 통과 | 검증하지 않은 나머지 획득·효과·변형기물과 catalog 전체 legal/reject/full-next-state/result/RNG 비교 미완료 |
 | PyO3/maturin | dcc0667 Windows/Linux CI 설치 검사 각 34/34·skip 0; 5e17 정책·profile v6의 Guard 수정 Linux sdist→wheel 설치 foundation 19/19·CI helper 34/34·skip 0, 정책 JCS·wheel/import 일치 | 새 정책의 최종 두 OS 배포 검증 필요 |
@@ -420,8 +478,8 @@ phase·공통 legality·효과 실행·모듈 연결을 담당한다. 2B는 vari
 | 1. 동결 source와 oracle | 실제 client 실행, public projection, 정확한 legal iterator, queued settlement | rule에 영향을 주는 UI 정리와 RNG를 보존하고 동결 source에서 legal/reject/state/result/RNG 비교가 재현됨 |
 | 2. 순수 Rust 규칙 | 초기·draft·256 카드·RULE·84개 catalog type과 reachable 상태 전이 | 채택된 8x8 normal/chaos/grand의 reachable 기능에 Unsupported나 대체 구현이 남지 않고 source 비교가 통과함 |
 | 3. Python 연동 | immutable Position/Action, owned 배열, direct/JSON 경계, maturin sdist/wheel | Windows/Linux에서 실제 배포 wheel을 설치하고 동일 의미·오류·소유권을 확인함 |
-| 4. 인코딩과 모델 | 공개 관측·이력, ResNet, static LoRA, FiLM, checkpoint/export | 숨은 상태 불변성, adapter 전용 갱신, 복사본 병합, 명시적 condition 입력과 계약 hash를 확인함 |
-| 5. Rust 추론 | 기본 ort, 명시적 tract, strict artifact 검증 | 두 실제 backend에서 base/adapter와 여러 B/A shape의 FP32 오차·condition 효과·오류 경로를 확인함 |
+| 4. 인코딩과 모델 | Python 공통 `ObservationIR`·공개 이력·descriptor·후보 행동, A mask-aware ResNet/B entity Transformer, 계열별 static LoRA·FiLM·checkpoint/export | 같은 허용 의미 정보, 숨은 상태 불변성, 계열별 adapter·복사 병합, 명시적 condition 입력과 계약 hash를 확인함 |
+| 5. Rust 추론 | 기본 ort, 명시적 tract, 계열별 typed 입력과 strict artifact 검증 | 두 실제 backend에서 base/adapter와 B/A/H/W/N의 지원 shape·dtype, FP32 오차·condition 효과·오류 전파를 확인함 |
 | 6. 공개 정보 탐색 | public trace, source-conditioned particles, availability PUCT, bounded search | 세 mode에서 실제 native 규칙과 연결되고 private 환경 상태·seed 없이 선택·재구성·취소가 작동함 |
 | 7. 실행과 자료 보존 | 유한 CLI, replay/dataset, optimizer/RNG checkpoint, 평가 코드 | 작은 synthetic 검증으로 중단·복원·미완료 판정·version 경계를 확인하고 실학습을 시작하지 않음 |
 | 8. 통합 검증 | 구조 검사, Rust lint/test, wheel 설치, source parity와 오류 경로 리뷰 | 최종 공통 commit에서 Windows/Linux CI 성공과 전체 미완료 항목의 해소를 관측함 |

@@ -7,6 +7,21 @@ D-001~D-003은 기존 결정입니다. D-004~D-006과 D-003 보완은 2026-09-27
 구현 완료는 별개입니다. 현재 구현과 관측한 검증 결과는 [IMPLEMENTATION](IMPLEMENTATION.md)에
 기록하며, 소스 파일의 존재만으로 전체 지원 범위의 완성을 선언하지 않습니다.
 
+## 재설계 D0 의미 정렬 (2026-09-29)
+
+| 기존 결정 | 처리 | 이번 설계와의 관계 |
+|---|---|---|
+| D-001·D-008 | 유지 | 동결 사이트/JS oracle은 정답 비교용, Rust 엔진은 실제 탐색용이다. PR #29의 v7 게임 어댑터는 구현·검증 완료된 기준 실행층으로 재사용한다. |
+| D-002 | 수정 | ResNet 단독 채택을 공통 `ObservationIR` 위의 mask-aware ResNet(A)·entity Transformer(B) 비교로 갱신한다. 성능상 우위나 최종 모델은 미정이다. |
+| D-005 | 유지·확장 | FiLM 조건화와 분리 정적 LoRA 적응의 역할은 유지한다. Transformer의 LoRA 위치·rank 등은 모델별 실험 설정에 고정한다. |
+| D-007 | 유지 | Python-first encoding은 이미 채택됐다. O-001을 다시 열지 않으며 실제 profiling으로 병목을 확인한 뒤에만 Rust 이전을 검토한다. |
+| D-009 | 유지·단계화 | 전체 8×8 원문 규칙의 코드 GO 기준은 유지한다. 가변 geometry·두 모델·대표 규칙의 기반 완료는 별도 checkpoint이며 전체 GO가 아니다. |
+| D-016 | 추가 | 엔진 상태와 AI 표현을 분리하고, 보드 크기 상수를 geometry로 옮기며, 검증용 N-version과 운영 오류 전파의 경계를 확정한다. |
+
+PR #29에는 `rust-engine/` 변경이 없다. 어댑터의 완료·검증 범위를 Rust의 v7 규칙 이관이나
+전체 카드 조합의 동등성 완료로 확대하지 않는다. 범위별 실제 근거는
+[ADAPTER-VERIFICATION](ADAPTER-VERIFICATION.md)과 [IMPLEMENTATION](IMPLEMENTATION.md)에 둔다.
+
 ## D-001: JS oracle + Rust engine + Python AI 구조 채택
 
 - **날짜**: 2026-09-20
@@ -32,17 +47,27 @@ D-001~D-003은 기존 결정입니다. D-004~D-006과 D-003 보완은 2026-09-27
   - Python에 규칙을 다시 구현: ML 통합은 단순하지만 규칙 구현이 중복되고 oracle과의 drift 위험이 커진다.
 - **영향**: 책임과 의존성 방향을 유지한다. PyO3/maturin 방식은 D-004로 보완하며 구체적인 Rust API와 Python encoding은 후속 Phase에서 결정한다.
 
-## D-002: 신경망 구조로 ResNet 채택
+## D-002: 공통 공개 입력 위에서 ResNet과 entity Transformer 비교
 
 - **날짜**: 2026-09-23
-- **상태**: 채택
-- **결정**: policy/value network는 ResNet(잔차 신경망) 구조로 한다.
-- **이유**: 팀 논의와 조사 결과 이 프로젝트 규모의 board-state 입력에 적합하다고 판단.
-- **대안과 제외 이유**: 단순 Dense/CNN도 검토했으나, 입력 구조가 아직 확정 전이라 Phase 6(state/action encoding)에서 실제 성능으로 재확인 필요.
-- **영향**: `python/`의 policy/value network 구현은 이 구조를 기준으로 시작한다. 세부 레이어 수·채널 수는 Phase 8에서 결정한다.
-  LoRA·FiLM 역할과 Hypernetwork 확장 경계는 D-005로 보완한다.
-- **구현 checkpoint**: 현재 기본값은 residual block 8개·channel 128개다.
-  코드와 ONNX 수치 검증 범위는 [IMPLEMENTATION](IMPLEMENTATION.md)에 기록한다.
+- **상태**: 2026-09-29 비교 결정으로 갱신; A만 구현됨
+- **기존 결정의 처리**: ResNet을 최초 구현과 비교의 A 기준선으로 유지한다.
+  ResNet만을 최종 policy/value 구조로 지정한 부분은 아래 비교 결정으로 대체한다.
+- **결정**: Rust 엔진이 허용한 같은 공개 Observation·history·규칙/행마 descriptor·
+  candidate action에서 공통 `ObservationIR`을 만든다. A는 가변 크기 mask-aware ResNet,
+  B는 기물·카드·활성 규칙·지형·효과와 geometry를 표현하는 entity Transformer다.
+  두 모델은 같은 허용 정보, 후보별 policy logit, 같은 decision actor 관점의 value를 사용한다.
+- **이유**: 엔진 저장 방식과 모델 입력 표현을 분리하고, 가변 보드를 CNN과 entity 모델
+  양쪽에서 검증하기 위함이다. 모델별 입력 표현과 backbone을 함께 비교하므로 결과를
+  attention 단독 효과 또는 token화 단독 효과로 해석하지 않는다.
+- **대안과 제외 이유**: 칸 token Transformer는 원인 분해가 필요할 때의 추가 대조군이다.
+  Transformer의 우위나 미학습 크기·카드 조합에 대한 일반화는 미리 결정하지 않는다.
+- **영향**: 모델별 encoder·artifact는 분리하되 공개 의미 필드·history·descriptor·
+  후보 의미를 맞춘다. 모델용 token/plane을 규칙 엔진의 저장 구조로 사용하지 않는다.
+  FiLM·LoRA의 역할은 D-005, Python 인코딩 소유권은 D-007을 따른다.
+- **구현 checkpoint**: 기존 A는 8×8·residual block 8개·channel 128개이며 새 A/B와
+  가변 크기 입력·두 backend 검증은 아직 구현되지 않았다. 실제 검증 범위는
+  [IMPLEMENTATION](IMPLEMENTATION.md)에 기록한다.
 
 ## D-003: 엔진-AI 통신 프로토콜의 기본 틀
 
@@ -78,7 +103,7 @@ D-001~D-003은 기존 결정입니다. D-004~D-006과 D-003 보완은 2026-09-27
   실측 전 보장하지 않는다. 기존 bridge-draft-0은 역사적 제안으로 보존하며 v1 실행 계약과
   혼용하지 않는다. backend의 실제 export 호환성은 실행 결과로 확인한다.
 
-## D-005: ResNet의 FiLM 조건화와 LoRA 적응·Hypernetwork 확장
+## D-005: FiLM 조건화와 LoRA 적응·Hypernetwork 확장
 
 - **날짜**: 2026-09-27
 - **상태**: 설계 채택, 구현 진행(검증 범위는 IMPLEMENTATION 참조)
@@ -95,6 +120,12 @@ D-001~D-003은 기존 결정입니다. D-004~D-006과 D-003 보완은 2026-09-27
   8 block·128 channel, 각 block의 두 convolution에 rank 8·alpha 8·dropout 0,
   두 번째 BN 뒤 FiLM이다. 조건 encoding은 D-007과 EncoderSpec에 명시한다.
   두 기법의 채택과 export 수치 검증은 대전 성능 개선의 증명이 아니다.
+- **2026-09-29 보완(D-002와 함께 적용)**: FiLM은 A/B 모두에서 명시적인 공개 조건으로
+  특징을 조절하고 ONNX 그래프에 남긴다. LoRA는 계열별 별도 정적 adapter다.
+  Transformer의 적용 projection·rank·alpha·dropout은 **모델별 실험 설정과 artifact**에
+  기록해 해당 실행 동안 고정한다. 현재 ResNet의 convolution rank 8을 모든 모델에
+  강제하거나 다른 계열의 adapter를 자동 호환으로 취급하지 않는다. 병합은 원본을
+  보존한 복사본에서만 수행하며 Hypernetwork의 국면별 동적 adapter는 병합 대상이 아니다.
 
 ## D-006: 저장소·에이전트 규약과 메타데이터 구조 검사
 
@@ -131,6 +162,10 @@ D-001~D-003은 기존 결정입니다. D-004~D-006과 D-003 보완은 2026-09-27
   정책 원문 및 JCS SHA-256을 보존하며 native runtime은 compiled 정책과 일치를 검사한다.
   `public-utf8-v2`·`public-film-v2`는 이전 artifact를 자동으로 변환하지 않는다. 이는 규칙·catalog
   동결 버전의 변경이 아니며 실제 관측 coverage와 배포 검증은 IMPLEMENTATION에서 확인한다.
+- **2026-09-29 적용**: `ObservationIR`에서 A의 plane/condition과 B의 entity/condition을
+  만드는 운영 encoder도 Python이 소유한다. 독립 참조판은 검사 전용이다.
+  인코딩·언어 경계 전달·추론 시간을 구분해 실측하고 Python 인코딩이 실제 병목일 때만
+  Rust 이전을 새 결정으로 검토한다. O-001은 해결 상태를 유지한다.
 
 ## D-008: 최초 동결 사이트 본체를 규칙 정답으로 고정
 
@@ -158,6 +193,10 @@ D-001~D-003은 기존 결정입니다. D-004~D-006과 D-003 보완은 2026-09-27
 - **영향**: source catalog 전 범위의 legal/reject/초기 draft/phase/terminal과 normalized
   full next state·result·RNG를 비교한다. signature·몇 개 기본 기물·구조 검사만으로 GO를
   선언하지 않는다. 아직 실패·미구현·근거 부족인 항목은 실행 보고에 유지한다.
+- **2026-09-29 단계화**: D-016의 가변 geometry와 대표 규칙·두 모델·native 추론이
+  연결된 기반 checkpoint는 전체 규칙 GO와 구분한다. 기존 8×8 사이트 범위의
+  코드 완료 기준은 축소하지 않는다. 붕괴처럼 유효 칸이 바뀌는 현재 규칙과 합성
+  외곽 확장·축소 검증의 출처도 분리한다.
 
 ## D-010: immutable snapshot 비교의 headless 실행 context 명시
 
@@ -262,6 +301,26 @@ D-001~D-003은 기존 결정입니다. D-004~D-006과 D-003 보완은 2026-09-27
   기존 BFB artifact·replay를 새 정책과 혼용하지 않는다. source 첫 수의 raw 전체 상태·RNG,
   양측 공개 관측·이력 기록을 새 정책에서 별도로 비교하고, 최종 ONNX metadata·설치
   wheel·두 OS CI는 새 hash로 다시 검증한다.
+
+## D-016: 모델 독립 가변 보드와 검증 전용 N-version
+
+- **날짜**: 2026-09-29
+- **상태**: 설계 채택, 구현·검증은 진행 전
+- **결정**: 엔진은 크기·좌표 경계를 소유하는 geometry, 변화하는 유효 칸·지형·연결,
+  단일 기물 identity와 footprint, 파생 점유 조회를 구분한다. 보드 크기를 규칙 코어의
+  고정 8×8 상수로 취급하지 않는다. 규칙 상태에서 허용 관측을 만든 뒤 D-007의 Python
+  encoder가 모델 입력으로 변환한다. 동결 v7 붕괴는 외곽 칸의 활성 상태를 바꾸고,
+  별도 합성 profile에서 실제 외곽 확장·축소를 검증한다.
+- **이유**: 규칙 의미를 plane/token 배열과 분리하고 원문 8×8 외의 보드 변화에도
+  좌표·기물·행동·관측의 의미를 일관되게 유지하기 위함이다.
+- **N-version 경계**: geometry·점유·행마 등 핵심 로직은 독립 참조 구현과 Rust 운영
+  구현을 차분 검사할 수 있다. 참조판과 PR #29의 JS oracle은 운영 탐색에 참여하지
+  않는다. 불일치는 원문·계약으로 판단하며 다수결로 실행하지 않는다.
+- **실패 정책**: Rust 규칙 구현이나 선택한 ONNX backend가 실패해도 JS·Python 규칙
+  구현 또는 다른 backend로 자동 전환하지 않는다. 미지원/한도 오류를 호출자에게 전파한다.
+- **영향**: 기존 8×8 경로는 의미를 보존하면서 geometry에서 크기를 유도하도록 정리한다.
+  새 구조는 명시 선택으로 병행하고, 규칙 미지원 상태를 전체 지원으로 표시하지 않는다.
+  실제 학습과 전체 사이트 카드의 가변 보드 의미 확정은 이번 기반 checkpoint가 아니다.
 
 ## 열린 질문
 
