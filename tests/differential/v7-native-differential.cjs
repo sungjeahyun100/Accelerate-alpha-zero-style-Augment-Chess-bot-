@@ -16,6 +16,13 @@ const MAX_ACTIONS = 4096;
 const MAX_EXAMINED = 65536;
 const MAX_BATCH_BYTES = 16 * 1024 * 1024;
 const STYLES = ["normal", "chaos", "grand"];
+// Three small assertions extracted from the external seed19-active-only source
+// manifest. The complete source positions stay outside Git and are regenerated.
+const ACTIVE_SEED19 = Object.freeze({
+  normal: { positionDigest: "08ecf6a04a6ddaa277e646ce24e863d0aecd2f10badf3f6c379b715421f59453", legalCount: 21 },
+  chaos: { positionDigest: "5c98166c0007febab1e00965bc1241bb4530088aa1e34367bf727703c6079108", legalCount: 22 },
+  grand: { positionDigest: "a7bfd8e2bae424bf59f742813312bf72effc7634c294f6874e8787891f379645", legalCount: 36 },
+});
 
 function options(argv) {
   const selected = { python: process.env.PYTHON || "python", source: null, oracleOnly: false };
@@ -57,6 +64,11 @@ function buildCase(adapter, contract, name, position) {
   contract.validatePosition(position);
   const { actions, examined } = sourceActions(adapter, position);
   if (!actions.length) throw new Error(`${name}: source has no action for reject/apply probes`);
+  const observations = Object.fromEntries(["white", "black"].map(viewer => {
+    const observation = adapter.observe(position, viewer);
+    contract.validateObservation(observation);
+    return [viewer, observation];
+  }));
   const first = actions[0];
   const rejectPayload = contract.jsonCopy({ ...first.payload, color: first.payload.color === "white" ? "black" : "white" });
   const rejected = adapter.apply(position, contract.action(position, rejectPayload));
@@ -64,22 +76,41 @@ function buildCase(adapter, contract, name, position) {
       contract.canonical(rejected.result) !== contract.canonical(adapter.result(position)))
     throw new Error(`${name}: source wrong-actor rejection changed the full position or result`);
   const samples = [];
-  for (const action of [actions[0], actions[actions.length - 1]]) {
+  const firstCard = actions.find(action => action.payload.type === "card");
+  for (const action of [actions[0], actions[actions.length - 1], firstCard].filter(Boolean)) {
     if (samples.some(sample => sample.action.actionId === action.actionId)) continue;
     const step = adapter.apply(position, action, { recordHistory: true });
     if (!step.ok || step.position.history.length !== position.history.length + 1)
       throw new Error(`${name}: source sample failed full-history apply`);
     contract.validatePosition(step.position);
     contract.validateResult(step.result);
-    samples.push({ action, position: step.position, result: step.result });
+    const nextObservations = Object.fromEntries(["white", "black"].map(viewer => {
+      const observation = adapter.observe(step.position, viewer);
+      contract.validateObservation(observation);
+      return [viewer, observation];
+    }));
+    samples.push({ action, position: step.position, result: step.result, observations: nextObservations });
   }
   const result = adapter.result(position);
   contract.validateResult(result);
   const actionTypes = [...new Set(actions.map(action => action.payload.type))].sort();
   return {
-    input: { name, position, result, actions, rejectPayload, samples },
-    summary: { name, mode: position.state.mode, legalCount: actions.length, sourceExamined: examined, actionTypes, sampleCount: samples.length, rejectCount: 1 },
+    input: { name, position, result, observations, actions, rejectPayload, samples },
+    summary: { name, mode: position.state.mode, positionDigest: contract.digest(position), legalCount: actions.length,
+      sourceExamined: examined, actionTypes, sampleTypes: samples.map(sample => sample.action.payload.type),
+      sampleCount: samples.length, rejectCount: 1, observationViewers: Object.keys(observations) },
   };
+}
+
+function firstActiveDraftAction(adapter, contract, position) {
+  const activation = new Map(contract.catalog.cards.map(card => [card.id, card.activation]));
+  const offered = new Map(position.state.draft.choices.map(card => [card.instanceId, card.id]));
+  return adapter.actions(position).find(action => {
+    const payload = action.payload;
+    const ids = payload.type === "draftPick" ? [payload.cardInstanceId] :
+      payload.type === "draftBundlePick" ? payload.cardInstanceIds : [];
+    return ids.length > 0 && ids.every(instanceId => activation.get(offered.get(instanceId)) === "ACTIVE");
+  });
 }
 
 function sourceCases(source, contract) {
@@ -87,21 +118,32 @@ function sourceCases(source, contract) {
   for (const style of STYLES) {
     const adapter = new GameAdapter({ source, contract });
     try {
-      let position = adapter.newGame({ gameStyle: style }, 37);
-      cases.push(buildCase(adapter, contract, `${style}-draft`, position));
-      let picks = 0;
-      while (position.state.mode === "draft" && picks < 64) {
-        const first = adapter.actions(position)[0];
-        if (!first) throw new Error(`${style}: draft has no legal choice`);
-        const step = adapter.apply(position, first, { recordHistory: false });
-        if (!step.ok) throw new Error(`${style}: source rejected its own draft choice`);
-        position = step.position;
-        picks++;
+      for (const { seed, policy } of [{ seed: 37, policy: "first" }, { seed: 19, policy: "first-active" }]) {
+        let position = adapter.newGame({ gameStyle: style }, seed);
+        if (seed === 37) cases.push(buildCase(adapter, contract, `${style}-seed37-draft`, position));
+        let picks = 0;
+        while (position.state.mode === "draft" && picks < 64) {
+          const choice = policy === "first-active" ? firstActiveDraftAction(adapter, contract, position) : adapter.actions(position)[0];
+          if (!choice) throw new Error(`${style} seed ${seed}: draft has no ${policy} legal choice`);
+          const step = adapter.apply(position, choice, { recordHistory: false });
+          if (!step.ok) throw new Error(`${style} seed ${seed}: source rejected its own draft choice`);
+          position = step.position;
+          picks++;
+        }
+        if (position.state.mode !== "play")
+          throw new Error(`${style} seed ${seed}: source draft did not reach play within 64 choices`);
+        const name = `${style}-seed${seed}-${policy}-play`;
+        const item = buildCase(adapter, contract, name, position);
+        item.summary.draftChoicesToPlay = picks;
+        item.summary.seed = seed;
+        item.summary.draftPolicy = policy;
+        if (seed === 19) {
+          const expected = ACTIVE_SEED19[style];
+          if (item.summary.positionDigest !== expected.positionDigest || item.summary.legalCount !== expected.legalCount)
+            throw new Error(`${name}: regenerated source differs from pinned external active-only manifest`);
+        }
+        cases.push(item);
       }
-      if (position.state.mode !== "play")
-        throw new Error(`${style}: source draft did not reach play within 64 choices`);
-      cases.push(buildCase(adapter, contract, `${style}-play`, position));
-      cases[cases.length - 1].summary.draftChoicesToPlay = picks;
     } finally {
       adapter.dispose();
     }
@@ -132,9 +174,10 @@ function main() {
     gate: "source-pinned-v7-native-differential-probe",
     status: "setup-error",
     generatedAt: new Date().toISOString(),
-    scope: "normal/chaos/grand initial draft and first play after deterministic source draft; sampled first/last applies; not complete rule coverage or project GO",
+    scope: "normal/chaos/grand seed37 draft/first play and seed19 first-ACTIVE play; full legal stream, both public viewers, sampled draft/move/card applies; not complete rule or terminal coverage",
     completeRuleCoverage: false,
-    bounds: { pageSize: PAGE_SIZE, maxPages: MAX_PAGES, maxActions: MAX_ACTIONS, maxExamined: MAX_EXAMINED, maxDraftChoices: 64, maxSamplesPerPosition: 2 },
+    projectGo: false,
+    bounds: { pageSize: PAGE_SIZE, maxPages: MAX_PAGES, maxActions: MAX_ACTIONS, maxExamined: MAX_EXAMINED, maxDraftChoices: 64, maxSamplesPerPosition: 3 },
   };
   try {
     const args = options(process.argv.slice(2));
@@ -155,13 +198,14 @@ function main() {
       actionTypes: [...new Set(cases.flatMap(item => item.summary.actionTypes))].sort(),
       resultStatuses: [...new Set(cases.map(item => item.input.result.status))].sort(),
     };
+    const identity = { rulesVersion: contract.catalog.rulesVersion, catalogVersion: contract.catalog.catalogVersion,
+      sourceSha256: SOURCE_SHA256, profile: PROFILE, observationPolicy: contract.observationPolicy };
     const preflight = args.oracleOnly ? { status: "oracle-only", reason: "native comparison explicitly omitted" } :
-      nativeProbe(args.python, { phase: "preflight", rulesVersion: contract.catalog.rulesVersion, catalogVersion: contract.catalog.catalogVersion });
+      nativeProbe(args.python, { phase: "preflight", ...identity });
     report.nativePreflight = preflight;
     if (args.oracleOnly || preflight.status !== "ready") report.status = preflight.status;
     else {
-      const comparison = nativeProbe(args.python, { phase: "compare", rulesVersion: contract.catalog.rulesVersion,
-        catalogVersion: contract.catalog.catalogVersion, cases: cases.map(item => item.input) });
+      const comparison = nativeProbe(args.python, { phase: "compare", ...identity, cases: cases.map(item => item.input) });
       report.native = comparison;
       report.status = comparison.status === "pass" ? "pass" : comparison.status;
     }
@@ -169,10 +213,12 @@ function main() {
     report.status = "setup-error";
     report.reason = `${error.name}: ${error.message}`;
   }
+  report.decision = report.status === "pass" ? "bounded-P8-probe-pass-only" : "NO-GO";
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });
   fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
-  console.log(JSON.stringify({ status: report.status, report: reportPath, sourceCases: report.sourceCases?.length || 0,
-    nativeCases: report.native?.cases?.length || 0, reason: report.reason || report.nativePreflight?.reason || undefined }));
+  console.log(JSON.stringify({ status: report.status, decision: report.decision, report: reportPath,
+    sourceCases: report.sourceCases?.length || 0, nativeCases: report.native?.cases?.length || 0,
+    reason: report.reason || report.nativePreflight?.reason || report.native?.cases?.find(item => item.status !== "pass")?.reason || undefined }));
   if (report.status !== "pass") process.exitCode = 1;
 }
 

@@ -170,18 +170,28 @@ def test_typed_v3_rejects_self_consistent_wrong_feature_schema():
     arrays = _typed_arrays(spec, "entity-transformer")
     manifest_path = export_typed_onnx(model, spec, _root() / "typed-schema-source", arrays,
                                       architecture_family="entity-transformer")
-    altered = deepcopy(json.loads(manifest_path.read_text(encoding="utf-8")))
-    altered["encoder"]["feature_schema"]["numeric_slots"]["record"][0] = "private_scalar"
-    altered["encoder"]["feature_schema_hash"] = hashlib.sha256(jcs.canonicalize(altered["encoder"]["feature_schema"])).hexdigest()
-    altered["encoder_hash"] = hashlib.sha256(jcs.canonicalize(altered["encoder"])).hexdigest()
+    original = json.loads(manifest_path.read_text(encoding="utf-8"))
     invalid = _root() / "typed-schema-invalid"
     invalid.mkdir(parents=True, exist_ok=True)
     (invalid / "model.onnx").write_bytes(manifest_path.with_name("model.onnx").read_bytes())
-    (invalid / "manifest.json").write_text(json.dumps(altered), encoding="utf-8")
-    with pytest.raises(ValueError, match="feature schema"):
-        load_manifest(invalid / "manifest.json")
-    with pytest.raises(ValueError, match="feature semantics"):
-        InferenceSession(invalid / "manifest.json")
+    for semantic in ("numeric_slots", "descriptor_identity", "card_aliases", "belief_summary"):
+        altered = deepcopy(original)
+        schema = altered["encoder"]["feature_schema"]
+        if semantic == "numeric_slots":
+            schema["numeric_slots"]["record"][0] = "private_scalar"
+        elif semantic == "descriptor_identity":
+            schema["descriptor_identity"] = "unversioned private identity"
+        elif semantic == "card_aliases":
+            schema["card_aliases"] = "duplicate each public card instance without identity links"
+        else:
+            schema["belief_summary"]["chance_prior"] = "private-outcome-prior"
+        altered["encoder"]["feature_schema_hash"] = hashlib.sha256(jcs.canonicalize(schema)).hexdigest()
+        altered["encoder_hash"] = hashlib.sha256(jcs.canonicalize(altered["encoder"])).hexdigest()
+        (invalid / "manifest.json").write_text(json.dumps(altered), encoding="utf-8")
+        with pytest.raises(ValueError, match="feature schema"):
+            load_manifest(invalid / "manifest.json")
+        with pytest.raises(ValueError, match="feature semantics"):
+            InferenceSession(invalid / "manifest.json")
 
 
 def test_v7_explicit_bundle_runs_both_backends_and_rejects_v6_spec():

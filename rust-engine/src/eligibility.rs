@@ -391,6 +391,9 @@ pub(crate) fn draft_drawable(state: &mut GameState, card: &Value, color: Color) 
     let id = card["id"]
         .as_str()
         .ok_or_else(|| EngineError::InvalidState("card definition id missing".into()))?;
+    if state.ruleset_id == RULES_VERSION_V7 && v7_large_opening_rule_blocks(state, id) {
+        return Ok(false);
+    }
     if state
         .extra
         .get("cardBanIds")
@@ -413,6 +416,67 @@ pub(crate) fn draft_drawable(state: &mut GameState, card: &Value, color: Color) 
         return Ok(true);
     }
     drawable(state, card, color, true, 0)
+}
+
+/// Source `isRuleBlockedDraftCard` chooses an active diagonal RULE before the
+/// installed opening RULE, then applies `isLargeOpeningCardExcludedByRule`.
+/// This is only its large-opening branch; other rule/card exclusions retain
+/// their own admission boundaries.
+fn v7_large_opening_rule_blocks(state: &GameState, card_id: &str) -> bool {
+    if !matches!(card_id, "summon-colossus" | "big-rook" | "big-bishop") {
+        return false;
+    }
+    let applied_id = state
+        .extra
+        .get("appliedRuleCard")
+        .and_then(|card| card.get("id"))
+        .and_then(Value::as_str);
+    let presentation_only = applied_id.is_some_and(|id| {
+        let editor = state.extra.get("simpleBoardEditor");
+        let configured = editor
+            .and_then(|editor| editor.get("ruleId"))
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .or_else(|| {
+                editor
+                    .and_then(|editor| editor.get("startConfig"))
+                    .and_then(|start| start.get("ruleId"))
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty())
+            });
+        editor.and_then(|editor| editor.get("enabled")) == Some(&Value::Bool(true))
+            && editor.and_then(|editor| editor.get("ruleApplicationDisabled"))
+                == Some(&Value::Bool(true))
+            && configured == Some(id)
+    });
+    let active_applied_id = applied_id.filter(|_| !presentation_only);
+    let additional_diagonal = state
+        .extra
+        .get("additionalRuleCards")
+        .and_then(Value::as_array)
+        .is_some_and(|cards| cards.iter().any(|card| card["id"] == "diagonal-chess"));
+    let rule_id = if active_applied_id == Some("diagonal-chess") || additional_diagonal {
+        Some("diagonal-chess")
+    } else {
+        active_applied_id
+    };
+    match card_id {
+        "summon-colossus" => matches!(
+            rule_id,
+            Some("chess-344200" | "chess-n-pow-30" | "chess-45-pow-30")
+        ),
+        "big-rook" | "big-bishop" => matches!(
+            rule_id,
+            Some(
+                "diagonal-chess"
+                    | "chess-960"
+                    | "chess-344200"
+                    | "chess-n-pow-30"
+                    | "chess-45-pow-30"
+            )
+        ),
+        _ => false,
+    }
 }
 fn drawable(
     state: &mut GameState,
@@ -1163,4 +1227,63 @@ fn target_drawable(state: &GameState, card: &Value, color: Color) -> Result<bool
         // targets already handled by their availability case above.
         _ => true,
     })
+}
+
+#[cfg(test)]
+mod v7_rule_draft_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn large_opening_exclusion_matches_source_rule_table_and_precedence() {
+        let mut state =
+            crate::draft::initialize_for_ruleset(GameConfig::default(), 19, RULES_VERSION_V7)
+                .unwrap();
+        for (rule, colossus, rook, bishop) in [
+            ("saturation", false, false, false),
+            ("diagonal-chess", false, true, true),
+            ("chess-960", false, true, true),
+            ("chess-344200", true, true, true),
+            ("chess-n-pow-30", true, true, true),
+            ("chess-45-pow-30", true, true, true),
+        ] {
+            state
+                .extra
+                .insert("appliedRuleCard".into(), json!({"id":rule}));
+            assert_eq!(
+                v7_large_opening_rule_blocks(&state, "summon-colossus"),
+                colossus
+            );
+            assert_eq!(v7_large_opening_rule_blocks(&state, "big-rook"), rook);
+            assert_eq!(v7_large_opening_rule_blocks(&state, "big-bishop"), bishop);
+        }
+
+        // Source gives an additional diagonal RULE precedence over the
+        // installed RULE; a presentation-only editor RULE does not block.
+        state
+            .extra
+            .insert("appliedRuleCard".into(), json!({"id":"chess-344200"}));
+        state.extra.insert(
+            "additionalRuleCards".into(),
+            json!([{"id":"diagonal-chess"}]),
+        );
+        assert!(!v7_large_opening_rule_blocks(&state, "summon-colossus"));
+        assert!(v7_large_opening_rule_blocks(&state, "big-rook"));
+        state.extra.insert("additionalRuleCards".into(), json!([]));
+        state.extra.insert(
+            "simpleBoardEditor".into(),
+            json!({"enabled":true,"ruleApplicationDisabled":true,"ruleId":"chess-344200"}),
+        );
+        assert!(!v7_large_opening_rule_blocks(&state, "summon-colossus"));
+        assert!(!v7_large_opening_rule_blocks(&state, "big-rook"));
+
+        state.extra.insert("simpleBoardEditor".into(), Value::Null);
+        let colossus = crate::draft::definitions_for_ruleset(RULES_VERSION_V7)
+            .unwrap()
+            .definitions
+            .iter()
+            .find(|card| card["id"] == "summon-colossus")
+            .unwrap();
+        assert!(!draft_drawable(&mut state, colossus, Color::White).unwrap());
+    }
 }

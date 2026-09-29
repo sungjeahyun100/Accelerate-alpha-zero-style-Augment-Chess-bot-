@@ -38,22 +38,28 @@ class _ExplicitBlocks(argparse.Action):
 
 def default_spec(catalog_path: str | None = None, *, observation_policy: dict | None = None,
                  model_family: str = "legacy-resnet"):
-    if observation_policy is None:
-        from ._native import site_observation_policy
-        observation_policy = site_observation_policy()
+    typed = model_family in ("mask-resnet", "entity-transformer")
+    if model_family != "legacy-resnet" and not typed:
+        raise ValueError("unknown explicit model family")
+    if typed:
+        from .ir import V7_RULES_VERSION, TypedEncoderSpec
+
     if catalog_path:
         catalog = read_json(catalog_path)
     else:
         from ._native import site_catalog
-        catalog = site_catalog()
+        catalog = site_catalog(V7_RULES_VERSION) if typed else site_catalog()
+    if observation_policy is None:
+        from ._native import site_observation_policy
+
+        observation_policy = (site_observation_policy(V7_RULES_VERSION) if typed
+                              else site_observation_policy())
     if model_family == "legacy-resnet":
         return EncoderSpec.from_catalog(catalog, observation_policy=observation_policy,
             history_encoding="public-history-summary-v1", action_encoding="public-decision-intent-v1")
-    if model_family in ("mask-resnet", "entity-transformer"):
-        from .ir import TypedEncoderSpec
-
-        return TypedEncoderSpec.from_catalog(catalog, observation_policy=observation_policy)
-    raise ValueError("unknown explicit model family")
+    if catalog.get("rulesVersion") != V7_RULES_VERSION:
+        raise ValueError("typed model families require the pinned v7 source catalog")
+    return TypedEncoderSpec.from_catalog(catalog, observation_policy=observation_policy)
 
 
 def _configuration(args):

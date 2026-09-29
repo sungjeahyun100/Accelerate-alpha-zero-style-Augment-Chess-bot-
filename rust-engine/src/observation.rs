@@ -221,6 +221,29 @@ pub(crate) fn validate_projection(observation: &Observation) -> Result<()> {
     validate_projection_for_ruleset(observation, RULES_VERSION_V6)
 }
 
+/// The frozen v7 client emits no selection hints outside the acting side's
+/// ordinary play window. Active hints call `getLegalMoves` and
+/// `getVisibleCardTargetSquares`; until both v7 kernels have source parity,
+/// a partial move/card list would be a false public contract.
+pub(crate) fn public_hints_v7(state: &GameState, viewer: Color) -> Result<Value> {
+    if state.ruleset_id != RULES_VERSION_V7 {
+        return Err(EngineError::UnsupportedFeature(format!(
+            "v7 public hints for rules version {}",
+            state.ruleset_id
+        )));
+    }
+    if state.mode != "play"
+        || state.turn != viewer
+        || truth(state.extra.get("pendingPromotion"))
+        || truth(state.extra.get("activeTrolley"))
+    {
+        return Ok(json!({"moves":[],"cardTargets":[]}));
+    }
+    Err(EngineError::UnsupportedFeature(
+        "v7 active public move and card target hints".into(),
+    ))
+}
+
 /// Validate projected field shapes against the selected frozen policy. This
 /// does not establish dynamic source parity or admit a v7 executable Position.
 pub(crate) fn validate_projection_for_ruleset(

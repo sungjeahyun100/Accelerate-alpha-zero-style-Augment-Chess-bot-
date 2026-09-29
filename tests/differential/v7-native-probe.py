@@ -17,6 +17,8 @@ PAGE_SIZE = 64
 MAX_PAGES = 128
 MAX_ACTIONS = 4096
 MAX_EXAMINED = 65536
+SOURCE_SHA256 = "e5ed84fcf8e72a24e6a8cfeb9050787387a616c55184e6501fca2077e302c45c"
+PROFILE = "accelerate-headless-semantic-v7"
 
 
 def difference(expected: Any, actual: Any, path: str = "$", depth: int = 0) -> str | None:
@@ -66,14 +68,46 @@ def collect_actions(position: Any) -> tuple[list[dict[str, Any]], int]:
         if len(actions) > MAX_ACTIONS or examined > MAX_EXAMINED:
             raise RuntimeError("native legal action stream exceeded probe budget")
         if page["exhausted"]:
+            if len({action["actionId"] for action in actions}) != len(actions):
+                raise RuntimeError("native legal action stream emitted duplicate action identities")
             return actions, examined
         if not page["actions"] and page["examined"] == 0:
             raise RuntimeError("native legal action stream made no progress")
     raise RuntimeError("native legal action stream did not exhaust within page budget")
 
 
-def check_rejection(position: Any, payload: dict[str, Any], native: Any) -> dict[str, Any] | None:
+def full_result(position: Any) -> dict[str, Any]:
+    state = position.snapshot()["state"]
+    terminal = state["mode"] == "gameover"
+    winner = state.get("winner") if terminal and state.get("winner") in ("white", "black") else None
+    return {
+        "protocolVersion": "accelerate-result-v1",
+        "status": "terminal" if terminal else "ongoing",
+        "winner": winner,
+        "outcome": (state.get("winner") or "draw") if terminal else None,
+        "reason": (state.get("replayEndReason") or "") if terminal else "",
+    }
+
+
+def compare_observations(position: Any, expected: dict[str, Any], native: Any, stage: str) -> dict[str, Any] | None:
+    for viewer in ("white", "black"):
+        try:
+            actual = position.observe(viewer)
+        except native.UnsupportedFeatureError as exc:
+            return failure("unsupported", f"native {stage} public observation unsupported: {exc}", viewer=viewer)
+        except Exception as exc:
+            return failure("observation-error", f"native {stage} public observation: {type(exc).__name__}: {exc}", viewer=viewer)
+        changed = difference(expected[viewer], actual)
+        if changed:
+            return failure("mismatch", f"{stage} public observation differs", viewer=viewer, path=changed)
+    return None
+
+
+def check_rejection(
+    position: Any, payload: dict[str, Any], expected_observations: dict[str, Any], native: Any
+) -> dict[str, Any] | None:
     before = position.snapshot()
+    before_result = position.result
     try:
         action = position.bind_action(payload)
         position.apply(action)
@@ -81,7 +115,11 @@ def check_rejection(position: Any, payload: dict[str, Any], native: Any) -> dict
         return failure("unsupported", f"native rejection path unsupported: {exc}")
     except (native.NativeError, ValueError) as exc:
         changed = difference(before, position.snapshot())
-        return failure("mismatch", "rejected action mutated native position", path=changed) if changed else None
+        if changed:
+            return failure("mismatch", "rejected action mutated native position", path=changed)
+        if position.result != before_result:
+            return failure("mismatch", "rejected action changed native result")
+        return compare_observations(position, expected_observations, native, "rejected")
     return failure("mismatch", "native accepted source-rejected wrong-actor action")
 
 
@@ -99,6 +137,12 @@ def compare_case(case: dict[str, Any], native: Any) -> dict[str, Any]:
         return {**result, **failure("mismatch", "imported full position differs", path=changed)}
     if position.result != case["result"]["outcome"]:
         return {**result, **failure("mismatch", "baseline result differs", expected=case["result"]["outcome"], actual=position.result)}
+    changed = difference(case["result"], full_result(position))
+    if changed:
+        return {**result, **failure("mismatch", "baseline result envelope differs", path=changed)}
+    observed = compare_observations(position, case["observations"], native, "baseline")
+    if observed:
+        return {**result, **observed}
 
     try:
         actual, examined = collect_actions(position)
@@ -111,13 +155,25 @@ def compare_case(case: dict[str, Any], native: Any) -> dict[str, Any]:
     actual_ids = Counter(action["actionId"] for action in actual)
     if expected_ids != actual_ids:
         return {**result, **failure("mismatch", "full legal action multiset differs", sourceCount=len(expected), nativeCount=len(actual), nativeExamined=examined, missingIds=list((expected_ids - actual_ids).elements())[:3], extraIds=list((actual_ids - expected_ids).elements())[:3])}
-    expected_by_id = {action["actionId"]: action for action in expected}
-    for action in actual:
-        changed = difference(expected_by_id[action["actionId"]], action)
+    for index, (source_action, native_action) in enumerate(zip(expected, actual)):
+        changed = difference(source_action, native_action)
         if changed:
-            return {**result, **failure("mismatch", "legal action envelope differs", actionId=action["actionId"], path=changed)}
+            return {**result, **failure("mismatch", "ordered legal action envelope differs", index=index, actionId=source_action["actionId"], path=changed)}
 
-    rejected = check_rejection(position, case["rejectPayload"], native)
+    for index, source_action in enumerate(expected):
+        try:
+            by_payload = position.bind_action(source_action["payload"]).snapshot()
+            by_snapshot = position.bind_snapshot(source_action).snapshot()
+        except native.UnsupportedFeatureError as exc:
+            return {**result, **failure("unsupported", f"native v7 bind unsupported: {exc}", index=index)}
+        except Exception as exc:
+            return {**result, **failure("bind-error", f"{type(exc).__name__}: {exc}", index=index)}
+        for route, bound in (("payload", by_payload), ("snapshot", by_snapshot)):
+            changed = difference(source_action, bound)
+            if changed:
+                return {**result, **failure("mismatch", "legal action bind differs", index=index, route=route, path=changed)}
+
+    rejected = check_rejection(position, case["rejectPayload"], case["observations"], native)
     if rejected:
         return {**result, **rejected}
 
@@ -137,13 +193,23 @@ def compare_case(case: dict[str, Any], native: Any) -> dict[str, Any]:
             return {**result, **failure("mismatch", "applied actor/turn change differs", sample=index)}
         if step.result != sample["result"]["outcome"] or step.position.result != sample["result"]["outcome"]:
             return {**result, **failure("mismatch", "applied result differs", sample=index)}
+        changed = difference(sample["result"], full_result(step.position))
+        if changed:
+            return {**result, **failure("mismatch", "applied result envelope differs", sample=index, path=changed)}
+        observed = compare_observations(step.position, sample["observations"], native, f"sample {index}")
+        if observed:
+            return {**result, **observed, "sample": index}
         if difference(case["position"], position.snapshot()):
             return {**result, **failure("mismatch", "apply mutated source native position", sample=index)}
-    return {**result, "status": "pass", "legalCount": len(actual), "nativeExamined": examined, "applied": len(case["samples"]), "rejected": 1}
+    return {**result, "status": "pass", "legalCount": len(actual), "nativeExamined": examined,
+            "bound": len(expected), "applied": len(case["samples"]), "rejected": 1, "publicViewers": 2}
 
 
 def main() -> None:
     request = json.load(sys.stdin)
+    if request.get("profile") != PROFILE or request.get("sourceSha256") != SOURCE_SHA256:
+        print(json.dumps(failure("version-mismatch", "native probe request source/profile identity differs")))
+        return
     try:
         import accelerate_chess._native as native
     except (ImportError, OSError) as exc:
@@ -156,6 +222,19 @@ def main() -> None:
         return
     if catalog.get("rulesVersion") != request["rulesVersion"] or catalog.get("catalogVersion") != request["catalogVersion"]:
         print(json.dumps(failure("version-mismatch", "native v7 catalog identity differs", nativeRulesVersion=catalog.get("rulesVersion"), nativeCatalogVersion=catalog.get("catalogVersion"))))
+        return
+    main_files = [item for item in catalog.get("source", {}).get("files", []) if item.get("name", "").startswith("main-")]
+    if len(main_files) != 1 or main_files[0].get("sha256") != SOURCE_SHA256:
+        print(json.dumps(failure("version-mismatch", "native v7 source SHA differs")))
+        return
+    try:
+        native_policy = native.site_observation_policy(request["rulesVersion"])
+    except Exception as exc:
+        print(json.dumps(failure("native-unsupported", f"v7 observation policy unavailable: {type(exc).__name__}: {exc}")))
+        return
+    changed = difference(request["observationPolicy"], native_policy)
+    if changed:
+        print(json.dumps(failure("version-mismatch", "native v7 observation policy differs", path=changed)))
         return
     if request["phase"] == "preflight":
         print(json.dumps({"status": "ready", "nativeModule": native.__file__}))

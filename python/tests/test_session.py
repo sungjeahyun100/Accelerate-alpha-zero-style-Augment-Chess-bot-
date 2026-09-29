@@ -9,8 +9,10 @@ import os
 from pathlib import Path
 import random
 import signal
+import sys
 from tempfile import TemporaryDirectory
 from threading import Barrier, Lock
+from types import ModuleType
 
 import numpy as np
 import pytest
@@ -469,6 +471,32 @@ def test_cli_defaults_are_explicit_intent_summary_and_full_resnet():
     assert contract.history_encoding == "public-history-summary-v1" and contract.action_encoding == "public-decision-intent-v1"
     assert cli.parser().parse_args(["evaluate", "--replay", "episode.json"]).backend == "ort"
     assert cli.parser().parse_args(["selfplay"]).max_plies == 2
+
+
+def test_cli_typed_default_requests_pinned_v7_native_metadata(monkeypatch):
+    from accelerate_chess.ir import V7_RULES_VERSION
+
+    source = Path(__file__).resolve().parents[2] / "bridge" / "catalog"
+    catalog = read_json(source / "site-20260928.json")
+    policy = read_json(source / "observation-20260928.json")
+    requests = []
+    native = ModuleType("accelerate_chess._native")
+    def catalog_for(version=None):
+        requests.append(("catalog", version))
+        return catalog
+    def policy_for(version=None):
+        requests.append(("policy", version))
+        return policy
+    native.site_catalog = catalog_for
+    native.site_observation_policy = policy_for
+    monkeypatch.setitem(sys.modules, "accelerate_chess._native", native)
+    for family in ("mask-resnet", "entity-transformer"):
+        contract = cli.default_spec(model_family=family)
+        assert contract.rules_version == V7_RULES_VERSION
+    assert requests == [("catalog", V7_RULES_VERSION), ("policy", V7_RULES_VERSION)] * 2
+    with pytest.raises(ValueError, match="pinned v7"):
+        cli.default_spec(str(source / "site-20260927.json"), observation_policy=policy,
+                         model_family="mask-resnet")
 
 
 def test_train_existing_run_slot_requires_matching_explicit_resume(session_directory, monkeypatch):

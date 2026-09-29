@@ -1,7 +1,7 @@
 use crate::*;
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
-use std::collections::VecDeque;
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 pub(crate) const ORTHO: &[(i8, i8)] = &[(-1, 0), (1, 0), (0, -1), (0, 1)];
 pub(crate) const DIAG: &[(i8, i8)] = &[(-1, -1), (-1, 1), (1, -1), (1, 1)];
@@ -151,6 +151,199 @@ pub(crate) fn legal_actions(state: &GameState) -> Result<Vec<Action>> {
 /// surface. Unrelated unknown card families must not poison royal threat probes.
 pub(crate) fn legal_move_actions(state: &GameState) -> Result<Vec<Action>> {
     ensure_supported(state)?;
+    legal_move_candidates(state)
+}
+
+/// Movement-only first-play profile observed in the frozen v7 headless
+/// adapter. This does not enumerate cards or authorize Position execution.
+/// The three source-reachable active-only draft samples had the same 20 raw
+/// moves, and all 20 survived actionStream(legal=true). The complete public
+/// action stream and post-apply state/RNG still belong to the Position gate.
+#[allow(dead_code, reason = "v7 Position opening gate is staged")]
+pub(crate) fn v7_opening_legal_move_actions(state: &GameState) -> Result<Vec<Action>> {
+    ensure_v7_orthodox_opening(state)?;
+    let moves = legal_move_candidates(state)?;
+    if moves.len() != 20
+        || moves.iter().any(|action| {
+            action.kind != ActionKind::Move
+                || action.from.is_none_or(|from| from.row < 6)
+                || action
+                    .destination
+                    .as_ref()
+                    .is_none_or(|to| to.flags.keys().any(|flag| flag != "standardPawnDoubleStep"))
+        })
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "v7 opening movement differs from the source-verified orthodox profile".into(),
+        ));
+    }
+    Ok(moves)
+}
+
+/// Validate an unbound movement payload against the same narrow source
+/// profile. Binding, card actions, and execution remain separate boundaries.
+#[allow(dead_code, reason = "v7 Position opening gate is staged")]
+pub(crate) fn v7_opening_validate_move(state: &GameState, action: &Action) -> Result<()> {
+    if action.position_key.is_some() {
+        return Err(EngineError::IllegalAction);
+    }
+    if v7_opening_legal_move_actions(state)?.contains(action) {
+        Ok(())
+    } else {
+        Err(EngineError::IllegalAction)
+    }
+}
+
+/// Ordered movement-only actions for the source-verified seed-19 normal
+/// first-play position after White uses Relay. This is a staged candidate
+/// surface: Position binding, swap execution, cards and general v7 play remain
+/// behind their separate guards.
+#[allow(dead_code, reason = "v7 Relay swap execution gate is staged")]
+pub(crate) fn v7_opening_relay_legal_move_actions(state: &GameState) -> Result<Vec<Action>> {
+    ensure_v7_relay_after_opening(state)?;
+    let moves = legal_move_candidates_with_relay(state)?;
+    let swaps = moves
+        .iter()
+        .filter(|action| {
+            action
+                .destination
+                .as_ref()
+                .is_some_and(|to| to.flag("relaySwap"))
+        })
+        .count();
+    if moves.len() != 148 || swaps != 128 {
+        return Err(EngineError::UnsupportedFeature(
+            "v7 Relay first-play candidates differ from source-verified 148 moves".into(),
+        ));
+    }
+    Ok(moves)
+}
+
+/// In the verified orthodox profile, a Relay exchange selects a different
+/// allied single-cell piece on the same row or column. This descriptor pins
+/// the target identity so an eventual executor can revalidate it against the
+/// action's position; Solidarity and altered footprints are outside the gate.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RelaySwap {
+    #[allow(dead_code, reason = "v7 Relay swap execution gate is staged")]
+    pub(crate) from: Square,
+    pub(crate) to: Square,
+    #[allow(dead_code, reason = "v7 Relay swap execution gate is staged")]
+    pub(crate) target_id: String,
+}
+
+impl RelaySwap {
+    fn for_pair(state: &GameState, mover: &Piece, from: Square, to: Square) -> Option<Self> {
+        let current = state.at(from)?;
+        let target = state.at(to)?;
+        if current.id != mover.id
+            || !state.flag("relay", mover.color)
+            || state.flag("solidarity", mover.color)
+            || mover.id == target.id
+            || mover.color != target.color
+            || from.row != to.row && from.col != to.col
+            || [mover, target].into_iter().any(|piece| {
+                piece.is_large()
+                    || piece.ability_kind() == "slime"
+                    || matches!(
+                        piece.kind.as_str(),
+                        "wall" | "football" | "blackHole" | "monster" | "coffin"
+                    )
+            })
+        {
+            return None;
+        }
+        Some(Self {
+            from,
+            to,
+            target_id: target.id.clone(),
+        })
+    }
+
+    #[allow(dead_code, reason = "v7 Relay swap execution gate is staged")]
+    pub(crate) fn from_target(
+        state: &GameState,
+        mover: &Piece,
+        from: Square,
+        target: &MoveTarget,
+    ) -> Result<Option<Self>> {
+        if !target.flag("relaySwap") {
+            return Ok(None);
+        }
+        if target.flags.len() != 1 || target.flags.get("relaySwap") != Some(&json!(true)) {
+            return Err(EngineError::IllegalAction);
+        }
+        Self::for_pair(state, mover, from, target.square())
+            .map(Some)
+            .ok_or(EngineError::IllegalAction)
+    }
+
+    fn target(&self) -> MoveTarget {
+        let mut target = MoveTarget::at(self.to);
+        target.flags.insert("relaySwap".into(), json!(true));
+        target
+    }
+}
+
+fn relay_swap_targets(state: &GameState, mover: &Piece, from: Square) -> Vec<MoveTarget> {
+    let mut moves = Vec::new();
+    for row in 0..8 {
+        for col in 0..8 {
+            let to = Square { row, col };
+            if let Some(swap) = RelaySwap::for_pair(state, mover, from, to) {
+                moves.push(swap.target());
+            }
+        }
+    }
+    moves
+}
+
+/// Proves only that the source-shaped first white play has a legal pawn move.
+/// This witness neither enumerates nor authorizes actions. `None` means the
+/// position is outside the proven profile and the general v7 guard stays closed.
+#[allow(dead_code, reason = "v7 first-play no-action flow is staged")]
+pub(crate) fn v7_first_play_has_legal_move_witness(
+    state: &GameState,
+    color: Color,
+) -> Result<Option<bool>> {
+    if color != Color::White || state.ruleset_id != RULES_VERSION_V7 {
+        return Ok(None);
+    }
+    let verified = if state.extra.get("relay") == Some(&json!({"black":false,"white":true})) {
+        ensure_v7_relay_after_opening(state)
+    } else if state.extra.get("relay") == Some(&json!({"black":false,"white":false})) {
+        ensure_v7_orthodox_opening(state)
+    } else {
+        return Ok(None);
+    };
+    match verified {
+        Ok(()) => {}
+        Err(EngineError::UnsupportedFeature(_)) => return Ok(None),
+        Err(error) => return Err(error),
+    }
+    let from = Square { row: 6, col: 0 };
+    let pawn = state
+        .at(from)
+        .ok_or_else(|| EngineError::InvalidState("source-shaped first-play pawn missing".into()))?;
+    let forward = MoveTarget::at(Square { row: 5, col: 0 });
+    if piece_moves(state, pawn, from)?.contains(&forward) {
+        Ok(Some(true))
+    } else {
+        Err(EngineError::InvalidState(
+            "source-shaped first-play pawn witness disappeared".into(),
+        ))
+    }
+}
+
+fn legal_move_candidates(state: &GameState) -> Result<Vec<Action>> {
+    legal_move_candidates_inner(state, false)
+}
+
+fn legal_move_candidates_with_relay(state: &GameState) -> Result<Vec<Action>> {
+    legal_move_candidates_inner(state, true)
+}
+
+fn legal_move_candidates_inner(state: &GameState, relay: bool) -> Result<Vec<Action>> {
     let mut actions = Vec::new();
     let mut seen = BTreeSet::new();
     for row in 0..8 {
@@ -172,6 +365,11 @@ pub(crate) fn legal_move_actions(state: &GameState) -> Result<Vec<Action>> {
                     > 0
             {
                 continue;
+            }
+            if relay {
+                for target in relay_swap_targets(state, piece, from) {
+                    actions.push(Action::movement(state.turn, from, target));
+                }
             }
             for target in piece_moves(state, piece, from)? {
                 actions.push(Action::movement(state.turn, from, target));
@@ -201,6 +399,267 @@ pub(crate) fn legal_move_actions(state: &GameState) -> Result<Vec<Action>> {
         });
     }
     Ok(actions)
+}
+
+fn ensure_v7_relay_after_opening(state: &GameState) -> Result<()> {
+    let unsupported = |reason: &str| {
+        EngineError::UnsupportedFeature(format!("v7 Relay first-play profile: {reason}"))
+    };
+    if state.extra.get("relay") != Some(&json!({"black":false,"white":true}))
+        || state.extra.get("gameStyle") != Some(&json!("normal"))
+        || state.cards_used_this_turn.white != 1
+        || state.cards_used_this_turn.black != 0
+        || state.extra.get("replayEventNonce") != Some(&json!(3))
+        || state
+            .extra
+            .get("replayEvents")
+            .and_then(Value::as_array)
+            .is_none_or(|events| events.len() != 3)
+    {
+        return Err(unsupported("effect or replay counters"));
+    }
+    let used: Vec<_> = state
+        .deck_slots
+        .white
+        .iter()
+        .filter(|card| !card.vacant && card.used)
+        .collect();
+    if used.len() != 1
+        || used[0].id != "relay"
+        || used[0].effect != "relay"
+        || used[0].recovering
+        || used[0]
+            .extra
+            .get("usedAt")
+            .and_then(Value::as_i64)
+            .is_none_or(|stamp| stamp <= 0)
+    {
+        return Err(unsupported("used Relay card identity"));
+    }
+    // The source Relay action changes no board piece. Restore only its known
+    // effect/counters in a private clone, then use the full orthodox profile
+    // check to reject any other changed rule state or footprint.
+    let mut baseline = state.clone();
+    baseline.cards_used_this_turn.white = 0;
+    baseline
+        .extra
+        .insert("relay".into(), json!({"black":false,"white":false}));
+    baseline.extra.insert("replayEventNonce".into(), json!(2));
+    if let Some(card) = baseline.deck_slots.white.iter_mut().find(|card| card.used) {
+        card.used = false;
+        card.extra.shift_remove("usedAt");
+    }
+    if let Some(events) = baseline
+        .extra
+        .get_mut("replayEvents")
+        .and_then(Value::as_array_mut)
+    {
+        events.pop();
+    }
+    ensure_v7_orthodox_opening(&baseline)
+}
+
+#[allow(dead_code, reason = "v7 Position opening gate is staged")]
+fn ensure_v7_orthodox_opening(state: &GameState) -> Result<()> {
+    // Presentation, draft, clock, and replay fields may vary across the three
+    // verified seed-19 first-play Positions. Every other source extra field,
+    // including inactive rule fields, must retain its source default.
+    const VARIABLE_EXTRAS: &[&str] = &[
+        "boardHistory",
+        "cardAcquisitionNonce",
+        "clock",
+        "draft",
+        "draftClock",
+        "endDraftDone",
+        "endPhaseStartMove",
+        "gameStyle",
+        "logs",
+        "middleDraftDone",
+        "notationEvent",
+        "notationEvents",
+        "notationTimeline",
+        "openingAutoNoticeShown",
+        "positionCounts",
+        "repetitionSalt",
+        "replayBaseFrame",
+        "replayEventNonce",
+        "replayEvents",
+        "replayStartedAt",
+        "replayTailFrame",
+    ];
+    // SHA-256 of JCS({ stable source extra fields }), shared by normal,
+    // chaos, and grand active-only first-play oracle snapshots. This compact
+    // profile check also rejects added, removed, or changed inactive fields.
+    const STABLE_EXTRAS_SHA256: &str =
+        "a4bf8022aca2454da4c23a4e948a3bc02fde9beefe8dbd752411c22b8d275534";
+    let unsupported = |reason: &str| {
+        EngineError::UnsupportedFeature(format!("v7 orthodox first-play profile: {reason}"))
+    };
+    if state.ruleset_id != RULES_VERSION_V7
+        || state.mode != "play"
+        || state.result().is_some()
+        || state.turn != Color::White
+        || state.actions_remaining != 1
+        || state.move_count != 0
+        || state.full_move != 1
+        || state.turns_taken.white != 0
+        || state.turns_taken.black != 0
+        || state.cards_used_this_turn.white != 0
+        || state.cards_used_this_turn.black != 0
+        || state.en_passant.is_some()
+        || !state.captures.white.is_empty()
+        || !state.captures.black.is_empty()
+    {
+        return Err(unsupported("turn or capture state"));
+    }
+    let style = state
+        .extra
+        .get("gameStyle")
+        .and_then(Value::as_str)
+        .ok_or_else(|| unsupported("game style"))?;
+    let (cards_per_side, slots_per_side, draft_events) = match style {
+        "normal" => (1, 3, 2),
+        "chaos" => (2, 6, 2),
+        "grand" => (6, 6, 12),
+        _ => return Err(unsupported("game style")),
+    };
+    let stable = state
+        .extra
+        .iter()
+        .filter(|(name, _)| !VARIABLE_EXTRAS.contains(&name.as_str()))
+        .map(|(name, value)| (name.as_str(), value))
+        .collect::<BTreeMap<_, _>>();
+    let stable_json = serde_jcs::to_vec(&stable).map_err(EngineError::serialization)?;
+    if format!("{:x}", Sha256::digest(stable_json)) != STABLE_EXTRAS_SHA256 {
+        return Err(unsupported("unverified rule-state defaults"));
+    }
+    let clock = state
+        .extra
+        .get("clock")
+        .ok_or_else(|| unsupported("clock state"))?;
+    if clock.get("enabled") != Some(&json!(true))
+        || clock.get("runningColor") != Some(&json!("white"))
+        || clock.get("timeoutLoser") != Some(&Value::Null)
+        || clock.get("timeoutWinner") != Some(&Value::Null)
+        || ["whiteMs", "blackMs"].into_iter().any(|name| {
+            clock
+                .get(name)
+                .and_then(Value::as_f64)
+                .is_none_or(|ms| ms <= 0.0)
+        })
+    {
+        return Err(unsupported("active clock window"));
+    }
+    if state
+        .extra
+        .get("replayEvents")
+        .and_then(Value::as_array)
+        .is_none_or(|events| events.len() != draft_events)
+        || state.extra.get("replayEventNonce") != Some(&json!(draft_events))
+        || state.extra.get("cardAcquisitionNonce") != Some(&json!(cards_per_side * 2))
+        || state.extra.get("endDraftDone") != Some(&json!(style == "grand"))
+        || state.extra.get("middleDraftDone") != Some(&json!(style == "grand"))
+    {
+        return Err(unsupported("draft provenance counters"));
+    }
+    let draft = state
+        .extra
+        .get("draft")
+        .ok_or_else(|| unsupported("draft state"))?;
+    if style == "grand" {
+        if draft.get("kind").and_then(Value::as_str) != Some("grand")
+            || draft.get("phase").and_then(Value::as_str) != Some("GRAND")
+            || draft.get("color").and_then(Value::as_str) != Some("white")
+            || draft.get("version") != Some(&json!(1))
+            || draft.get("pickIndex") != Some(&json!(12))
+            || draft
+                .get("picks")
+                .and_then(Value::as_array)
+                .is_none_or(|picks| picks.len() != 12)
+            || state.extra.get("endPhaseStartMove") != Some(&json!(0))
+        {
+            return Err(unsupported("grand draft completion"));
+        }
+    } else if draft.get("phase").and_then(Value::as_str) != Some("OPENING")
+        || draft.get("color").and_then(Value::as_str) != Some("black")
+        || draft.get("tutorial") != Some(&json!(false))
+        || draft
+            .get("choices")
+            .and_then(Value::as_array)
+            .is_none_or(|choices| !choices.is_empty())
+        || state.extra.get("endPhaseStartMove") != Some(&Value::Null)
+    {
+        return Err(unsupported("opening draft completion"));
+    }
+    for side in [Color::White, Color::Black] {
+        let deck = state.deck_slots.get(side);
+        if deck.len() != slots_per_side
+            || deck.iter().filter(|card| !card.vacant).count() != cards_per_side
+            || deck
+                .iter()
+                .any(|card| !card.vacant && (card.used || card.recovering))
+        {
+            return Err(unsupported("selected active card count"));
+        }
+        for card in deck.iter().filter(|card| !card.vacant) {
+            let definition = crate::card_registry::definition_for(RULES_VERSION_V7, &card.id)?;
+            if definition.activation != Some(crate::card_registry::CardActType::Active)
+                || definition.effect != card.effect
+            {
+                return Err(unsupported("selected card can alter first-play movement"));
+            }
+        }
+    }
+    let spatial = crate::SpatialState::from_v7_source(state)?;
+    if spatial.geometry() != crate::BoardGeometry::new(0, 0, 8, 8)? || spatial.pieces().len() != 32
+    {
+        return Err(unsupported("board geometry or identity count"));
+    }
+    const BACK_RANK: [&str; 8] = [
+        "rook", "knight", "bishop", "queen", "king", "bishop", "knight", "rook",
+    ];
+    for row in 0..8 {
+        for col in 0..8 {
+            let square = Square { row, col };
+            let coord = crate::Coord::new(i32::from(row), i32::from(col));
+            if !spatial.is_usable(coord) {
+                return Err(unsupported("collapsed opening cell"));
+            }
+            let expected = match row {
+                0 | 7 => Some(BACK_RANK[col as usize]),
+                1 | 6 => Some("pawn"),
+                _ => None,
+            };
+            let Some(kind) = expected else {
+                if state.at(square).is_some() || spatial.piece_at(coord).is_some() {
+                    return Err(unsupported("occupied middle rank"));
+                }
+                continue;
+            };
+            let piece = state
+                .at(square)
+                .ok_or_else(|| unsupported("missing initial piece"))?;
+            let spatial_piece = spatial
+                .piece_at(coord)
+                .ok_or_else(|| unsupported("missing spatial occupancy"))?;
+            let owner = if row <= 1 { Color::Black } else { Color::White };
+            let origin = format!("{}{}", char::from(b'a' + col), 8 - row);
+            if piece.kind != kind
+                || piece.color != owner
+                || piece.moved
+                || piece.extra.len() != 2
+                || piece.extra.get("origin") != Some(&json!(origin))
+                || piece.extra.get("shielded") != Some(&json!(false))
+                || spatial_piece.id != piece.id
+                || spatial_piece.anchor != coord
+                || spatial_piece.footprint.len() != 1
+                || !spatial_piece.footprint.contains(&crate::Offset::new(0, 0))
+            {
+                return Err(unsupported("piece identity or source attributes"));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The frozen v7 `hasAnyLegalMove(color)` temporarily makes `color` the turn,
@@ -2533,6 +2992,132 @@ mod v7_movement_tests {
         assert!(!piece_moves(&state, &rook, from).unwrap().is_empty());
         state.ruleset_id = RULES_VERSION_V6.into();
         assert!(!piece_moves(&state, &rook, from).unwrap().is_empty());
+    }
+
+    #[test]
+    fn orthodox_opening_candidate_reuse_keeps_source_order_and_flag_payloads() {
+        let mut state = GameState::new(GameConfig::default(), 19).unwrap();
+        state.mode = "play".into();
+        let moves = legal_move_candidates(&state).unwrap();
+        let expected = (0..8)
+            .flat_map(|col| {
+                let from = Square { row: 6, col };
+                let single =
+                    Action::movement(Color::White, from, MoveTarget::at(Square { row: 5, col }));
+                let mut double = MoveTarget::at(Square { row: 4, col });
+                double
+                    .flags
+                    .insert("standardPawnDoubleStep".into(), json!(true));
+                [single, Action::movement(Color::White, from, double)]
+            })
+            .chain(
+                [(1, 0), (1, 2), (6, 5), (6, 7)]
+                    .into_iter()
+                    .map(|(from_col, to_col)| {
+                        Action::movement(
+                            Color::White,
+                            Square {
+                                row: 7,
+                                col: from_col,
+                            },
+                            MoveTarget::at(Square {
+                                row: 5,
+                                col: to_col,
+                            }),
+                        )
+                    }),
+            )
+            .collect::<Vec<_>>();
+        assert_eq!(moves, expected);
+        let mut bound = moves[1].clone();
+        bound.position_key = Some("not-an-unbound-action".into());
+        assert!(matches!(
+            v7_opening_validate_move(&state, &bound),
+            Err(EngineError::IllegalAction)
+        ));
+        state.ruleset_id = RULES_VERSION_V7.into();
+        state
+            .extra
+            .insert("cornerKick".into(), json!({"white":true,"black":false}));
+        assert!(matches!(
+            v7_opening_legal_move_actions(&state),
+            Err(EngineError::UnsupportedFeature(_))
+        ));
+    }
+
+    #[test]
+    fn staged_relay_swaps_precede_base_moves_in_source_order() {
+        // Frozen seed-19 normal first-play after White uses Relay has 128
+        // exchanges followed per piece by the existing 20 orthodox moves.
+        let mut state = GameState::new(GameConfig::default(), 19).unwrap();
+        state.mode = "play".into();
+        state.set_flag("relay", Color::White, true);
+        let staged = legal_move_candidates_with_relay(&state).unwrap();
+        assert_eq!(staged.len(), 148);
+        assert_eq!(
+            staged
+                .iter()
+                .filter(|action| action
+                    .destination
+                    .as_ref()
+                    .is_some_and(|to| to.flag("relaySwap")))
+                .count(),
+            128
+        );
+        let from = Square { row: 6, col: 0 };
+        let mut prefix = (1..8)
+            .map(|col| {
+                let mut target = MoveTarget::at(Square { row: 6, col });
+                target.flags.insert("relaySwap".into(), json!(true));
+                Action::movement(Color::White, from, target)
+            })
+            .collect::<Vec<_>>();
+        let mut rook = MoveTarget::at(Square { row: 7, col: 0 });
+        rook.flags.insert("relaySwap".into(), json!(true));
+        prefix.push(Action::movement(Color::White, from, rook));
+        prefix.push(Action::movement(
+            Color::White,
+            from,
+            MoveTarget::at(Square { row: 5, col: 0 }),
+        ));
+        let mut double = MoveTarget::at(Square { row: 4, col: 0 });
+        double
+            .flags
+            .insert("standardPawnDoubleStep".into(), json!(true));
+        prefix.push(Action::movement(Color::White, from, double));
+        assert_eq!(&staged[..prefix.len()], prefix.as_slice());
+        let pawn = state.at(from).unwrap();
+        let swap =
+            RelaySwap::from_target(&state, pawn, from, staged[0].destination.as_ref().unwrap())
+                .unwrap()
+                .unwrap();
+        assert_eq!(swap.from, from);
+        assert_eq!(swap.to, Square { row: 6, col: 1 });
+        assert_eq!(swap.target_id, state.at(swap.to).unwrap().id);
+        let mut forged = staged[0].destination.clone().unwrap();
+        forged.flags.insert("capture".into(), json!(true));
+        assert!(matches!(
+            RelaySwap::from_target(&state, pawn, from, &forged),
+            Err(EngineError::IllegalAction)
+        ));
+        let mut off_axis = MoveTarget::at(Square { row: 7, col: 1 });
+        off_axis.flags.insert("relaySwap".into(), json!(true));
+        assert!(matches!(
+            RelaySwap::from_target(&state, pawn, from, &off_axis),
+            Err(EngineError::IllegalAction)
+        ));
+        let impostor = Piece::new("pawn", Color::White, "different-origin-id");
+        assert!(matches!(
+            RelaySwap::from_target(
+                &state,
+                &impostor,
+                from,
+                staged[0].destination.as_ref().unwrap()
+            ),
+            Err(EngineError::IllegalAction)
+        ));
+        // The older v6 candidate path does not inherit the staged v7 swaps.
+        assert_eq!(legal_move_candidates(&state).unwrap().len(), 20);
     }
 
     #[test]

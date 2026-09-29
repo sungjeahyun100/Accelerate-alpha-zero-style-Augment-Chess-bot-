@@ -1383,7 +1383,7 @@ impl GameState {
             .expect("validated v6 state has a pinned observation policy")
     }
 
-    fn observe_checked(&self, viewer: Color) -> Result<Observation> {
+    pub(crate) fn observe_checked(&self, viewer: Color) -> Result<Observation> {
         let policy = observation_policy_for_ruleset(&self.ruleset_id)?;
         let definitions = crate::draft::definitions_for_ruleset(&self.ruleset_id)?;
         let state_value = serde_json::to_value(self).expect("validated state serializes");
@@ -1651,10 +1651,15 @@ impl GameState {
                 entry
                     .get("public")
                     .and_then(|public| public.get(viewer.as_str()))
-                    .expect("validated viewer history")
-                    .clone()
+                    .cloned()
+                    .ok_or_else(|| {
+                        EngineError::InvalidState(format!(
+                            "history entry lacks the {} public projection",
+                            viewer.as_str()
+                        ))
+                    })
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
         let mut observation = Observation {
             protocol_version: observation_protocol_for_ruleset(&self.ruleset_id)?.into(),
             viewer,
@@ -1678,16 +1683,18 @@ impl GameState {
     /// Full viewer-facing projection, including the site's highlight surface.
     /// Unsupported active rules are explicit errors at the language boundary.
     pub fn try_observe(&self, viewer: Color) -> Result<Observation> {
-        if self.ruleset_id != RULES_VERSION_V6 {
-            return Err(EngineError::UnsupportedFeature(format!(
-                "observation execution for rules version {}",
-                self.ruleset_id
-            )));
-        }
-        let hints = crate::movement::public_hints(self, viewer)?;
+        let hints = match self.ruleset_id.as_str() {
+            RULES_VERSION_V6 => crate::movement::public_hints(self, viewer)?,
+            RULES_VERSION_V7 => crate::observation::public_hints_v7(self, viewer)?,
+            other => {
+                return Err(EngineError::UnsupportedFeature(format!(
+                    "observation execution for rules version {other}"
+                )));
+            }
+        };
         let mut observation = self.observe_checked(viewer)?;
         observation.public_state.insert("legalHints".into(), hints);
-        crate::observation::validate_projection(&observation)?;
+        crate::observation::validate_projection_for_ruleset(&observation, &self.ruleset_id)?;
         observation.refresh_key();
         Ok(observation)
     }

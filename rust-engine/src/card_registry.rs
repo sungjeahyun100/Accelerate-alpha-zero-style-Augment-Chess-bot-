@@ -41,12 +41,9 @@ impl CardType {
 pub(crate) enum CardActType {
     Passive,
     Active,
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "forced opening activation is staged for the v7 move boundary"
-        )
+    #[allow(
+        dead_code,
+        reason = "forced opening activation is staged for the v7 move boundary"
     )]
     ActiveForced,
 }
@@ -107,13 +104,6 @@ pub(crate) struct CardDefinition {
     pub(crate) activation: Option<CardActType>,
     pub(crate) turn_policy: CardTurnPolicy,
     pub(crate) selection: SelectionContract,
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "source definition is retained for typed v7 card construction"
-        )
-    )]
     pub(crate) source_definition: Value,
 }
 
@@ -187,11 +177,16 @@ impl CardRegistry {
         site_text: &str,
         definition_text: &str,
         draft_text: &str,
+        presentation_text: Option<&str>,
     ) -> Result<Self> {
         let site: Value = serde_json::from_str(site_text).map_err(EngineError::serialization)?;
         let definitions: Value =
             serde_json::from_str(definition_text).map_err(EngineError::serialization)?;
         let draft: Value = serde_json::from_str(draft_text).map_err(EngineError::serialization)?;
+        let presentation: Option<Value> = presentation_text
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(EngineError::serialization)?;
         for document in [&site, &definitions, &draft] {
             if required_str(document, "rulesVersion")? != rules_version {
                 return Err(EngineError::InvalidState(
@@ -223,19 +218,60 @@ impl CardRegistry {
         let public = required_array(&site, "cards")?;
         let raw_definitions = required_array(&definitions, "definitions")?;
         let weights = required_array(&draft, "weights")?;
+        let presented = if let Some(presentation) = &presentation {
+            if presentation["schemaVersion"].as_u64() != Some(1)
+                || presentation["sourceDefinitionCount"].as_u64() != Some(257)
+                || required_str(presentation, "rulesVersion")? != rules_version
+                || required_str(presentation, "catalogVersion")? != CATALOG_VERSION
+                || required_str(presentation, "sourceMainSha256")? != expected_main
+                || required_str(presentation, "sourceExpression")? != "JSON.stringify(CARD_DEFS)"
+                || definitions["presentationFieldsExcluded"]
+                    != serde_json::json!(["name", "text", "art"])
+            {
+                return Err(EngineError::InvalidState(
+                    "v7 card presentation source identity mismatch".into(),
+                ));
+            }
+            Some(required_array(presentation, "definitions")?)
+        } else {
+            None
+        };
         if public.len() != 256
             || raw_definitions.len() != 257
             || weights.len() != 257
             || definitions["publicCatalogCardCount"].as_u64() != Some(256)
+            || presented.is_some_and(|cards| cards.len() != raw_definitions.len())
         {
             return Err(EngineError::InvalidState(
                 "card catalog count mismatch".into(),
             ));
         }
         let mut cards = BTreeMap::new();
-        for raw in raw_definitions {
+        for (index, raw) in raw_definitions.iter().enumerate() {
             let id = required_str(raw, "id")?.to_owned();
             let effect = required_str(raw, "effect")?.to_owned();
+            let mut source_definition = raw.clone();
+            if let Some(cards) = presented {
+                let presentation = &cards[index];
+                if presentation["id"] != raw["id"]
+                    || presentation["effect"] != raw["effect"]
+                    || presentation["phase"] != raw["phase"]
+                    || presentation["stars"] != raw["stars"]
+                {
+                    return Err(EngineError::InvalidState(format!(
+                        "v7 card presentation definition mismatch for {id}"
+                    )));
+                }
+                let fields = source_definition.as_object_mut().ok_or_else(|| {
+                    EngineError::InvalidState("card source definition is not an object".into())
+                })?;
+                for field in ["name", "text", "art"] {
+                    fields.insert(
+                        field.into(),
+                        serde_json::json!(required_str(presentation, field)?),
+                    );
+                }
+            }
             if cards
                 .insert(
                     id.clone(),
@@ -251,7 +287,7 @@ impl CardRegistry {
                             max_squares: 0,
                             choice_required: false,
                         },
-                        source_definition: raw.clone(),
+                        source_definition,
                     },
                 )
                 .is_some()
@@ -329,6 +365,7 @@ pub(crate) fn registry_for(rules_version: &str) -> Result<&'static CardRegistry>
                 include_str!("../../bridge/catalog/site-20260927.json"),
                 include_str!("../../bridge/catalog/card-definitions-20260927.json"),
                 include_str!("../../bridge/catalog/draft-20260927.json"),
+                None,
             )
         }),
         RULES_VERSION_V7 => V7.get_or_init(|| {
@@ -338,6 +375,9 @@ pub(crate) fn registry_for(rules_version: &str) -> Result<&'static CardRegistry>
                 include_str!("../../bridge/catalog/site-20260928.json"),
                 include_str!("../../bridge/catalog/card-definitions-20260928.json"),
                 include_str!("../../bridge/catalog/draft-20260928.json"),
+                Some(include_str!(
+                    "../../bridge/catalog/card-presentation-20260928.json"
+                )),
             )
         }),
         other => {
@@ -354,6 +394,30 @@ pub(crate) fn definition_for(
     card_id: &str,
 ) -> Result<&'static CardDefinition> {
     registry_for(rules_version)?.get(card_id)
+}
+
+/// Opening RULE effect support is deliberately narrower than the 26-card
+/// selection pool. The returned source object includes the reviewed v7
+/// presentation projection, including acceleration's OPENING source phase.
+pub(crate) fn opening_rule_source_card(card_id: &str) -> Result<Value> {
+    if !matches!(card_id, "saturation" | "acceleration") {
+        return Err(EngineError::UnsupportedFeature(format!(
+            "v7 opening RULE effect {card_id}"
+        )));
+    }
+    let definition = definition_for(RULES_VERSION_V7, card_id)?;
+    if definition.card_type != Some(CardType::Rule)
+        || definition.activation != Some(CardActType::Active)
+        || definition.selection.kind != SelectionKind::None
+        || ["name", "text", "art"]
+            .into_iter()
+            .any(|field| required_str(&definition.source_definition, field).is_err())
+    {
+        return Err(EngineError::InvalidState(format!(
+            "v7 opening RULE source definition drift for {card_id}"
+        )));
+    }
+    Ok(definition.source_definition.clone())
 }
 
 pub(crate) fn validate_instance(
@@ -533,10 +597,7 @@ pub(crate) fn action_policy(state: &GameState, card: &CardSlot) -> Result<CardAc
 }
 
 /// Source first-move resolution is a separate event from a manual card action.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "v7 forced opening action integration is staged")
-)]
+#[allow(dead_code, reason = "v7 forced opening action integration is staged")]
 pub(crate) fn forced_first_move_policy(
     state: &GameState,
     card: &CardSlot,
@@ -572,12 +633,9 @@ pub(crate) fn forced_first_move_policy(
     })
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "typed hand state is staged for canonical Position admission"
-    )
+#[allow(
+    dead_code,
+    reason = "typed hand state is staged for canonical Position admission"
 )]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct CardInstance {
@@ -590,12 +648,9 @@ pub(crate) struct CardInstance {
     pub(crate) next_turn_pending: bool,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "active RULE projection is staged for canonical Position admission"
-    )
+#[allow(
+    dead_code,
+    reason = "active RULE projection is staged for canonical Position admission"
 )]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ActiveRule {
@@ -604,12 +659,9 @@ pub(crate) struct ActiveRule {
     pub(crate) value: Value,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "typed card state is staged for canonical Position admission"
-    )
+#[allow(
+    dead_code,
+    reason = "typed card state is staged for canonical Position admission"
 )]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CardState {
@@ -620,12 +672,9 @@ pub(crate) struct CardState {
 impl CardState {
     /// Read the source DTO into separate hand and active-rule collections.
     /// No rules are synthesized from card IDs in hand slots.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "typed card projection awaits v7 Position integration"
-        )
+    #[allow(
+        dead_code,
+        reason = "typed card projection awaits v7 Position integration"
     )]
     pub(crate) fn from_legacy(state: &GameState) -> Result<Self> {
         let hand = |owner: Color| -> Result<Vec<CardInstance>> {

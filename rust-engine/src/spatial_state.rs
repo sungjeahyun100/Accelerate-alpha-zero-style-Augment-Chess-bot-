@@ -264,6 +264,8 @@ pub struct SpatialReference {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResizePolicy {
     RejectAffected,
+    /// Removes clipped pieces, links, and scheduled effects. Nondefault cell
+    /// state must be cleared explicitly before its coordinate is removed.
     RemoveAffectedEntities,
 }
 
@@ -460,9 +462,10 @@ impl SpatialState {
         self.finish_transition(next)
     }
 
-    /// Source v7 collapse changes usability inside the existing extent. An
-    /// affected multi-cell piece keeps its identity and surviving offsets.
-    /// Links/effects need their source rule handler to decide their fate.
+    /// Source v7 collapse changes usability inside the existing extent.
+    /// A piece touching a collapsed cell is removed as one identity, including
+    /// every other occupied cell. Links/effects need their source rule handler
+    /// to decide their fate.
     pub fn collapse_cells(&self, collapsed: &BTreeSet<Coord>) -> Result<Self> {
         if self.profile != SpatialProfile::SourceV7 || collapsed.is_empty() {
             return Err(EngineError::InvalidState(
@@ -491,15 +494,15 @@ impl SpatialState {
             let index = next.geometry().index(coord).expect("checked above");
             next.board.cells[index].usable = false;
         }
-        next.pieces.0.retain(|_, piece| {
-            piece.footprint.retain(|&offset| {
-                piece
-                    .anchor
-                    .offset(offset)
-                    .is_none_or(|coord| !collapsed.contains(&coord))
-            });
-            !piece.footprint.is_empty()
-        });
+        for piece in self.pieces.iter() {
+            if piece
+                .occupied_cells()?
+                .iter()
+                .any(|coord| collapsed.contains(coord))
+            {
+                next.pieces.0.remove(&piece.id);
+            }
+        }
         self.finish_transition(next)
     }
 
@@ -525,6 +528,16 @@ impl SpatialState {
                 "new cell state must cover exactly the added coordinates".into(),
             ));
         }
+        if self.geometry().coordinates().any(|coord| {
+            !request.geometry.contains(coord)
+                && self
+                    .cell(coord)
+                    .is_some_and(|cell| *cell != CellState::open())
+        }) {
+            return Err(EngineError::InvalidState(
+                "resize would discard nondefault cell state".into(),
+            ));
+        }
         let mut board = BoardState::new(request.geometry)?;
         for coord in request.geometry.coordinates() {
             let index = request
@@ -536,18 +549,6 @@ impl SpatialState {
             } else {
                 request.added_cells[&coord].clone()
             };
-        }
-        if request.policy == ResizePolicy::RejectAffected
-            && self.geometry().coordinates().any(|coord| {
-                !request.geometry.contains(coord)
-                    && self
-                        .cell(coord)
-                        .is_some_and(|cell| *cell != CellState::open())
-            })
-        {
-            return Err(EngineError::InvalidState(
-                "resize would discard nondefault cell state".into(),
-            ));
         }
         let mut next = self.clone();
         next.board = board;
@@ -706,6 +707,31 @@ impl SpatialState {
         }
         let mut next = Self::new_with_profile(profile, geometry)?;
         if profile == SpatialProfile::SourceV7 {
+            // Source normalizeBlackHole ignores non-array values and cells
+            // whose Number-coerced coordinates cannot name a board square.
+            // The hazard is terrain, not a collapsed/unusable cell: source
+            // applyBlackHoleDeaths removes occupants in a separate rule step.
+            if let Some(black_holes) = source.extra.get("blackHole").and_then(Value::as_array) {
+                for cell in black_holes {
+                    let (Some(row), Some(col)) = (
+                        crate::observation::number(cell.get("row")),
+                        crate::observation::number(cell.get("col")),
+                    ) else {
+                        continue;
+                    };
+                    if row.fract() != 0.0
+                        || col.fract() != 0.0
+                        || !(0.0..8.0).contains(&row)
+                        || !(0.0..8.0).contains(&col)
+                    {
+                        continue;
+                    }
+                    let index = geometry
+                        .index(Coord::new(row as i32, col as i32))
+                        .expect("source black-hole square inside 8x8 geometry");
+                    next.board.cells[index].terrain.insert("blackHole".into());
+                }
+            }
             for row in 0..8 {
                 for col in 0..8 {
                     let square = Square { row, col };

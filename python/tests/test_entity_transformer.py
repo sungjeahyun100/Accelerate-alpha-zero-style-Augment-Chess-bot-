@@ -198,3 +198,25 @@ def test_typed_input_boundary_rejects_invalid_relation_and_parent():
     inputs[13][0, 0, 2] = 2
     with pytest.raises(ValueError, match="candidate parent"):
         model.validate_inputs(*inputs)
+
+
+def test_all_candidates_masked_and_only_global_record_are_finite():
+    model = _model()
+    inputs = list(_inputs())
+    inputs[3][:, 1:] = False
+    inputs[4][:, 1:] = False
+    inputs[8][:] = False
+    inputs[12][:] = False
+    inputs[15][:] = -1
+    inputs[16][:] = False
+    inputs[17][:] = False
+    logits, value = model.evaluate(*inputs)
+    assert logits.shape == (1, 2) and value.shape == (1, 1)
+    assert torch.isfinite(logits).all() and torch.isfinite(value).all()
+    assert torch.equal(logits, torch.full_like(logits, -1.0e9))
+
+
+def test_transformer_rejects_excessive_parameter_config_before_allocation():
+    context = TypedContextConfig((1, 1, 1, 1), (1, 1), (1, 1, 1, 1), hidden_dim=4096)
+    with pytest.raises(ValueError, match="parameter lower bound"):
+        EntityTransformerConfig(context, blocks=64, heads=4, ffn_dim=4096)

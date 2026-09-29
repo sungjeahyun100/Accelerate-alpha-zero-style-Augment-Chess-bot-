@@ -493,9 +493,29 @@ def current_client():
         "tests/site-adapter/parity/latest-client.test.cjs", timeout=180)
 
 
+def v7_differential():
+    """Compare the installed wheel with the same pinned client on this OS."""
+    root, _, _, _, python = locations()
+    try:
+        current_client()
+    except Exception:
+        # Keep an explicit NO-GO report even when source preparation stops
+        # before the differential runner can create its own detailed report.
+        destination = root / "reports" / "v7-native-differential"
+        destination.mkdir(parents=True, exist_ok=True)
+        (destination / "report.json").write_text(json.dumps({
+            "gate": "source-pinned-v7-native-differential-probe",
+            "status": "setup-error", "decision": "NO-GO",
+            "reason": "pinned v7 source preparation failed; inspect the CI step log",
+        }, indent=2) + "\n", encoding="utf-8")
+        raise
+    run("node", "tests/differential/v7-native-differential.cjs", "--python", python)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=("configure", "rust-scope", "build", "tests", "frozen", "current-client"))
+    parser.add_argument("phase", choices=("configure", "rust-scope", "build", "tests", "frozen", "current-client",
+                                          "v7-differential"))
     phase = parser.parse_args().phase
     {"configure": configure, "rust-scope": rust_scope, "build": build, "tests": tests, "frozen": frozen,
-     "current-client": current_client}[phase]()
+     "current-client": current_client, "v7-differential": v7_differential}[phase]()

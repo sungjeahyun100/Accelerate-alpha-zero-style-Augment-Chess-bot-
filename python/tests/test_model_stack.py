@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from io import BytesIO
 import json
 import hashlib
@@ -33,7 +34,11 @@ def _mask_resnet_case():
     config = MaskResNetConfig(board_channels=6, typed_context=context, channels=8,
                               residual_blocks=2, lora_rank=2, lora_alpha=2.)
     model = MaskResNetPolicyValueNetwork(config).eval()
-    spatial = torch.randn(1, 6, 5, 7)
+    spatial = torch.zeros(1, 6, 5, 7)
+    spatial[:, 0] = 1.
+    spatial[0, 0, 2, 3] = 0.
+    spatial[0, 3, 2, 3] = 1.
+    spatial[0, 4, 2, 3] = 1.
     layout_mask = torch.ones(1, 1, 5, 7, dtype=torch.bool)
     record_category = torch.zeros(1, 3, 4, dtype=torch.int64)
     record_category[0, 1, 0] = 1
@@ -105,6 +110,44 @@ def test_mask_resnet_padding_and_candidate_partition_invariance():
     changed_logits, changed_value = model.evaluate(*changed)
     assert not torch.allclose(changed_logits, logits)
     torch.testing.assert_close(changed_value, value, atol=0, rtol=0)
+
+
+def test_mask_resnet_holes_and_padding_excluded_from_normalization():
+    model, inputs = _mask_resnet_case()
+    with_hole = list(inputs)
+    with_hole[0] = inputs[0].clone()
+    with_hole[0][0, 0, 1, 1] = 0.
+    with_hole[0][0, 2, 1, 1] = 1.
+    baseline = model.evaluate(*with_hole)
+
+    noisy_hole = list(with_hole)
+    noisy_hole[0] = with_hole[0].clone()
+    noisy_hole[0][0, [0, 1, 3, 4, 5], 1, 1] = 900.
+    observed = model.evaluate(*noisy_hole)
+    for expected, actual in zip(baseline, observed, strict=True):
+        torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+
+    padded = list(with_hole)
+    padded[0] = torch.randn(1, 6, 9, 11)
+    padded[0][:, :, :5, :7] = with_hole[0]
+    padded[1] = torch.zeros(1, 1, 9, 11, dtype=torch.bool)
+    padded[1][:, :, :5, :7] = True
+    reference = deepcopy(model).train()
+    enlarged = deepcopy(model).train()
+    reference_output = reference(*with_hole)
+    enlarged_output = enlarged(*padded)
+    for expected, actual in zip(reference_output, enlarged_output, strict=True):
+        torch.testing.assert_close(actual, expected, atol=1e-5, rtol=1e-4)
+    for expected, actual in zip(reference.modules(), enlarged.modules(), strict=True):
+        if isinstance(expected, torch.nn.BatchNorm2d):
+            torch.testing.assert_close(actual.running_mean, expected.running_mean, atol=1e-6, rtol=1e-5)
+            torch.testing.assert_close(actual.running_var, expected.running_var, atol=1e-6, rtol=1e-5)
+
+    all_holes = list(inputs)
+    all_holes[0] = torch.zeros_like(inputs[0])
+    all_holes[0][:, 2] = 1.
+    all_hole_logits, all_hole_value = model.evaluate(*all_holes)
+    assert torch.isfinite(all_hole_logits).all() and torch.isfinite(all_hole_value).all()
 
 
 def test_mask_resnet_film_adapter_merge_and_input_limits():

@@ -25,15 +25,31 @@ pub(crate) fn definitions() -> &'static Definitions {
 /// Explicit source selection for callers entering the v7 rule path. The
 /// legacy helper above keeps existing v6 draw and replay behavior unchanged.
 pub(crate) fn definitions_for_ruleset(rules_version: &str) -> Result<&'static Definitions> {
-    static V7: OnceLock<Definitions> = OnceLock::new();
+    static V7: OnceLock<Result<Definitions>> = OnceLock::new();
     match rules_version {
         RULES_VERSION_V6 => Ok(definitions()),
-        RULES_VERSION_V7 => Ok(V7.get_or_init(|| {
-            serde_json::from_str(include_str!(
-                "../../bridge/catalog/card-definitions-20260928.json"
-            ))
-            .expect("adopted v7 card definitions")
-        })),
+        RULES_VERSION_V7 => V7
+            .get_or_init(|| {
+                let registry = crate::card_registry::registry_for(RULES_VERSION_V7)?;
+                let mut source: Definitions = serde_json::from_str(include_str!(
+                    "../../bridge/catalog/card-definitions-20260928.json"
+                ))
+                .map_err(EngineError::serialization)?;
+                if source.definitions.len() != registry.cards.len() {
+                    return Err(EngineError::InvalidState(
+                        "v7 presented card count mismatch".into(),
+                    ));
+                }
+                for card in &mut source.definitions {
+                    let id = card["id"].as_str().ok_or_else(|| {
+                        EngineError::InvalidState("v7 card definition ID missing".into())
+                    })?;
+                    *card = registry.get(id)?.source_definition.clone();
+                }
+                Ok(source)
+            })
+            .as_ref()
+            .map_err(Clone::clone),
         other => Err(EngineError::UnsupportedFeature(format!(
             "card definitions for rules version {other}"
         ))),
@@ -84,6 +100,7 @@ pub(crate) fn frozen_timestamp_for_ruleset(rules_version: &str) -> Result<i64> {
 }
 #[derive(Deserialize)]
 struct Weights {
+    constants: Value,
     weights: Vec<Weight>,
 }
 #[derive(Deserialize)]
@@ -1294,6 +1311,92 @@ pub(crate) fn initialize(config: GameConfig, seed: u64) -> Result<GameState> {
     initialize_for_ruleset(config, seed, RULES_VERSION_V6)
 }
 
+fn validate_v7_opening_rule_selection(ids: &[String], deathmatch_enabled: bool) -> Result<()> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let constants = &weights_for_ruleset(RULES_VERSION_V7)?.constants;
+    let pool = constants["CARD_CATEGORY_GROUPS"]["RULE"]
+        .as_array()
+        .ok_or_else(|| EngineError::InvalidState("v7 RULE selection pool missing".into()))?;
+    let deleted = constants["DELETED_CARD_IDS"]
+        .as_array()
+        .ok_or_else(|| EngineError::InvalidState("v7 deleted card IDs missing".into()))?;
+    if pool.len() != 26 {
+        return Err(EngineError::InvalidState(
+            "v7 RULE selection pool count drift".into(),
+        ));
+    }
+    let mut seen = BTreeSet::new();
+    for id in ids {
+        if !seen.insert(id.as_str()) {
+            return Err(EngineError::InvalidConfig(format!(
+                "duplicate opening RULE selection {id}"
+            )));
+        }
+        if !pool.iter().any(|candidate| candidate == id)
+            || deleted.iter().any(|candidate| candidate == id)
+            || id == "revelation" && !deathmatch_enabled
+        {
+            return Err(EngineError::InvalidConfig(format!(
+                "opening RULE {id} unavailable in pinned source pool"
+            )));
+        }
+        // An admitted selection may be chosen by the source's one random
+        // index. Reject unsupported candidates before consuming live RNG.
+        crate::card_registry::opening_rule_source_card(id)?;
+    }
+    Ok(())
+}
+
+fn activate_v7_opening_rule(state: &mut GameState, ids: &[String]) -> Result<()> {
+    let created_at = frozen_timestamp_for_ruleset(RULES_VERSION_V7)?;
+    let nonce = format!("rule-{created_at}-{}", random_suffix(state.rng.sample()?)?);
+    let selected = (state.rng.sample()? * ids.len() as f64).floor() as usize;
+    let card_id = ids.get(selected).ok_or_else(|| {
+        EngineError::InvalidState("v7 opening RULE random selection outside pool".into())
+    })?;
+    crate::card_effects::apply_opening_rule_effect(state, card_id)?;
+    let mut event_card = crate::card_registry::opening_rule_source_card(card_id)?;
+    let card_name = event_card["name"]
+        .as_str()
+        .ok_or_else(|| EngineError::InvalidState("v7 opening RULE name missing".into()))?
+        .to_owned();
+    event_card["instanceId"] = json!(format!("{card_id}-{}", random_suffix(state.rng.sample()?)?));
+    let mut applied = event_card.clone();
+    applied["instanceId"] = json!(format!("applied-rule-{card_id}"));
+    state.extra.insert("appliedRuleCard".into(), applied);
+    state.extra.insert(
+        "ruleOpeningEvent".into(),
+        json!({
+            "nonce":nonce,
+            "createdAt":created_at,
+            "dismissAt":created_at+3600,
+            "status":"hit",
+            "title":"RULE CARD",
+            "card":event_card,
+            "message":format!("{card_name} 카드가 발동됩니다."),
+        }),
+    );
+    let notation = json!({
+        "id":format!("opening-rule-{card_id}"),
+        "kind":"card",
+        "color":"white",
+        "moveNumber":0,
+        "text":format!("@{card_name}"),
+        "description":format!("RULE {card_name} 적용"),
+    });
+    state
+        .extra
+        .get_mut("pendingNotations")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| EngineError::InvalidState("initial pending notations missing".into()))?
+        .push(notation.clone());
+    state.extra.insert("pendingNotation".into(), notation);
+    crate::replay::add_log(state, format!("RULE 카드 발동: {card_name}"))?;
+    Ok(())
+}
+
 pub(crate) fn initialize_for_ruleset(
     config: GameConfig,
     seed: u64,
@@ -1317,9 +1420,12 @@ pub(crate) fn initialize_for_ruleset(
         ));
     }
     if !config.rule_card_ids.is_empty() {
-        return Err(EngineError::UnsupportedFeature(
-            "initial RULE activation".into(),
-        ));
+        if rules_version == RULES_VERSION_V6 {
+            return Err(EngineError::UnsupportedFeature(
+                "initial RULE activation".into(),
+            ));
+        }
+        validate_v7_opening_rule_selection(&config.rule_card_ids, config.deathmatch_enabled)?;
     }
     let initial = if rules_version == RULES_VERSION_V7 {
         include_str!("../../bridge/catalog/initial-state-20260928.json")
@@ -1336,6 +1442,19 @@ pub(crate) fn initialize_for_ruleset(
         serde_json::from_value(raw["state"].clone()).map_err(EngineError::serialization)?;
     state.ruleset_id = rules_version.into();
     state.rng = RngState::seeded(seed);
+    if rules_version == RULES_VERSION_V7 {
+        // resetGame initializes the replay clock before its first frame.
+        // The frozen template is an idle state and deliberately has no date.
+        let catalog: Value =
+            serde_json::from_str(include_str!("../../bridge/catalog/site-20260928.json"))
+                .map_err(EngineError::serialization)?;
+        let frozen_at = catalog["source"]["frozenAt"]
+            .as_str()
+            .ok_or_else(|| EngineError::InvalidState("v7 frozen ISO date missing".into()))?;
+        state
+            .extra
+            .insert("replayStartedAt".into(), json!(frozen_at));
+    }
     for col in 0..8 {
         for row in [0, 7] {
             let suffix = random_suffix(state.rng.sample()?)?;
@@ -1367,6 +1486,30 @@ pub(crate) fn initialize_for_ruleset(
         "deathmatchLimitTurns".into(),
         json!(config.deathmatch_limit_turns),
     );
+    if rules_version == RULES_VERSION_V7 && config.game_style == "grand" {
+        // resetGame sets these flags from initialGameStyle before recording
+        // its idle replay frame (main-OahWs0tU.js:66120-66121). The frozen
+        // headless grand clock starts from GRAND_DRAFT_PICK_MS=20_000.
+        state.extra.insert("middleDraftDone".into(), json!(true));
+        state.extra.insert("endDraftDone".into(), json!(true));
+        state.extra["draftClock"]["initialMs"] = json!(20_000);
+    }
+    if !config.rule_card_ids.is_empty() {
+        state
+            .extra
+            .insert("ruleSelectionEnabled".into(), json!(true));
+        state
+            .extra
+            .insert("selectedRuleCardIds".into(), json!(config.rule_card_ids));
+        state.extra.insert(
+            "selectedRuleCardId".into(),
+            json!(if config.rule_card_ids.len() == 1 {
+                config.rule_card_ids[0].as_str()
+            } else {
+                ""
+            }),
+        );
+    }
     let slots = if config.game_style == "normal" { 3 } else { 6 };
     state.deck_slots=serde_json::from_value::<GameState>(json!({"board":state.board,"turn":"white","deckSlots":{"white":vec![Value::Null;slots],"black":vec![Value::Null;slots]}})).map_err(EngineError::serialization)?.deck_slots;
     // resetGame records the idle board before beginInitialGameFlow applies
@@ -1386,6 +1529,9 @@ pub(crate) fn initialize_for_ruleset(
     crate::replay::record(&mut state, "initial")?;
     for (key, value) in configured {
         state.extra.insert(key, value);
+    }
+    if !config.rule_card_ids.is_empty() {
+        activate_v7_opening_rule(&mut state, &config.rule_card_ids)?;
     }
     if config.draft_delete {
         state.mode = "play".into();

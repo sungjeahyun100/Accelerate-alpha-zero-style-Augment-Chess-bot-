@@ -1043,6 +1043,12 @@ fn raw_card_acceptance_does_not_expand_public_source_selection() {
     assert_eq!(probe.rng.cursor, before_cursor + 2);
     assert_eq!(probe.board, before_board);
     assert_eq!(probe.semantic_chance_probability, Some(1.0));
+    let mut no_draft_cards = position.state().clone();
+    no_draft_cards
+        .extra
+        .insert("draftDelete".into(), json!(true));
+    assert!(!crate::transition::available_card_action(&mut no_draft_cards, Color::White).unwrap());
+    assert_eq!(no_draft_cards.rng.cursor, before_cursor);
     assert!(
         probe.extra["pendingOtherworld"]
             .as_array()
@@ -1524,6 +1530,18 @@ fn explicit_rules_version_preserves_v6_and_refuses_unported_v7() {
     assert!(matches!(
         Position::from_state(state),
         Err(EngineError::UnsupportedFeature(_))
+    ));
+}
+
+#[test]
+fn v7_public_history_projection_rejects_missing_viewer_without_panicking() {
+    let mut state =
+        crate::draft::initialize_for_ruleset(GameConfig::default(), 37, RULES_VERSION_V7).unwrap();
+    state.history.push(json!({"public":{"white":{}}}));
+    assert!(matches!(
+        state.try_observe(Color::Black),
+        Err(EngineError::InvalidState(message))
+            if message.contains("black public projection")
     ));
 }
 

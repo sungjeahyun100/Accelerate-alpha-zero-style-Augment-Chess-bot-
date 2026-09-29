@@ -405,7 +405,70 @@ pub(crate) fn queue_forced_opening_card(
 fn square_name(square: Square) -> String {
     format!("{}{}", char::from(b'a' + square.col), 8 - square.row)
 }
-fn piece_code(kind: &str) -> String {
+
+/// Queue one source Don Quixote turn-entry hop. The caller owns path and
+/// capture semantics; this boundary owns the source notation identity/RNG.
+/// Concealed hops need viewer-specific redactions and stay unsupported.
+pub(crate) fn queue_don_quixote_rampage(
+    state: &mut GameState,
+    piece: &Piece,
+    from: Square,
+    to: Square,
+    capture: bool,
+) -> Result<()> {
+    if state.ruleset_id != RULES_VERSION_V7 || piece.kind != "donQuixote" {
+        return Err(EngineError::UnsupportedFeature(
+            "v7 Don Quixote notation outside reviewed source path".into(),
+        ));
+    }
+    let owner = piece.color.owner().ok_or_else(|| {
+        EngineError::InvalidState("Don Quixote notation needs an owned piece".into())
+    })?;
+    let within = |square: Square| {
+        state
+            .board
+            .get(usize::from(square.row))
+            .and_then(|row| row.get(usize::from(square.col)))
+            .is_some()
+    };
+    if !within(from) || !within(to) || from == to {
+        return Err(EngineError::IllegalAction);
+    }
+    let target = state.at(to);
+    if capture != target.is_some()
+        || !state.piece_visible(piece, from, owner.opponent())
+        || !state.piece_visible(piece, to, owner.opponent())
+        || target.is_some_and(|victim| !state.piece_visible(victim, to, owner.opponent()))
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "v7 Don Quixote concealed or unsupported capture notation".into(),
+        ));
+    }
+    queue_notation(
+        state,
+        "special",
+        owner,
+        format!(
+            "DQ{}{}{}",
+            square_name(from),
+            if capture { "x" } else { "-" },
+            square_name(to)
+        ),
+        format!(
+            "돈 키호테 폭주: {} → {}{}",
+            square_name(from),
+            square_name(to),
+            if capture { " 포획" } else { "" }
+        ),
+        u64::from(state.full_move),
+    )?;
+    Ok(())
+}
+fn piece_code(rules_version: &str, kind: &str) -> String {
+    // The frozen v7 client changed the medium's move-notation code from MD to GR.
+    if rules_version == RULES_VERSION_V7 && kind == "medium" {
+        return "GR".into();
+    }
     metadata()["codes"][kind]
         .as_str()
         .map(str::to_owned)
@@ -439,7 +502,8 @@ pub(crate) fn queue_move(
                 };
                 if other.id == piece.id
                     || other.color != piece.color
-                    || piece_code(&other.kind) != piece_code(&piece.kind)
+                    || piece_code(&state.ruleset_id, &other.kind)
+                        != piece_code(&state.ruleset_id, &piece.kind)
                     || !seen.insert(other.id.clone())
                 {
                     continue;
@@ -473,7 +537,7 @@ pub(crate) fn queue_move(
     } else {
         format!(
             "{}{}{}{to_name}{}{}",
-            piece_code(&piece.kind),
+            piece_code(&state.ruleset_id, &piece.kind),
             if piece.kind == "pawn" {
                 if capture {
                     char::from(b'a' + from.col).to_string()
@@ -519,13 +583,13 @@ pub(crate) fn queue_move(
             format!(
                 "{}x{square}",
                 if known {
-                    piece_code(&piece.kind)
+                    piece_code(&state.ruleset_id, &piece.kind)
                 } else {
                     "?".into()
                 }
             )
         } else if known {
-            format!("{}??", piece_code(&piece.kind))
+            format!("{}??", piece_code(&state.ruleset_id, &piece.kind))
         } else {
             "???".into()
         };

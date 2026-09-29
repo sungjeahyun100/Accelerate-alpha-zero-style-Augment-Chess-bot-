@@ -715,7 +715,7 @@ fn validate_typed_schema(
         .as_object()
         .context("typed feature schema must be an object")?;
     ensure!(
-        fields.len() == 11
+        fields.len() == 15
             && [
                 "inputs",
                 "input_order",
@@ -725,6 +725,10 @@ fn validate_typed_schema(
                 "spatial_channels",
                 "coordinate_frame",
                 "history_version",
+                "history_coordinates",
+                "descriptor_identity",
+                "card_aliases",
+                "belief_summary",
                 "limits",
                 "candidate_tree",
                 "padding"
@@ -821,6 +825,19 @@ fn validate_typed_schema(
             && schema["coordinate_frame"]
                 == "absolute public Coord mapped to local row/column in current geometry; no viewer rotation"
             && schema["history_version"] == "public-history-summary-v2"
+            && schema["history_coordinates"]
+                == "ordered absolute [row,col] pairs; Observation v2 does not supply past event geometry"
+            && schema["descriptor_identity"]
+                == "sourceId, modifierId and modifier source are reference metadata, not category content"
+            && schema["card_aliases"]
+                == "same public instance may appear once per own, revealed-opponent, or draft-choice surface; compatible views link by same-identity"
+            && schema["belief_summary"]
+                == json!({"version": "public-particle-summary-v3",
+                    "proposal_profiles": ["source-prior-v1", "source-weighted-conditional-step-v1", "source-weighted-offer-proposal-v1"],
+                    "opponent_action_prior": "uniform-public-intents",
+                    "filter_version": "source-importance-filter-v2",
+                    "chance_prior": "independent-source-draws",
+                    "conditional_steps": "source-weighted-conditional-step-v1"})
             && schema["candidate_tree"]
                 == "root index zero; child parent index, array order, public record target index or -1"
             && schema["padding"]

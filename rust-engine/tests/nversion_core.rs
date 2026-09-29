@@ -121,8 +121,8 @@ impl RefWorld {
         self.pieces.retain(|_, piece| {
             piece
                 .offsets
-                .retain(|&offset| !collapsed.contains(&piece.anchor.offset(offset).unwrap()));
-            !piece.offsets.is_empty()
+                .iter()
+                .all(|&offset| !collapsed.contains(&piece.anchor.offset(offset).unwrap()))
         });
     }
 
@@ -194,7 +194,7 @@ fn signed_rectangle_index_matches_coordinate_keyed_enumeration() {
 }
 
 #[test]
-fn source_collapse_keeps_extent_and_one_identity_per_remaining_footprint() {
+fn source_collapse_keeps_extent_and_removes_affected_identities() {
     let geometry = BoardGeometry::new(0, 0, 8, 8).unwrap();
     let mut reference = RefWorld::new(geometry, SpatialProfile::SourceV7);
     reference.add(
@@ -215,7 +215,7 @@ fn source_collapse_keeps_extent_and_one_identity_per_remaining_footprint() {
     assert_same_world(&reference, &actual);
     assert_eq!(actual.geometry(), geometry);
     assert!(actual.piece("single").is_none());
-    assert_eq!(actual.piece("large").unwrap().anchor, Coord::new(2, 2));
+    assert!(actual.piece("large").is_none());
 }
 
 #[test]
@@ -312,6 +312,10 @@ fn reference_shift(world: &RefWorld, mover: &str, target: &str) -> bool {
 /// comparison. Its traversal is intentionally different from the runtime's
 /// stack and raw ordering is compared as a multiset.
 fn reference_moves(world: &RefWorld, program: &MoveProgram, mover: &str) -> Vec<RawMove> {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the independent recursive reference carries its full traversal state explicitly"
+    )]
     fn visit(
         world: &RefWorld,
         program: &MoveProgram,

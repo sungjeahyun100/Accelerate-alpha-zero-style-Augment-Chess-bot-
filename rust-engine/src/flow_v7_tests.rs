@@ -1,5 +1,139 @@
 use super::*;
 
+#[test]
+fn source_v7_normal_and_chaos_milestones_match_full_state_and_rng() {
+    use sha2::{Digest, Sha256};
+    let digest = |state: &GameState| {
+        let mut value = serde_json::to_value(state).unwrap();
+        for key in ["rulesetId", "rng", "history"] {
+            value.as_object_mut().unwrap().remove(key);
+        }
+        format!("{:x}", Sha256::digest(serde_jcs::to_vec(&value).unwrap()))
+    };
+    // SHA-pinned main-OahWs0tU.js seed 37 first-play states with a synthetic
+    // completed-turn count. These are direct maybeStartMilestoneDraft probes,
+    // not evidence that the intervening 10/20 natural turns are supported.
+    for (style, phase, turns, middle_done, expected_digest, cursor, rng_state) in [
+        (
+            "normal",
+            "MIDDLE",
+            10,
+            false,
+            "448d844ac5ddf083b31e9dfdac39c98f7328cbc572a85178f7dcbd66a5b7bafd",
+            278,
+            4_230_071_635,
+        ),
+        (
+            "normal",
+            "END",
+            20,
+            true,
+            "ba80d75b821c1424bcb803c4944266fa3655abbafe33a6bcd8765b438265fa02",
+            306,
+            3_997_385_423,
+        ),
+        (
+            "chaos",
+            "MIDDLE",
+            10,
+            false,
+            "f59fdc0af589a67ed10ce1d104e83d3659d190630504e34b3637482baf47eb03",
+            526,
+            3_751_996_747,
+        ),
+        (
+            "chaos",
+            "END",
+            20,
+            true,
+            "0c3139e1a5aa15fd3fcd49f7cafe50b9263960daa5559f893766578d682c882b",
+            582,
+            768_950_659,
+        ),
+    ] {
+        let mut opening = crate::draft::initialize_for_ruleset(
+            GameConfig {
+                game_style: style.into(),
+                ..GameConfig::default()
+            },
+            37,
+            RULES_VERSION_V7,
+        )
+        .unwrap();
+        for _ in 0..2 {
+            let action = crate::draft::legal_actions(&opening).unwrap().remove(0);
+            crate::transition::apply(&mut opening, &action).unwrap();
+            crate::replay::canonicalize_position_frames(&mut opening).unwrap();
+        }
+        assert_eq!(opening.mode, "play");
+        let mut state = opening;
+        state.turns_taken = Sides::new(turns, turns);
+        state.move_count = turns * 2;
+        state.full_move = turns + 1;
+        state
+            .extra
+            .insert("middleDraftDone".into(), json!(middle_done));
+        state.extra.insert("endDraftDone".into(), json!(false));
+        assert!(
+            maybe_start_milestone_draft(&mut state).unwrap(),
+            "{style} {phase}"
+        );
+        assert_eq!(state.mode, "draft");
+        assert_eq!(state.turn, Color::White);
+        assert_eq!(state.extra["draft"]["phase"], phase);
+        assert_eq!(
+            digest(&state),
+            expected_digest,
+            "{style} {phase} full state"
+        );
+        assert_eq!(state.rng.cursor, cursor, "{style} {phase} RNG cursor");
+        assert_eq!(state.rng.state, rng_state, "{style} {phase} RNG state");
+    }
+}
+
+#[test]
+fn v7_milestone_skips_source_exclusions_and_rejects_unported_return_effects() {
+    let mut state = play_state(RULES_VERSION_V7);
+    state.turns_taken = Sides::new(10, 10);
+    state.extra.insert("draftDelete".into(), json!(false));
+    state.extra.insert("middleDraftDone".into(), json!(false));
+    state.extra.insert("endDraftDone".into(), json!(false));
+    state.extra.insert("gameStyle".into(), json!("normal"));
+    let mut below_threshold = state.clone();
+    below_threshold.turns_taken.black = 9;
+    let before = below_threshold.clone();
+    assert!(!maybe_start_milestone_draft(&mut below_threshold).unwrap());
+    assert_eq!(below_threshold, before);
+
+    let mut grand = state.clone();
+    grand.extra.insert("gameStyle".into(), json!("grand"));
+    let before = grand.clone();
+    assert!(!maybe_start_milestone_draft(&mut grand).unwrap());
+    assert_eq!(grand, before);
+
+    let mut forced = state.clone();
+    place_king(&mut forced, Color::White, 7, 4);
+    forced.board[7][4]
+        .as_mut()
+        .unwrap()
+        .extra
+        .insert("thiefSecondMove".into(), json!(true));
+    let before = forced.clone();
+    assert!(!maybe_start_milestone_draft(&mut forced).unwrap());
+    assert_eq!(forced, before);
+
+    state.extra.insert(
+        "judgmentExiles".into(),
+        json!([{"returnPhase":"MIDDLE","piece":{"color":"white","type":"pawn"}}]),
+    );
+    let before = state.clone();
+    assert!(matches!(
+        maybe_start_milestone_draft(&mut state),
+        Err(EngineError::UnsupportedFeature(_))
+    ));
+    assert_eq!(state, before);
+}
+
 fn play_state(rules_version: &str) -> GameState {
     let mut state = GameState::new(
         GameConfig {
@@ -27,6 +161,47 @@ fn place_king(state: &mut GameState, color: Color, row: usize, col: usize) {
         color,
         format!("{}-king", color.as_str()),
     ));
+}
+
+#[test]
+fn relay_first_play_no_action_probe_uses_source_witness_after_card_trial() {
+    // Source seed 19 normal: second white offer is Relay and the first black
+    // offer enters play. Relay adds swap moves, but a2-a3 alone proves that
+    // checkNoActionLoss must not declare a loss after the used card probe.
+    let mut state =
+        crate::draft::initialize_for_ruleset(GameConfig::default(), 19, RULES_VERSION_V7).unwrap();
+    let white_pick = crate::draft::legal_actions(&state).unwrap().remove(1);
+    crate::draft::apply_pick(&mut state, &white_pick).unwrap();
+    crate::replay::canonicalize_position_frames(&mut state).unwrap();
+    let black_pick = crate::draft::legal_actions(&state).unwrap().remove(0);
+    crate::transition::apply(&mut state, &black_pick).unwrap();
+    assert_eq!(state.mode, "play");
+    assert_eq!(state.turn, Color::White);
+    let card = state.deck_slots.white[0].clone();
+    assert_eq!(card.id, "relay");
+    let action = crate::Action::card(Color::White, &card, None);
+    // Position's v7 public-action gate remains closed. Construct only the
+    // source-probed post-card state needed by this no-action flow check.
+    crate::card_effects::apply(&mut state, &card, &action).unwrap();
+    state.deck_slots.white[0].used = true;
+    state.deck_slots.white[0].extra.insert(
+        "usedAt".into(),
+        json!(crate::draft::frozen_timestamp_for_ruleset(RULES_VERSION_V7).unwrap()),
+    );
+    state.cards_used_this_turn.white = 1;
+    note_card_event(&mut state).unwrap();
+    crate::replay::queue_card(&mut state, Color::White, &card).unwrap();
+    crate::replay::record(&mut state, "card").unwrap();
+    assert_eq!(state.rng.cursor, 217);
+    assert_eq!(state.extra["replayEventNonce"], 3);
+    assert_eq!(state.extra["relay"], json!({"white":true,"black":false}));
+    let before = state.clone();
+    assert_eq!(
+        crate::movement::v7_first_play_has_legal_move_witness(&state, Color::White).unwrap(),
+        Some(true)
+    );
+    assert!(!check_no_action_loss(&mut state).unwrap());
+    assert_eq!(state, before);
 }
 
 #[test]
@@ -150,4 +325,54 @@ fn no_action_probe_refuses_a_football_false_loss_without_changing_v6() {
         Err(EngineError::UnsupportedFeature(_))
     ));
     assert_eq!(v6.mode, "play");
+}
+
+#[test]
+fn v7_terminal_replay_settles_once_after_end_game() {
+    let mut state = GameState::new(
+        GameConfig {
+            draft_delete: true,
+            ..GameConfig::default()
+        },
+        17,
+    )
+    .unwrap();
+    state.ruleset_id = RULES_VERSION_V7.into();
+    state.mode = "play".into();
+    let rng = state.rng.clone();
+    let events_before = state.extra["replayEvents"].as_array().unwrap().len();
+    let history_before = state.extra["boardHistory"].as_array().unwrap().len();
+    let nonce_before = state.extra["replayEventNonce"].as_u64().unwrap();
+
+    end_game(&mut state, Some(Color::White), "검증용 종료").unwrap();
+    assert!(state.gameover_replay_pending);
+    assert_eq!(
+        state.extra["replayEvents"].as_array().unwrap().len(),
+        events_before
+    );
+    crate::replay::settle(&mut state).unwrap();
+    assert!(!state.gameover_replay_pending);
+    assert_eq!(
+        state.extra["replayEvents"].as_array().unwrap().len(),
+        events_before + 1
+    );
+    assert_eq!(
+        state.extra["boardHistory"].as_array().unwrap().len(),
+        history_before + 1
+    );
+    assert_eq!(state.extra["replayEventNonce"], json!(nonce_before + 1));
+    assert_eq!(
+        state.extra["replayEvents"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()["label"],
+        "gameover"
+    );
+    assert_eq!(state.rng, rng);
+    crate::replay::settle(&mut state).unwrap();
+    assert_eq!(
+        state.extra["replayEvents"].as_array().unwrap().len(),
+        events_before + 1
+    );
 }

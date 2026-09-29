@@ -242,6 +242,63 @@ def test_ordered_draft_bundle_references_public_choices():
     assert np.all(targets >= 0) and targets[0] != targets[1]
 
 
+def test_public_card_aliases_share_identity_but_reject_conflicting_entities():
+    public = frame()
+    choice = {"id": "king-of-the-hill", "instanceId": "shared-public-card",
+              "effect": "kingOfTheHill", "phase": "OPENING", "stars": 2.5}
+    public["publicState"]["draft"] = {"kind": "grand", "phase": "OPENING",
+                                      "color": "white", "choices": [choice]}
+    public["publicState"]["revealedOpponentCards"] = [{**choice, "slot": 0,
+                                                        "firstTurnCard": True}]
+    signed(public)
+    action = {"type": "draftPick", "color": "white", "cardInstanceId": "shared-public-card"}
+    encoded = TypedEncoder(spec()).encode(ObservationIR.from_public(public, spec()), [action])
+    relation_kinds = encoded.inputs["relation_category"][:, 0]
+    assert np.count_nonzero(relation_kinds == spec().category_id("same-identity")) == 1
+    target = encoded.inputs["candidate_target_index"][0]
+    assert np.count_nonzero(target >= 0) == 1
+    assert encoded.inputs["record_category"][target[target >= 0][0], 0] == spec().category_id("object")
+    conflicting = deepcopy(public)
+    conflicting["publicState"]["revealedOpponentCards"][0]["id"] = "slime"
+    signed(conflicting)
+    with pytest.raises(ValueError, match="conflicting public card alias"):
+        TypedEncoder(spec()).encode(ObservationIR.from_public(conflicting, spec()), [action])
+    repeated = deepcopy(public)
+    repeated["publicState"]["draft"]["choices"].append(deepcopy(choice))
+    signed(repeated)
+    with pytest.raises(ValueError, match="duplicate public card instance in one surface"):
+        TypedEncoder(spec()).encode(ObservationIR.from_public(repeated, spec()), [action])
+    opposite_owners = deepcopy(public)
+    opposite_owners["ownCards"] = [deepcopy(choice)]
+    signed(opposite_owners)
+    with pytest.raises(ValueError, match="opposite owners"):
+        TypedEncoder(spec()).encode(ObservationIR.from_public(opposite_owners, spec()), [action])
+
+
+def test_public_belief_proposal_profiles_have_a_fixed_typed_domain():
+    summary = {"version": "public-particle-summary-v3", "particle_count": 4,
+               "distinct_particle_instances": 3, "trace_steps": 1,
+               "opponent_action_prior": "uniform-public-intents",
+               "filter_version": "source-importance-filter-v2",
+               "chance_prior": "independent-source-draws",
+               "conditional_steps": "source-weighted-conditional-step-v1",
+               "proposal_profiles": ["source-prior-v1"],
+               "effective_sample_size": 3.5}
+    encoded = TypedEncoder(spec()).encode(ObservationIR.from_public(
+        frame(), spec(), belief_summary=summary), [])
+    assert np.any(encoded.inputs["record_category"][:, 2] == spec().category_id("source-prior-v1"))
+    all_profiles = deepcopy(summary)
+    all_profiles["proposal_profiles"] = sorted(("source-prior-v1",
+                                                "source-weighted-conditional-step-v1",
+                                                "source-weighted-offer-proposal-v1"))
+    TypedEncoder(spec()).encode(ObservationIR.from_public(
+        frame(), spec(), belief_summary=all_profiles), [])
+    unknown = deepcopy(summary)
+    unknown["proposal_profiles"] = ["unreviewed-proposal-v1"]
+    with pytest.raises(ValueError, match="unknown typed public belief proposal profile"):
+        ObservationIR.from_public(frame(), spec(), belief_summary=unknown)
+
+
 def test_move_program_descriptor_is_typed_and_source_id_is_not_a_feature():
     catalog, policy = source()
     synthetic = TypedEncoderSpec.from_catalog(catalog, observation_policy=policy,
@@ -251,15 +308,32 @@ def test_move_program_descriptor_is_typed_and_source_id_is_not_a_feature():
         "activationCondition": "Any", "activateAtParentDistance": None,
         "children": [{"primitive": "SHIFT", "direction": {"dr": 0, "dc": 1},
                       "maxDistance": 1, "activationCondition": "NoCapture", "children": []}]}]}
+    descriptor = {"base": program, "modifiers": [{"modifierId": "arbitrary-modifier-identity",
+                                                  "source": "arbitrary-modifier-source",
+                                                  "program": deepcopy(program),
+                                                  "expiration": {"kind": "ownerTurns",
+                                                                 "owner": "white", "remaining": 3}}]}
     base = dict(spec=synthetic, geometry=BoardGeometry(0, 0, 2, 2), viewer="white",
                 turn="white", board=[[None] * 2 for _ in range(2)],
                 cell_kinds=[["empty"] * 2 for _ in range(2)])
-    first = TypedEncoder(synthetic).encode(ObservationIR.from_components(**base, descriptors=[program]), [])
-    program["sourceId"] = "renamed-program-identity"
-    second = TypedEncoder(synthetic).encode(ObservationIR.from_components(**base, descriptors=[program]), [])
+    first = TypedEncoder(synthetic).encode(ObservationIR.from_components(**base, descriptors=[descriptor]), [])
+    descriptor["base"]["sourceId"] = "renamed-program-identity"
+    descriptor["modifiers"][0]["modifierId"] = "renamed-modifier-identity"
+    descriptor["modifiers"][0]["source"] = "renamed-modifier-source"
+    descriptor["modifiers"][0]["program"]["sourceId"] = "renamed-modifier-program-identity"
+    second = TypedEncoder(synthetic).encode(ObservationIR.from_components(**base, descriptors=[descriptor]), [])
     for name in first.inputs:
         np.testing.assert_array_equal(first.inputs[name], second.inputs[name])
     assert np.any(first.inputs["record_category"][:, 2] == synthetic.category_id("SHIFT"))
+    assert np.any(first.inputs["record_category"][:, 2] == synthetic.category_id("ownerTurns"))
+    invalid = deepcopy(descriptor)
+    invalid["base"]["roots"][0]["direction"] = {"dr": 0, "dc": 0}
+    with pytest.raises(ValueError, match="direction cannot be zero"):
+        ObservationIR.from_components(**base, descriptors=[invalid])
+    invalid = deepcopy(descriptor)
+    invalid["base"]["roots"][0]["activateAtParentDistance"] = 1
+    with pytest.raises(ValueError, match="root cannot have a parent distance"):
+        ObservationIR.from_components(**base, descriptors=[invalid])
 
 
 def test_fail_closed_limits_and_history_version():

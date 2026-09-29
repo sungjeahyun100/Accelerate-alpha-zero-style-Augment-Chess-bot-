@@ -30,6 +30,11 @@ IR_VERSION = "semantic-ir-v1"
 ENCODER_VERSION = "typed-input-v1"
 DESCRIPTOR_VERSION = "move-program-v1"
 HISTORY_VERSION = "public-history-summary-v2"
+BELIEF_VERSION = "public-particle-summary-v3"
+BELIEF_PROPOSAL_PROFILES = (
+    "source-prior-v1", "source-weighted-conditional-step-v1",
+    "source-weighted-offer-proposal-v1",
+)
 SYNTHETIC_OBSERVATION_VERSION = "synthetic-geometry-v1"
 PUBLIC_OBSERVATION_VERSION = "accelerate-observation-v2"
 V7_RULES_VERSION = "augment-site-20260928-e5ed84fcf8e72a24"
@@ -89,7 +94,7 @@ _SYMBOLS = {
     "event_count", "actor_counts", "decision_actor_changes", "board_change_count",
     "recent_events", "board_change_squares", "own_card_count", "opponent_card_count",
     "public-history-summary-v2", "public-particle-summary-v3", "uniform-public-intents",
-    "source-importance-filter-v2", "independent-source-draws",
+    "source-importance-filter-v2", "independent-source-draws", "source-prior-v1",
     "source-weighted-conditional-step-v1", "source-weighted-offer-proposal-v1",
     "version", "particle_count", "distinct_particle_instances", "trace_steps",
     "opponent_action_prior", "filter_version", "chance_prior", "conditional_steps",
@@ -134,6 +139,34 @@ def _reject_private(value: Any, *, allow_identity: bool = False, depth: int = 0)
     elif isinstance(value, (list, tuple)):
         for item in value:
             _reject_private(item, depth=depth + 1)
+
+
+def _validate_belief_summary(summary: Mapping[str, Any]) -> None:
+    expected = {"version", "particle_count", "distinct_particle_instances", "trace_steps",
+                "opponent_action_prior", "filter_version", "chance_prior", "conditional_steps",
+                "proposal_profiles", "effective_sample_size"}
+    if not isinstance(summary, Mapping) or set(summary) != expected:
+        raise ValueError("typed public belief summary has an unknown shape")
+    fixed = {"version": BELIEF_VERSION, "opponent_action_prior": "uniform-public-intents",
+             "filter_version": "source-importance-filter-v2",
+             "chance_prior": "independent-source-draws",
+             "conditional_steps": "source-weighted-conditional-step-v1"}
+    if any(summary[key] != value for key, value in fixed.items()):
+        raise ValueError("typed public belief summary version or prior differs from the contract")
+    for key in ("particle_count", "distinct_particle_instances", "trace_steps"):
+        if type(summary[key]) is not int or summary[key] < 0:
+            raise ValueError(f"typed public belief {key} must be a nonnegative integer")
+    if summary["distinct_particle_instances"] > summary["particle_count"]:
+        raise ValueError("typed public belief distinct count exceeds its particle count")
+    effective = summary["effective_sample_size"]
+    if (type(effective) not in (int, float) or not math.isfinite(effective)
+            or not 0 <= effective <= summary["particle_count"] + 1e-6):
+        raise ValueError("typed public belief effective sample size is invalid")
+    profiles = summary["proposal_profiles"]
+    if (not isinstance(profiles, list) or any(not isinstance(item, str) for item in profiles)
+            or profiles != sorted(set(profiles))
+            or any(item not in BELIEF_PROPOSAL_PROFILES for item in profiles)):
+        raise ValueError("unknown typed public belief proposal profile")
 
 
 def _schema_symbols(schema: Any, into: set[str]) -> None:
@@ -256,6 +289,14 @@ class TypedEncoderSpec:
             "spatial_channels": list(SPATIAL_CHANNELS),
             "coordinate_frame": "absolute public Coord mapped to local row/column in current geometry; no viewer rotation",
             "history_version": self.history_version,
+            "history_coordinates": "ordered absolute [row,col] pairs; Observation v2 does not supply past event geometry",
+            "descriptor_identity": "sourceId, modifierId and modifier source are reference metadata, not category content",
+            "card_aliases": "same public instance may appear once per own, revealed-opponent, or draft-choice surface; compatible views link by same-identity",
+            "belief_summary": {"version": BELIEF_VERSION, "proposal_profiles": list(BELIEF_PROPOSAL_PROFILES),
+                               "opponent_action_prior": "uniform-public-intents",
+                               "filter_version": "source-importance-filter-v2",
+                               "chance_prior": "independent-source-draws",
+                               "conditional_steps": "source-weighted-conditional-step-v1"},
             "limits": {key: getattr(self, key) for key in ("max_board_axis", "max_records", "max_relations", "max_candidates", "max_candidate_nodes", "max_batch", "max_input_bytes")},
             "candidate_tree": "root index zero; child parent index, array order, public record target index or -1",
             "padding": "layout_mask false only for batch padding; hole remains within layout",
@@ -427,6 +468,8 @@ class ObservationIR:
         for value in (self.board, self.own_cards, self.public_state, self.history_summary, self.belief_summary, self.descriptors):
             _reject_private(value)
             canonical_json(value)
+        if self.belief_summary is not None:
+            _validate_belief_summary(self.belief_summary)
         if not isinstance(self.information_state_key, str) or len(self.information_state_key) != 64 or any(c not in "0123456789abcdef" for c in self.information_state_key):
             raise ValueError("IR information state binding must be SHA-256")
 
@@ -547,7 +590,7 @@ def _validate_descriptors(descriptors: Sequence[Mapping[str, Any]]) -> None:
                    "activateAtParentDistance", "children"}
     primitives = {"MOVE", "TAKE", "TAKEMOVE", "BOTHTAKEMOVE", "CATCH", "JUMP", "SHIFT"}
 
-    def check(node: Any, depth: int) -> None:
+    def check(node: Any, depth: int, *, root: bool = False) -> None:
         if depth > 64 or not isinstance(node, Mapping):
             raise ValueError("unsupported public move descriptor")
         if "primitive" in node:
@@ -557,7 +600,11 @@ def _validate_descriptors(descriptors: Sequence[Mapping[str, Any]]) -> None:
             if (not isinstance(direction, Mapping) or set(direction) != {"dr", "dc"}
                     or any(type(direction[key]) is not int or abs(direction[key]) > 32 for key in ("dr", "dc"))):
                 raise ValueError("invalid public move direction")
-            for key, lower in (("maxDistance", 1), ("activateAtParentDistance", 0)):
+            if direction["dr"] == direction["dc"] == 0:
+                raise ValueError("public move direction cannot be zero")
+            if root and node.get("activateAtParentDistance") is not None:
+                raise ValueError("public move root cannot have a parent distance")
+            for key, lower in (("maxDistance", 1), ("activateAtParentDistance", 1)):
                 value = node.get(key)
                 if value is not None and (type(value) is not int or not lower <= value <= 4096):
                     raise ValueError(f"invalid public move {key}")
@@ -573,7 +620,7 @@ def _validate_descriptors(descriptors: Sequence[Mapping[str, Any]]) -> None:
                     or not node["sourceId"] or not isinstance(node["roots"], (list, tuple))):
                 raise ValueError("invalid public move program")
             for root in node["roots"]:
-                check(root, depth + 1)
+                check(root, depth + 1, root=True)
         elif "program" in node:
             if (set(node) != {"modifierId", "source", "program", "expiration"}
                     or not isinstance(node["modifierId"], str) or not node["modifierId"]
@@ -634,6 +681,12 @@ class _Edge:
     numeric: tuple[float, float, float, float]
 
 
+def _card_surface(path: tuple[str, ...]) -> str | None:
+    return {("ownCards",): "ownCards",
+            ("publicState", "revealedOpponentCards"): "revealedOpponentCards",
+            ("publicState", "draft", "choices"): "choices"}.get(path)
+
+
 class _SemanticTree:
     def __init__(self, spec: TypedEncoderSpec, geometry: BoardGeometry, *, candidate: bool = False,
                  target_cells: Mapping[tuple[int, int], int] | None = None,
@@ -646,6 +699,8 @@ class _SemanticTree:
         self.target_cells = target_cells or {}
         self.card_targets = card_targets or {}
         self.card_instances: dict[str, int] = {}
+        self._card_views: dict[str, dict[str, Mapping[str, Any]]] = {}
+        self._card_alias_records: set[int] = set()
 
     def _categories(self, kind: str, field: str, symbol: str = "", owner: str = "") -> tuple[int, int, int, int]:
         return tuple(self.spec.category_id(value) for value in (kind, field, symbol, owner))  # type: ignore[return-value]
@@ -699,7 +754,7 @@ class _SemanticTree:
                           path=(*path, field))
             self._set_child_count(index, len(value))
             return index
-        if field in _INSTANCE_FIELDS:
+        if field in _INSTANCE_FIELDS or (field == "source" and "descriptor" in path):
             if not isinstance(value, str):
                 raise ValueError("public instance reference must be a string")
             target = self.card_targets.get(value, -1) if self.candidate and field in _CARD_REF_FIELDS else -1
@@ -709,7 +764,7 @@ class _SemanticTree:
                              order=order, target_index=target, depth=depth)
             if not self.candidate and field in _CARD_REF_FIELDS:
                 linked = self.card_instances.get(value)
-                if linked is not None and linked != parent:
+                if linked is not None and linked != parent and parent not in self._card_alias_records:
                     self._link(parent, linked, "semantic-link", field)
             return index
         if isinstance(value, Mapping):
@@ -721,11 +776,27 @@ class _SemanticTree:
             index = self.add("coordinate" if coordinate is not None else "object", field,
                              parent=parent, order=order, coordinate=coordinate,
                              target_index=target, depth=depth)
-            if not self.candidate and "instanceId" in value and "id" in value and set(path) & {"ownCards", "revealedOpponentCards", "choices"}:
+            surface = _card_surface(path) if not self.candidate else None
+            if surface is not None and "instanceId" in value and "id" in value:
                 identifier = value["instanceId"]
-                if not isinstance(identifier, str) or identifier in self.card_instances:
-                    raise ValueError("duplicate or invalid public card instance identifier")
-                self.card_instances[identifier] = index
+                if not isinstance(identifier, str) or not identifier:
+                    raise ValueError("invalid public card instance identifier")
+                views = self._card_views.setdefault(identifier, {})
+                if surface in views:
+                    raise ValueError("duplicate public card instance in one surface")
+                if (surface == "ownCards" and "revealedOpponentCards" in views
+                        or surface == "revealedOpponentCards" and "ownCards" in views):
+                    raise ValueError("one public card instance cannot have opposite owners")
+                for prior in views.values():
+                    if any(canonical_json(value[key]) != canonical_json(prior[key])
+                           for key in value.keys() & prior.keys()):
+                        raise ValueError("conflicting public card alias fields")
+                if views:
+                    self._link(index, self.card_instances[identifier], "same-identity", "instanceId")
+                    self._card_alias_records.add(index)
+                else:
+                    self.card_instances[identifier] = index
+                views[surface] = value
             for key, child in sorted(value.items()):
                 self.emit(child, key, index, depth=depth + 1, path=(*path, field))
             self._set_child_count(index, len(value))

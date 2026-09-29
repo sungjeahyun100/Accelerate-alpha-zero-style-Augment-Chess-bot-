@@ -43,6 +43,14 @@ class EntityTransformerConfig:
             raise ValueError("static Transformer LoRA requires positive alpha and dropout zero")
         if self.architecture_version != "entity-transformer-film-lora-v1":
             raise ValueError("unsupported Transformer architecture version")
+        width = self.typed.hidden_dim
+        embeddings = width * (sum(self.typed.record_category_sizes)
+                              + sum(self.typed.relation_category_sizes)
+                              + sum(self.typed.candidate_category_sizes))
+        block_weights = self.blocks * (4 * width * width + 2 * width * self.ffn_dim
+                                       + 4 * width * self.lora_rank)
+        if embeddings + block_weights > 64_000_000:
+            raise ValueError("Transformer parameter lower bound exceeds 64 million")
 
     @property
     def digest(self) -> str:

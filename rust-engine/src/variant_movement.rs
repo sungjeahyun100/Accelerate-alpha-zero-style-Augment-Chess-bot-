@@ -102,7 +102,10 @@ pub(crate) fn base_moves(
                 (-1, -2),
             ],
         ),
-        "donQuixote" => leaps(state, piece, from, KNIGHT),
+        "donQuixote" => {
+            let deltas = don_quixote_deltas(state, piece, from)?;
+            leaps(state, piece, from, &deltas)
+        }
         "recruiter" => leaps(state, piece, from, KING),
         "bear" => rays(state, piece, from, QUEEN, 7),
         "revolvingDoor" => rays(state, piece, from, ORTHO, 7),
@@ -228,6 +231,39 @@ fn owner(piece: &Piece) -> Result<Color> {
             piece.kind
         ))
     })
+}
+
+/// The v7 source applies knightInjury to Don Quixote's long axis before
+/// checking its destination. The intermediate blocker is transparent only for
+/// a concealed enemy or an allied Ghost (the source passes "rook" to its
+/// ranged transparency helper). v6 keeps its frozen unconditioned deltas.
+fn don_quixote_deltas(state: &GameState, piece: &Piece, from: Square) -> Result<Vec<(i8, i8)>> {
+    if state.ruleset_id != RULES_VERSION_V7 || !state.flag("knightInjury", piece.color) {
+        return Ok(KNIGHT.to_vec());
+    }
+    if state.extra.get("camouflageRule").is_some_and(nonempty) {
+        return Err(EngineError::UnsupportedFeature(
+            "v7 injured Don Quixote camouflage transparency".into(),
+        ));
+    }
+    Ok(KNIGHT
+        .iter()
+        .copied()
+        .filter(|&(dr, dc)| {
+            let jump = if dr.abs() > dc.abs() {
+                from.offset(dr.signum(), 0)
+            } else {
+                from.offset(0, dc.signum())
+            };
+            jump.and_then(|at| state.at(at)).is_none_or(|blocker| {
+                blocker.color != piece.color
+                    && blocker.extra.get("hiddenFrom").and_then(Value::as_str)
+                        == Some(piece.color.as_str())
+                    || blocker.color == piece.color
+                        && blocker.extra.get("ghost").is_some_and(nonempty)
+            })
+        })
+        .collect())
 }
 
 /// Source jumpMoves97585 accepts a directly concealed enemy square before
@@ -722,6 +758,109 @@ fn thief(state: &GameState, piece: &Piece, from: Square) -> Result<Vec<MoveTarge
         }
     }
     Ok(moves)
+}
+
+/// The source executes a Siege Ram's occupied path cells in this order before
+/// handling a direct or jump capture. `highlightCells` is therefore an
+/// execution descriptor, not merely a display hint. Portal paths require a
+/// separate descriptor and are deliberately rejected here.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SiegeRamPath {
+    cells: Vec<Square>,
+}
+
+#[allow(dead_code, reason = "v7 Siege Ram transition is staged")]
+impl SiegeRamPath {
+    pub(crate) fn from_target(from: Square, target: &MoveTarget) -> Result<Option<Self>> {
+        if !target.flag("siegeRamMove") {
+            return Ok(None);
+        }
+        if target.flags.get("siegeRamMove") != Some(&json!(true)) {
+            return Err(EngineError::IllegalAction);
+        }
+        if target.flag("portalLanding") || target.flag("portalThrough") {
+            return Err(EngineError::UnsupportedFeature(
+                "Siege Ram portal path descriptor".into(),
+            ));
+        }
+        let to = target.square();
+        let row_distance = from.row.abs_diff(to.row);
+        let col_distance = from.col.abs_diff(to.col);
+        let (dr, dc, distance) = match (row_distance, col_distance) {
+            (1..=2, 0) => (
+                (i16::from(to.row) - i16::from(from.row)).signum() as i8,
+                0,
+                row_distance,
+            ),
+            (0, 1..=2) => (
+                0,
+                (i16::from(to.col) - i16::from(from.col)).signum() as i8,
+                col_distance,
+            ),
+            _ => return Err(EngineError::IllegalAction),
+        };
+        let mut cells = Vec::with_capacity(usize::from(distance));
+        for step in 1..=distance {
+            cells.push(
+                from.offset(dr * step as i8, dc * step as i8)
+                    .ok_or(EngineError::IllegalAction)?,
+            );
+        }
+        if target.flags.get("highlightCells") != Some(&json!(cells)) {
+            return Err(EngineError::IllegalAction);
+        }
+        Ok(Some(Self { cells }))
+    }
+
+    pub(crate) fn cells(&self) -> &[Square] {
+        &self.cells
+    }
+
+    /// The source's saturation gate counts distinct occupied piece IDs over
+    /// the whole path, including allied and neutral pieces. It does not call
+    /// ordinary `canCaptureTarget` on each path occupant.
+    pub(crate) fn potential_capture_count(&self, state: &GameState) -> usize {
+        self.cells
+            .iter()
+            .filter_map(|&square| state.at(square))
+            .map(|piece| piece.id.as_str())
+            .collect::<BTreeSet<_>>()
+            .len()
+    }
+
+    /// `captured` must contain actual successful path captures, keyed by the
+    /// cell where each capture occurred. Forced removals and failed captures
+    /// must not be included. The caller handles direct/jump fallback after
+    /// this source-priority path victim.
+    pub(crate) fn first_chameleon_victim<'a>(
+        &self,
+        state: &GameState,
+        captured: &'a [(Square, Piece)],
+    ) -> Result<Option<&'a Piece>> {
+        if captured.len() > self.cells.len()
+            || captured
+                .iter()
+                .any(|(square, _)| !self.cells.contains(square))
+            || captured.iter().enumerate().any(|(index, (square, _))| {
+                captured[..index].iter().any(|(other, _)| other == square)
+            })
+        {
+            return Err(EngineError::InvalidState(
+                "Siege Ram capture trace outside path".into(),
+            ));
+        }
+        Ok(self.cells.iter().find_map(|cell| {
+            captured.iter().find_map(|(at, victim)| {
+                (at == cell
+                    && !state.royal_identity(victim)
+                    && !matches!(
+                        victim.kind.as_str(),
+                        "wall" | "colossus" | "bigRook" | "bigBishop"
+                    ))
+                .then_some(victim)
+            })
+        }))
+    }
 }
 
 fn siege_ram(from: Square) -> Vec<MoveTarget> {
@@ -1623,6 +1762,45 @@ mod tests {
     }
 
     #[test]
+    fn v7_injured_don_quixote_uses_the_long_axis_jump_blocker() {
+        let mut state = GameState::new(GameConfig::default(), 37).unwrap();
+        let from = Square { row: 4, col: 4 };
+        let don = Piece::new("donQuixote", Color::White, "don");
+        state.board[4][4] = Some(don.clone());
+        state.board[3][4] = Some(Piece::new("wall", PieceColor::Neutral, "wall"));
+        state
+            .extra
+            .insert("knightInjury".into(), json!({"white":true,"black":false}));
+        let destinations = |state: &GameState| {
+            moves(state, &don, from)
+                .into_iter()
+                .map(|target| target.square())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            destinations(&state),
+            vec![
+                Square { row: 2, col: 3 },
+                Square { row: 2, col: 5 },
+                Square { row: 3, col: 2 },
+                Square { row: 3, col: 6 },
+                Square { row: 5, col: 2 },
+                Square { row: 5, col: 6 },
+            ]
+        );
+        state.ruleset_id = RULES_VERSION_V7.into();
+        assert_eq!(
+            destinations(&state),
+            vec![
+                Square { row: 3, col: 2 },
+                Square { row: 3, col: 6 },
+                Square { row: 5, col: 2 },
+                Square { row: 5, col: 6 },
+            ]
+        );
+    }
+
+    #[test]
     fn source_quiet_and_jump_paths_preserve_blockers_and_identity() {
         for (kind, delta) in [
             ("reaper", (-1, -1)),
@@ -1855,6 +2033,75 @@ mod tests {
             .find(|to| to.square() == Square { row: 4, col: 7 })
             .unwrap();
         assert_eq!(kick.flags["kicker"], json!({"row":4,"col":2}));
+    }
+
+    #[test]
+    fn v7_siege_chameleon_path_preserves_source_candidate_and_first_victim() {
+        // Frozen v7 P8 synthetic board: Ram (4,4), knight (4,5), bishop
+        // (4,6). The source accepts the two-cell move and transforms the Ram
+        // into the first successful path victim after both forced captures.
+        let (mut state, mut ram, _) = empty("siegeRam");
+        state.ruleset_id = RULES_VERSION_V7.into();
+        state.board[4][3] = None;
+        let from = Square { row: 4, col: 4 };
+        ram.extra.insert("chameleon".into(), json!(true));
+        state.board[4][4] = Some(ram.clone());
+        let first = Square { row: 4, col: 5 };
+        let landing = Square { row: 4, col: 6 };
+        put(&mut state, first, "knight", Color::Black);
+        put(&mut state, landing, "bishop", Color::Black);
+        let target = base_moves(&state, &ram, from)
+            .unwrap()
+            .unwrap()
+            .into_iter()
+            .find(|target| target.square() == landing)
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&target).unwrap(),
+            json!({
+                "row":4,"col":6,"siegeRamMove":true,
+                "highlightCells":[{"row":4,"col":5},{"row":4,"col":6}]
+            })
+        );
+        let path = SiegeRamPath::from_target(from, &target).unwrap().unwrap();
+        assert_eq!(path.cells(), &[first, landing]);
+        assert_eq!(path.potential_capture_count(&state), 2);
+        assert!(
+            crate::movement::piece_moves(&state, &ram, from)
+                .unwrap()
+                .contains(&target)
+        );
+        let captures = vec![
+            (landing, state.at(landing).unwrap().clone()),
+            (first, state.at(first).unwrap().clone()),
+        ];
+        assert_eq!(
+            path.first_chameleon_victim(&state, &captures)
+                .unwrap()
+                .unwrap()
+                .kind,
+            "knight"
+        );
+        let mut royal_first = captures.clone();
+        royal_first[1].1.kind = "king".into();
+        assert_eq!(
+            path.first_chameleon_victim(&state, &royal_first)
+                .unwrap()
+                .unwrap()
+                .kind,
+            "bishop"
+        );
+        let mut invalid = target.clone();
+        invalid
+            .flags
+            .insert("highlightCells".into(), json!([landing]));
+        assert!(matches!(
+            SiegeRamPath::from_target(from, &invalid),
+            Err(EngineError::IllegalAction)
+        ));
+        let first_id = state.at(first).unwrap().id.clone();
+        state.board[4][6].as_mut().unwrap().id = first_id;
+        assert_eq!(path.potential_capture_count(&state), 1);
     }
 
     #[test]

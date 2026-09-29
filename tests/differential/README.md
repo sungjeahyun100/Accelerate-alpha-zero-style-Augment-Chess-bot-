@@ -45,14 +45,23 @@ Hypocrisy의 큰 후보 공간은 전체 `actions()`의 명시적 예산 오류�
 ## v7 네이티브 비교 진입점
 
 `node tests/differential/v7-native-differential.cjs --python <maturin으로 설치한 Python>`은
-고정된 client SHA·v7 프로필·catalog를 먼저 확인한다. normal, chaos, grand 각각에서
-seed 37의 초기 draft와 원문 선택으로 draft를 끝낸 첫 play를 만든다. 국면마다
-`actionStream()`의 **전체** 합법 후보를 한도 안에서 소진한 뒤 네이티브 PyO3
-`Position.from_snapshot()`·`action_stream()`의 후보 multiset과 action envelope를
-비교한다. 원문이 거부한 잘못된 행동자 선택의 거부·원본 상태 보존도 확인하고,
-처음/마지막 합법 행동을 적용해 전체 Position(상태·공개 이력·RNG·identity),
-행동자·턴 변화·결과를 대조한다. 후보의 prefix나 worker의 useful-action filter는
-전체 합법 후보의 대체물이 아니다.
+고정된 client SHA·v7 프로필·catalog·공개 관찰 정책을 먼저 확인한다. normal,
+chaos, grand 각각에서 seed 37의 초기 draft와 첫 play를 만들고, seed 19에서는
+각 draft offer의 모든 카드가 catalog상 `ACTIVE`인 첫 선택을 반복해 첫 play를
+재생성한다. seed 19 세 국면의 Position digest와 합법 후보 수는 저장소 밖
+`%APPDATA%/Accelerate/reports/v7-opening-source-probe/seed19-active-only/manifest.json`의
+작은 고정값에 맞춰 검사한다. 원시 Position은 Git fixture로 복사하지 않는다.
+
+각 국면에서 `actionStream()`의 **전체** 합법 후보를 한도 안에서 소진하고,
+네이티브 PyO3 `Position.from_snapshot()`·`action_stream()`의 후보 집합뿐 아니라
+**순서와 전체 action envelope**를 비교한다. 모든 합법 후보를 payload 및
+snapshot 경로로 다시 bind하고, 원문이 거부한 잘못된 행동자 선택의 거부·원본
+상태 보존을 확인한다. 처음/마지막 후보와 별도의 첫 card 후보가 있으면 이를
+각각 적용해 전체 Position(상태·공개 이력·RNG·identity), 행동자·턴 변화,
+결과 envelope 및 양측 viewer의 public Observation v2를 대조한다. JSON object의
+키 순서와 정수/실수 표기 차이만 정규화하고, 누락 필드·배열 순서·값 차이는
+불일치로 판정한다. 후보 prefix나 worker useful-action filter는 전체 합법 후보의
+대체물이 아니다.
 
 `--source <절대 경로>`로 고정 client cache를 명시할 수 있다. `--oracle-only`는
 네이티브 엔진 없이 원문 입력 생성을 조사할 때 사용하며 종료 코드는 실패다.
@@ -60,5 +69,7 @@ seed 37의 초기 draft와 원문 선택으로 draft를 끝낸 첫 play를 만�
 페이지·후보·examined 예산 초과와 비교 불일치는 모두 성공으로 처리하지 않는다.
 고정 위치의 작은 요약만 `%APPDATA%/Accelerate/reports/v7-native-differential/report.json`
 (CI: `$RUNNER_TEMP/Accelerate/reports/...`)에 쓴다. 원시 상태나 fixture는 저장하지
-않는다. 이 6개 국면은 draft/play의 move·card·draft 선택과 ongoing 결과만 다루므로,
-통과해도 특수 행동·종료 결과·모든 규칙의 P8 완료 판정은 아니다.
+않는다. 미실행·미지원·불일치 상태의 보고서 `decision`은 `NO-GO`이며 명시적
+`--oracle-only`도 종료 코드가 실패다. 이 9개 국면은 draft/play의 일부 move·card·
+draft 선택과 ongoing 결과만 다루므로, 통과해도 특수 행동·종료 결과·모든 규칙의
+P8 완료 또는 프로젝트 GO 판정은 아니다.

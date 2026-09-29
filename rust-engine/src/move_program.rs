@@ -743,8 +743,7 @@ impl<'a, B: MoveBoard> MoveProgramCursor<'a, B> {
             }
             if let Some((kind, new_anchor, captured_id, shifted_id)) = activated {
                 let is_capture = captured_id.is_some();
-                if !(is_capture
-                    && frame.node.activation_condition == ActivationCondition::NoCapture)
+                if !is_capture || frame.node.activation_condition != ActivationCondition::NoCapture
                 {
                     let step = ActivationStep {
                         node_path: frame.node_path.clone(),
@@ -754,8 +753,8 @@ impl<'a, B: MoveBoard> MoveProgramCursor<'a, B> {
                     };
                     let mut provenance = frame.ancestry;
                     provenance.push(step);
-                    if !(frame.node.activation_condition == ActivationCondition::MustCapture
-                        && !is_capture)
+                    if frame.node.activation_condition != ActivationCondition::MustCapture
+                        || is_capture
                     {
                         if self.emitted >= self.limits.max_raw_actions {
                             return Err(MoveProgramError::LimitExceeded {

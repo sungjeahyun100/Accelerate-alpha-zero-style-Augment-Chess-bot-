@@ -88,6 +88,7 @@ P1/P2a/P2b/P4/P5/P6/P7은 분리 가능한 경계에서 병렬 진행한다. P3�
 ## P7. 공개 정보 탐색·기록·유한 실행
 
 - ISMCTS의 선택과 정보집합 키는 Observation/public history/실제 공개 hint만 사용한다. private Position은 환경 transition과 source-valid particle 내부에만 있고 네트워크·정책 키에 전달하지 않는다. 상대 공개 선택 카드를 숨은 카드로 재표본화하지 않는다. chance posterior는 독립 seed와 source prior/proposal 확률 `p/q`를 써서 가중하며 설명할 수 없는 chance family는 Unsupported다.
+- 탐색 자식 노드에 루트에서 조건화한 `belief_summary`를 그대로 전달한다면 이를 **루트 posterior 문맥**으로 기록한다. 자식의 공개 history 길이와 `trace_steps`가 같아야 한다고 가정하거나, 새 관측으로 조건화하지 않은 값을 자식 posterior로 표시하지 않는다. 자식별 posterior가 필요한 기능은 source-valid 전이·제안 확률을 검증하고 별도 의미 버전으로 도입한다.
 - 실제 decision actor가 바뀔 때 value 부호/backup을 변경한다. 중복 public intent는 MCTS에서 합칠 수 있으나 원시 ordered 선택과 effect별 실행 action은 보존한다. legal iterator·progressive widening은 정확한 전체 후보 의미를 유지하고 예산 때문에 조용히 truncate하지 않는다.
 - 노드·particle·proposal·batch·시간/step/메모리 한도는 유한하다. 시간 예산 종료와 게임 terminal, 취소와 미완료 rollout을 구분한다. clock을 주입해 deterministic finite-work 의미 검사와 실제 시간 watchdog 검사를 분리한다. 현재 두 OS CI의 CHAOS belief reconstruction 5초 실패를 timeout 수치 확대나 작업 축소만으로 녹색 처리하지 않는다.
 - replay/dataset에는 public frame·결정 actor·후보 정책·result의 terminal/unfinished, seed 및 source/rules/catalog/observation/encoder/model/adapter 버전을 보존한다. snapshot/replay는 v6/v7을 교차 자동 승격하지 않는다. 동일 계약 checkpoint의 optimizer/RNG/cursor **resume**과 새 IR에 맞는 가중치 일부 이전 **warm-start**를 분리한다.

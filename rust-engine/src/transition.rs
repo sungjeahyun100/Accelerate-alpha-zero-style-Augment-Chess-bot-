@@ -316,8 +316,8 @@ fn apply_democracy(state: &mut GameState, color: Color) -> Result<bool> {
 pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
     let actor = action.color;
     let before = Sides {
-        white: state.try_observe(Color::White)?,
-        black: state.try_observe(Color::Black)?,
+        white: observe_for_public_event(state, Color::White)?,
+        black: observe_for_public_event(state, Color::Black)?,
         white_first: true,
     };
     let captures = match action.kind {
@@ -332,7 +332,7 @@ pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>
     prune_board_potion_effects(state)?;
     crate::replay::settle(state)?;
     let transition = |viewer| -> Result<PublicTransition> {
-        let after = state.try_observe(viewer)?;
+        let after = observe_for_public_event(state, viewer)?;
         let before = before.get(viewer);
         let mut board_changes = Vec::new();
         if before.board.len() != after.board.len()
@@ -407,6 +407,20 @@ pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>
         .history
         .push(serde_json::to_value(event).expect("game event serializes"));
     Ok(captures)
+}
+
+/// PublicEvent records board/card/result changes. The source's active-play
+/// highlight calculation is a separate viewer API and is not an input to this
+/// transition. In v7, keep that still-unported hint surface fail-closed while
+/// allowing validated internal projections to record draft-to-play events.
+fn observe_for_public_event(state: &GameState, viewer: Color) -> Result<Observation> {
+    if state.ruleset_id == RULES_VERSION_V7 {
+        let observation = state.observe_checked(viewer)?;
+        crate::observation::validate_projection_for_ruleset(&observation, &state.ruleset_id)?;
+        Ok(observation)
+    } else {
+        state.try_observe(viewer)
+    }
 }
 
 pub(crate) fn execute_threat_move(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
@@ -1211,13 +1225,18 @@ fn finish_move(state: &mut GameState, actor: Color) -> Result<()> {
     if !crate::flow::commit_turn_clock(state, actor)? {
         return Ok(());
     }
-    for piece in state
-        .board
-        .iter_mut()
-        .flatten()
-        .flatten()
-        .filter(|piece| piece.color == actor)
-    {
+    // With thiefRemake enabled, v7 tickThiefArrests clears every piece's
+    // path memory before actor-specific arrests. v6 clears only the actor's.
+    let v7 = state.ruleset_id == RULES_VERSION_V7;
+    let clear_v7_thief_paths =
+        v7 && state.extra.get("thiefRemake").and_then(Value::as_bool) != Some(false);
+    for piece in state.board.iter_mut().flatten().flatten().filter(|piece| {
+        if v7 {
+            clear_v7_thief_paths
+        } else {
+            piece.color == actor
+        }
+    }) {
         piece.extra.shift_remove("thiefVisited");
         piece.extra.shift_remove("thiefLastDirection");
     }
@@ -1315,6 +1334,15 @@ fn finish_move(state: &mut GameState, actor: Color) -> Result<()> {
     // movement states; ordinary Portal Gun reservations settle here.
     crate::card_effects::resolve_pending_portals_for_turn(state, incoming)?;
     clear_coronation_protection(state, state.turn);
+    if state.ruleset_id == RULES_VERSION_V7 {
+        // Source completeTurnAfterMove resolves local Don Quixote after the
+        // incoming side's coronation/Brutus window and before its action limit.
+        // The helper admits only a source-verified inert predecessor profile.
+        crate::turn_effects_v7::resolve_don_quixote_turn_entry(state, incoming)?;
+        if state.mode == "gameover" {
+            return Ok(());
+        }
+    }
     state.actions_remaining = if state.flag("acceleration", state.turn) {
         2
     } else {
@@ -1323,6 +1351,11 @@ fn finish_move(state: &mut GameState, actor: Color) -> Result<()> {
     crate::flow::start_clock(state)?;
     if crate::flow::check_termination(state)? {
         crate::flow::pause_clock(state)?;
+    }
+    if state.ruleset_id == RULES_VERSION_V7 {
+        // Frozen completeTurnAfterMove checks repetition/star limits, then
+        // enters a MIDDLE/END draft before probing next-turn no-action loss.
+        crate::flow::maybe_start_milestone_draft(state)?;
     }
     crate::flow::check_no_action_loss(state)?;
     Ok(())
@@ -2101,7 +2134,8 @@ fn finish_card(
 /// real position, although its mutated board is discarded. This is different
 /// from the public immutable rule-query API, whose probe RNG stays isolated.
 pub(crate) fn available_card_action(state: &mut GameState, color: Color) -> Result<bool> {
-    if state.flag("draftDelete", color) {
+    // draftDelete is a game-wide source setting, not a per-side status flag.
+    if crate::observation::truth(state.extra.get("draftDelete")) {
         return Ok(false);
     }
     let cards = state.deck_slots.get(color).clone();

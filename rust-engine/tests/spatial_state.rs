@@ -26,15 +26,17 @@ fn piece(id: &str, anchor: Coord, footprint: &[(i32, i32)]) -> SpatialPiece {
 
 #[test]
 fn geometry_maps_rectangles_and_signed_extents_without_relabeling_coordinates() {
-    for (height, width) in [(1, 1), (5, 7), (8, 8), (10, 12)] {
-        let geometry = BoardGeometry::new(-3, -5, height, width).unwrap();
-        assert_eq!(geometry.area(), usize::from(height) * usize::from(width));
-        for (index, coord) in geometry.coordinates().enumerate() {
-            assert_eq!(geometry.index(coord), Some(index));
-            assert_eq!(geometry.coord_at(index), Some(coord));
+    for (min_row, min_col) in [(-3, -5), (4, 7)] {
+        for (height, width) in [(1, 1), (5, 7), (8, 8), (10, 12)] {
+            let geometry = BoardGeometry::new(min_row, min_col, height, width).unwrap();
+            assert_eq!(geometry.area(), usize::from(height) * usize::from(width));
+            for (index, coord) in geometry.coordinates().enumerate() {
+                assert_eq!(geometry.index(coord), Some(index));
+                assert_eq!(geometry.coord_at(index), Some(coord));
+            }
+            assert_eq!(geometry.index(Coord::new(min_row - 1, min_col)), None);
+            assert_eq!(geometry.index(Coord::new(min_row, min_col - 1)), None);
         }
-        assert_eq!(geometry.index(Coord::new(-4, -5)), None);
-        assert_eq!(geometry.index(Coord::new(-3, -6)), None);
     }
     assert!(BoardGeometry::new(0, 0, 0, 1).is_err());
     assert!(BoardGeometry::new(0, 0, 65, 65).is_err());
@@ -49,6 +51,11 @@ fn geometry_maps_rectangles_and_signed_extents_without_relabeling_coordinates() 
         .is_err()
     );
     assert_eq!(Coord::new(i32::MAX, 0).offset(Offset::new(1, 0)), None);
+    assert_eq!(Coord::new(i32::MIN, 0).offset(Offset::new(-1, 0)), None);
+    assert_eq!(
+        Offset::between(Coord::new(i32::MIN, 0), Coord::new(i32::MAX, 0)),
+        None
+    );
 }
 
 #[test]
@@ -69,6 +76,20 @@ fn one_piece_owns_disconnected_cells_and_collision_is_rejected_atomically() {
     ));
     assert_eq!(state.position_key().unwrap(), before);
     assert_eq!(state.pieces().len(), 1);
+
+    let anchorless = piece("anchorless", Coord::new(0, 0), &[(0, 1)]);
+    let placed = state.with_piece(anchorless.clone()).unwrap();
+    assert!(placed.piece_at(Coord::new(0, 0)).is_none());
+    assert_eq!(placed.piece_at(Coord::new(0, 1)).unwrap().id, "anchorless");
+    let mut unusable = CellState::open();
+    unusable.usable = false;
+    let blocked = state.with_cell(Coord::new(0, 1), unusable).unwrap();
+    let blocked_key = blocked.position_key().unwrap();
+    assert!(matches!(
+        blocked.with_piece(anchorless),
+        Err(EngineError::InvalidState(_))
+    ));
+    assert_eq!(blocked.position_key().unwrap(), blocked_key);
 }
 
 #[test]
@@ -91,6 +112,27 @@ fn synthetic_resize_requires_new_cells_and_an_explicit_clipping_policy() {
         .unwrap();
     let before = initial.position_key().unwrap();
 
+    let larger = BoardGeometry::new(-1, -2, 7, 9).unwrap();
+    let retained_expansion_cells = larger
+        .coordinates()
+        .filter(|&coord| !initial.geometry().contains(coord))
+        .map(|coord| (coord, CellState::open()))
+        .collect();
+    let retained = initial
+        .resize_geometry(ResizeRequest {
+            geometry: larger,
+            added_cells: retained_expansion_cells,
+            policy: ResizePolicy::RejectAffected,
+        })
+        .unwrap();
+    assert_eq!(retained.piece_at(Coord::new(4, 6)).unwrap().id, "edge");
+    assert_eq!(retained.links(), initial.links());
+    assert_eq!(retained.scheduled_effects(), initial.scheduled_effects());
+    assert!(matches!(
+        retained.check_binding(&before),
+        Err(EngineError::StaleAction)
+    ));
+
     let smaller = BoardGeometry::new(0, 0, 4, 6).unwrap();
     let reject = ResizeRequest {
         geometry: smaller,
@@ -110,12 +152,12 @@ fn synthetic_resize_requires_new_cells_and_an_explicit_clipping_policy() {
     assert!(removed.links().is_empty());
     assert!(removed.scheduled_effects().is_empty());
     assert_eq!(removed.geometry(), smaller);
+    assert_eq!(removed.revision(), initial.revision() + 1);
     assert!(matches!(
         removed.check_binding(&before),
         Err(EngineError::StaleAction)
     ));
 
-    let larger = BoardGeometry::new(-1, -2, 7, 9).unwrap();
     let mut added_cells = BTreeMap::new();
     for coord in larger
         .coordinates()
@@ -146,31 +188,62 @@ fn synthetic_resize_requires_new_cells_and_an_explicit_clipping_policy() {
         .unwrap()
         .with_cell(Coord::new(1, 1), marked)
         .unwrap();
+    let marked_key = marked_state.position_key().unwrap();
+    for policy in [
+        ResizePolicy::RejectAffected,
+        ResizePolicy::RemoveAffectedEntities,
+    ] {
+        assert!(
+            marked_state
+                .resize_geometry(ResizeRequest {
+                    geometry: BoardGeometry::new(0, 0, 1, 2).unwrap(),
+                    added_cells: BTreeMap::new(),
+                    policy,
+                })
+                .is_err()
+        );
+        assert_eq!(marked_state.position_key().unwrap(), marked_key);
+    }
+    let cleared = marked_state
+        .with_cell(Coord::new(1, 1), CellState::open())
+        .unwrap();
     assert!(
-        marked_state
+        cleared
             .resize_geometry(ResizeRequest {
                 geometry: BoardGeometry::new(0, 0, 1, 2).unwrap(),
                 added_cells: BTreeMap::new(),
-                policy: ResizePolicy::RejectAffected,
+                policy: ResizePolicy::RemoveAffectedEntities,
             })
-            .is_err()
+            .is_ok()
     );
 }
 
 #[test]
-fn v7_collapse_keeps_extent_and_only_removes_affected_footprint_offsets() {
+fn v7_collapse_keeps_extent_and_removes_the_entire_affected_identity() {
     let geometry = BoardGeometry::new(0, 0, 8, 8).unwrap();
     let state = SpatialState::new_with_profile(SpatialProfile::SourceV7, geometry)
         .unwrap()
         .with_piece(piece("large", Coord::new(2, 2), &[(0, 0), (0, 1), (1, 0)]))
+        .unwrap()
+        .with_piece(piece("anchorless", Coord::new(2, 2), &[(3, 3)]))
         .unwrap();
+    let before = state.position_key().unwrap();
     let collapsed = state.collapse_cells(&coords(&[(2, 2)])).unwrap();
     assert_eq!(collapsed.geometry(), geometry);
     assert!(!collapsed.is_usable(Coord::new(2, 2)));
-    assert!(collapsed.piece_at(Coord::new(2, 2)).is_none());
-    assert_eq!(collapsed.piece_at(Coord::new(2, 3)).unwrap().id, "large");
-    assert_eq!(collapsed.piece("large").unwrap().anchor, Coord::new(2, 2));
-    assert_eq!(collapsed.piece("large").unwrap().footprint.len(), 2);
+    assert!(collapsed.piece("large").is_none());
+    for coord in coords(&[(2, 2), (2, 3), (3, 2)]) {
+        assert!(collapsed.piece_at(coord).is_none());
+    }
+    assert_eq!(
+        collapsed.piece_at(Coord::new(5, 5)).unwrap().id,
+        "anchorless"
+    );
+    assert_eq!(collapsed.revision(), state.revision() + 1);
+    assert!(matches!(
+        collapsed.check_binding(&before),
+        Err(EngineError::StaleAction)
+    ));
     let linked = state
         .with_link(SpatialReference {
             id: "link".into(),
@@ -303,6 +376,51 @@ fn v7_source_board_projects_one_exact_noncontiguous_piece_without_enabling_execu
     assert_eq!(spatial.piece_at(Coord::new(2, 2)).unwrap().id, "large-v7");
     assert_eq!(spatial.piece_at(Coord::new(4, 5)).unwrap().id, "large-v7");
     assert!(spatial.piece_at(Coord::new(3, 4)).is_none());
+    let mut black_hole_source = source.clone();
+    black_hole_source.extra.insert(
+        "blackHole".into(),
+        json!([{"row": 4, "col": 5}, {"row": 1, "col": 1}]),
+    );
+    let black_hole_spatial = SpatialState::from_v7_source(&black_hole_source).unwrap();
+    assert_eq!(black_hole_spatial.geometry(), spatial.geometry());
+    assert!(black_hole_spatial.is_usable(Coord::new(4, 5)));
+    assert_eq!(
+        black_hole_spatial.piece_at(Coord::new(4, 5)).unwrap().id,
+        "large-v7"
+    );
+    assert!(
+        black_hole_spatial
+            .cell(Coord::new(4, 5))
+            .unwrap()
+            .terrain
+            .contains("blackHole")
+    );
+    assert!(
+        black_hole_spatial
+            .cell(Coord::new(1, 1))
+            .unwrap()
+            .terrain
+            .contains("blackHole")
+    );
+    black_hole_source.extra.insert(
+        "blackHole".into(),
+        json!([{"row": 8, "col": 0}, {"row": 2.5, "col": 2}, {"row": "1", "col": 1}]),
+    );
+    let normalized = SpatialState::from_v7_source(&black_hole_source).unwrap();
+    assert!(
+        normalized
+            .cell(Coord::new(1, 1))
+            .unwrap()
+            .terrain
+            .contains("blackHole")
+    );
+    assert!(
+        normalized
+            .cell(Coord::new(2, 2))
+            .unwrap()
+            .terrain
+            .is_empty()
+    );
     assert!(matches!(
         spatial.resize_geometry(ResizeRequest {
             geometry: BoardGeometry::new(0, 0, 7, 8).unwrap(),

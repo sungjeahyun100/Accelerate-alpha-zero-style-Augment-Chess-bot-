@@ -24,6 +24,23 @@ v7 생성·실행 guard와 `try_observe`의 동적 v7 투영 guard는 유지한�
 실제 학습은 수행하지 않았다. 위 수치는 서로 다른 국소 검사 범위의 관측값이며, 새 PR
 커밋의 CI 성공이나 규칙 전체 GO를 뜻하지 않는다.
 
+## 2026-09-29 후속 통합 checkpoint
+
+이 절은 위 기반 checkpoint 이후의 **로컬 작업 트리**에서 확인한 범위다. 동결 v7
+클라이언트와 독립 N-version의 결과를 분리하고, 공개 native `Position`의 v7
+import·play legal·bind·apply를 아직 열지 않는다.
+
+| 범위 | 추가 구현과 확인한 증거 | 남은 경계 |
+|---|---|---|
+| 공간·행마 | v7 `collapseEdges`는 보드 외곽 8×8을 유지하며 영향받은 다중 셀 기물의 identity 전체를 제거한다. `blackHole`은 별도 위험 지형이다. 독립 N-version의 낡은 부분 footprint 잔존 기대도 원문에 맞게 수정했다. seed 19 normal Relay 직후에는 검증된 profile에서 swap 128개와 기본 행마 20개, 합계 **148개 후보의 payload·순서**가 원문과 일치한다. Siege Ram 경로와 Don Quixote의 왕 회피 자동 턴 진입도 각각 좁은 원문 상태에서 대조했다. | Relay 교환 실행·다른 조합의 이동·붕괴 후 상위 승패·일반 v7 legal 전체. |
+| 카드·드래프트·턴 | 257개 정의의 표시 필드를 원문 SHA에 묶고, seed 37 normal·chaos·grand 초기 상태/전체 draft 후보 **3·3·28개**/첫 선택 후 전체 상태·history·RNG를 대조했다. seed 19에서 Relay·Reposition, grand의 실제 12회 선택 후 Taunt, chaos의 Queen's Gambit을 해당 도달 상태에서 대조했다. 10·20턴 MIDDLE·END 자동 드래프트는 normal·chaos의 **합성** 네 상태에서 전체 상태·RNG가 일치했다. | 나머지 카드·RULE 상호작용, 자연 대국으로 10·20턴 도달하는 전체 전이. |
+| 공개 계약 | v7 드래프트·종료·비행동자 관측을 버전별 공개 정책으로 검사하며, 이력에 viewer 투영이 없으면 panic 대신 `InvalidState`를 반환한다. 마지막 draft 선택의 내부 공개 event 기록은 active-play 힌트와 분리했다. | 플레이 행동자의 `legalHints`와 모든 선택의 적용이 완성되기 전에는 공개 v7 `Position`을 열 수 없다. 기존 v6 전용 infallible `observe`도 v7에 사용하지 않는다. |
+| AI·설치본 | source 공개 IR에 카드 alias와 belief 요약을 명시한 15필드 인코더를 적용했다. 로컬 Python 관련 검사는 **62 pass·7 native 선택 제외**였다. 중간 Linux sdist→설치 wheel에서 15필드 검증, 추론 검사 **11 pass**, A/B × ORT·tract 활성화 네 건과 수치 대조가 통과했다. | 같은 최종 커밋의 Windows/Linux 설치본, v7 native Position을 통한 세 모드 bounded 탐색. |
+| 통합 검사 | 로컬 WSL `cargo test --workspace --locked`에서 엔진 lib **125개**와 통합 **1·4·8개**가 모두 통과했고 ignored는 0개였다. workspace 전체 대상 strict Clippy, 전체 rustfmt, 저장소 정책 Node 검사 14개와 v7 ordered adapter 검사 4개가 통과했다. | 동일 SHA CI 및 source-reachable 전체 규칙 coverage. 고정 v7 차분의 native import는 아직 명시적 `Unsupported`이므로 최종 코드 판정은 **NO-GO**다. |
+
+Linux 전체 workspace 테스트의 PyO3 링크에는 WSL 시스템의 `libpython3.12.so.1.0`을
+가리키는 재생성 가능한 외부 캐시 symlink를 사용했다. 모델 학습 캠페인은 실행하지 않았다.
+
 ## D0 의미 정렬과 적용 상태 (2026-09-29)
 
 아래는 [DECISIONS](DECISIONS.md#재설계-d0-의미-정렬-2026-09-29)의 채택 관계다.

@@ -171,6 +171,8 @@ enum Mutation {
     Wanted,
     Brainwash,
     Othello,
+    Reposition,
+    Taunt,
     Taboo,
     Cleanup,
     Hypocrisy,
@@ -331,6 +333,11 @@ fn plan(state: &GameState, card: &CardSlot) -> Option<Plan> {
         "taboo" => (Exact(""), Taboo),
         _ => match card.effect.as_str() {
             "othello" if state.ruleset_id == RULES_VERSION_V7 => (Exact(""), Othello),
+            "relay" if state.ruleset_id == RULES_VERSION_V7 => {
+                (Exact(""), SideFlag("relay", false))
+            }
+            "reposition" if state.ruleset_id == RULES_VERSION_V7 => (Exact(""), Reposition),
+            "taunt" if state.ruleset_id == RULES_VERSION_V7 => (Exact(""), Taunt),
             "cleanupPieces" => (Exact(""), Cleanup),
             "hypocrisy" => (Exact(""), Hypocrisy),
             "portalGun" => (Exact(""), PortalGun),
@@ -1340,6 +1347,8 @@ pub(crate) fn actions(state: &GameState, card: &CardSlot) -> Result<Option<Vec<A
             | Mutation::Alekhine
             | Mutation::Evasion
             | Mutation::LastResistance
+            | Mutation::Reposition
+            | Mutation::Taunt
             | Mutation::Wanted
     ) {
         let available = match plan.mutation {
@@ -1348,6 +1357,8 @@ pub(crate) fn actions(state: &GameState, card: &CardSlot) -> Result<Option<Vec<A
             Mutation::Alekhine => alekhine_formation(state).is_some(),
             Mutation::Evasion => !evasion_candidates(state).is_empty(),
             Mutation::LastResistance => king_augment_square(state).is_some(),
+            Mutation::Reposition => reposition_available(state),
+            Mutation::Taunt => taunt_available(state),
             Mutation::Wanted => !wanted_candidates(state).is_empty(),
             _ => unreachable!(),
         };
@@ -2619,6 +2630,76 @@ fn apply_last_resistance(state: &mut GameState) -> Result<()> {
         .ok_or(EngineError::IllegalAction)?;
     temporary_protection(&mut piece, "lastResistance", state.turn);
     write_piece(state, &piece);
+    Ok(())
+}
+// v7 main-OahWs0tU.js:95363-95366,104799-104807. The untargeted
+// reposition effect clears the owner's older marks, then marks eligible pieces
+// and queues their animation in board iteration order without sampling RNG.
+fn reposition_available(state: &GameState) -> bool {
+    state.board.iter().flatten().flatten().any(|piece| {
+        piece.color == state.turn && !["wall", "football"].contains(&piece.kind.as_str())
+    })
+}
+fn apply_reposition(state: &mut GameState, action: &Action) -> Result<()> {
+    if action.target.is_some() || !reposition_available(state) {
+        return Err(EngineError::IllegalAction);
+    }
+    let color = state.turn;
+    for piece in state.board.iter_mut().flatten().flatten() {
+        if piece.color == color {
+            piece.extra.shift_remove("repositionSecondMove");
+        }
+    }
+    for row in 0..state.board.len() {
+        for col in 0..state.board[row].len() {
+            let marked = state.board[row][col].as_mut().and_then(|piece| {
+                (piece.color == color && !["wall", "football"].contains(&piece.kind.as_str())).then(
+                    || {
+                        piece
+                            .extra
+                            .insert("repositionSecondMove".into(), json!({"used":false}));
+                        piece.clone()
+                    },
+                )
+            });
+            if let Some(piece) = marked {
+                mark_animation(state, &piece)?;
+            }
+        }
+    }
+    Ok(())
+}
+// v7 main-OahWs0tU.js:68479-68481,104541-104547. Taunt affects the
+// opposing side's next turn and is available even when its only target is a
+// royal piece; only wall, football and blackHole are excluded.
+fn taunt_available(state: &GameState) -> bool {
+    state.board.iter().flatten().flatten().any(|piece| {
+        piece.color == state.turn.opponent()
+            && !["wall", "football", "blackHole"].contains(&piece.kind.as_str())
+    })
+}
+fn apply_taunt(state: &mut GameState, action: &Action) -> Result<()> {
+    if action.target.is_some() || !taunt_available(state) {
+        return Err(EngineError::IllegalAction);
+    }
+    let target = state.turn.opponent().as_str();
+    if !truthy(state.extra.get("taunt")) {
+        state
+            .extra
+            .insert("taunt".into(), json!({"white":0,"black":0}));
+    }
+    let counters = state
+        .extra
+        .get_mut("taunt")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| EngineError::InvalidState("taunt color map missing".into()))?;
+    let previous = match counters.get(target) {
+        None | Some(Value::Null) => 0,
+        Some(value) => value
+            .as_u64()
+            .ok_or_else(|| EngineError::InvalidState("taunt counter must be unsigned".into()))?,
+    };
+    counters.insert(target.into(), json!(previous.max(1)));
     Ok(())
 }
 fn apply_side_flag(state: &mut GameState, field: &str, color: Color) -> Result<()> {
@@ -4200,7 +4281,14 @@ fn trickster_defaults(state: &mut GameState, piece: &mut Piece) -> Result<()> {
         .extra
         .insert("tricksterMoveType".into(), json!(ability));
     match ability {
-        "thief" => default_if_missing(piece, "submerged", json!(true)),
+        "thief" => {
+            default_if_missing(piece, "submerged", json!(true));
+            // The September 26 source also makes a thief-form Trickster
+            // wanted. The legacy source left this field untouched.
+            if state.ruleset_id == RULES_VERSION_V7 {
+                default_if_missing(piece, "wanted", json!({"by":piece.color}));
+            }
+        }
         "wizard" => {
             default_if_missing(piece, "mana", json!(0));
             default_if_missing(piece, "maxMana", json!(5));
@@ -4399,6 +4487,53 @@ pub(crate) fn validate(
     }
 }
 
+/// Opening RULEs use a separate source activation path from hand-card use.
+/// Only effects with verified immediate initial-state semantics are admitted.
+pub(crate) fn apply_opening_rule_effect(state: &mut GameState, card_id: &str) -> Result<()> {
+    if state.ruleset_id != RULES_VERSION_V7 || state.turn != Color::White {
+        return Err(EngineError::UnsupportedFeature(
+            "opening RULE activation outside v7 white reset state".into(),
+        ));
+    }
+    let card = crate::card_registry::opening_rule_source_card(card_id)?;
+    match card["effect"].as_str() {
+        Some("saturation") => {
+            state.extra.insert("saturationRule".into(), json!(true));
+        }
+        Some("acceleration") => {
+            if state.extra.get("acceleration") == Some(&Value::Bool(true))
+                || state
+                    .extra
+                    .get("accelerationPendingFor")
+                    .is_some_and(|value| !value.is_null() && value != "")
+            {
+                return Ok(());
+            }
+            let completed = u64::from(state.turns_taken.black);
+            let starts_after = completed.checked_add(2).ok_or_else(|| {
+                EngineError::InvalidState("acceleration black-turn counter overflow".into())
+            })?;
+            state.extra.insert(
+                "accelerationStartsAfterBlackTurns".into(),
+                json!(starts_after),
+            );
+            state
+                .extra
+                .insert("accelerationPendingFor".into(), json!("black"));
+            state.extra.insert(
+                "accelerationPendingTurns".into(),
+                json!(starts_after - completed),
+            );
+        }
+        _ => {
+            return Err(EngineError::UnsupportedFeature(format!(
+                "v7 opening RULE effect {card_id}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn apply(
     state: &mut GameState,
     card: &CardSlot,
@@ -4461,6 +4596,14 @@ pub(crate) fn apply(
             }
             let actor = state.turn;
             crate::turn_effects_v7::activate_othello(state, actor)?;
+            return Ok(Some(Vec::new()));
+        }
+        Mutation::Reposition => {
+            apply_reposition(state, action)?;
+            return Ok(Some(Vec::new()));
+        }
+        Mutation::Taunt => {
+            apply_taunt(state, action)?;
             return Ok(Some(Vec::new()));
         }
         Mutation::Taboo => {
@@ -5436,6 +5579,43 @@ mod tests {
         assert!(number_is_finite(Some(&json!("0x20"))));
         assert!(!number_is_finite(Some(&json!([1, 2]))));
         assert!(!number_is_finite(None));
+    }
+
+    #[test]
+    fn trickster_thief_defaults_follow_the_source_ruleset() {
+        // Direct v6/v7 applyTricksterAbilityDefaults probes in the pinned
+        // clients differ only in wanted: v6 leaves it absent, v7 writes the
+        // Trickster's own color while both mark it submerged.
+        let thief_index = TRICKSTER_TYPES
+            .iter()
+            .position(|kind| *kind == "thief")
+            .unwrap();
+        for (rules_version, expected_wanted) in [
+            (RULES_VERSION_V6, Value::Null),
+            (RULES_VERSION_V7, json!({"by":"white"})),
+        ] {
+            let mut state = empty();
+            state.ruleset_id = rules_version.into();
+            state.rng = RngState {
+                tape: vec![(thief_index as f64 + 0.25) / TRICKSTER_TYPES.len() as f64],
+                ..RngState::seeded(0)
+            };
+            let mut piece = Piece::new("trickster", Color::White, "test-trickster");
+            trickster_defaults(&mut state, &mut piece).unwrap();
+            assert_eq!(piece.extra["tricksterMoveType"], "thief");
+            assert_eq!(piece.extra["submerged"], true);
+            assert_eq!(
+                piece.extra.get("wanted").unwrap_or(&Value::Null),
+                &expected_wanted
+            );
+            assert_eq!(state.rng.cursor, 1);
+
+            if rules_version == RULES_VERSION_V7 {
+                piece.extra.insert("wanted".into(), json!({"by":"black"}));
+                trickster_defaults(&mut state, &mut piece).unwrap();
+                assert_eq!(piece.extra["wanted"], json!({"by":"black"}));
+            }
+        }
     }
 
     #[test]

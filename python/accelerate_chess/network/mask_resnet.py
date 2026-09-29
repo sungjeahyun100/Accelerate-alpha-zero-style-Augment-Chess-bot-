@@ -49,6 +49,8 @@ class MaskResNetConfig:
                 raise ValueError(f"{name} must be a positive bounded integer")
         if not isinstance(self.typed_context, TypedContextConfig):
             raise ValueError("typed_context must be a TypedContextConfig")
+        if self.board_channels != 6:
+            raise ValueError("typed-input-v1 spatial input has six channels")
         if self.condition_dim != 8:
             raise ValueError("typed public FiLM condition has eight fields")
         if self.channels > 4096 or self.residual_blocks > 64 or self.lora_rank > 4096:
@@ -100,23 +102,53 @@ def _masked(value: Tensor, layout_mask: Tensor) -> Tensor:
     return value * layout_mask.to(dtype=value.dtype)
 
 
+class MaskedBatchNorm2d(nn.BatchNorm2d):
+    """Use only playable cells for training statistics and spatial output.
+
+    The batch axis still contributes to the statistics, as in BatchNorm2d.
+    Keeping its affine and running-stat buffers also permits the adapter path
+    to freeze normalization while a base model remains in training mode.
+    """
+
+    def forward(self, value: Tensor, valid_mask: Tensor) -> Tensor:
+        if not self.training:
+            return _masked(super().forward(value), valid_mask)
+
+        weights = valid_mask.to(dtype=value.dtype)
+        count = weights.sum()
+        mean = (value * weights).sum(dim=(0, 2, 3)) / count.clamp_min(1)
+        centered = (value - mean[None, :, None, None]) * weights
+        variance = centered.square().sum(dim=(0, 2, 3)) / count.clamp_min(1)
+        if self.track_running_stats and bool(count > 0):
+            with torch.no_grad():
+                self.num_batches_tracked.add_(1)
+                momentum = self.momentum if self.momentum is not None else 1.0 / self.num_batches_tracked.item()
+                self.running_mean.lerp_(mean.detach(), momentum)
+                unbiased = variance.detach() * count / (count - 1).clamp_min(1)
+                self.running_var.lerp_(unbiased, momentum)
+        normalized = (value - mean[None, :, None, None]) * torch.rsqrt(variance[None, :, None, None] + self.eps)
+        if self.affine:
+            normalized = normalized * self.weight[None, :, None, None] + self.bias[None, :, None, None]
+        return _masked(normalized, valid_mask)
+
+
 class MaskedResidualFiLMBlock(nn.Module):
     def __init__(self, config: MaskResNetConfig):
         super().__init__()
         self.conv1 = LoRAConv2d(config.channels, config.lora_rank, config.lora_alpha)
-        self.bn1 = nn.BatchNorm2d(config.channels)
+        self.bn1 = MaskedBatchNorm2d(config.channels)
         self.conv2 = LoRAConv2d(config.channels, config.lora_rank, config.lora_alpha)
-        self.bn2 = nn.BatchNorm2d(config.channels)
+        self.bn2 = MaskedBatchNorm2d(config.channels)
         self.film = nn.Linear(config.channels, 2 * config.channels)
         nn.init.zeros_(self.film.weight)
         nn.init.zeros_(self.film.bias)
 
     def forward(self, value: Tensor, layout_mask: Tensor, condition: Tensor) -> Tensor:
         residual = _masked(self.conv1(value), layout_mask)
-        residual = _masked(self.bn1(residual), layout_mask)
+        residual = self.bn1(residual, layout_mask)
         residual = _masked(torch.relu(residual), layout_mask)
         residual = _masked(self.conv2(residual), layout_mask)
-        residual = _masked(self.bn2(residual), layout_mask)
+        residual = self.bn2(residual, layout_mask)
         gamma, beta = self.film(condition).chunk(2, dim=1)
         residual = _masked(residual * (1 + gamma[:, :, None, None]) + beta[:, :, None, None], layout_mask)
         return _masked(torch.relu(value + residual), layout_mask)
@@ -126,20 +158,27 @@ class MaskedResNetBackbone(nn.Module):
     def __init__(self, config: MaskResNetConfig):
         super().__init__()
         self.stem_conv = nn.Conv2d(config.board_channels, config.channels, 3, padding=1, bias=False)
-        self.stem_norm = nn.BatchNorm2d(config.channels)
+        self.stem_norm = MaskedBatchNorm2d(config.channels)
         self.condition_projection = nn.Sequential(nn.Linear(config.condition_dim, config.channels), nn.LeakyReLU(0.01))
         self.blocks = nn.ModuleList(MaskedResidualFiLMBlock(config) for _ in range(config.residual_blocks))
 
     def forward(self, spatial: Tensor, layout_mask: Tensor, condition: Tensor) -> Tensor:
-        features = _masked(spatial, layout_mask)
-        features = _masked(self.stem_conv(features), layout_mask)
-        features = _masked(self.stem_norm(features), layout_mask)
-        features = _masked(torch.relu(features), layout_mask)
+        # The layout includes collapsed cells; their typed hole marker is
+        # visible to adjacent convolutions, but their other fields and their
+        # own activations cannot enter normalization or pooling. Padding has
+        # neither an activation nor a hole marker.
+        hole = layout_mask & (spatial[:, 2:3] > 0.5)
+        playable = layout_mask & ~hole
+        features = torch.cat((_masked(spatial[:, :2], playable), hole.to(spatial.dtype),
+                              _masked(spatial[:, 3:], playable)), dim=1)
+        features = _masked(self.stem_conv(features), playable)
+        features = self.stem_norm(features, playable)
+        features = _masked(torch.relu(features), playable)
         projected_condition = self.condition_projection(condition)
         for block in self.blocks:
-            features = block(features, layout_mask, projected_condition)
-        weights = layout_mask.to(dtype=features.dtype)
-        return features.sum(dim=(2, 3)) / weights.sum(dim=(2, 3))
+            features = block(features, playable, projected_condition)
+        weights = playable.to(dtype=features.dtype)
+        return features.sum(dim=(2, 3)) / weights.sum(dim=(2, 3)).clamp_min(1)
 
 
 class MaskResNetPolicyValueNetwork(nn.Module):

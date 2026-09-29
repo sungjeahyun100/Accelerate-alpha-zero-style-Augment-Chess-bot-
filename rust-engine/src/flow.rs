@@ -261,26 +261,20 @@ pub(crate) fn check_no_action_loss(state: &mut GameState) -> Result<bool> {
     // The client excludes cards while an extra move is forced. Its untargeted
     // card probe may consume the real RNG, so the order matters even when a
     // legal board move is eventually found.
-    let forced_extra_move = state.board.iter().flatten().flatten().any(|piece| {
-        piece.color == state.turn
-            && [
-                "thiefSecondMove",
-                "frenzyExtraMove",
-                "fileSurgeSecondMove",
-                "rookLiftSecondMove",
-                "ironMonarchExtraMove",
-                "underpromotionSecondMove",
-                "checkerChainCapture",
-                "madHorseSecondMove",
-                "platformExtraMove",
-                "desperado",
-            ]
-            .into_iter()
-            .any(|key| crate::observation::truth(piece.extra.get(key)))
-    });
-    if (!forced_extra_move && crate::transition::available_card_action(state, state.turn)?)
-        || !crate::movement::legal_move_actions(state)?.is_empty()
+    let forced_extra_move = has_active_forced_extra_move(state);
+    if !forced_extra_move && crate::transition::available_card_action(state, state.turn)? {
+        return Ok(false);
+    }
+    // The source card probe above is allowed to advance the real RNG. Only
+    // after it returns false may this bounded first-play witness short-circuit
+    // move enumeration. Relay adds 128 extra move actions, so this helper
+    // proves existence of one orthodox pawn move, not the public move list.
+    if state.ruleset_id == RULES_VERSION_V7
+        && crate::movement::v7_first_play_has_legal_move_witness(state, state.turn)? == Some(true)
     {
+        return Ok(false);
+    }
+    if !crate::movement::legal_move_actions(state)?.is_empty() {
         return Ok(false);
     }
     if state.board.iter().flatten().flatten().any(|piece| {
@@ -318,6 +312,98 @@ pub(crate) fn check_no_action_loss(state: &mut GameState) -> Result<bool> {
             crate::replay::label(state.turn)
         ),
     )?;
+    Ok(true)
+}
+
+fn has_active_forced_extra_move(state: &GameState) -> bool {
+    state.board.iter().flatten().flatten().any(|piece| {
+        piece.color == state.turn
+            && [
+                "thiefSecondMove",
+                "frenzyExtraMove",
+                "fileSurgeSecondMove",
+                "rookLiftSecondMove",
+                "ironMonarchExtraMove",
+                "underpromotionSecondMove",
+                "checkerChainCapture",
+                "madHorseSecondMove",
+                "platformExtraMove",
+                "desperado",
+            ]
+            .into_iter()
+            .any(|key| crate::observation::truth(piece.extra.get(key)))
+    })
+}
+
+/// Frozen v7 completeTurnAfterMove calls this after repetition/star settlement
+/// and before checkNoActionLoss. The four source-probed seed-37 normal/chaos
+/// MIDDLE/END entry states agree on the complete state and RNG after the draw.
+/// A wider long-game transition still needs predecessor effect coverage.
+pub(crate) fn maybe_start_milestone_draft(state: &mut GameState) -> Result<bool> {
+    if state.ruleset_id != RULES_VERSION_V7 || state.mode == "draft" || state.mode == "gameover" {
+        return Ok(false);
+    }
+    if state.mode != "play" {
+        return Err(EngineError::UnsupportedFeature(
+            "v7 milestone draft from non-play state".into(),
+        ));
+    }
+    if state.extra.get("gameStyle").and_then(Value::as_str) == Some("grand")
+        && !crate::observation::truth(state.extra.get("campaign"))
+    {
+        return Ok(false);
+    }
+    if has_active_forced_extra_move(state)
+        || state.extra.get("localMode").and_then(Value::as_str) == Some("tutorial")
+        || crate::observation::truth(state.extra.get("draftDelete"))
+    {
+        return Ok(false);
+    }
+    let shared_turns = state.turns_taken.white.min(state.turns_taken.black);
+    let middle_done = crate::observation::truth(state.extra.get("middleDraftDone"));
+    let (phase, milestone) = if !crate::observation::truth(state.extra.get("endDraftDone"))
+        && middle_done
+        && shared_turns >= 20
+    {
+        ("END", 20)
+    } else if !middle_done && shared_turns >= 10 {
+        ("MIDDLE", 10)
+    } else {
+        return Ok(false);
+    };
+    let style = state.extra.get("gameStyle").and_then(Value::as_str);
+    if !matches!(style, Some("normal" | "chaos"))
+        || crate::observation::truth(state.extra.get("campaign"))
+        || crate::observation::truth(state.extra.get("shotgunDlc"))
+        || state
+            .extra
+            .get("shotgunOpeningColor")
+            .is_some_and(|v| !v.is_null())
+        || state
+            .extra
+            .get("judgmentExiles")
+            .and_then(Value::as_array)
+            .is_some_and(|entries| !entries.is_empty())
+        || state
+            .board
+            .iter()
+            .flatten()
+            .flatten()
+            .any(|piece| crate::observation::truth(piece.extra.get("repositionSecondMove")))
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "v7 milestone draft predecessor or first-pick variant".into(),
+        ));
+    }
+    let resume_turn = state.turn;
+    crate::replay::add_log(
+        state,
+        format!("양쪽 모두 {milestone}턴을 마쳐 {phase} 카드 선택으로 넘어갑니다."),
+    )?;
+    state
+        .extra
+        .insert("draftResumeTurn".into(), json!(resume_turn));
+    crate::draft::start_draft(state, Color::White, phase)?;
     Ok(true)
 }
 
