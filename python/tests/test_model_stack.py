@@ -17,7 +17,11 @@ import pytest
 import torch
 
 from accelerate_chess.encoding import EncoderSpec, PublicEncoder, PublicObservation, batch_positions, canonical_json, decode_json_tail
-from accelerate_chess.network.artifacts import MAX_MANIFEST_BYTES, OnnxEvaluator, _validate_graph, export_onnx, load_adapter, load_base, load_manifest, save_adapter, save_base
+from accelerate_chess.ir import TypedEncoderSpec
+from accelerate_chess.network.artifacts import (
+    MAX_MANIFEST_BYTES, OnnxEvaluator, _typed_frozen_source, _validate_graph, export_onnx,
+    export_typed_onnx, file_sha256, load_adapter, load_base, load_manifest, save_adapter, save_base,
+)
 from accelerate_chess.network.model import AdapterDescriptor, ModelConfig, PolicyValueNetwork, is_adapter_parameter, masked_policy, tensor_state_hash
 from accelerate_chess.network.mask_resnet import MaskResNetConfig, MaskResNetPolicyValueNetwork
 from accelerate_chess.network.typed_context import TypedContextConfig
@@ -199,6 +203,62 @@ def test_mask_resnet_film_adapter_merge_and_input_limits():
     too_wide[1] = torch.ones(1, 1, 5, 33, dtype=torch.bool)
     with pytest.raises(ValueError, match="geometry"):
         model.evaluate(*too_wide)
+
+
+def test_typed_export_and_manifest_bind_model_config_to_encoder_and_onnx(artifact_directory):
+    catalog, policy = _typed_frozen_source()
+    spec = TypedEncoderSpec.from_catalog(catalog, observation_policy=policy)
+    small_model, inputs = _mask_resnet_case()
+    bundle_path = artifact_directory / "typed-feature-dimensions"
+    samples = dict(zip(spec.feature_schema["input_order"]["mask-resnet"], inputs, strict=True))
+    with pytest.raises(ValueError, match="category embeddings"):
+        export_typed_onnx(small_model, spec, bundle_path, samples, architecture_family="mask-resnet")
+
+    vocabulary = len(spec.category_vocabulary)
+    context = replace(small_model.config.typed_context,
+                      record_category_sizes=(vocabulary,) * 4,
+                      relation_category_sizes=(vocabulary,) * 2,
+                      candidate_category_sizes=(vocabulary,) * 4)
+    model = MaskResNetPolicyValueNetwork(replace(small_model.config, typed_context=context)).eval()
+    manifest_path = export_typed_onnx(model, spec, bundle_path, samples, architecture_family="mask-resnet")
+    payload = load_manifest(manifest_path, spec)
+    for field, wrong in (("record_numeric_dim", 9), ("record_category_sizes", [vocabulary - 1] * 4)):
+        changed = deepcopy(payload)
+        changed["model_config"]["typed_context"][field] = wrong
+        changed["model_config_hash"] = hashlib.sha256(canonical_json(changed["model_config"]).encode()).hexdigest()
+        manifest_path.write_text(canonical_json(changed) + "\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="typed model .* differ"):
+            load_manifest(manifest_path, spec, inspect_graph=False)
+
+    import onnx
+
+    model_path = manifest_path.with_name("model.onnx")
+    original_bytes = model_path.read_bytes()
+    original_graph = onnx.load_model_from_string(original_bytes)
+    matches = [index for index, item in enumerate(original_graph.metadata_props)
+               if item.key == "accelerate.model_config_sha256"]
+    assert len(matches) == 1
+    assert original_graph.metadata_props[matches[0]].value == payload["model_config_hash"]
+    try:
+        for defect in ("missing", "duplicate", "malformed", "different"):
+            graph = deepcopy(original_graph)
+            if defect == "missing":
+                del graph.metadata_props[matches[0]]
+            elif defect == "duplicate":
+                duplicate = graph.metadata_props.add()
+                duplicate.key = "accelerate.model_config_sha256"
+                duplicate.value = payload["model_config_hash"]
+            else:
+                graph.metadata_props[matches[0]].value = "G" * 64 if defect == "malformed" else "f" * 64
+            onnx.save_model(graph, model_path, save_as_external_data=False)
+            changed = deepcopy(payload)
+            changed["model_sha256"] = file_sha256(model_path)
+            manifest_path.write_text(canonical_json(changed) + "\n", encoding="utf-8")
+            with pytest.raises(ValueError, match="typed ONNX model configuration metadata mismatch"):
+                load_manifest(manifest_path, spec)
+    finally:
+        model_path.write_bytes(original_bytes)
+        manifest_path.write_text(canonical_json(payload) + "\n", encoding="utf-8")
 
 
 def test_mask_resnet_warm_start_copies_only_compatible_residual_base_weights():

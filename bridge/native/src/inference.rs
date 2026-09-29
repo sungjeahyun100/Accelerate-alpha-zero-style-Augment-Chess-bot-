@@ -1,7 +1,7 @@
 //! NumPy ownership boundary for the independent CPU runtime.
 use accelerate_runtime::{
     Backend, InferenceSession as Session, Input, Limits, ModelConfig, NamedInput, TensorDtype,
-    TypedInferenceSession, TypedTensorData,
+    TypedInferenceSession, TypedInputShape, TypedTensorData,
 };
 use numpy::{
     PyArray2, PyReadonlyArray2, PyReadonlyArray3, PyReadonlyArray4, PyReadonlyArrayDyn,
@@ -236,6 +236,52 @@ impl InferenceSession {
         };
         if inputs.len() != specs.len() {
             return Err(error("typed input count mismatch"));
+        }
+        // Validate metadata while the NumPy arrays are still borrowed. Runtime
+        // resource checks must run before building any owned Vec, especially
+        // for a caller-supplied oversized or strided array.
+        let shapes = specs
+            .iter()
+            .map(|spec| {
+                let value = inputs
+                    .get_item(&spec.name)?
+                    .ok_or_else(|| error(format!("typed input {} missing", spec.name)))?;
+                Ok(match spec.dtype {
+                    TensorDtype::Float32 => value
+                        .extract::<PyReadonlyArrayDyn<'_, f32>>()?
+                        .shape()
+                        .to_vec(),
+                    TensorDtype::Int64 => value
+                        .extract::<PyReadonlyArrayDyn<'_, i64>>()?
+                        .shape()
+                        .to_vec(),
+                    TensorDtype::Bool => value
+                        .extract::<PyReadonlyArrayDyn<'_, bool>>()?
+                        .shape()
+                        .to_vec(),
+                })
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        let metadata = specs
+            .iter()
+            .zip(&shapes)
+            .map(|(spec, shape)| TypedInputShape {
+                name: &spec.name,
+                dtype: spec.dtype.clone(),
+                shape,
+            })
+            .collect::<Vec<_>>();
+        {
+            let guard = self
+                .session
+                .lock()
+                .map_err(|_| error("inference session poisoned"))?;
+            match &*guard {
+                SessionVariant::Typed(session) => {
+                    session.validate_shapes(&metadata).map_err(error)?;
+                }
+                SessionVariant::Legacy(_) => return Err(error("legacy bundle requires evaluate")),
+            }
         }
         let mut owned = Vec::with_capacity(specs.len());
         for spec in &specs {

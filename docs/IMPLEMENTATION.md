@@ -7,6 +7,25 @@
 아래 관측한 검사와 계획을 혼동하지 않는다.
 작업 브랜치는 feature/full-stack-implementation, 출발점은 bfc85c886b489f21f6f1037bc291ab0157c3dc6f다.
 
+## 2026-09-29 비어댑터 병렬 구현 checkpoint
+
+카드 효과와 기물 이동의 규칙 객체화는 [별도 담당자 이관](RULE-ADAPTER-HANDOFF.md)에 따라
+동결했다. 이번 단계는 공통 상태·입력·배포 계약과 독립 검증을 보강한 것이다. 공개 v7
+`Position`의 import/legal/bind/apply와 플레이 행동자의 후속 힌트는 계속 미지원이다.
+
+| 범위 | 이번 변경과 국소 증거 | 완료하지 않은 범위 |
+|---|---|---|
+| Rust 상태·흐름 | 명시 anchor와 파생 점유의 충돌을 거부하고, 손실 있는 레거시 export를 막는다. 가변 직사각형 replay의 빈·ragged 입력 및 크기 변경은 상태 변경 전에 거부한다. v7 deathmatch 설정을 원문 수치 규칙으로 정규화하고 좁은 seed 37 직접 호출에서 전체 상태·RNG를 대조했다. 왕실 위협은 내부 `AiNoCards` 후보·포획 실행이 검증될 때까지 닫았다. | 자연 대국 전이와 모든 source-reachable 상태·카드·기물 규칙. |
+| 공개 AI 입력·실행 | 공개 이력의 최근 8개와 집계 일관성을 검증한다. 탐색의 루트 posterior를 조건화하지 않은 자식 posterior로 표기하지 않고, hidden opening의 확률·native 지원이 없으면 거부한다. replay의 중복·actor 불일치와 CLI의 실행 오류·예산 종료를 구분한다. | 공개 v7 native Position을 이용한 세 모드 bounded 탐색·자가대국. |
+| 모델·추론 | A/B typed v3 ONNX에 model-config SHA-256을 정확히 한 번 기록하고 양쪽 로더가 검사한다. NumPy 소유 복사 전에 dtype/shape/총 원소 수/명시 byte 한도를 검사하며 관계 수 0을 기존 A/B 패리티 검사에 포함했다. Python 두 모델 검사 24개가 로컬에서 통과했다. | 최종 설치 wheel의 두 OS ORT·tract 검사. 중간 메모리 값은 검증된 exporter 계열에 대한 추정이며 임의 ONNX의 hard bound가 아니다. 기존 typed v3 bundle은 재export가 필요하다. |
+| 차등 gate | 원문 행동을 새 Position에 재사용하면 거부되는지 검사하고 native bind/apply 뒤 원자성을 확인한다. 응답 건수·순서·실패 상태가 잘못되면 성공으로 보고하지 않는다. 동결 원문 전용 9국면 생성은 `oracle-only`·NO-GO로 끝났다. | native v7 import 미지원으로 실제 9국면 동등성 판정 불가. |
+
+로컬 통합 검사에서 Rust 엔진 142개, 통합 1·4·8개, runtime 4개와 workspace
+strict Clippy/rustfmt가 통과했다. WSL의 native 라이브러리 테스트 링크는 호스트의
+`libpython3.12` 부재로 실행되지 않았고, 설치 wheel은 CI에서만 판단한다. Python
+공개 IR·탐색·session 소스 검사 49개는 7개 native 의존 사례를 제외하고 통과했다.
+이 단계의 검사 개수는 전체 규칙 GO나 모델 성능 증거가 아니다. 실제 학습은 수행하지 않았다.
+
 ## 2026-09-29 구현 checkpoint
 
 이번 checkpoint는 동결 v7 규칙을 실행 가능하게 선언하는 단계가 아니다. Rust `Position`의

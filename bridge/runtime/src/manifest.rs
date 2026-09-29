@@ -115,6 +115,130 @@ pub struct TypedBundle {
     pub resource_limits: TypedResourceLimits,
     pub numerical_tolerance: Value,
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TypedContextMetadata {
+    record_category_sizes: Vec<usize>,
+    relation_category_sizes: Vec<usize>,
+    candidate_category_sizes: Vec<usize>,
+    hidden_dim: usize,
+    record_numeric_dim: usize,
+    relation_numeric_dim: usize,
+    candidate_numeric_dim: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MaskResNetMetadata {
+    board_channels: usize,
+    typed_context: TypedContextMetadata,
+    condition_dim: usize,
+    channels: usize,
+    residual_blocks: usize,
+    lora_rank: usize,
+    lora_alpha: f64,
+    lora_dropout: f64,
+    max_batch: usize,
+    max_board_axis: usize,
+    max_candidates: usize,
+    architecture_version: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EntityTransformerMetadata {
+    typed: TypedContextMetadata,
+    blocks: usize,
+    heads: usize,
+    ffn_dim: usize,
+    lora_rank: usize,
+    lora_alpha: f64,
+    lora_dropout: f64,
+    architecture_version: String,
+}
+
+fn validate_typed_context(context: &TypedContextMetadata, vocabulary: usize) -> Result<u128> {
+    ensure!(
+        [
+            (&context.record_category_sizes, 4),
+            (&context.relation_category_sizes, 2),
+            (&context.candidate_category_sizes, 4),
+        ]
+        .iter()
+        .all(|(sizes, count)| sizes.len() == *count
+            && sizes.iter().all(|size| *size == vocabulary)),
+        "typed category embeddings differ from the source vocabulary"
+    );
+    ensure!(
+        (1..=4096).contains(&context.hidden_dim)
+            && context.record_numeric_dim == 8
+            && context.relation_numeric_dim == 4
+            && context.candidate_numeric_dim == 8,
+        "unsupported typed context dimensions"
+    );
+    Ok(context.hidden_dim as u128 * 10 * vocabulary as u128)
+}
+
+fn validate_typed_model_config(config: &Value, family: &str, vocabulary: usize) -> Result<()> {
+    let parameters = match family {
+        "mask-resnet" => {
+            let model: MaskResNetMetadata = serde_json::from_value(config.clone())?;
+            let embeddings = validate_typed_context(&model.typed_context, vocabulary)?;
+            ensure!(
+                model.architecture_version == "mask-resnet-v2"
+                    && model.board_channels == 6
+                    && model.condition_dim == 8
+                    && (1..=4096).contains(&model.channels)
+                    && (1..=64).contains(&model.residual_blocks)
+                    && (1..=4096).contains(&model.lora_rank)
+                    && (1..=64).contains(&model.max_batch)
+                    && (1..=32).contains(&model.max_board_axis)
+                    && (1..=4096).contains(&model.max_candidates)
+                    && model.lora_alpha.is_finite()
+                    && model.lora_alpha > 0.
+                    && model.lora_dropout == 0.,
+                "unsupported mask ResNet model configuration"
+            );
+            let channels = model.channels as u128;
+            let rank = model.lora_rank as u128;
+            embeddings
+                + 9 * model.board_channels as u128 * channels
+                + model.condition_dim as u128 * channels
+                + model.residual_blocks as u128
+                    * (20 * channels * channels + 20 * rank * channels + 8 * channels)
+                + channels * model.typed_context.hidden_dim as u128
+        }
+        "entity-transformer" => {
+            let model: EntityTransformerMetadata = serde_json::from_value(config.clone())?;
+            let embeddings = validate_typed_context(&model.typed, vocabulary)?;
+            ensure!(
+                model.architecture_version == "entity-transformer-film-lora-v1"
+                    && (1..=64).contains(&model.blocks)
+                    && (1..=4096).contains(&model.heads)
+                    && model.typed.hidden_dim.is_multiple_of(model.heads)
+                    && (1..=4096).contains(&model.ffn_dim)
+                    && (1..=model.typed.hidden_dim).contains(&model.lora_rank)
+                    && model.lora_alpha.is_finite()
+                    && model.lora_alpha > 0.
+                    && model.lora_dropout == 0.,
+                "unsupported entity Transformer model configuration"
+            );
+            let width = model.typed.hidden_dim as u128;
+            embeddings
+                + model.blocks as u128
+                    * (4 * width * width
+                        + 2 * width * model.ffn_dim as u128
+                        + 4 * width * model.lora_rank as u128)
+        }
+        _ => anyhow::bail!("unsupported typed architecture family"),
+    };
+    ensure!(
+        parameters <= 64_000_000,
+        "typed model parameter estimate exceeds 64 million"
+    );
+    Ok(())
+}
 fn sha(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -579,6 +703,21 @@ impl TypedBundle {
             &bundle.onnx,
             limits,
         )?;
+        // The v7 source-derived category IDs are part of the model input
+        // meaning. A self-consistent manifest must not silently renumber them.
+        ensure!(
+            canonical_hash(&encoder["feature_schema"]["category_vocabulary"])?
+                == "f9ad67832ecb0544a032be8011d266419f31f8ab5bb31f6ae54871d71eaa8906",
+            "typed category vocabulary differs from frozen source"
+        );
+        validate_typed_model_config(
+            &bundle.model_config,
+            &bundle.architecture_family,
+            encoder["feature_schema"]["category_vocabulary"]
+                .as_array()
+                .context("typed category vocabulary missing")?
+                .len(),
+        )?;
         ensure!(
             bundle.numerical_tolerance == json!({"atol":1e-5,"rtol":1e-4}),
             "unsupported numerical tolerance"
@@ -586,15 +725,14 @@ impl TypedBundle {
         match (&bundle.adapter, &bundle.adapter_hash) {
             (None, None) => {}
             (Some(adapter), Some(adapter_hash)) => {
-                ensure!(
-                    hash(adapter_hash)
-                        && adapter["base_hash"] == bundle.base_hash
-                        && adapter["config_hash"] == bundle.model_config_hash
-                        && adapter["encoder_hash"] == bundle.encoder_hash
-                        && adapter["generator"] == "static-lora"
-                        && adapter["mergeable"] == true,
-                    "typed adapter compatibility mismatch"
-                );
+                ensure!(hash(adapter_hash), "invalid typed adapter hash");
+                validate_typed_adapter(
+                    adapter,
+                    &bundle.architecture_family,
+                    &bundle.base_hash,
+                    &bundle.model_config_hash,
+                    &bundle.encoder_hash,
+                )?;
             }
             _ => anyhow::bail!("typed adapter metadata/hash mismatch"),
         }
@@ -609,9 +747,46 @@ impl TypedBundle {
             sha(&bytes) == bundle.model_sha256,
             "ONNX model file hash mismatch"
         );
-        validate_typed_graph(&bytes, &bundle.onnx)?;
+        validate_typed_graph(&bytes, &bundle.onnx, &bundle.model_config_hash)?;
         Ok((bundle, bytes))
     }
+}
+
+fn validate_typed_adapter(
+    adapter: &Value,
+    family: &str,
+    base_hash: &str,
+    config_hash: &str,
+    encoder_hash: &str,
+) -> Result<()> {
+    fields(
+        adapter,
+        &[
+            "base_hash",
+            "config_hash",
+            "encoder_hash",
+            "generator",
+            "condition_lifetime",
+            "mergeable",
+            "version",
+        ],
+    )?;
+    let version = match family {
+        "mask-resnet" => "lora-convolution-v1",
+        "entity-transformer" => "lora-transformer-qv-v1",
+        _ => anyhow::bail!("unsupported typed adapter family"),
+    };
+    ensure!(
+        adapter["base_hash"] == base_hash
+            && adapter["config_hash"] == config_hash
+            && adapter["encoder_hash"] == encoder_hash
+            && adapter["generator"] == "static-lora"
+            && adapter["condition_lifetime"] == "global"
+            && adapter["mergeable"] == true
+            && adapter["version"] == version,
+        "typed adapter compatibility mismatch"
+    );
+    Ok(())
 }
 
 fn valid_name(value: &str) -> bool {
@@ -899,8 +1074,17 @@ struct ModelProto {
     graph: Option<GraphProto>,
     #[prost(message, repeated, tag = "8")]
     opset: Vec<OperatorSet>,
+    #[prost(message, repeated, tag = "14")]
+    metadata: Vec<MetadataEntry>,
     #[prost(message, repeated, tag = "25")]
     functions: Vec<Empty>,
+}
+#[derive(Clone, PartialEq, Message)]
+struct MetadataEntry {
+    #[prost(string, tag = "1")]
+    key: String,
+    #[prost(string, tag = "2")]
+    value: String,
 }
 #[derive(Clone, PartialEq, Message)]
 struct Empty {}
@@ -1186,8 +1370,33 @@ fn validate_graph(bytes: &[u8], config: &ModelConfig) -> Result<()> {
     Ok(())
 }
 
-fn validate_typed_graph(bytes: &[u8], contract: &TypedOnnxContract) -> Result<()> {
+fn validate_model_config_binding(metadata: &[MetadataEntry], expected_hash: &str) -> Result<()> {
+    let mut matches = metadata
+        .iter()
+        .filter(|entry| entry.key == "accelerate.model_config_sha256");
+    let entry = matches
+        .next()
+        .context("typed ONNX model config hash metadata missing")?;
+    ensure!(
+        matches.next().is_none(),
+        "duplicate typed ONNX model config hash metadata"
+    );
+    ensure!(
+        hash(&entry.value) && entry.value == expected_hash,
+        "typed ONNX model config hash metadata mismatch"
+    );
+    Ok(())
+}
+
+fn validate_typed_graph(
+    bytes: &[u8],
+    contract: &TypedOnnxContract,
+    expected_config_hash: &str,
+) -> Result<()> {
     let model = ModelProto::decode(bytes)?;
+    // This binds an unchanged ONNX file to the manifest's model configuration.
+    // It does not prove an arbitrary graph's memory needs from metadata alone.
+    validate_model_config_binding(&model.metadata, expected_config_hash)?;
     ensure!(
         model.opset.len() == 1
             && ["", "ai.onnx"].contains(&model.opset[0].domain.as_str())
@@ -1317,4 +1526,82 @@ fn validate_typed_graph(bytes: &[u8], contract: &TypedOnnxContract) -> Result<()
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        MetadataEntry, validate_model_config_binding, validate_typed_adapter,
+        validate_typed_model_config,
+    };
+    use serde_json::{Value, json};
+
+    #[test]
+    fn typed_adapter_family_and_lifetime_are_bound() {
+        let mut adapter = json!({
+            "base_hash": "base", "config_hash": "config", "encoder_hash": "encoder",
+            "generator": "static-lora", "condition_lifetime": "global",
+            "mergeable": true, "version": "lora-transformer-qv-v1"
+        });
+        let validate = |value: &Value, family| {
+            validate_typed_adapter(value, family, "base", "config", "encoder")
+        };
+        assert!(validate(&adapter, "entity-transformer").is_ok());
+        assert!(validate(&adapter, "mask-resnet").is_err());
+        adapter["condition_lifetime"] = json!("per-input");
+        assert!(validate(&adapter, "entity-transformer").is_err());
+        adapter["condition_lifetime"] = json!("global");
+        adapter["extra"] = json!("unsupported");
+        assert!(validate(&adapter, "entity-transformer").is_err());
+    }
+
+    #[test]
+    fn typed_model_resource_metadata_cannot_understate_dimensions() {
+        let context = json!({
+            "record_category_sizes": [885, 885, 885, 885],
+            "relation_category_sizes": [885, 885],
+            "candidate_category_sizes": [885, 885, 885, 885],
+            "hidden_dim": 128, "record_numeric_dim": 8,
+            "relation_numeric_dim": 4, "candidate_numeric_dim": 8
+        });
+        let mut config = json!({
+            "typed": context, "blocks": 4, "heads": 4, "ffn_dim": 512,
+            "lora_rank": 8, "lora_alpha": 8.0, "lora_dropout": 0.0,
+            "architecture_version": "entity-transformer-film-lora-v1"
+        });
+        assert!(validate_typed_model_config(&config, "entity-transformer", 885).is_ok());
+        config["heads"] = json!(0);
+        assert!(validate_typed_model_config(&config, "entity-transformer", 885).is_err());
+        config["heads"] = json!(4);
+        config["typed"]["hidden_dim"] = json!(0);
+        assert!(validate_typed_model_config(&config, "entity-transformer", 885).is_err());
+        config["typed"]["hidden_dim"] = json!(128);
+        config["typed"]["record_category_sizes"][0] = json!(886);
+        assert!(validate_typed_model_config(&config, "entity-transformer", 885).is_err());
+    }
+
+    #[test]
+    fn typed_graph_config_binding_rejects_missing_duplicate_and_wrong_hash() {
+        let expected = "a".repeat(64);
+        let binding = MetadataEntry {
+            key: "accelerate.model_config_sha256".into(),
+            value: expected.clone(),
+        };
+        let unrelated = MetadataEntry {
+            key: "producer".into(),
+            value: "test".into(),
+        };
+        assert!(
+            validate_model_config_binding(&[unrelated.clone(), binding.clone()], &expected).is_ok()
+        );
+        assert!(validate_model_config_binding(&[unrelated], &expected).is_err());
+        assert!(
+            validate_model_config_binding(&[binding.clone(), binding.clone()], &expected).is_err()
+        );
+        let mut invalid = binding;
+        invalid.value = "A".repeat(64);
+        assert!(validate_model_config_binding(&[invalid.clone()], &expected).is_err());
+        invalid.value = "b".repeat(64);
+        assert!(validate_model_config_binding(&[invalid], &expected).is_err());
+    }
 }

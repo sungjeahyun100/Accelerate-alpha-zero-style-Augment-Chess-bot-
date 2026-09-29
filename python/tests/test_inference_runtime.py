@@ -147,8 +147,10 @@ def test_typed_v3_native_backend_parity_and_input_boundary(family):
                 parameter.fill_(.003)
     model.eval()
     arrays = _typed_arrays(spec, family)
+    no_relations = _typed_arrays(spec, family, relations=0)
     with torch.no_grad():
         reference = model.evaluate(*(torch.from_numpy(value) for value in arrays.values()))
+        no_relations_reference = model.evaluate(*(torch.from_numpy(value) for value in no_relations.values()))
     manifest_path = export_typed_onnx(model, spec, _root() / f"typed-native-{family}", arrays,
                                       architecture_family=family,
                                       descriptor=model.adapter_descriptor(spec.digest))
@@ -163,6 +165,17 @@ def test_typed_v3_native_backend_parity_and_input_boundary(family):
         assert tuple(value.shape for value in observed) == ((2, 2), (2, 1))
         for actual, expected in zip(observed, reference, strict=True):
             np.testing.assert_allclose(actual, expected.detach().numpy(), atol=1e-5, rtol=1e-4)
+        no_relations_observed = evaluator.evaluate_typed(no_relations)
+        for actual, expected in zip(no_relations_observed, no_relations_reference, strict=True):
+            np.testing.assert_allclose(actual, expected.detach().numpy(), atol=1e-5, rtol=1e-4)
+        if family == "entity-transformer" and backend == "ort":
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                concurrent = list(pool.map(lambda _: evaluator.evaluate_typed(arrays), range(2)))
+            for result in concurrent:
+                for actual, expected in zip(result, observed, strict=True):
+                    np.testing.assert_array_equal(actual, expected)
+            concurrent[0][0].fill(1000)
+            np.testing.assert_array_equal(evaluator.evaluate_typed(arrays)[0], observed[0])
         strided = {name: np.asfortranarray(value) for name, value in arrays.items()}
         for actual, expected in zip(evaluator.evaluate_typed(strided), observed, strict=True):
             np.testing.assert_array_equal(actual, expected)
@@ -183,6 +196,32 @@ def test_typed_v3_native_backend_parity_and_input_boundary(family):
         invalid["candidate_numeric"] = invalid["candidate_numeric"][:, :, :1, :]
         with pytest.raises(ValueError, match="axis"):
             evaluator.evaluate_typed(invalid)
+        # A broadcast view can describe far more logical elements than its
+        # backing buffer. Reject its metadata before the binding copies it.
+        invalid = dict(arrays)
+        record = arrays["record_numeric"]
+        invalid["record_numeric"] = np.broadcast_to(record[:1], (100_000, *record.shape[1:]))
+        with pytest.raises(ValueError, match="typed axis batch.*exceeds limit"):
+            evaluator.evaluate_typed(invalid)
+        limited = InferenceSession(manifest_path, backend, spec.digest, max_input_elements=1)
+        with pytest.raises(ValueError, match="typed input element count exceeds inference limits"):
+            limited.evaluate_typed(arrays)
+        if backend == "ort":
+            # Broadcast views isolate the byte ceiling from the element ceiling
+            # without allocating a large input buffer in the test process.
+            extents = {"batch": 64, "records": 2048, "relations": 8192,
+                       "actions": 1024, "nodes": 5, "height": 1, "width": 1}
+            small = _typed_arrays(spec, family, batch=1, records=1, relations=1,
+                                  actions=1, nodes=1, height=1, width=1)
+            byte_oversized = {
+                name: np.broadcast_to(value, tuple(extents.get(axis, axis)
+                                                   for axis in spec.feature_schema["inputs"][name]["shape"]))
+                for name, value in small.items()
+            }
+            assert sum(value.size for value in byte_oversized.values()) < 16_777_216
+            assert sum(value.nbytes for value in byte_oversized.values()) > spec.max_input_bytes
+            with pytest.raises(ValueError, match="typed input bytes exceed inference limits"):
+                evaluator.evaluate_typed(byte_oversized)
 
 
 def test_typed_v3_rejects_self_consistent_wrong_feature_schema():

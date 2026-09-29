@@ -7,7 +7,7 @@ mutating a live model; adapter generation/application/merge are separate APIs.
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, fields
 import hashlib
 import json
 import math
@@ -27,6 +27,7 @@ from .model import AdapterDescriptor, ModelConfig, PolicyValueNetwork, tensor_st
 CHECKPOINT_VERSION = "model-checkpoint-v2"
 BUNDLE_VERSION = "onnx-policy-value-v2"
 TYPED_BUNDLE_VERSION = "onnx-policy-value-v3"
+TYPED_CONFIG_METADATA_KEY = "accelerate.model_config_sha256"
 MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
 MAX_MANIFEST_BYTES = 2 * 1024 * 1024
 
@@ -395,12 +396,16 @@ def _validate_typed_adapter_metadata(family: str, adapter: Any, base_hash: str,
         raise ValueError("typed adapter compatibility mismatch")
 
 
-def _validate_typed_graph(path: Path, contract: Mapping[str, Any]) -> None:
+def _validate_typed_graph(path: Path, contract: Mapping[str, Any], expected_config_hash: str) -> None:
     import onnx
 
     if path.stat().st_size > MAX_ARTIFACT_BYTES:
         raise ValueError("ONNX exceeds the 512 MiB artifact size limit")
     graph = onnx.load(path, load_external_data=False)
+    config_metadata = [item.value for item in graph.metadata_props if item.key == TYPED_CONFIG_METADATA_KEY]
+    if (len(config_metadata) != 1 or not _valid_hash(config_metadata[0])
+            or config_metadata[0] != expected_config_hash):
+        raise ValueError("typed ONNX model configuration metadata mismatch")
     if len(graph.opset_import) != 1 or graph.opset_import[0].domain not in ("", "ai.onnx") or graph.opset_import[0].version != 18 or graph.functions:
         raise ValueError("typed ONNX requires standard opset 18")
     if graph.graph.sparse_initializer or len(graph.graph.node) > 100_000:
@@ -463,6 +468,25 @@ def _validate_typed_graph(path: Path, contract: Mapping[str, Any]) -> None:
     onnx.checker.check_model(graph, full_check=True)
 
 
+def _bind_typed_model_config(path: Path, config_hash: str) -> None:
+    """Bind the declared config to this ONNX file, before its file hash is taken.
+
+    This catches manifest-only config drift; it does not prove a graph's peak
+    memory use or authenticate a jointly rewritten graph and manifest.
+    """
+    import onnx
+
+    if not _valid_hash(config_hash):
+        raise ValueError("invalid typed model configuration hash")
+    graph = onnx.load(path, load_external_data=False)
+    if any(item.key == TYPED_CONFIG_METADATA_KEY for item in graph.metadata_props):
+        raise ValueError("typed ONNX already declares model configuration metadata")
+    entry = graph.metadata_props.add()
+    entry.key = TYPED_CONFIG_METADATA_KEY
+    entry.value = config_hash
+    onnx.save_model(graph, path, save_as_external_data=False)
+
+
 def export_typed_onnx(model: Any, spec: Any, directory: str | Path, sample_inputs: Mapping[str, Any], *,
                       architecture_family: str, descriptor: Any | None = None) -> Path:
     """Export a typed A/B model with its complete public input and graph contract."""
@@ -471,8 +495,10 @@ def export_typed_onnx(model: Any, spec: Any, directory: str | Path, sample_input
     encoder = spec.contract()
     if spec.digest != _typed_hash(encoder):
         raise ValueError("typed encoder digest mismatch")
+    _typed_source_spec(spec.to_dict())
     if _typed_family(model) != architecture_family:
         raise ValueError("typed architecture family does not match the model")
+    _, config, config_hash = _typed_check_model(model, spec)
     onnx_contract = _typed_io_contract(spec, architecture_family)
     names = [item["name"] for item in onnx_contract["inputs"]]
     if set(sample_inputs) != set(names):
@@ -522,9 +548,8 @@ def export_typed_onnx(model: Any, spec: Any, directory: str | Path, sample_input
     torch.onnx.export(exported, tuple(samples), output_path, dynamo=False, opset_version=18,
                       input_names=names, output_names=["policy_logits", "value"],
                       dynamic_axes=axes, external_data=False)
-    _validate_typed_graph(output_path, onnx_contract)
-    config = asdict(model.config)
-    config_hash = _typed_hash(config)
+    _bind_typed_model_config(output_path, config_hash)
+    _validate_typed_graph(output_path, onnx_contract, config_hash)
     if descriptor is not None and (descriptor.base_hash, descriptor.config_hash, descriptor.encoder_hash) != (model.base_hash, config_hash, spec.digest):
         raise ValueError("typed adapter descriptor compatibility mismatch")
     manifest = {
@@ -582,6 +607,8 @@ def _validate_typed_manifest(manifest: dict[str, Any], path: Path, expected_spec
     if config.get("architecture_version") != {"mask-resnet": "mask-resnet-v2",
                                                "entity-transformer": "entity-transformer-film-lora-v1"}[family]:
         raise ValueError("model architecture version/family mismatch")
+    _validate_typed_feature_dimensions(_typed_config_from_metadata(family, config), family,
+                                       len(schema["category_vocabulary"]))
     if manifest["onnx"] != _typed_io_contract(expected_spec if expected_spec is not None else _ManifestTypedSpec(encoder), family):
         raise ValueError("typed ONNX IO contract mismatch")
     if manifest["resource_limits"] != _typed_resource_limits() or manifest["numerical_tolerance"] != {"atol": 1e-5, "rtol": 1e-4}:
@@ -601,7 +628,7 @@ def _validate_typed_manifest(manifest: dict[str, Any], path: Path, expected_spec
     if model_path.stat().st_size > MAX_ARTIFACT_BYTES or file_sha256(model_path) != manifest["model_sha256"]:
         raise ValueError("typed ONNX model size/hash mismatch")
     if inspect_graph:
-        _validate_typed_graph(model_path, manifest["onnx"])
+        _validate_typed_graph(model_path, manifest["onnx"], manifest["model_config_hash"])
     return manifest
 
 
@@ -627,6 +654,52 @@ def _typed_family(model: Any) -> str:
     raise TypeError("typed checkpoint requires the mask ResNet or entity Transformer")
 
 
+def _typed_config_from_metadata(family: str, config: Mapping[str, Any]) -> Any:
+    """Validate deployment metadata without allocating model weights."""
+    from .typed_context import TypedContextConfig
+    from .mask_resnet import MaskResNetConfig
+    from .entity_transformer import EntityTransformerConfig
+
+    if family == "mask-resnet":
+        field = "typed_context"
+        config_class = MaskResNetConfig
+    elif family == "entity-transformer":
+        field = "typed"
+        config_class = EntityTransformerConfig
+    else:
+        raise ValueError("unsupported typed architecture family")
+    if not isinstance(config, Mapping) or set(config) != {item.name for item in fields(config_class)}:
+        raise ValueError("invalid typed model configuration fields")
+    context = config[field]
+    if not isinstance(context, Mapping) or set(context) != {item.name for item in fields(TypedContextConfig)}:
+        raise ValueError("invalid typed context configuration fields")
+    data = dict(config)
+    typed_data = dict(context)
+    for name in ("record_category_sizes", "relation_category_sizes", "candidate_category_sizes"):
+        if not isinstance(typed_data[name], (list, tuple)):
+            raise ValueError(f"invalid typed context {name}")
+        typed_data[name] = tuple(typed_data[name])
+    try:
+        data[field] = TypedContextConfig(**typed_data)
+        parsed = config_class(**data)
+    except (TypeError, ValueError) as error:
+        raise ValueError("invalid typed model configuration") from error
+    if _typed_hash(asdict(parsed)) != _typed_hash(dict(config)):
+        raise ValueError("typed model configuration is not canonical")
+    return parsed
+
+
+def _validate_typed_feature_dimensions(config: Any, family: str, vocabulary_size: int) -> None:
+    context = config.typed_context if family == "mask-resnet" else config.typed
+    if any(size != vocabulary_size for size in (*context.record_category_sizes,
+                                                *context.relation_category_sizes,
+                                                *context.candidate_category_sizes)):
+        raise ValueError("typed model category embeddings differ from encoder vocabulary")
+    if (context.record_numeric_dim, context.relation_numeric_dim,
+            context.candidate_numeric_dim) != (8, 4, 8):
+        raise ValueError("typed model numeric dimensions differ from typed-input-v1")
+
+
 def _typed_frozen_source() -> tuple[dict[str, Any], dict[str, Any]]:
     """Read source checkout metadata or the same frozen copies in an installed wheel."""
     root = Path(__file__).resolve().parents[3] / "bridge" / "catalog"
@@ -649,37 +722,25 @@ def _typed_source_spec(data: Mapping[str, Any]) -> Any:
 
 
 def _typed_model_from_config(family: str, config: Mapping[str, Any]) -> Any:
-    from .typed_context import TypedContextConfig
-    from .mask_resnet import MaskResNetConfig, MaskResNetPolicyValueNetwork
-    from .entity_transformer import EntityTransformer, EntityTransformerConfig
+    from .mask_resnet import MaskResNetPolicyValueNetwork
+    from .entity_transformer import EntityTransformer
 
-    data = dict(config)
     if family == "mask-resnet":
-        field = "typed_context"
-        config_class, model_class = MaskResNetConfig, MaskResNetPolicyValueNetwork
+        model_class = MaskResNetPolicyValueNetwork
     elif family == "entity-transformer":
-        field = "typed"
-        config_class, model_class = EntityTransformerConfig, EntityTransformer
+        model_class = EntityTransformer
     else:
         raise ValueError("unsupported typed checkpoint architecture family")
-    context = dict(data[field])
-    for name in ("record_category_sizes", "relation_category_sizes", "candidate_category_sizes"):
-        context[name] = tuple(context[name])
-    data[field] = TypedContextConfig(**context)
-    return model_class(config_class(**data))
+    return model_class(_typed_config_from_metadata(family, config))
 
 
 def _typed_check_model(model: Any, spec: Any) -> tuple[str, dict[str, Any], str]:
     family = _typed_family(model)
     metadata = spec.contract()
     if spec.digest != _typed_hash(metadata) or metadata["rules_version"] != "augment-site-20260928-e5ed84fcf8e72a24":
-        raise ValueError("typed checkpoint encoder compatibility mismatch")
-    vocabulary_size = len(metadata["feature_schema"]["category_vocabulary"])
-    context = model.config.typed_context if family == "mask-resnet" else model.config.typed
-    if any(size != vocabulary_size for size in (*context.record_category_sizes,
-                                                   *context.relation_category_sizes,
-                                                   *context.candidate_category_sizes)):
-        raise ValueError("typed model category embeddings differ from encoder vocabulary")
+        raise ValueError("typed model encoder compatibility mismatch")
+    _validate_typed_feature_dimensions(model.config, family,
+                                       len(metadata["feature_schema"]["category_vocabulary"]))
     state = model.state_dict()
     if any(tensor.is_floating_point() and (tensor.dtype != torch.float32 or not bool(torch.isfinite(tensor).all()))
            for tensor in state.values()):

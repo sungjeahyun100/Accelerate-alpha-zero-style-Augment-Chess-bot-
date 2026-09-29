@@ -279,6 +279,14 @@ pub struct NamedInput {
     pub data: TypedTensorData,
 }
 
+/// Borrowed metadata for validating a typed request before copying array data.
+#[derive(Clone, Debug)]
+pub struct TypedInputShape<'a> {
+    pub name: &'a str,
+    pub dtype: TensorDtype,
+    pub shape: &'a [usize],
+}
+
 pub struct TypedInferenceSession {
     pub bundle: TypedBundle,
     pub limits: Limits,
@@ -317,17 +325,21 @@ impl TypedInferenceSession {
         })
     }
 
-    pub fn validate_inputs(
+    /// Enforces input shape, element, and byte limits before an owned copy.
+    /// The intermediate-memory check is an estimate for exporter-produced
+    /// model families, not a hard bound for an arbitrary ONNX graph.
+    pub fn validate_shapes(
         &self,
-        inputs: &[NamedInput],
+        inputs: &[TypedInputShape<'_>],
     ) -> Result<(usize, usize, BTreeMap<String, usize>)> {
         let specs = &self.bundle.onnx.inputs;
         ensure!(inputs.len() == specs.len(), "typed input count mismatch");
         let mut symbols: BTreeMap<String, usize> = BTreeMap::new();
+        let mut total_elements = 0usize;
         let mut total_bytes = 0usize;
         for (input, spec) in inputs.iter().zip(specs) {
             ensure!(
-                input.name == spec.name && input.data.dtype() == spec.dtype,
+                input.name == spec.name && input.dtype == spec.dtype,
                 "typed input name/dtype mismatch"
             );
             ensure!(
@@ -339,16 +351,9 @@ impl TypedInferenceSession {
                 .iter()
                 .try_fold(1usize, |n, dim| n.checked_mul(*dim))
                 .context("typed shape overflow")?;
-            ensure!(
-                elements == input.data.len(),
-                "typed input element count mismatch"
-            );
-            if let TypedTensorData::Float32(data) = &input.data {
-                ensure!(
-                    data.iter().all(|value| value.is_finite()),
-                    "typed input non-finite float32 value"
-                );
-            }
+            total_elements = total_elements
+                .checked_add(elements)
+                .context("typed input element overflow")?;
             for (actual, required) in input.shape.iter().zip(&spec.shape) {
                 match required {
                     Axis::Fixed(expected) => {
@@ -392,8 +397,11 @@ impl TypedInferenceSession {
             "batch or candidate count exceeds inference limits"
         );
         ensure!(
-            total_bytes <= self.bundle.resource_limits.max_input_bytes
-                && total_bytes <= self.limits.max_input_elements.saturating_mul(4),
+            total_elements <= self.limits.max_input_elements,
+            "typed input element count exceeds inference limits"
+        );
+        ensure!(
+            total_bytes <= self.bundle.resource_limits.max_input_bytes,
             "typed input bytes exceed inference limits"
         );
         let feature_limits = &self.bundle.encoder["feature_schema"]["limits"];
@@ -432,7 +440,7 @@ impl TypedInferenceSession {
             .or_else(|| config.get("typed_context"))
             .and_then(|value| value.get("hidden_dim"))
             .and_then(|value| value.as_u64())
-            .unwrap_or(128) as u128;
+            .context("typed model hidden dimension missing")? as u128;
         let typed_work = batch as u128
             * hidden
             * (8 * records + 6 * relations + 6 * actions as u128 * nodes)
@@ -441,7 +449,7 @@ impl TypedInferenceSession {
             let heads = config
                 .get("heads")
                 .and_then(|value| value.as_u64())
-                .unwrap_or(4) as u128;
+                .context("typed Transformer head count missing")? as u128;
             typed_work + 3u128 * batch as u128 * heads * records * records * 4
         } else {
             let height = symbols.get("height").copied().unwrap_or(1) as u128;
@@ -449,7 +457,28 @@ impl TypedInferenceSession {
             let channels = config
                 .get("channels")
                 .and_then(|value| value.as_u64())
-                .unwrap_or(128) as u128;
+                .context("typed ResNet channels missing")? as u128;
+            ensure!(
+                batch as u64
+                    <= config["max_batch"]
+                        .as_u64()
+                        .context("typed ResNet batch limit missing")?
+                    && actions as u64
+                        <= config["max_candidates"]
+                            .as_u64()
+                            .context("typed ResNet candidate limit missing")?
+                    && height
+                        <= config["max_board_axis"]
+                            .as_u64()
+                            .context("typed ResNet board limit missing")?
+                            as u128
+                    && width
+                        <= config["max_board_axis"]
+                            .as_u64()
+                            .context("typed ResNet board limit missing")?
+                            as u128,
+                "typed input exceeds model geometry limits"
+            );
             typed_work + 6u128 * batch as u128 * channels * height * width * 4
         };
         ensure!(
@@ -457,6 +486,39 @@ impl TypedInferenceSession {
                 <= self.bundle.resource_limits.max_intermediate_bytes as u128,
             "typed inference intermediate buffer estimate exceeds limit"
         );
+        Ok((batch, actions, symbols))
+    }
+
+    pub fn validate_inputs(
+        &self,
+        inputs: &[NamedInput],
+    ) -> Result<(usize, usize, BTreeMap<String, usize>)> {
+        let shapes = inputs
+            .iter()
+            .map(|input| TypedInputShape {
+                name: &input.name,
+                dtype: input.data.dtype(),
+                shape: &input.shape,
+            })
+            .collect::<Vec<_>>();
+        let (batch, actions, symbols) = self.validate_shapes(&shapes)?;
+        for input in inputs {
+            let elements = input
+                .shape
+                .iter()
+                .try_fold(1usize, |count, dim| count.checked_mul(*dim))
+                .context("typed shape overflow")?;
+            ensure!(
+                elements == input.data.len(),
+                "typed input element count mismatch"
+            );
+            if let TypedTensorData::Float32(data) = &input.data {
+                ensure!(
+                    data.iter().all(|value| value.is_finite()),
+                    "typed input non-finite float32 value"
+                );
+            }
+        }
         validate_typed_semantics(
             inputs,
             &symbols,
@@ -753,4 +815,132 @@ fn validate_typed_semantics(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use manifest::{TensorSpec, TypedOnnxContract, TypedResourceLimits};
+    use serde_json::json;
+
+    #[test]
+    fn mixed_dtype_element_limit_is_independent_of_byte_limit() {
+        let bundle = TypedBundle {
+            version: String::new(),
+            model_io_version: String::new(),
+            architecture_family: "entity-transformer".into(),
+            model_file: String::new(),
+            model_sha256: String::new(),
+            base_hash: String::new(),
+            adapter_hash: None,
+            adapter: None,
+            model_config: json!({"typed": {"hidden_dim": 1}, "heads": 1}),
+            model_config_hash: String::new(),
+            encoder: json!({"feature_schema": {"limits": {
+                "max_input_bytes": 1024, "max_batch": 64,
+                "max_candidates": 4096, "max_relations": 8192
+            }}}),
+            encoder_hash: String::new(),
+            onnx: TypedOnnxContract {
+                opset: 18,
+                inputs: vec![
+                    TensorSpec {
+                        name: "candidate_mask".into(),
+                        dtype: TensorDtype::Bool,
+                        shape: vec![
+                            Axis::Dynamic("batch".into()),
+                            Axis::Dynamic("actions".into()),
+                        ],
+                    },
+                    TensorSpec {
+                        name: "relation_index".into(),
+                        dtype: TensorDtype::Int64,
+                        shape: vec![
+                            Axis::Dynamic("batch".into()),
+                            Axis::Dynamic("relations".into()),
+                            Axis::Fixed(2),
+                        ],
+                    },
+                ],
+                outputs: Vec::new(),
+            },
+            resource_limits: TypedResourceLimits {
+                axis_maxima: [
+                    ("batch".into(), 64),
+                    ("actions".into(), 4096),
+                    ("relations".into(), 8192),
+                ]
+                .into(),
+                max_input_bytes: 1024,
+                max_intermediate_bytes: 1024 * 1024,
+            },
+            numerical_tolerance: json!({}),
+        };
+        let mut session = TypedInferenceSession {
+            bundle,
+            limits: Limits {
+                max_input_elements: 65,
+                ..Limits::default()
+            },
+            backend: Backend::Tract,
+            runner: Runner::TractTyped(Vec::new()),
+        };
+        let inputs = [
+            TypedInputShape {
+                name: "candidate_mask",
+                dtype: TensorDtype::Bool,
+                shape: &[1, 64],
+            },
+            TypedInputShape {
+                name: "relation_index",
+                dtype: TensorDtype::Int64,
+                shape: &[1, 1, 2],
+            },
+        ];
+        // 66 elements use only 80 bytes, below both byte ceilings. The
+        // bool-heavy request still exceeds an element limit of 65.
+        assert!(
+            session
+                .validate_shapes(&inputs)
+                .unwrap_err()
+                .to_string()
+                .contains("element count")
+        );
+        session.limits.max_input_elements = 66;
+        assert!(session.validate_shapes(&inputs).is_ok());
+        session.bundle.resource_limits.max_input_bytes = 79;
+        assert!(
+            session
+                .validate_shapes(&inputs)
+                .unwrap_err()
+                .to_string()
+                .contains("input bytes")
+        );
+
+        // Here 65 elements require 513 bytes because 64 are int64. The
+        // element limit is satisfied and the explicit byte budget admits it.
+        let int64_heavy = [
+            TypedInputShape {
+                name: "candidate_mask",
+                dtype: TensorDtype::Bool,
+                shape: &[1, 1],
+            },
+            TypedInputShape {
+                name: "relation_index",
+                dtype: TensorDtype::Int64,
+                shape: &[1, 32, 2],
+            },
+        ];
+        session.limits.max_input_elements = 65;
+        session.bundle.resource_limits.max_input_bytes = 1024;
+        assert!(session.validate_shapes(&int64_heavy).is_ok());
+        session.bundle.resource_limits.max_input_bytes = 512;
+        assert!(
+            session
+                .validate_shapes(&int64_heavy)
+                .unwrap_err()
+                .to_string()
+                .contains("input bytes")
+        );
+    }
 }
