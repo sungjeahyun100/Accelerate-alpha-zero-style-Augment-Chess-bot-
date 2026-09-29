@@ -46,6 +46,12 @@ trait AdapterObject: Send + Sync {
 
 첫 일반 이동 `a2→a3` 뒤의 비행동자 White 관측은 세 모드에서 원문과 일치하지만, 행동자 Black의 공개 힌트는 아직 닫혀 있다. 이를 열려면 이동 구현이 `getVisibleMoveSquares`의 **표시 순서와 출발점별 목적지 묶음**을, 카드 구현이 `getVisibleCards` 표시 순서와 `getVisibleCardTargetSquares`의 **첫 선택 대상 묶음**을 각각 제공해야 한다. 빈 대상 묶음은 의미가 있을 때 보존하고 대상 없는 카드를 임의로 힌트에 추가하지 않는다. 관측 계층은 이 두 투영을 조합하고 공개 정책을 검증한다. 전체 legal action이나 실행용 카드 후보를 UI 힌트로 바꿔 쓰지 않는다. 왕실 위협은 별도의 순서·출처가 보존된 내부 `AiNoCards` 후보와 검증된 포획 실행을 요구한다. 이 세 소비 계약은 서로 대체할 수 없으며, 현재 모두 공개 v7 실행을 여는 근거가 아니다.
 
+프로젝트 host는 후보를 AI 입력에 넘기기 전에 source-valid 공개 intent의 정확한 필드와
+순서 있는 선택 대상을 검증해야 한다. `TypedEncoder.encode`는 의미 특징 추출기이며,
+카드 후보의 추가 필드까지 거부하는 최종 행동 schema 검증기가 아니다. 공개
+`ObservationIR`도 `from_public`의 원본 서명·visibility-policy 검사를 거친 출력으로만
+사용한다. 투영된 IR을 직접 구성·변경하면 원본 관측 전체를 다시 검증할 수 없다.
+
 ## 다음 작업자의 순서와 소유권
 
 1. **공유 계약 담당자 한 명**이 서로 다른 가짜 프로젝트 타입 두 개로 descriptor/envelope/error/capability의 schema·버전 협상·취소/한도·중복 등록을 검증한다. Accelerate 타입을 공유 패키지에 import하지 않는다. 실제 모노레포 경로·패키지명은 구조가 정해진 뒤 선택한다.
