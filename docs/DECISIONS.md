@@ -4,7 +4,8 @@
 
 D-001~D-003은 기존 결정입니다. D-004~D-006과 D-003 보완은 2026-09-27 작업 방향을
 기록한 변경이며, 이를 추가한 PR이 `develop`에 병합된 때부터 적용합니다. 설계 채택과
-구현 완료는 별개입니다. 새 바인딩·신경망·ONNX 구현은 아직 없습니다.
+구현 완료는 별개입니다. D-007은 2026-10-01의 확률적 탐색 설계 결정입니다.
+새 바인딩·신경망·ONNX·MCTS 구현은 아직 없습니다.
 
 ## D-001: JS oracle + Rust engine + Python AI 구조 채택
 
@@ -104,6 +105,36 @@ D-001~D-003은 기존 결정입니다. D-004~D-006과 D-003 보완은 2026-09-27
 - **영향**: [AGENTS](../AGENTS.md), [개발 기준](ENGINEERING-STANDARDS.md), 구조 정책과 CI가
   기준이다. 생성기 경로 전환은 해당 코드 수정 시 적용한다. 구조 검사는 모든 쓰기를
   통제하거나 모든 개발 규약의 준수를 증명하지 않는다.
+
+## D-007: 확률적 전이를 지원하는 AlphaZero 스타일 탐색
+
+- **날짜**: 2026-10-01
+- **상태**: 설계 채택, 구현 전
+- **결정**: 실제 Rust 규칙 엔진 + policy/value network + MCTS 방향을 유지하고,
+  MCTS를 **chance-aware AlphaZero-style MCTS**로 설계한다. 괴물의 무작위 이동이나
+  랜덤 카드 드로우처럼 같은 `(state, action)`에서도 여러 후속 상태가 가능하므로 전이는
+  `P(next_state | state, action)`으로 본다. 플레이어가 고르는 action의 decision node와
+  엔진 규칙이 정하는 chance outcome의 chance node를 구분한다. 개념적 흐름은
+  `decision state → player action → afterstate → chance event → next decision state`다.
+  `afterstate`는 설명용이며 필수 저장 타입으로 확정하지 않는다.
+- **이유**: 순수 결정론적 `state + action → next_state`와 action마다 단일 child를
+  가정하면 환경의 무작위 결과를 플레이어 선택으로 잘못 취급할 수 있다. Decision node에는
+  policy prior·visit count·Q-value·PUCT를 적용할 수 있지만 chance node는 유리한
+  outcome을 골라서는 안 된다. 확률은 엔진의 실제 게임 규칙을 따른다. 개념적 기대값은
+  `Q(s,a) = Σ_o P(o | s,a) V(s'_o)`다.
+- **엔진·AI 경계**: Rust 엔진이 합법 행동, 플레이어 행동 적용, 확률 사건의 가능한
+  결과·확률 또는 규칙에 따른 샘플링, 결과 적용의 의미를 소유한다. AI는 규칙이나
+  확률을 재구현하지 않는다. 실제 API 이름·타입은 Phase 1/3/5에서 기존
+  `apply_action` 초안과 연결해 정한다. 엔진의 authoritative game state와 AI observation은
+  구분한다. 내부 RNG 상태·셔플된 미래 덱 순서 등 플레이어에게 알려지지 않은 정보는
+  신경망 입력이나 해당 플레이어의 관측에 노출하지 않는다.
+- **대안과 제외 이유**: 결정론적 단일 후속 상태 탐색은 위 규칙을 표현하지 못한다.
+  Stochastic MuZero로의 전환이나 NNUE를 확률 처리 수단으로 쓰는 방향은 채택하지 않는다.
+  NNUE는 향후 축적한 대국·탐색 데이터로 별도 학습할 수 있는 평가 모델 후보다.
+- **영향·미결정**: explicit chance expansion과 simulation마다 실제 분포를 따르는
+  sampled chance outcomes를 모두 구현 후보로 둔다. 확률 열거·샘플링·RNG 재현 및 bridge 표현은
+  구현 단계에서 결정한다. 숨은 정보의 실제 범위와 불완전정보 탐색 도입 여부도 별도
+  검토한다. 기존 JS oracle의 검증 역할과 D-001~D-005의 책임·모델 결정은 유지한다.
 
 ---
 
