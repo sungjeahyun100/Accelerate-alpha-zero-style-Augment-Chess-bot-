@@ -24,12 +24,20 @@ Python AI ──(요청 JSON)──> 엔진 ──(응답 JSON)──> Python AI
             get_legal_actions / apply_action / get_result   매 턴 GameState를 함께 보냄
 ```
 
-- **엔진은 위치 단위로 상태가 없습니다(stateless).** 매 요청에 `state`가 들어 있고, 서버가 대국을 기억하지 않아도 됩니다. 이렇게 하면 MCTS에서 임의의 위치로 되돌아가도 새 요청 하나면 되고, differential test의 fixture(상태 -> 합법 행동, 상태+행동 -> 결과 상태)와 모양이 같습니다. 대신 `gameId`는 등록해 둔 카드 정의를 가리키는 손잡이입니다.
+- 위치 단위 **stateless는 초안의 제안**입니다(B-Q1). 매 요청에 `state`를 넣어
+  MCTS의 위치 재방문과 differential fixture를 표현합니다. fixture의 `상태+행동 →
+  관측된 결과 상태`는 한 번의 실행 기록이며 동일한 `(state, action)`의 후속 상태가
+  하나뿐이라는 뜻이 아닙니다. `gameId`는 등록된 카드 정의의 손잡이입니다.
 - **카드 정의는 `new_game`에서 한 번만** 보냅니다(D-003). 이후 요청은 `gameId`만 붙입니다.
 - **실제 반복 호출은 PyO3 타입·배열**로 설계합니다(D-004, 해당 변경의 develop 병합 시 적용).
   maturin은 바인딩의 빌드·패키징 도구입니다. 위 그림은 JSON 기록·검증 경로이며 모든
   탐색 노드에서 문자열을 전달하는 실행 요구가 아닙니다. 스키마·예시 버전은 그대로입니다.
 - 인코딩(신경망 입력) 위치는 O-001이 미결정이므로 기본 응답에는 원문 상태만 있고, 선택 필드 `encoded`/`encode`를 확장 지점으로만 열어 두었습니다.
+  이 원문 상태는 엔진 계약의 기록이며 AI observation을 그대로 정의하지 않습니다(B-Q12).
+- [D-007](../../docs/DECISIONS.md#d-007-확률적-전이를-지원하는-alphazero-스타일-탐색)은
+  플레이어 행동과 chance outcome의 구분을 요구합니다. 현재 `apply_action` JSON은
+  실행 한 번의 결과만 나타내며 outcome 목록·확률·샘플링 계약을 정의하지 않습니다.
+  필요한 확장은 [미결정 목록](open-questions.md)의 B-Q9에서 다룹니다.
 
 ## 근거로 삼은 자료
 

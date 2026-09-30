@@ -7,14 +7,15 @@ AlphaZero 방식의 탐색, 신경망, self-play, 학습과 평가를 연구하�
 ## 책임 범위
 
 - `alphazero/`: 전체 AlphaZero 흐름 조정
-- `mcts/`: policy/value 기반 탐색
+- `mcts/`: policy/value 기반 chance-aware MCTS. decision node의 플레이어 행동과
+  chance node의 엔진 확률 결과를 구분하며 전개·샘플링 방식은 구현 시 결정
 - `network/`: state encoder와 policy/value network
 - `network/`는 ResNet·FiLM 조건화·별도 LoRA 어댑터와 ONNX export의 모델 계약을 담당합니다.
   FiLM 조건은 ONNX 입력으로 유지하며, 검증용 정적 LoRA 병합은 원본 복사본에서 수행합니다.
   Hypernetwork는 생성·적용·병합 가능 여부의 확장 경계만 설계합니다.
 - `selfplay/`: self-play와 replay data 생성
 - `training/`: 학습과 평가·승격 흐름
-- `nnue/`: NNUE 관련 연구
+- `nnue/`: 향후 self-play·탐색 데이터로 별도 학습할 수 있는 평가 모델 연구
 - `tests/`: Python 계층 단위·통합 검사
 
 ## 다른 영역과의 관계

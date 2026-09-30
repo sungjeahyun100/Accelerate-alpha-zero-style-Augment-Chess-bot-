@@ -56,9 +56,20 @@ Rust는 독립적으로 `GameState`, `Action`, `legal_actions()`, `apply_action(
 `is_terminal()`, `result()`에 해당하는 규칙 API를 제공할 계획이다.
 기존 JSON 스키마는 초안이며 아직 엔진에 구현하지 않았다.
 
+D-007에 따라 이 API 목록만으로 단일 `next_state`를 전제하지 않는다. 엔진은
+플레이어 행동과 그 뒤의 확률 사건을 구분해, 가능한 chance outcome과 규칙상 확률을
+제공하거나 같은 분포에서 샘플링할 수 있어야 한다. 결과 적용까지 포함한 책임의 분리는
+필요하지만 실제 Rust API 이름·타입과 JSON/PyO3 표현은 미정이다. Python MCTS는
+decision node에서 플레이어 행동을 선택하고 chance node에서는 엔진 분포를 따른다.
+전체 outcome 전개와 simulation별 샘플링은 모두 후보이며 Phase 7에서 결정한다.
+
+엔진의 authoritative game state는 AI observation과 다르다. 내부 RNG 상태나 미래
+셔플 순서가 엔진에 있더라도 플레이어가 모르는 미래 정보는 encoder·신경망 입력에
+넣지 않는다. 관측의 정확한 필드와 숨은 정보 탐색 필요성은 Phase 1/6/7에서 검토한다.
+
 ## 신경망·LoRA·FiLM·Hypernetwork
 
-policy/value network는 ResNet이다. FiLM은 카드·RULE·게임 상태 조건을 이용해 잔차
+policy/value network는 ResNet이다. FiLM은 플레이어가 관측 가능한 카드·RULE·게임 상태 조건을 이용해 잔차
 특징을 조절한다. 조건은 **명시적인 ONNX 입력**이고 FiLM 연산은 그래프 안에 유지한다.
 조건 벡터의 의미·순서·dtype·shape와 인코딩 버전을 모델 메타데이터에 연결한다.
 
@@ -96,10 +107,13 @@ Rust 후보를 연결할 때 빌드 산출물 경로와 candidate 명령도 새 
 검증 대상은 legal actions, 적용/거절 결과, 전체 상태, 턴·카드·기물 상태와 종료 결과다.
 사이트와 JS가 다를 때의 기준은 O-002로 남아 있다.
 
-목표 학습 흐름은 `(state/observation, legal actions, visit policy, result, seed,
-model/encoder/rules versions)`를 보존하는 self-play → Python 학습 → 후보 모델의
+목표 학습 흐름은 `(position/observation, player to move, chosen action, legal actions,
+MCTS visit policy, MCTS estimated value, 필요한 경우 chance outcome, final result,
+seed, model/encoder/rules versions)`를 보존할 수 있는 self-play → Python 학습 → 후보 모델의
 정확성·독립 대전 평가 → 승격이다. 중단 결과를 실제 무승부로 취급하지 않는다.
-추가 행동·확률·은신에 필요한 상태와 관측 의미는 Phase 1/6/7에서 명시한다.
+실제 기록 형식은 미정이다. 보존한 대국·탐색 데이터는 향후 별도 NNUE 평가 모델의
+학습에도 재활용할 수 있다. 추가 행동·확률·은신에 필요한 상태와 관측 의미는
+Phase 1/6/7에서 명시한다.
 
 ## 근거
 
