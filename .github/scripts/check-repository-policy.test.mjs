@@ -8,7 +8,7 @@ import { checkRecords, inspectRepository, parseIndex, parseObjectMetadata, valid
 const basePolicy = {
   schemaVersion: 1,
   allowedRootFiles: ['README.md'],
-  allowedRootDirectories: ['docs', 'python', 'tests', 'rust-engine'],
+  allowedRootDirectories: ['docs', 'packages', 'projects'],
   forbiddenDirectoryNames: ['models', 'target', '.cache', '.venv', '__pycache__', 'node_modules'],
   forbiddenFileNames: ['engine_test'],
   forbiddenFileSuffixes: ['.onnx', '.safetensors', '.whl', '.so', '.pyc'],
@@ -20,22 +20,23 @@ const policy = changes => ({ ...structuredClone(basePolicy), ...changes });
 const violations = (entries, changes = {}) => checkRecords(policy(changes), entries);
 
 test('source, existing-style fixture and Unicode/space paths are permitted', () => {
-  assert.deepEqual(violations([record('README.md'), record('rust-engine/build.rs', 100),
-    record('tests/differential/fixtures/cards.jsonl'), record('docs/설계 기록.md'),
-    record('python/network/model.py', 20, '100755')]), []);
+  assert.deepEqual(violations([record('README.md'), record('projects/augment-chess/engine/build.rs', 100),
+    record('projects/augment-chess/tests/differential/fixtures/cards.jsonl'), record('docs/설계 기록.md'),
+    record('projects/accelerate/python/network/model.py', 20, '100755')]), []);
 });
 
 test('unregistered directories and root files are rejected, including case variants', () => {
-  for (const path of ['experiment-a/network.py', 'scratch.md', 'Docs/design.md']) {
+  for (const path of ['experiment-a/network.py', 'scratch.md', 'Docs/design.md',
+    'rust-engine/src/lib.rs', 'bridge/catalog/site.json', 'infra/engine-merged.js']) {
     assert.match(violations([record(path)]).join('\n'), /unregistered root/u);
   }
 });
 
 test('generated weights, wheels, binaries, caches and versioned shared libraries are rejected', () => {
-  for (const path of ['python/network/candidate.ONNX', 'python/adapter.safetensors', 'python/pkg.whl',
-    'python/lib.so.1.2', 'python/network/cache.pyc', 'rust-engine/engine_test',
-    'rust-engine/target/release/app', 'python/.venv/config', 'python/__pycache__/module',
-    'python/MODELS/notes.md', 'python/node_modules/package', 'docs/.cache/report']) {
+  for (const path of ['projects/accelerate/python/network/candidate.ONNX', 'projects/accelerate/python/adapter.safetensors', 'projects/accelerate/python/pkg.whl',
+    'projects/accelerate/python/lib.so.1.2', 'projects/accelerate/python/network/cache.pyc', 'projects/augment-chess/engine/engine_test',
+    'projects/augment-chess/engine/target/release/app', 'projects/accelerate/python/.venv/config', 'projects/accelerate/python/__pycache__/module',
+    'projects/accelerate/python/MODELS/notes.md', 'projects/accelerate/python/node_modules/package', 'docs/.cache/report']) {
     assert.match(violations([record(path)]).join('\n'), /generated rule/u, path);
   }
 });
@@ -49,11 +50,11 @@ test('size limit is inclusive and explicit size exceptions are exact', () => {
 });
 
 test('configured suffix case also covers versioned shared libraries', () => {
-  assert.match(violations([record('python/library.SO.2')], { forbiddenFileSuffixes: ['.SO'] }).join('\n'), /generated rule/u);
+  assert.match(violations([record('projects/accelerate/python/library.SO.2')], { forbiddenFileSuffixes: ['.SO'] }).join('\n'), /generated rule/u);
 });
 
 test('generated fixture exemption does not also waive size or unknown root', () => {
-  const exception = { path: 'tests/tiny.onnx', reason: 'Reviewed numerical fixture', allow: ['generated'] };
+  const exception = { path: 'projects/augment-chess/tests/tiny.onnx', reason: 'Reviewed numerical fixture', allow: ['generated'] };
   assert.deepEqual(violations([record(exception.path)], { exceptions: [exception] }), []);
   assert.match(violations([record(exception.path, 101)], { exceptions: [exception] }).join('\n'), /size rule/u);
   const rootException = { ...exception, path: 'scratch/tiny.onnx' };

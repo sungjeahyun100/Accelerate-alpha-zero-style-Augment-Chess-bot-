@@ -1,0 +1,12 @@
+[package]
+name = "augment-chess-v6-migration"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Read-only v6 transport admission and bounded v7 initial-template conversion"
+
+[dependencies]
+serde = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
+serde_jcs = "0.2"
+sha2 = "0.10"

@@ -1,52 +1,14 @@
-[build-system]
-requires = ["maturin==1.15.0"]
-build-backend = "maturin"
-
 [project]
-name = "accelerate-chess"
-version = "0.1.0"
-description = "Augment Chess rules bindings, information-set search and residual policy/value models"
-readme = "python/README.md"
+name = "accelerate-workspace"
+version = "0.0.0"
 requires-python = ">=3.12,<3.13"
-dependencies = [
-  "numpy==2.5.3",
-  "torch==2.14.0",
-  "onnx==1.23.0",
-  "onnxscript==0.7.2",
-  "safetensors==0.8.0",
-  "jcs==0.2.1",
-]
-
-[project.optional-dependencies]
-validation = ["onnxruntime==1.30.0"]
-
-[dependency-groups]
-dev = ["pytest==9.1.1", "maturin==1.15.0"]
-
-[tool.maturin]
-manifest-path = "bridge/native/Cargo.toml"
-python-source = "python"
-module-name = "accelerate_chess._native"
-features = ["pyo3/extension-module"]
-include = [
-  { path = "bridge/catalog/*.json", format = "sdist" },
-  { path = "NOTICE.md", format = "sdist" },
-]
-
-[tool.pytest.ini_options]
-testpaths = ["python/tests"]
-addopts = "--strict-markers"
 
 [tool.uv]
+package = false
 environments = [
   "sys_platform == 'win32' and platform_machine == 'AMD64'",
   "sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
-
-[tool.uv.sources]
-torch = [{ index = "pytorch-cpu" }]
+[tool.uv.workspace]
+members = ["projects/accelerate"]

@@ -1,0 +1,30 @@
+[package]
+name = "augment-chess-perf"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# The measurement harness is opt-in and does not add a root workspace member.
+[workspace]
+
+[dependencies]
+adapter-runtime = { path = "../../../../packages/adapter-runtime" }
+augment-chess-engine = { path = "../../engine" }
+serde_json = "1"
+serde_jcs = "0.2"
+sha2 = "0.10"
+
+[build-dependencies]
+serde_json = "1"
+sha2 = "0.10"
+
+[features]
+allocation-probe = []
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[[bin]]
+name = "augment-chess-perf"
+path = "src/main.rs"

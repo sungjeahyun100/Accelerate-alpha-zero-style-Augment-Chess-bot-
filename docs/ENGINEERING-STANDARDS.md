@@ -12,7 +12,7 @@
 수용 기준, 변경 추적, 검증 근거를 문서와 PR에 연결하는 방식을 보여 준다.
 이 프로젝트는 그 신뢰성 원칙을 조정해 사용하며 NASA 분류·인증·전면 준수를 주장하지 않는다.
 
-규칙 엔진·bridge/FFI·데이터 계약·모델 export는 오류가 후속 계산 전체에 전파되는 경계다.
+규칙 엔진·adapter/FFI·데이터 계약·모델 export는 오류가 후속 계산 전체에 전파되는 경계다.
 이 영역에서는 입력 검증, 실패의 명시성, 소유권, 버전, 재현 검사를 엄격히 적용한다.
 연구 단계에서는 구조와 파라미터의 실험을 허용하되 결과를 채택·승격한 근거와 구분한다.
 기존 JS/C++ 전체를 이번 규약에 맞춰 재작성하지 않는다. 기존 경고와 새 경고를 구분한다.
@@ -34,6 +34,53 @@
 
 규약 예외에는 규칙, 이유, 보완 검사, 재검토 조건을 PR에 남긴다. 정당한 예외 때문에
 일상적인 구현 선택을 모두 사용자 승인 대상으로 만들지 않는다.
+
+## 오류·경고와 CI 근거 재사용
+
+개발 도구·검사·CI는 실제 오류 종류, 메시지, 실패 단계와 종료 코드를 보존한다.
+실패를 빈 결과·정상 상태·일반적인 안내 문구로 바꾸거나 로그를 숨기지 않는다.
+계속 진행할 수 있는 경고도 진단 로그와 보고서에 원인을 남기고, 실행하지 못한 검사와
+그 영향을 구분한다. 제품의 사용자 안내를 단순화할 때도 개발 환경의 원래 진단은 유지한다.
+
+서로 의존하지 않는 Rust 검사, 설치 wheel 검사, 동결 JS adapter 검사는 병렬 job으로
+실행한다. 같은 목적의 중복 실행은 concurrency로 조율하고, 선행 결과가 필요한 검사만
+의존성을 둔다. CI 내부 병렬 worker·메모리 한도와 timeout은 runner 자원에 맞춰 명시한다.
+
+빌드 파일뿐 아니라 성공한 테스트·검증 결과도 재사용할 수 있다. 현재 commit SHA가
+달라도 해당 검사에 영향을 주는 소스·공통 계약·fixture·테스트·lockfile·실행 명령과
+workflow, OS·runner image·toolchain·환경 조건의 식별자가 같아야 한다. 일부 엔진 파일만
+같다는 이유로 전이 의존성이나 검증 입력 변경을 무시하지 않는다. 실행 결과의 근거와
+검증 범위를 함께 보존하며, 캐시를 찾았다는 사실만으로 성공을 보고하지 않는다.
+
+현재 [native CI 재사용 도구](../.github/scripts/native-ci-reuse.py)는 stage 0 Git blob과
+선택한 runtime·runner 식별자로 `rust`, `native`, `adapter` 범위를 나눠 키를 계산한다.
+마지막 필수 검사가 성공하고 근거 보고서를 확인한 뒤에만 success marker를 기록한다.
+재사용 시 marker의 동일 입력 식별자와 근거 보고서를 다시 검사하며, 누락·불일치는
+정확한 오류로 반환한다. 재사용한 검사의 범위를 현재 실행한 검사와 구분해 보고하고,
+adapter의 bounded 검증 결과를 전체 v7 규칙·설치 wheel·프로젝트 완료로 확대하지 않는다.
+
+동결 v7의 실행 식별자는 원문 main·parser SHA, 원문 공개 catalog hash,
+[`execution-profile-20260928.json`](../projects/augment-chess/contracts/catalog/execution-profile-20260928.json)의 내용과 실행 profile version,
+프로필을 포함한 composite `catalogVersion`을 함께 묶는다. 원문 main/parser가 같아도
+startup 초기화 정책이나 manifest가 달라지면 이전 성공을 재사용하지 않는다.
+원문 `state.profile.catalogHash`는 원래 공개 hash를 유지하며 composite 식별자로 바꾸지 않는다.
+현재 faithful 초기화 프로필은 `accelerate-headless-semantic-v7-faithful-init-v1`이다.
+프로필 문서와 검토 요약은 기본 한국어로 작성한다.
+
+CI 키에는 모노레포의 공통 계약, 게임 엔진·게임 계약, native/runtime 및 해당 scope의
+Python·oracle·검사·패키징 경로를 전이 의존성으로 포함한다. 실행 manifest는 필수 추적
+입력이며 stage에서 빠지면 key 생성에 실패한다. sdist에도 같은 manifest·catalog·crate
+manifest가 있어야 하고, 설치 wheel은 소스 배포본의 composite catalog·관측 정책과 일치해야
+한다. native 재사용 근거는 Python/OS/runner/toolchain 조건 외에 source ABI 설정,
+wheel의 ABI·플랫폼 태그와 실제 설치 바이너리 일치도 보존한다. 현재 ABI는 `abi3-py312`이며,
+다른 ABI나 프로필에서 만든 wheel·검증 보고서를 동일 main SHA만으로 승인하지 않는다.
+캐시 hit는 보존된 성공 근거의 재사용이고, 이번 실행에서 다시 빌드·검사한 결과와 구별한다.
+
+일회성 workflow는 동일 목표당 하나를 재사용하며 작성자·저장소의 고정 개수 상한은 두지
+않는다. 작성자는 목표·담당자·종료 조건을 기록하고 자신의 비활성 임시 workflow와
+종료된 실행 기록을 정리한다. 목표당 최근 5개 run, 임시 artifact 14일을 기본으로 하되
+열린 PR·연구 자료의 근거나 미해결 실패 기록은 보존한다. 상시 CI·실행 중인 작업·다른
+공동작업자의 workflow와 자료를 이 규약을 이유로 정리하지 않는다.
 
 ## 에이전트 작업과 검토
 
@@ -108,7 +155,7 @@ checkout별 고정 슬롯을 사용하고 보존할 실험은 ID·설정·seed·
 WSL2는 일반 개발에 자유롭게 사용한다. 재생성 가능한 Linux 캐시·가상환경·중간 빌드만
 `${XDG_CACHE_HOME:-$HOME/.cache}/accelerate`에 둘 수 있다. 보존할 산출물은 호스트의
 APPDATA 경로를 확인·변환해 Windows 루트로 내보낸다. CI 루트는 `$RUNNER_TEMP/Accelerate`다.
-기존 infra/CI 생성기는 수정 시 경로를 전환하며 이번 규약 도입으로 출력 계약을 일괄 바꾸지 않는다.
+기존 JS 참고 도구와 CI 생성기는 수정 시 출력 경로를 전환하며 이번 규약 도입으로 출력 계약을 일괄 바꾸지 않는다.
 
 장시간 실행에는 유한한 종료 조건, 자원·worker 설정, 출력, 취소·자식 종료 방법을
 기록한다. 기존 process group/Job Object/cgroup/container를 활용할 수 있지만 새 전용

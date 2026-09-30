@@ -18,6 +18,8 @@ import tarfile
 import urllib.request
 import xml.etree.ElementTree as ET
 
+from native_validation_profile import EXECUTION_SOURCE_PATHS, execution_identity, require_execution_identity
+
 REPOSITORY = Path(__file__).resolve().parents[2]
 
 
@@ -58,10 +60,12 @@ def rust_scope():
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
     result = subprocess.run(
-        ["cargo", "test", "-p", "accelerate-engine", "--locked", "--", "--list"],
+        ["cargo", "test", "-p", "augment-chess-engine", "--locked", "--", "--list"],
         cwd=REPOSITORY, env=environment, capture_output=True, text=True,
         check=True, timeout=180,
     )
+    if result.stderr:
+        print(result.stderr, end="" if result.stderr.endswith("\n") else "\n", file=sys.stderr)
     required = (
         "geometry_maps_rectangles_and_signed_extents_without_relabeling_coordinates",
         "synthetic_resize_requires_new_cells_and_an_explicit_clipping_policy",
@@ -77,7 +81,7 @@ def rust_scope():
     reports.mkdir(parents=True, exist_ok=True)
     (reports / "rust-test-list.txt").write_text(result.stdout, encoding="utf-8")
     (reports / "rust-scope.json").write_text(json.dumps({
-        "crate": "accelerate-engine", "required_tests": list(required),
+        "crate": "augment-chess-engine", "required_tests": list(required),
         "listed": True, "execution": "cargo test --workspace --locked in the preceding CI step",
         "scope": "geometry and MoveProgram code contracts; full v7 rules parity remains pending",
     }, indent=2) + "\n", encoding="utf-8")
@@ -138,14 +142,27 @@ def unpack(archive, destination):
             raise RuntimeError("source distribution must have one project root")
         source.extractall(destination, members=members, filter="data")
     project = destination / roots.pop()
-    required = ["Cargo.toml", "Cargo.lock", "pyproject.toml", "NOTICE.md", "rust-engine/src/lib.rs",
-                "bridge/native/src/lib.rs", "bridge/runtime/src/lib.rs",
+    # Maturin relocates the mixed project's python-source to the sdist root,
+    # while workspace crates retain their repository-relative paths.
+    required = ["Cargo.toml", "Cargo.lock", "pyproject.toml", "NOTICE.md",
+                "packages/adapter-runtime/Cargo.toml",
+                "projects/augment-chess/contracts/Cargo.toml", "projects/augment-chess/contracts/src/lib.rs",
+                "projects/augment-chess/engine/Cargo.toml",
+                "projects/augment-chess/engine/src/lib.rs",
+                "projects/accelerate/native/Cargo.toml",
+                "projects/accelerate/native/src/lib.rs", "projects/accelerate/native/src/game_adapter.rs",
+                "projects/accelerate/runtime/Cargo.toml",
+                "projects/accelerate/runtime/src/lib.rs",
+                "python/accelerate_chess/adapter_client.py",
                 "python/accelerate_chess/ir.py",
                 "python/accelerate_chess/network/typed_context.py",
                 "python/accelerate_chess/network/mask_resnet.py",
                 "python/accelerate_chess/network/entity_transformer.py"]
-    required += [f"bridge/catalog/{name}-{date}.json" for date in ("20260927", "20260928")
+    required += [f"projects/augment-chess/contracts/catalog/{name}-{date}.json" for date in ("20260927", "20260928")
                  for name in ("site", "observation", "initial-state", "draft", "card-definitions")]
+    required += [f"projects/augment-chess/contracts/schemas/adapter-{name}-v1.schema.json"
+                 for name in ("actions-request", "actions-response", "observe-request", "observe-response")]
+    required = sorted(set(required) | set(EXECUTION_SOURCE_PATHS))
     for relative in required:
         if not (project / relative).is_file():
             raise RuntimeError(f"source distribution missing {relative}")
@@ -155,23 +172,27 @@ def unpack(archive, destination):
 def build():
     _, _, directory, reports, python = locations()
     run("uv", "lock", "--check")
-    run("uv", "sync", "--locked", "--extra", "validation", "--no-install-project")
+    run("uv", "sync", "--locked", "--extra", "validation", "--no-install-project",
+        cwd=REPOSITORY / "projects/accelerate")
     distribution = directory / "sdist"
     wheels = directory / "wheels" / "sdist-roundtrip"
-    run(python, "-m", "maturin", "sdist", "--manifest-path", "bridge/native/Cargo.toml",
-        "--out", distribution)
+    run(python, "-m", "maturin", "sdist", "--manifest-path", "native/Cargo.toml",
+        "--out", distribution, cwd=REPOSITORY / "projects/accelerate")
     archives = list(distribution.glob("accelerate_chess-*.tar.gz"))
     if len(archives) != 1:
         raise RuntimeError("expected exactly one source distribution")
     project, required = unpack(archives[0], distribution / "extracted")
+    source_identity = execution_identity(project)
+    require_execution_identity(source_identity, execution_identity(REPOSITORY), "source distribution")
     # Source archives use reproducible mtimes. A reused target can otherwise
     # accept stale local-crate fingerprints after re-extraction; force those
-    # three owned release crates to rebuild, retaining dependency artifacts.
+    # owned release crates to rebuild, retaining external dependency artifacts.
     run("cargo", "clean", "--release", "--manifest-path", project / "Cargo.toml",
-        "-p", "accelerate-engine", "-p", "accelerate-native", "-p", "accelerate-runtime",
+        "-p", "adapter-runtime", "-p", "augment-chess-contracts", "-p", "augment-chess-engine",
+        "-p", "accelerate-native", "-p", "accelerate-runtime",
         cwd=project)
     run(python, "-m", "maturin", "build", "--release", "--locked", "--interpreter", python,
-        "--manifest-path", project / "bridge/native/Cargo.toml", "--out", wheels,
+        "--manifest-path", project / "projects/accelerate/native/Cargo.toml", "--out", wheels,
         cwd=project)
     built = list(wheels.glob("accelerate_chess-*.whl"))
     if len(built) != 1:
@@ -179,32 +200,36 @@ def build():
     run("uv", "pip", "install", "--python", python, "--no-deps", "--reinstall", built[0])
     reports.mkdir(parents=True, exist_ok=True)
     run(python, "-c", """
-import hashlib, json, sys, zipfile
+import hashlib, json, re, sys, tomllib, zipfile
 from pathlib import Path
 import jcs
-from accelerate_chess import Position, ActionStream, InferenceSession, site_observation_policy
+from accelerate_chess import (Position, ActionStream, InferenceSession, site_observation_policy,
+                              GameAdapterSession, GameAdapterClient, NativeError)
 from accelerate_chess.encoding import EncoderSpec
 from accelerate_chess.ir import TypedEncoderSpec
 import accelerate_chess as package
 import accelerate_chess.encoding as encoding
 import accelerate_chess.ir as typed_ir
+import accelerate_chess.adapter_client as adapter_client
 import accelerate_chess.network.entity_transformer as entity_transformer
 import accelerate_chess.network.mask_resnet as mask_resnet
 import accelerate_chess.network.typed_context as typed_context
 import accelerate_chess._native as native
-checkout, policy_source, wheel, report = map(Path, sys.argv[1:])
+checkout, policy_source, wheel, report = map(Path, sys.argv[1:5])
+expected_execution_identity = json.loads(sys.argv[5])
 native_path = Path(native.__file__).resolve()
 module_paths = {'native_module': native_path,
     'python_package': Path(package.__file__).resolve(),
     'encoder_module': Path(encoding.__file__).resolve(),
     'typed_ir_module': Path(typed_ir.__file__).resolve(),
+    'adapter_client_module': Path(adapter_client.__file__).resolve(),
     'entity_model_module': Path(entity_transformer.__file__).resolve(),
     'resnet_model_module': Path(mask_resnet.__file__).resolve(),
     'typed_context_module': Path(typed_context.__file__).resolve()}
 for path in module_paths.values():
     if path.is_relative_to(checkout.resolve()) or not path.is_relative_to(Path(sys.prefix).resolve()):
         raise RuntimeError('packaging smoke must import native and Python code from the installed wheel')
-source_python = policy_source.parents[2] / 'python/accelerate_chess'
+source_python = policy_source.parents[4] / 'python/accelerate_chess'
 source_modules = {path.relative_to(source_python).as_posix(): path
                   for path in source_python.rglob('*.py')}
 source_hashes = {}
@@ -233,6 +258,20 @@ with zipfile.ZipFile(wheel) as archive:
     native_hash = hashlib.sha256(native_path.read_bytes()).hexdigest()
     if native_hash != hashlib.sha256(archive.read(native_members[0])).hexdigest():
         raise RuntimeError('installed native extension differs from the wheel')
+    wheel_metadata = [name for name in names if name.endswith('.dist-info/WHEEL')]
+    if len(wheel_metadata) != 1:
+        raise RuntimeError('wheel must contain exactly one ABI/platform metadata record')
+    wheel_tags = [line.partition(':')[2].strip()
+                  for line in archive.read(wheel_metadata[0]).decode('utf-8').splitlines()
+                  if line.startswith('Tag:')]
+    if (not wheel_tags or any(not re.fullmatch(r'cp312-abi3-[A-Za-z0-9_.]+', tag)
+                              or tag.endswith('-any') for tag in wheel_tags)):
+        raise RuntimeError('native wheel ABI/platform tags differ from abi3-py312: '+repr(wheel_tags))
+native_manifest = tomllib.loads((policy_source.parents[4] / 'projects/accelerate/native/Cargo.toml').read_text(encoding='utf-8'))
+pyo3 = native_manifest.get('dependencies',{}).get('pyo3',{})
+abi_features = [feature for feature in pyo3.get('features',[]) if feature.startswith('abi3')]
+if abi_features != ['abi3-py312'] or sys.version_info[:2] != (3,12):
+    raise RuntimeError('installed native ABI smoke requires source abi3-py312 and Python 3.12: '+repr(abi_features))
 catalog = native.site_catalog()
 source_catalog = json.loads((policy_source.parent / 'site-20260927.json').read_text(encoding='utf-8'))
 catalog_bytes = jcs.canonicalize(catalog)
@@ -260,9 +299,104 @@ latest_policy = native.site_observation_policy(latest_version)
 if (jcs.canonicalize(latest_catalog) != jcs.canonicalize(latest_catalog_source)
         or jcs.canonicalize(latest_policy) != jcs.canonicalize(latest_policy_source)):
     raise RuntimeError('installed v7 catalog or observation policy differs from the source distribution')
+execution_manifest_path = policy_source.parent / 'execution-profile-20260928.json'
+execution_manifest = json.loads(execution_manifest_path.read_text(encoding='utf-8'))
+installed_execution_identity = {
+    'rulesVersion': latest_catalog['rulesVersion'],
+    'catalogVersion': latest_catalog['catalogVersion'],
+    'catalogSha256': hashlib.sha256(jcs.canonicalize(latest_catalog)).hexdigest(),
+    'sourcePublicCatalogHash': latest_catalog['sourcePublicCatalogHash'],
+    'profileVersion': latest_catalog['executionProfile']['version'],
+    'executionProfileSha256': hashlib.sha256(jcs.canonicalize(execution_manifest)).hexdigest(),
+    'executionManifestFileSha256': hashlib.sha256(execution_manifest_path.read_bytes()).hexdigest(),
+    'sourceMainSha256': execution_manifest['sourceMainSha256'],
+    'parserSha256': execution_manifest['parserSha256'],
+}
+identity_differences = {
+    key: {'expected': expected_execution_identity.get(key), 'observed': installed_execution_identity.get(key)}
+    for key in sorted(set(expected_execution_identity) | set(installed_execution_identity))
+    if key not in expected_execution_identity or key not in installed_execution_identity
+    or expected_execution_identity[key] != installed_execution_identity[key]
+}
+profile_digest = installed_execution_identity['executionProfileSha256']
+if latest_catalog['executionProfile']['sha256'] != profile_digest:
+    identity_differences['compiledExecutionProfileSha256'] = {
+        'expected': profile_digest, 'observed': latest_catalog['executionProfile']['sha256'],
+    }
+if execution_manifest['profileVersion'] != installed_execution_identity['profileVersion']:
+    identity_differences['manifestProfileVersion'] = {
+        'expected': installed_execution_identity['profileVersion'], 'observed': execution_manifest['profileVersion'],
+    }
+if identity_differences:
+    raise RuntimeError('installed native execution identity differs from the source distribution: '
+                       + json.dumps(identity_differences, sort_keys=True))
 typed_spec = TypedEncoderSpec.from_catalog(latest_catalog, observation_policy=latest_policy)
 if typed_spec.catalog_hash != hashlib.sha256(jcs.canonicalize(latest_catalog)).hexdigest():
     raise RuntimeError('installed typed encoder catalog hash differs from v7 catalog')
+if native.GameAdapterSession is not GameAdapterSession or adapter_client.GameAdapterClient is not GameAdapterClient:
+    raise RuntimeError('installed public game adapter classes differ from their implementation exports')
+adapter_config = {'gameStyle': 'normal', 'draftDelete': False}
+adapter_session = GameAdapterSession.new_game(adapter_config, 37, rules_version=latest_version)
+descriptors = adapter_session.descriptors()
+if ({descriptor['adapterId'] for descriptor in descriptors} != {'public-observation', 'public-actions'}
+        or len(descriptors) != 2):
+    raise RuntimeError('installed game adapter descriptor set differs from the v7 public contract')
+schema_directory = policy_source.parent.parent / 'schemas'
+adapter_schemas = {}
+for name in ('actions-request', 'actions-response', 'observe-request', 'observe-response'):
+    schema = json.loads((schema_directory / f'adapter-{name}-v1.schema.json').read_text(encoding='utf-8'))
+    adapter_schemas[schema['$id']] = hashlib.sha256(jcs.canonicalize(schema)).hexdigest()
+referenced_schemas = set()
+for descriptor in descriptors:
+    if descriptor['projectId'] != 'augment-chess' or descriptor['contractVersion'] != {'major': 1, 'minor': 0}:
+        raise RuntimeError('installed game adapter descriptor identity or contract version differs')
+    for capability in descriptor['capabilities']:
+        for field in ('requestSchema', 'responseSchema'):
+            reference = capability[field]
+            if adapter_schemas.get(reference['id']) != reference['sha256']:
+                raise RuntimeError(f'installed game adapter {field} differs from its source distribution schema')
+            referenced_schemas.add(reference['id'])
+if referenced_schemas != adapter_schemas.keys():
+    raise RuntimeError('installed game adapter omitted a required public schema')
+adapter = GameAdapterClient(adapter_session, typed_spec)
+adapter_before = adapter.observe('white')
+adapter_revision = adapter.snapshot_revision
+adapter_intents = adapter.legal_intents()
+if not adapter_intents or any(intent['type'] not in ('draftPick', 'draftBundlePick') for intent in adapter_intents):
+    raise RuntimeError('installed draft game adapter did not return the complete public draft candidate set')
+adapter_page = adapter.action_stream().next_page(1)
+if (adapter_page['examined'] != 1 or len(adapter_page['actions']) != 1
+        or adapter_page['actions'][0].public_intent() != adapter_intents[0]):
+    raise RuntimeError('installed draft game adapter stream changed the ordered public candidate')
+adapter_action = adapter.bind_public_intent(adapter_intents[0])
+if adapter_action.public_intent() != adapter_intents[0] or adapter_action.revision != adapter_revision:
+    raise RuntimeError('installed draft game adapter binding changed the public intent or revision')
+try:
+    adapter.bind_public_intent({**adapter_intents[0], 'clientNote': 'unverified'})
+except NativeError:
+    pass
+else:
+    raise RuntimeError('installed draft game adapter admitted an unknown public intent field')
+if adapter.snapshot_revision != adapter_revision:
+    raise RuntimeError('installed draft game adapter rejection changed its parent revision')
+adapter_step = adapter.apply(adapter_action)
+adapter_after = adapter_step.position.observe('white')
+if (adapter.snapshot_revision != adapter_revision or adapter.observe('white') != adapter_before
+        or adapter_step.position.snapshot_revision == adapter_revision or adapter_after == adapter_before
+        or hasattr(adapter_step, 'event')):
+    raise RuntimeError('installed draft game adapter branch failed public isolation or parent preservation')
+if adapter_after['history'][-1]['actor'] != 'white':
+    raise RuntimeError('installed draft game adapter omitted its source public history actor')
+typed_ir.ObservationIR.from_public(adapter_after, typed_spec)
+adapter_smoke = {
+    'scope': 'public v7 draft observation, legal intent binding, rejection and branch application',
+    'installed_exports_match': True, 'source_schema_match': True,
+    'ordered_public_candidates': True, 'unknown_field_rejected': True,
+    'parent_revision_preserved': True, 'parent_public_observation_preserved': True,
+    'branch_revision_changed': True, 'public_observation_valid': True,
+    'private_transition_event_omitted': True,
+    'schemas': adapter_schemas,
+}
 policy.clear()
 if jcs.canonicalize(site_observation_policy()) != policy_bytes:
     raise RuntimeError('observation policy must return an independently owned value')
@@ -270,6 +404,9 @@ report.write_text(json.dumps({
     **{key: str(path) for key, path in module_paths.items()},
     'python_source_sha256': source_hashes,
     'native_module_sha256': native_hash,
+    'native_abi': {'abi':'abi3','python_minimum':'3.12','wheel_tags':wheel_tags,
+                   'source_manifest_verified':True,'installed_binary_match':True},
+    'execution_identity': installed_execution_identity,
     'installed_wheel_match': True,
     'site_catalog_sha256': hashlib.sha256(catalog_bytes).hexdigest(),
     'observation_policy_sha256': policy_hash,
@@ -283,14 +420,16 @@ report.write_text(json.dumps({
     'v7_catalog_sha256': hashlib.sha256(jcs.canonicalize(latest_catalog)).hexdigest(),
     'v7_observation_policy_sha256': hashlib.sha256(jcs.canonicalize(latest_policy)).hexdigest(),
     'typed_encoder_hash': typed_spec.digest,
+    'game_adapter_draft_boundary': adapter_smoke,
 }, indent=2) + '\\n', encoding='utf-8')
 print('installed native:', native_path)
-""", REPOSITORY, project / "bridge/catalog/observation-20260927.json",
-        built[0], reports / "installed-policy.json")
+""", REPOSITORY, project / "projects/augment-chess/contracts/catalog/observation-20260927.json",
+        built[0], reports / "installed-policy.json", json.dumps(source_identity, sort_keys=True))
     (reports / "packaging.json").write_text(json.dumps({
         "sdist": archives[0].name, "sdist_sha256": sha(archives[0]),
         "wheel": built[0].name, "wheel_sha256": sha(built[0]),
         "required_source_files": required, "installed": True,
+        "execution_identity": source_identity,
         "required_source_sha256": {relative: sha(project / relative) for relative in required},
         "observation_policy": json.loads((reports / "installed-policy.json").read_text(encoding="utf-8")),
     }, indent=2) + "\n", encoding="utf-8")
@@ -300,9 +439,10 @@ def tests():
     _, _, _, reports, python = locations()
     reports.mkdir(parents=True, exist_ok=True)
     report = reports / "pytest.xml"
-    run(python, "-m", "pytest", "python/tests/test_native.py", "python/tests/test_model_stack.py",
-        "python/tests/test_ir.py", "python/tests/test_entity_transformer.py",
-        "python/tests/test_inference_runtime.py", "python/tests/test_search.py", "python/tests/test_session.py",
+    run(python, "-m", "pytest", "projects/accelerate/python/tests/test_native.py", "projects/accelerate/python/tests/test_model_stack.py",
+        "projects/accelerate/python/tests/test_ir.py", "projects/accelerate/python/tests/test_entity_transformer.py",
+        "projects/accelerate/python/tests/test_inference_runtime.py", "projects/accelerate/python/tests/test_search.py", "projects/accelerate/python/tests/test_session.py",
+        "projects/accelerate/python/tests/test_adapter_client.py",
         "-p", "no:cacheprovider",
         "--junitxml", report, "-ra")
     suites = ET.parse(report).getroot().findall("testsuite")
@@ -311,7 +451,8 @@ def tests():
     cases = [case for suite in suites for case in suite.findall("testcase")]
     for module, minimum in (("test_native", 6), ("test_model_stack", 7), ("test_ir", 7),
                             ("test_entity_transformer", 7), ("test_inference_runtime", 6),
-                            ("test_search", 11), ("test_session", 4)):
+                            ("test_search", 11), ("test_session", 4),
+                            ("test_adapter_client", 5)):
         if sum(case.get("classname", "").endswith(module) for case in cases) < minimum:
             raise RuntimeError(f"missing required checks for {module}")
     default_checks = {
@@ -334,10 +475,16 @@ def tests():
     for boundary, required in typed_checks.items():
         if not any(case.get("name") == required for case in cases):
             raise RuntimeError(f"missing installed typed {boundary} check")
+    adapter_modes = ("normal", "chaos", "grand")
+    for mode in adapter_modes:
+        required = f"test_v7_draft_public_intents_are_exact_and_branches_are_isolated[{mode}]"
+        if not any(case.get("name") == required for case in cases):
+            raise RuntimeError(f"missing installed game adapter {mode} public draft branch check")
     (reports / "test-scope.json").write_text(json.dumps({
         "implementation": "installed wheel; native/typed IR/two model families/ort/tract/search/replay/CLI",
         "skips": 0, "default_weighted_conditioning_modes": list(default_checks),
         "typed_contract_checks": list(typed_checks),
+        "game_adapter_draft_modes": list(adapter_modes),
         "scope": "code and bounded synthetic checks; full rules/catalog coverage is a separate pending gate",
         "actual_learning_campaign": False,
     }, indent=2) + "\n", encoding="utf-8")
@@ -357,7 +504,7 @@ def tests():
 def frozen():
     root, _, _, reports, _ = locations()
     reports.mkdir(parents=True, exist_ok=True)
-    catalog = json.loads((REPOSITORY / "bridge/catalog/site-20260927.json").read_text(encoding="utf-8"))
+    catalog = json.loads((REPOSITORY / "projects/augment-chess/contracts/catalog/site-20260927.json").read_text(encoding="utf-8"))
     metadata = catalog["source"]
     # OfflineOracle executes loadMain only. Index and worker keep their original
     # provenance; their mutable URLs cannot select a new client or worker.
@@ -412,15 +559,16 @@ def frozen():
     manifest.write_text(serialized, encoding="utf-8")
     (reports / "frozen-source.json").write_text(json.dumps(baseline, indent=2) + "\n", encoding="utf-8")
     os.environ["ACCELERATE_SITE_BASELINE"] = str(destination)
-    run("node", "--test", "bridge/tools/runtime-contract.test.js",
-        "infra/tools/site-parity/offline-oracle.test.js", timeout=180)
+    run("node", "--test", "projects/augment-chess/contracts/tools/runtime-contract.test.js",
+        "projects/augment-chess/oracle/tools/site-parity/offline-oracle.test.js", timeout=180)
 
 
 def current_client():
     """Verify the reviewed v7 client in an isolated slot; reuse the v6 parser."""
     root, _, _, reports, _ = locations()
     reports.mkdir(parents=True, exist_ok=True)
-    catalog = json.loads((REPOSITORY / "bridge/catalog/site-20260928.json").read_text(encoding="utf-8"))
+    catalog = json.loads((REPOSITORY / "projects/augment-chess/contracts/catalog/site-20260928.json").read_text(encoding="utf-8"))
+    profile_identity = execution_identity(REPOSITORY)
     metadata = catalog["source"]
     files = metadata["files"]
     mains = [file for file in files if file["name"].startswith("main-")]
@@ -486,11 +634,15 @@ def current_client():
         raise RuntimeError("refusing to replace an existing v7 client manifest")
     if not manifest.exists():
         manifest.write_text(serialized, encoding="utf-8")
-    (reports / "current-client-source.json").write_text(serialized, encoding="utf-8")
     os.environ["ACCELERATE_SITE_BASELINE_LATEST"] = str(destination)
-    run("node", "infra/tools/site-parity/prepare-current-baseline.js", "--verify", destination, timeout=180)
-    run("node", "--test", "bridge/tools/runtime-contract.test.js",
-        "tests/site-adapter/parity/latest-client.test.cjs", timeout=180)
+    run("node", "projects/augment-chess/oracle/tools/site-parity/prepare-current-baseline.js", "--verify", destination, timeout=180)
+    run("node", "--test", "projects/augment-chess/contracts/tools/runtime-contract.test.js",
+        "projects/augment-chess/tests/site-adapter/parity/latest-client.test.cjs", timeout=180)
+    # Cache에 보존할 검증 보고서와 원문 loader의 baseline manifest를 구별한다.
+    # 성공한 current-client 단계만 실제 composite 실행 식별자를 보고서에 남긴다.
+    (reports / "current-client-source.json").write_text(json.dumps({
+        **baseline, "executionIdentity": profile_identity,
+    }, indent=2) + "\n", encoding="utf-8")
 
 
 def v7_differential():
@@ -498,7 +650,7 @@ def v7_differential():
     root, _, _, _, python = locations()
     try:
         current_client()
-    except Exception:
+    except Exception as error:
         # Keep an explicit NO-GO report even when source preparation stops
         # before the differential runner can create its own detailed report.
         destination = root / "reports" / "v7-native-differential"
@@ -506,10 +658,12 @@ def v7_differential():
         (destination / "report.json").write_text(json.dumps({
             "gate": "source-pinned-v7-native-differential-probe",
             "status": "setup-error", "decision": "NO-GO",
-            "reason": "pinned v7 source preparation failed; inspect the CI step log",
+            "phase": "pinned-source-preparation",
+            "errorType": type(error).__name__,
+            "reason": str(error),
         }, indent=2) + "\n", encoding="utf-8")
         raise
-    run("node", "tests/differential/v7-native-differential.cjs", "--python", python)
+    run("node", "projects/augment-chess/tests/differential/v7-native-differential.cjs", "--python", python)
 
 
 if __name__ == "__main__":
@@ -517,5 +671,12 @@ if __name__ == "__main__":
     parser.add_argument("phase", choices=("configure", "rust-scope", "build", "tests", "frozen", "current-client",
                                           "v7-differential"))
     phase = parser.parse_args().phase
-    {"configure": configure, "rust-scope": rust_scope, "build": build, "tests": tests, "frozen": frozen,
-     "current-client": current_client, "v7-differential": v7_differential}[phase]()
+    try:
+        {"configure": configure, "rust-scope": rust_scope, "build": build, "tests": tests, "frozen": frozen,
+         "current-client": current_client, "v7-differential": v7_differential}[phase]()
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        for stream in (error.stdout, error.stderr):
+            if stream:
+                diagnostic = stream.decode("utf-8", errors="replace") if isinstance(stream, bytes) else stream
+                print(diagnostic, end="" if diagnostic.endswith("\n") else "\n", file=sys.stderr)
+        raise

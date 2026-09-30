@@ -20,11 +20,13 @@ on:
   push:
     branches: [main, develop]
     paths:
-      - "infra/**"
+      - "projects/augment-chess/reference/infra/**"
+      - "projects/augment-chess/oracle/tools/site-parity/**"
       - ".github/workflows/ci.yml"
   pull_request:
     paths:
-      - "infra/**"
+      - "projects/augment-chess/reference/infra/**"
+      - "projects/augment-chess/oracle/tools/site-parity/**"
       - ".github/workflows/ci.yml"
   workflow_dispatch: {}
 
@@ -37,7 +39,7 @@ permissions:
 
 defaults:
   run:
-    working-directory: infra
+    working-directory: projects/augment-chess/reference/infra
 
 jobs:
   checks:
@@ -55,7 +57,7 @@ jobs:
       - name: Syntax check
         run: |
           set -e
-          for f in engine-merged.js selfplay-worker-merged.js selfplay-run-merged.js smoke-merged.js nnue/*.js tools/ci/*.js tools/perf/*.js tools/site-parity/*.js; do
+          for f in engine-merged.js selfplay-worker-merged.js selfplay-run-merged.js smoke-merged.js nnue/*.js tools/ci/*.js tools/perf/*.js ../../oracle/tools/site-parity/*.js; do
             node --check "$f"
           done
           echo "syntax ok"
@@ -67,5 +69,29 @@ jobs:
         run: node tools/ci/golden-eval.js
 
       - name: Site parity (needs network; warning only)
-        continue-on-error: true
-        run: node tools/site-parity/parity-actions.js - 200
+        run: |
+          report_dir="$RUNNER_TEMP/Accelerate/reports/live-site-parity"
+          mkdir -p "$report_dir"
+          set +e
+          node ../../oracle/tools/site-parity/parity-actions.js - 200 > "$report_dir/parity-actions.txt" 2>&1
+          rc=$?
+          cat "$report_dir/parity-actions.txt"
+          set -e
+          if [ $rc -ne 0 ]; then
+            echo "::warning::live-site parity-actions.js exited $rc; exact diagnostic is in the step log and live-site-parity report"
+          fi
+          {
+            echo "Live-site parity exited $rc (informational network check)."
+            echo '```text'
+            cat "$report_dir/parity-actions.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve live-site parity diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-site-parity
+          path: ${{ runner.temp }}/Accelerate/reports/live-site-parity
+          if-no-files-found: warn
+          retention-days: 7

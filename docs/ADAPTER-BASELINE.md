@@ -19,10 +19,20 @@ manifest와 원문 SHA를 검사한 뒤에만 실행한다. 이전 `site-baselin
 client 실행은 main과 parser에 의존하며 worker는 이번 어댑터 실행의 일부가 아니다.
 
 규칙 버전은 `augment-site-20260928-e5ed84fcf8e72a24`, 실행 profile은
-`accelerate-headless-semantic-v7`, 공개 관측 projection은 `source-visible-20260928-v1`이다.
+`accelerate-headless-semantic-v7-faithful-init-v1`, 공개 관측 projection은 `source-visible-20260928-v1`이다.
 이전 v6와 새 v7의 Position을 서로 받아들이지 않는다. 공개 카드 catalog hash
 `yt63f_Lcq4xUPu4GbbdwAyv5IUTuC079nNxvF3IFrj4`는 동일하지만 원문 코드와
 전이 의미가 달라졌으므로 catalog hash만으로 버전을 판정하지 않는다.
+
+현재 `execution-profile-20260928.json`은 최상위 initializer 175개와 제외 168개,
+원문 순서·dependency/bootstrap digest와 replay labels·codes 각 79개/frameKeys 222개를
+고정한다. manifest SHA-256은
+`d811f0232ac38af4e45e0e4f93e89c49712142dfd0f2b5fe57d36f63cd05a29f`이고,
+현재 composite `catalogVersion`은
+`f80ebcd21759df179bccfb301415e672194de67691a6383beafc549538ffae7c`다.
+공개 source catalog hash와 이 composite identity는 별도 값이다. 같은 원문 bytes라도
+선언 전용·23-initializer/labels 30 프로필의 영수증을 faithful175 성공으로 옮기지 않는다.
+최신 생성·native 비교·남은 경계는 [v7 인수 장부](V7-ACCEPTANCE-CLOSURE.md)에 둔다.
 
 ## 공식 설명과 source 대조
 
@@ -32,17 +42,19 @@ client 실행은 main과 parser에 의존하며 worker는 이번 어댑터 실�
 카드의 적용 시점이 다르며, 새 기물의 같은 턴 포획은 제한된다. 이는 검증 범위의
 안내이며 실제 어댑터 전이는 위 고정 client가 기준이다.
 
-고정 원문에서 공개 카드 metadata 256개와 semantic `CARD_DEFS` 257개의 필드는
-이전 기준과 모두 같음을 기계적으로 비교했다. 이 중 `shotgun-king` 보조 정의가
+이전 초기화 범위에서 공개 카드 metadata 256개와 semantic `CARD_DEFS` 257개의 필드는
+이전 기준과 같다는 비교가 나왔다. 이는 초기화 누락을 고치기 전의 조사 기록이며,
+현재 faithful175의 phase·stars·weight·openingWeight 값 검증을 대신하지 않는다.
+이 중 `shotgun-king` 보조 정의가
 공개 카드 수와 semantic 정의 수의 차이를 만든다. 기존 draft 상수·가중치는 새
 source와 대조했고, 배제 조합에는 `summon-colossus` 관련 다섯 조합이 추가됐다:
 `false-start`, `london-system`, `chess-344200`, `chess-n-pow-30`,
 `chess-45-pow-30`과 각각 함께 나올 수 없다. 기존 일반 3장, 카오스 3묶음×2장,
 그랜드 공용 28장·한쪽 덱 6장이라는 핵심 수량은 그대로다.
 
-동일한 고정 시계·난수·headless 초기화 조건에서 이전/현재 client의 normal
+당시 동일한 고정 시계·난수·headless 초기화 조건에서 이전/새 client의 normal
 초기 raw state 259개 필드를 비교했을 때 차이가 없었다. 초기 메타데이터는 새
-rulesVersion으로 별도 보존한다. 새 v7 어댑터로 seed 11의 세 모드를 실제 시작하면
+rulesVersion으로 별도 보존했다. 당시 v7 어댑터로 seed 11의 세 모드를 실제 시작하면
 normal은 3개 선택지와 RNG cursor 122, chaos는 6개 선택지와 cursor 212,
 grand는 28개 선택지와 cursor 112를 반환했다. 같은 seed의 v6/v7 시작 상태를
 비교하면 각 모드에서 draft clock 시작 시각과 replay 시작 시각 네 경로만 달랐다.
@@ -50,6 +62,12 @@ grand는 28개 선택지와 cursor 112를 반환했다. 같은 seed의 v6/v7 시
 세 모드의 이 시작 Position에서 양측 `observe`도 v7 policy hash로 검증을 통과했다.
 이 한 seed의 초깃값 확인은 드래프트 완료 상태나 모든 초기 RNG 소비를 검증한
 결과가 아니다.
+
+23-initializer 로더로 재조사했던 seed 19에서도 grand의 후보 28개·RNG cursor
+112, chaos의 후보 6개·cursor 212라는 수량은 유지된다. 그러나 grand는
+21번째 후보부터 일부 ID가 달라지고, chaos도 4·6번째 후보 ID가 달라진다.
+더 이른 로더에서 얻은 후보 ID·그에 따른 선택 경로와 이 재조사 결과는 각각 당시
+프로필의 근거로 남긴다. 현재 faithful175에서는 새 identity로 자료를 생성·대조한다.
 
 client 선언 단위 비교에서 다음 행동 의미 차이를 확인했다.
 
@@ -61,7 +79,7 @@ client 선언 단위 비교에서 다음 행동 의미 차이를 확인했다.
 | 도둑·트릭스터 | 방문·방향 상태 정리 범위와 wanted 기본값 변경 | 턴 경계·상태 복원·관측 |
 | 기보·표시 | medium 기보 코드, 카멜레온 눈 표시, 돈 키호테 animation 처리 변경 | 공개 기록·표시 분리 |
 
-`bridge/catalog/*-20260928.json`과 `bridge/schemas/runtime-site-20260928.schema.json`은
+`projects/augment-chess/contracts/catalog/*-20260928.json`과 `projects/augment-chess/contracts/schemas/runtime-site-20260928.schema.json`은
 새 버전 묶음이다. 명시적으로
 `createRuntimeContract({ baseline: "site-20260928" })`를 호출해 사용한다. 기존
 기본 export는 이전 기준을 유지한다. schema도 각 Position rulesVersion과 관측
@@ -82,6 +100,6 @@ normal·chaos·grand의 드래프트/행동/관측/종료와 실제 RNG·history
 원문과 일치하는지 확인한다.
 
 ```text
-node infra/tools/site-parity/prepare-current-baseline.js --verify <외부-동결-디렉터리>
-node --test bridge/tools/runtime-contract.test.js
+node projects/augment-chess/oracle/tools/site-parity/prepare-current-baseline.js --verify <외부-동결-디렉터리>
+node --test projects/augment-chess/contracts/tools/runtime-contract.test.js
 ```

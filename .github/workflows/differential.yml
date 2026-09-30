@@ -9,15 +9,15 @@ on:
   push:
     branches: [main, develop]
     paths:
-      - "infra/tools/fixtures/**"
-      - "infra/engine-merged.js"
-      - "tests/differential/**"
+      - "projects/augment-chess/reference/infra/tools/fixtures/**"
+      - "projects/augment-chess/reference/infra/engine-merged.js"
+      - "projects/augment-chess/tests/differential/**"
       - ".github/workflows/differential.yml"
   pull_request:
     paths:
-      - "infra/tools/fixtures/**"
-      - "infra/engine-merged.js"
-      - "tests/differential/**"
+      - "projects/augment-chess/reference/infra/tools/fixtures/**"
+      - "projects/augment-chess/reference/infra/engine-merged.js"
+      - "projects/augment-chess/tests/differential/**"
       - ".github/workflows/differential.yml"
   workflow_dispatch: {}
 
@@ -40,12 +40,12 @@ jobs:
 
       - name: Validate historical fixtures with their original JS server
         env:
-          CANDIDATE_CMD: node infra/tools/fixtures/generate-fixtures.js --serve
+          CANDIDATE_CMD: node projects/augment-chess/reference/infra/tools/fixtures/generate-fixtures.js --serve
         run: |
           report_dir="$RUNNER_TEMP/Accelerate/reports/historical-fixtures/Linux"
           mkdir -p "$report_dir"
-          node infra/tools/fixtures/run-differential.js \
-            --fixtures=tests/differential/fixtures/oracle-v1.jsonl.gz \
+          node projects/augment-chess/reference/infra/tools/fixtures/run-differential.js \
+            --fixtures=projects/augment-chess/tests/differential/fixtures/oracle-v1.jsonl.gz \
             --candidate="$CANDIDATE_CMD" \
             --limit=300 \
             --report="$report_dir/report.json"

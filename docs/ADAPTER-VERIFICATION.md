@@ -5,9 +5,18 @@
 2026-09-28에 고정한 공식 클라이언트 `main-OahWs0tU.js`의 SHA-256은
 `e5ed84fcf8e72a24e6a8cfeb9050787387a616c55184e6501fca2077e302c45c`다.
 계약은 `site-20260928`, headless profile은
-`accelerate-headless-semantic-v7`을 사용한다. 원문 번들과 parser는
+`accelerate-headless-semantic-v7-faithful-init-v1`을 사용한다. 원문 번들과 parser는
 저장소 밖의 검증된 캐시에서 읽으며 Git에 넣지 않는다. 이 검증은
 **로컬 오프라인 8×8의 normal, chaos, grand**에 한한다.
+
+실행 manifest `execution-profile-20260928.json`이 initializer 175개/제외 168개,
+replay labels·codes 각 79개/frameKeys 222개와 SHA-256
+`d811f0232ac38af4e45e0e4f93e89c49712142dfd0f2b5fe57d36f63cd05a29f`를 고정한다.
+현재 composite catalogVersion은
+`f80ebcd21759df179bccfb301415e672194de67691a6383beafc549538ffae7c`이며 원문 공개
+catalog hash와 별도다. 아래 자동 검사는 검사 범위의 설명이며 현재 변경분의 성공
+기록이 아니다. 이전 선언 전용/23-initializer·labels 30 결과는 당시 증거로 보존한다.
+최신 생성·native 결과와 실패 범위는 [v7 인수 장부](V7-ACCEPTANCE-CLOSURE.md)를 따른다.
 
 공식 [규칙](https://augmentchess.org/rules/)과
 [게임 방법](https://augmentchess.org/how-to-play/)은 왕 포획, 행동 불능,
@@ -17,15 +26,14 @@
 
 ## 자동 검증
 
-`node --test tests/site-adapter/parity/latest-client.test.cjs`는 다음을 확인한다.
+`node --test projects/augment-chess/tests/site-adapter/parity/latest-client.test.cjs`는 다음을 확인한다.
 
 - 원문 manifest SHA와 객체 불변성. 검증 이후 파일 메타데이터를 바꾸어
   다른 원문을 실행할 수 없다.
 - 세 스타일의 원문 초기 state/RNG와 어댑터 초기 state/RNG 일치,
   초기 드래프트 완료, 양측 공개 관측 검증, 실제 첫 기물 수의 전체
   다음 state/RNG 일치.
-- RULE `acceleration` 적용과 원문 선택 풀에 없는
-  `capture-the-flag`의 명시적 거부, 잘못된 행위자·오래된 action 거부,
+- RULE `acceleration`과 `capture-the-flag` 적용, 잘못된 행위자·오래된 action 거부,
   원본 Position 불변성 및 다음 호출 복구.
 - 관측에서 새 원문 state 필드가 분류되지 않으면 해당 이름을 포함한
   명시적 오류로 실패하고, 후속 정상 호출은 복구된다.
@@ -54,7 +62,7 @@
 
 ## 카드 표면 조사
 
-`infra/tools/site-parity/audit-card-surface.js`는 카탈로그의 256개 카드
+`projects/augment-chess/oracle/tools/site-parity/audit-card-surface.js`는 카탈로그의 256개 카드
 각각에 원문 ID·카테고리·효과와 세 모드별 조사 셀을 만든다. CI에서는
 `--baseline=site-20260928 --shard=0/8`부터 `7/8`까지 서로 다른
 샤드를 병렬 실행할 수 있다. `ACCELERATE_SITE_BASELINE` 또는
@@ -62,10 +70,11 @@
 결과 JSON은 `$RUNNER_TEMP/Accelerate/reports/site-adapter` 또는
 Windows 사용자 생성물 루트의 대응 `reports/site-adapter`에 쓴다.
 
-원문 `ruleCardPool()`이 실제로 제공하는 RULE 26개는 해당 스타일의
-게임 시작 시 직접 설치하여 관측까지 확인한다. 카탈로그에 있는
-`capture-the-flag` 1개는 현재 선택 풀에 없어 비가용으로 따로
-분류한다. 명시 요청은 오류가 되고 조용히 무시되지 않는다.
+수정된 원문 로더의 `ruleCardPool()`은 RULE 27개를 제공하며
+`capture-the-flag`가 포함된다. 조사 절차는 RULE을 해당 스타일의 게임
+시작 시 직접 설치해 관측까지 확인한다. 선택 풀에 없는 ID의 명시 요청은
+오류가 되고 조용히 무시되지 않는다. 이전 로더의 26개 RULE 조사만으로
+현재 27개 전체의 적용·관측을 검증했다고 간주하지 않는다.
 
 다른 카드는 정상 드래프트를 마친 원문 8×8 상태에 특정 카드 한 장을
 손패로 주입한 **합성 표면 조사**다. 고정 시드의 정상 원문 드래프트에서
@@ -79,7 +88,9 @@ Windows 사용자 생성물 루트의 대응 `reports/site-adapter`에 쓴다.
 더 있는 셀은 접두 부분만 조사한 것이다. 보고서의
 `completeRuleCoverage`는 의도적으로 `false`다.
 
-8개 샤드의 256개 카드 × 3개 모드, 총 768셀을 조사했다.
+아래 8개 샤드의 256개 카드 × 3개 모드, 총 768셀 조사 결과는 초기화 누락을 고치기
+전의 기록이다. faithful175에서 전체 표면을 다시 실행하기 전에는 그 결과를
+현재 source의 27개 RULE과 모든 카드 동작에 대한 완료 근거로 사용하지 않는다.
 오류와 미조사 셀은 각각 0개였다. 후보가 없던 27셀은 모두 아래
 9개 카드의 세 모드에서 나타났다:
 `emergency-evacuation`, `exile`, `homecoming`, `joker`,
@@ -111,8 +122,11 @@ state/RNG, 양측 관측을 검사한다. 이 국면들도 전체 조합의
 
 기본 45수·10수 장기 진행 전체와 별 비동률 종료, 장기 다중 턴의 모든 분기,
 특수 기물 84종의 모든 상태, 카드 256종의 모든 전제조건 및 조합,
-원문 선택 가능 RULE 26종의 장기 전이, fog·은폐 상태의 공개 정보 누출
-여부는 아직 완전하게 증명되지 않았다. 브라우저 DOM·애니메이션·
-타이머·온라인·캠페인도 이 headless profile의 범위 밖이다.
+원문 선택 가능 RULE 27종의 장기 전이, fog·은폐 상태의 공개 정보 누출
+여부는 아직 완전하게 증명되지 않았다. 브라우저 DOM·실시간 애니메이션·
+타이머·온라인 서버는 manifest의 stub/noop 경계를 따르며 브라우저 전체 parity의
+범위 밖이다. headless에서 비교하는 직렬화된 animation 상태·cold clock와 8×8 캠페인
+callback은 각 영수증의 별도 경계를 따르고, 위 세 스타일 조사로 모두 검증됐다고
+주장하지 않는다.
 로컬 검사 통과는 원격 CI 관측이나 전체 게임 규칙의 안전성 완료를
 뜻하지 않는다.

@@ -10,10 +10,16 @@ supported-markers = [
     "platform_machine == 'x86_64' and sys_platform == 'linux'",
 ]
 
+[manifest]
+members = [
+    "accelerate-chess",
+    "accelerate-workspace",
+]
+
 [[package]]
 name = "accelerate-chess"
 version = "0.1.0"
-source = { editable = "." }
+source = { editable = "projects/accelerate" }
 dependencies = [
     { name = "jcs" },
     { name = "numpy" },
@@ -51,6 +57,11 @@ dev = [
     { name = "maturin", specifier = "==1.15.0" },
     { name = "pytest", specifier = "==9.1.1" },
 ]
+
+[[package]]
+name = "accelerate-workspace"
+version = "0.0.0"
+source = { virtual = "." }
 
 [[package]]
 name = "colorama"

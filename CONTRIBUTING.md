@@ -22,21 +22,20 @@ develop
 영역이 드러나는 브랜치 이름을 권장합니다.
 
 ```text
-feature/rust-engine-*
-feature/bridge-*
-feature/python-*
-feature/infra-*
+feature/augment-chess-*
+feature/adapter-contract-*
+feature/accelerate-*
+feature/reference-*
 feature/docs-*
 ```
 
 ## 영역별 책임
 
-- `bridge/`: 언어 간 데이터·호출 계약과 얇은 PyO3 연동. maturin은 빌드·패키징을 담당합니다. 게임 규칙이나 탐색·학습 로직을 넣지 않습니다.
-- `rust-engine/`: 실제 봇과 self-play용 독립 규칙 엔진. PyO3·신경망·ONNX runtime·Python 학습을 의존하지 않습니다.
-- `infra/`: JS oracle 및 기존 검증·실험 도구. 기존 경로와 동작을 보존합니다.
-- `python/`: AlphaZero/MCTS/신경망/self-play/training 연구 코드. 규칙을 별도로 재구현하지 않습니다.
-- `tests/differential/`: JS oracle과 Rust 엔진의 동등성 검증만 둡니다.
-- `pre_cpp_engine_code/`: Rust 포팅 참고용 C++ 초안입니다.
+- `packages/adapter-contract/`, `packages/adapter-runtime/`: 게임을 모르는 공통 schema·Rust 호출·등록 계약입니다.
+- `projects/augment-chess/engine/`, `projects/augment-chess/contracts/`: 독립 규칙 엔진과 게임 전용 상태·catalog 계약입니다. PyO3·모델·학습을 의존하지 않습니다.
+- `projects/augment-chess/oracle/`, `projects/augment-chess/tests/`: 동결 사이트 기준 실행과 차분 검증 자료입니다.
+- `projects/augment-chess/reference/`: 기존 JS 실험 도구와 C++ 초안입니다. JS 도구 묶음의 내부 상대 배치를 보존합니다.
+- `projects/accelerate/`: PyO3·ONNX runtime·Python 탐색·모델·학습입니다. 게임 규칙을 중복 구현하지 않습니다.
 - `docs/`, `.github/`: 설계·개발 규약과 저장소 CI입니다.
 
 PR 하나에는 가능한 한 한 영역의 변경만 포함하세요. 여러 영역의 계약을 함께 바꿔야 한다면 변경 이유와 영향 범위를 PR 본문에 명시하세요.
@@ -78,11 +77,11 @@ push는 feature 브랜치에 하고 원격 SHA를 확인합니다. 공유한 커
 
 - 변경 이유, 책임 영역, 확인한 내용이 PR에 적혀 있는가
 - 불필요하게 여러 영역이나 기존 경로를 함께 변경하지 않았는가
-- bridge 계약 변경이라면 각 언어 소비자와 differential test에 미칠 영향을 설명했는가
-- `infra/engine-merged.js`를 고쳤다면 결과 동등성을 `infra/tools/perf/ab-cards.js` 등으로 확인했는가
+- 공통 계약 변경이라면 각 프로젝트 소비자와 차분 검사에 미칠 영향을 설명했는가
+- `projects/augment-chess/reference/infra/engine-merged.js`를 고쳤다면 결과 동등성을 해당 `tools/perf/ab-cards.js` 등으로 확인했는가
 - 구현 정확성은 변경 영역의 계약·오류·수치 검사로 확인했는가. 문서·바인딩·모델 형식 변경에 승률 기준을 일괄 적용하지 않는가
 - 새 회귀 검사·fixture가 반복 가능한 중요한 계약을 지키며 기존 자료로 부족한 이유가 있는가. 일회성 버그의 큰 snapshot·로그·데이터 복사본을 영구 누적하지 않는가([검사 유지비 기준](docs/ENGINEERING-STANDARDS.md#기능-단위-구성과-검사-유지비))
-- 기존 infra의 평가/모델 **승격**이라면 `infra/tools/lab/lab.js`에서 95% 신뢰구간 하한이 50%를 넘고 독립 재실행(`seed_offset`)에서도 같은 방향인가. 새 AlphaZero 승격 기준은 Phase 10에서 별도 결정한다
+- 기존 JS 실험 도구의 평가/모델 **승격**이라면 `projects/augment-chess/reference/infra/tools/lab/lab.js`에서 95% 신뢰구간 하한이 50%를 넘고 독립 재실행(`seed_offset`)에서도 같은 방향인가. 새 AlphaZero 승격 기준은 Phase 10에서 별도 결정한다
 - 새 디렉터리와 생성물 예외에는 책임·이유가 있고, 규약 조정에는 규칙·이유·보완 검사·재검토 조건이 있는가
 - 로컬 검사, CI 요청, 관측한 CI 성공, 실제 모델 성능을 구분했는가
 
@@ -107,8 +106,8 @@ git diff --cached --check
 파일만 stage해야 합니다. 새 루트·생성물·10 MiB 초과 파일을 거부하며, 정확한 경로·이유를
 등록한 작은 fixture 등의 예외만 허용합니다. 모든 파일 쓰기를 감독하는 도구는 아닙니다.
 
-## 기존 infra 작업 시 주의사항
+## 기존 JS 참고 자료 작업 시 주의사항
 
-- `infra/` 내부 파일은 상대 경로로 연결되어 있으므로 꼭 필요한 경우가 아니면 이동하거나 이름을 바꾸지 않습니다.
+- `projects/augment-chess/reference/infra/` 내부 파일은 상대 경로로 연결되어 있으므로 꼭 필요한 경우가 아니면 이동하거나 이름을 바꾸지 않습니다.
 - 손으로 만든 테스트 보드에는 `turnsTaken`, `actionsRemaining`, `moveCount`, `castlingCanceled`를 채웁니다.
 - 클라우드 동시 작업은 최대 20개입니다. 무거운 워크플로는 수동으로 시작하고 자원을 조율합니다.

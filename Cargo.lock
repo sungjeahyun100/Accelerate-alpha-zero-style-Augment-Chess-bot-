@@ -3,21 +3,12 @@
 version = 4
 
 [[package]]
-name = "accelerate-engine"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_jcs",
- "serde_json",
- "sha2",
-]
-
-[[package]]
 name = "accelerate-native"
 version = "0.1.0"
 dependencies = [
- "accelerate-engine",
  "accelerate-runtime",
+ "adapter-runtime",
+ "augment-chess-engine",
  "numpy",
  "pyo3",
  "serde",
@@ -38,6 +29,14 @@ dependencies = [
  "serde_json",
  "sha2",
  "tract",
+]
+
+[[package]]
+name = "adapter-runtime"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -109,6 +108,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 dependencies = [
  "derive_arbitrary",
+]
+
+[[package]]
+name = "augment-chess-contracts"
+version = "0.1.0"
+
+[[package]]
+name = "augment-chess-engine"
+version = "0.1.0"
+dependencies = [
+ "adapter-runtime",
+ "augment-chess-contracts",
+ "serde",
+ "serde_jcs",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "augment-chess-v6-migration"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_jcs",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

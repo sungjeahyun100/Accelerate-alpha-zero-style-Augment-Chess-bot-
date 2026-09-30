@@ -80,8 +80,8 @@ PR #29에는 `rust-engine/` 변경이 없다. 어댑터의 완료·검증 범위
   직렬화 형식은 JSON을 기본으로 한다.
 - **이유**: 카드 정의처럼 게임 내내 바뀌지 않는 큰 데이터를 매 턴 반복 전송하지 않기 위함.
 - **대안과 제외 이유**: 매 턴 전체 상태를 새로 정의해서 보내는 방식은 카드 정의 중복 전송 비용이 커서 제외.
-- **영향**: `bridge/`의 요청/응답 규약은 이 틀을 기준으로 한다. Python encoding은 D-007,
-  실제 실행·저장 계약은 [runtime-v1](../bridge/protocol/runtime-v1.md)을 따른다.
+- **영향**: 게임 계약의 요청/응답 규약은 이 틀을 기준으로 한다. Python encoding은 D-007,
+  실제 실행·저장 계약은 [runtime-v1](../projects/augment-chess/contracts/protocol/runtime-v1.md)을 따른다.
 - **2026-09-27 보완(D-004와 같은 적용 시점)**: 카드 정의 1회와 위치별 상태의 논리 의미는 유지한다.
   JSON은 저장·교환·fixture·차분 검증의 기본 형식이고, 반복 탐색 호출은 PyO3 타입·배열로
   직접 전달한다. 모든 노드에 JSON 문자열 왕복을 강제하지 않는다. 기존 JSON Schema는
@@ -332,7 +332,10 @@ PR #29에는 `rust-engine/` 변경이 없다. 어댑터의 완료·검증 범위
 ## D-017: 모노레포를 위한 프로젝트 독립 객체형 어댑터 계약
 
 - **날짜**: 2026-09-29
-- **상태**: 언어 독립 계약과 Rust 구현체 방향 채택, 패키징·구현은 후속 공동 작업으로 이관
+- **상태**: 언어 독립 wire 계약과 Rust 첫 구현체를 모노레포에 구현 중. 게임 v7 전체 실행 GO는 별도 검증 대상
+- **이번 이관 범위**: PR #28의 마지막 커밋을 기준으로 한 어댑터 PR은 공유 계약·모노레포와 함께
+  D-009의 동결 v7 규칙 전체 이식을 목표로 한다. 단계별 국소 검증은 중간 증거일 뿐,
+  공개 256 카드와 source-reachable 이동·턴·종료·RNG·history 전체의 GO를 대신하지 않는다.
 - **결정**: 공통 인터페이스를 가진 어댑터 객체를 구성하고 각 기능은 별도 객체로
   구현한다. 이 계약은 Accelerate 전용 규칙 엔진의 내부 API가 아니라 향후
   모노레포의 다른 프로젝트에서도 사용할 수 있는 **프로젝트 독립 경계**다.
@@ -347,11 +350,14 @@ PR #29에는 `rust-engine/` 변경이 없다. 어댑터의 완료·검증 범위
   옮기거나 한 거대 객체가 모든 규칙을 실행하게 하지 않는다. Rust `MoveBoard`와
   카드 registry 같은 현재 구조도 재사용 API의 확정 근거로 간주하지 않는다.
   객체마다 파일을 하나씩 만드는 방식도 요구하지 않는다.
-- **영향**: 현재 Rust/JS/Python 규칙·oracle·모델 책임은 유지한다. 공유 코어의
-  위치와 패키지 배포 형식은 모노레포 구조가 정해질 때 확정하며, 이 저장소에는
-  임의의 최상위 패키지를 추가하지 않는다. Accelerate 어댑터로 감싸는 이전은
-  v6 호환과 동결 v7의 legal/reject/apply/full state·RNG 비교로 단계별 검증한다.
-  미지원 규칙은 실패로 남고 운영 중 JS/N-version으로 자동 대체하지 않는다.
+- **영향**: 언어 독립 JSON schema와 발행 hash는 `packages/adapter-contract/`,
+  첫 typed registry·호출 구현은 `packages/adapter-runtime/`에 둔다. 게임 전용
+  catalog·schema·Rust 엔진·검증용 JS oracle은 `projects/augment-chess/`, 봇의
+  native/runtime/Python 소비자는 `projects/accelerate/`에 둔다. 공유 패키지는
+  게임 규칙을 import하지 않고 정적 등록으로 시작한다. 기존 v6 입력은 읽기·검증된
+  부분 변환 자료로만 취급하고 공개 규칙 실행은 열지 않는다. 동결 v7의
+  legal/reject/apply/full state·RNG·history 비교를 단계별로 통과한 capability만
+  등록하며, 미지원 규칙은 오류로 남기고 운영 중 JS/N-version으로 자동 대체하지 않는다.
   상세 계약·현황·다음 작업 수용 기준은 [RULE-ADAPTER-HANDOFF](RULE-ADAPTER-HANDOFF.md)에 둔다.
 
 ## 열린 질문

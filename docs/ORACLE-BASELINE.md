@@ -2,7 +2,7 @@
 
 > 상태: 기존 worker와 fixture에 대한 과거 조사 자료입니다. O-002는 [DECISIONS.md의 D-008](DECISIONS.md#d-008-최초-동결-사이트-본체를-규칙-정답으로-고정)에서 최초 동결 client를 기준으로 채택했습니다. 아래 worker/fixture 비교 수치를 현재 Rust 엔진의 동등성으로 사용하지 않습니다.
 
-현재 실행 기준은 2026-09-27에 동결한 main-CqkYwJX4.js와 명시
+아래 과거 조사에서 사용한 실행 기준은 2026-09-27에 동결한 main-CqkYwJX4.js와 명시
 accelerate-headless-semantic-v6 profile이다. 성공한 restore/newGame에서 snapshot 밖
 activePieceAnimationUntil renderer Map과 clockDisplayAnchor를 cold 상태로 초기화한다.
 action 내부 정산에서는 두 context를 보존하고 복원 실패는 state·RNG·context·callback을
@@ -15,7 +15,10 @@ ONNX 실행 근거에는 v4·v5·v6가 포함되지 않는다.
 최초 hash와 실행 의존성을 보존하고,
 사용자가 사용하는 client의 legal/apply/draft/result를 실제 Rust와 비교한다.
 worker의 useful/전략 필터는 client legality를 대신하지 않는다. 전체 catalog의 정답
-동등성은 아직 미완료이며 최신 판정과 검증 범위는 [IMPLEMENTATION](IMPLEMENTATION.md)에 기록한다.
+동등성은 아직 미완료다. 현재 v7 faithful175의 기준과 composite identity는
+[ADAPTER-BASELINE](ADAPTER-BASELINE.md), 최신 검증 범위와 NO-GO는
+[V7-ACCEPTANCE-CLOSURE](V7-ACCEPTANCE-CLOSURE.md)에 기록한다. 아래 v6 결과를
+이 최신 프로필의 성공으로 재분류하지 않는다.
 
 ## 1. "oracle / 정답지"가 여기서 뜻하는 것
 
@@ -33,10 +36,10 @@ worker의 useful/전략 필터는 client legality를 대신하지 않는다. 전
 ① 사이트 원본 worker         (진짜 정답, ground truth)
         │  이 코드를 돌려서 뽑음
         ▼
-② 생성된 fixture 데이터      (PR #19, tests/differential/fixtures/site-reference-v1)
+② 생성된 fixture 데이터      (PR #19, projects/augment-chess/tests/differential/fixtures/site-reference-v1)
         │  비교
         ▼
-③ Twist의 engine-merged.js   (infra/engine-merged.js, 참고용 구현. 틀릴 수 있음)
+③ Twist의 engine-merged.js   (projects/augment-chess/reference/infra/engine-merged.js, 참고용 구현. 틀릴 수 있음)
         │
 ④ Rust 포팅                  (differential test로 ②와 대조해 검증)
 ```
@@ -48,7 +51,7 @@ worker의 useful/전략 필터는 client legality를 대신하지 않는다. 전
 | ③ engine-merged.js | Twist 프로젝트가 규칙을 JS로 다시 구현한 것. 실험, 학습 도구, 현재 differential 하네스의 임시 정답지로 쓰이고 있어 편해서 보존합니다. | **틀릴 수 있음.** ①과 다른 곳이 실제로 관측되었습니다(아래 3절). |
 | ④ Rust 엔진 | 앞으로 만들 실행용 엔진. | ②와 대조해 검증합니다. ③과 ②가 다르면 ②를 따릅니다. |
 
-기존 differential 하네스(`infra/tools/fixtures/run-differential.js`)와 `oracle-v1` 데이터는 ③ 기준으로 뽑은 것이고, PR #19가 ① 기준으로 뽑은 fixture를 같은 형식으로 추가합니다.
+기존 differential 하네스(`projects/augment-chess/reference/infra/tools/fixtures/run-differential.js`)와 `oracle-v1` 데이터는 ③ 기준으로 뽑은 것이고, PR #19가 ① 기준으로 뽑은 fixture를 같은 형식으로 추가합니다.
 
 ## 3. 알려진 engine-merged.js ↔ 사이트 불일치
 
@@ -69,7 +72,7 @@ worker의 useful/전략 필터는 client legality를 대신하지 않는다. 전
 | 카드 행동 목록 비교 (`parity-actions.js - 400 12345`) | 400개 중 11개 불일치(2.8%) | `card:recurrence`(32로 기록됨), `card:randomRoulette`(3), `card:trolley`(1) |
 | 행동 1개 적용 비교 (`parity-apply.js - 300 777`) | 297개 중 6개 불일치 | `zugzwang`(1), `blackMagic`(2), `binaMate`(1), `randomRoulette`(1), `falseStart`(1) |
 | 여러 수 대국 비교 (`parity-playout.js - 60 4242 60`) | 60게임 중 25게임이 어딘가에서 갈라짐 (총 1130수) | 일반 이동 후 상태 차이 6, 일반 이동 후 행동 목록 차이 4, `locustSwarm` 후 행동 목록 차이 4, `checker` 후 상태 차이 3, `falseStart` 2, `zugzwang` 1, `randomRoulette` 1, `missionary` 1, `brutus` 1, `royalShield` 후 행동 목록 차이 1, `knightmate` 후 행동 목록 차이 1 |
-| PR #19 fixture 349개를 develop의 `infra/engine-merged.js`에 돌림 (`run-differential.js`) | 328개 일치, 21개 불일치 | 불일치 출처 중 확인된 것(12종): `playout:5`(2), `piece:king`, `piece:alfil`, `card:blackBox`, `card:blueJeans`, `card:holdout`, `card:missionary`, `card:scarecrow`, `card:zugzwang`, `card:blackMagic`, `card:fieldPromotion`, `card:recurrence` 각 1 |
+| PR #19 fixture 349개를 develop의 `projects/augment-chess/reference/infra/engine-merged.js`에 돌림 (`run-differential.js`) | 328개 일치, 21개 불일치 | 불일치 출처 중 확인된 것(12종): `playout:5`(2), `piece:king`, `piece:alfil`, `card:blackBox`, `card:blueJeans`, `card:holdout`, `card:missionary`, `card:scarecrow`, `card:zugzwang`, `card:blackMagic`, `card:fieldPromotion`, `card:recurrence` 각 1 |
 
 주의할 점:
 
@@ -89,7 +92,7 @@ worker의 useful/전략 필터는 client legality를 대신하지 않는다. 전
 
 사이트가 업데이트되면 ①이 바뀌므로 ②도 낡습니다. 다음 순서로 갱신합니다.
 
-1. **감지**: `site-watch` 워크플로(`.github/workflows/site-watch.yml`, 현재 수동 실행)가 `infra/tools/site-parity/check-site-update.js`로 사이트의 메인 번들 이름과 `aiWorker.js` SHA-256을 `last-seen.json`과 비교합니다. 바뀌었으면 `CHANGED`로 표시합니다.
+1. **감지**: `site-watch` 워크플로(`.github/workflows/site-watch.yml`, 현재 수동 실행)가 `projects/augment-chess/oracle/tools/site-parity/check-site-update.js`로 사이트의 메인 번들 이름과 `aiWorker.js` SHA-256을 `last-seen.json`과 비교합니다. 바뀌었으면 `CHANGED`로 표시합니다.
 2. **가져오기**: 같은 워크플로가 `fetch-real-worker.js`로 사이트 worker를 내려받습니다(사이트 코드는 이 저장소에 커밋하지 않습니다).
 3. **동등성 검사(parity test)**: `parity-actions.js`, `parity-apply.js`, `parity-playout.js`로 engine-merged와 새 worker를 무작위 판에서 비교하고, 결과 보고서가 아티팩트로 올라옵니다. 차이가 늘었으면 규칙이 바뀐 것이므로 사람이 검토합니다.
 4. **fixture 재생성**: Twist의 `tools/site-parity/gen-reference-fixtures.js`(같은 시드면 byte 단위로 같은 결과)로 `site-reference-v1` 데이터를 다시 만듭니다. 생성기와 절차는 PR #19 README에 있습니다.

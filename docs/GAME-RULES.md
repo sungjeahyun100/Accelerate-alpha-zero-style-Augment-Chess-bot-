@@ -1,13 +1,13 @@
 # 증강체스 규칙 요약
 
-> 알파제로 팀이 규칙을 잘못 이해해서 생기는 버그를 줄이기 위한 문서입니다. 사이트(augmentchess.org)와 `infra/engine-merged.js`의 JS oracle을 현재 규칙 기준으로 삼고, 향후 Rust 엔진은 differential test로 이 동작과의 동등성을 검증합니다.
+> 알파제로 팀이 규칙을 잘못 이해해서 생기는 버그를 줄이기 위한 문서입니다. SHA로 고정한 공식 사이트 client를 현재 규칙 기준으로 삼고, 기존 `projects/augment-chess/reference/infra/engine-merged.js`는 역사적 참고 자료로 보존합니다. Rust 엔진은 동결 client와 차분 검증합니다.
 
 ## 1. 문서의 범위와 판정 우선순위
 
 증강체스는 카드, 특수 기물, 필드 규칙이 서로 조합되므로 모든 경우의 수를 자연어 문서 하나에 나열하기 어렵습니다. 규칙이 충돌하거나 이 문서가 코드와 다를 때는 다음 순서로 판정합니다.
 
 1. 현재 augmentchess.org의 실제 동작
-2. `infra/engine-merged.js`의 `generateActions()`가 만든 행동과 `applyAction()`이 적용한 결과
+2. `projects/augment-chess/reference/infra/engine-merged.js`의 `generateActions()`가 만든 행동과 `applyAction()`이 적용한 결과
 3. 이 문서의 요약
 
 이 문서는 구현자의 입문서이지 독립적인 새 규칙 정의가 아닙니다. 사이트 패치로 동작이 바뀌면 oracle과 이 문서를 함께 갱신합니다.
@@ -56,9 +56,9 @@ oracle의 보드 좌표는 `board[row][col]`이다. `row = 0`이 흑의 홈 랭�
 
 ### 무승부 규칙
 
-`infra/engine-merged.js`는 일반적인 스테일메이트, 3회 반복, 50수 무승부를 자체적으로 종료 판정하지 않는다. 카드 효과나 동시 제거가 `winner = "draw"`를 만드는 경우만 엔진 자체의 무승부다.
+`projects/augment-chess/reference/infra/engine-merged.js`는 일반적인 스테일메이트, 3회 반복, 50수 무승부를 자체적으로 종료 판정하지 않는다. 카드 효과나 동시 제거가 `winner = "draw"`를 만드는 경우만 엔진 자체의 무승부다.
 
-기존 `infra/selfplay-worker-merged.js`는 학습 대국이 무한히 지속되는 것을 막기 위해 별도로 다음을 적용한다.
+기존 `projects/augment-chess/reference/infra/selfplay-worker-merged.js`는 학습 대국이 무한히 지속되는 것을 막기 위해 별도로 다음을 적용한다.
 
 - 턴이 실제로 넘어간 시점의 동일 보드+턴이 3회 반복되면 무승부
 - 잡기나 폰 이동 없이 30 ply가 지나면 무승부. 로그 이름은 `50-move`지만 정통 체스의 50수 규칙과 수치가 같지 않다.
@@ -186,11 +186,11 @@ oracle의 보드 좌표는 `board[row][col]`이다. `row = 0`이 흑의 홈 랭�
 
 ## 8. 사이트와 엔진의 일치 검증
 
-- 사이트 워커와 JS oracle 비교: `infra/tools/site-parity/`
-- 사이트 대조 사용법: `infra/tools/site-parity/README.md`
-- 알려진 차이와 트라이에지: `infra/tools/site-parity/TRIAGE.md`
+- 사이트 워커와 JS oracle 비교: `projects/augment-chess/oracle/tools/site-parity/`
+- 사이트 대조 사용법: `projects/augment-chess/oracle/tools/site-parity/README.md`
+- 알려진 차이와 트라이에지: `projects/augment-chess/oracle/tools/site-parity/TRIAGE.md`
 - JS oracle 스모크 테스트: `cd infra && node smoke-merged.js`
-- Rust 엔진과 JS oracle의 differential test 위치: `tests/differential/`
+- Rust 엔진과 JS oracle의 differential test 위치: `projects/augment-chess/tests/differential/`
 
 site-parity 비교 시 주의할 점:
 
@@ -205,7 +205,7 @@ site-parity 비교 시 주의할 점:
 1. 최소 `GameState`와 행동
 2. 사이트의 합법 행동/적용 결과
 3. JS oracle의 합법 행동/적용 결과
-4. 차이가 있다면 `infra/tools/site-parity/TRIAGE.md`의 분류
+4. 차이가 있다면 `projects/augment-chess/oracle/tools/site-parity/TRIAGE.md`의 분류
 5. 수정 후 스모크 테스트와 재현 fixture
 
 새로 확정된 핵심 규칙은 이 문서에 요약하고, 최종 세부 동작은 재현 가능한 테스트로 고정한다.

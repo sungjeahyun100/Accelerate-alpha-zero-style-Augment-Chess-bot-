@@ -3,9 +3,19 @@
 이 문서는 [결정 기록](DECISIONS.md)과 [전체 구현·증거 현황](IMPLEMENTATION.md)을 실제 변경 단위와 검사 가능한 계약으로 풀어 쓴다. 충돌하면 사용자 결정과 D-001~D-017이 우선한다. 각 절의 “완료”는 해당 영역의 checkpoint이며 마지막의 전체 코드 GO와 다르다. 구현 담당자는 실제 소스와 동결 원문을 확인해 세부 source 의미를 채우고, 근거가 없는 경우 Unsupported로 남겨 원인과 범위를 기록한다.
 향후 모노레포에서 재사용할 언어 독립 객체형 규칙 어댑터의 범위와 Accelerate 이관 지시는 [RULE-ADAPTER-HANDOFF](RULE-ADAPTER-HANDOFF.md)에 둔다. 여기의 P2 파일 경계는 현 구현의 책임 지도이며 공유 패키지의 타입·디렉터리를 고정하지 않는다.
 
+## 이번 PR #32 전달 범위
+
+2026-10-01 사용자는 봇 연동·성능 측정을 진행하지 않고 PR #32에 push한 뒤 이번
+전달 목표를 완료하도록 조정했다. 현재 완료 조건은 구현·bounded 규칙/공통 계약
+검증·구조 검사·커밋/push와 원격 SHA 확인이다. 설치 wheel·실제 Python 봇 연동·성능
+측정은 사용자 범위 조정으로 미실행·미검증이며 후속 검증이 필요하다. 아래 모델·배포·
+탐색 계획과 전체 프로젝트 GO gate는 이 후속 범위를 보존하며 현재 PR 완료를 막는
+추가 실행 지시로 사용하지 않는다. CI dispatch와 관측 결과를 구분하고 범위를 늘리지 않는다.
+
 ## 목표 버전과 증거 경계
 
-- 최종 코드 GO의 정답은 `bridge/catalog/site-20260928.json`에 고정된 `augment-site-20260928-e5ed84fcf8e72a24`, headless profile `accelerate-headless-semantic-v7`, 로컬 8×8 normal·chaos·grand 및 공개 카드 256장이다. 원문 client 전체 SHA-256은 `e5ed84fcf8e72a24e6a8cfeb9050787387a616c55184e6501fca2077e302c45c`다.
+- 최종 코드 GO의 정답은 `projects/augment-chess/contracts/catalog/site-20260928.json`에 고정된 `augment-site-20260928-e5ed84fcf8e72a24`, headless profile `accelerate-headless-semantic-v7-faithful-init-v1`, 로컬 8×8 normal·chaos·grand 및 공개 카드 256장이다. 원문 client 전체 SHA-256은 `e5ed84fcf8e72a24e6a8cfeb9050787387a616c55184e6501fca2077e302c45c`다. 실행 manifest `execution-profile-20260928.json`은 initializer 175개/제외 168개와 replay labels·codes 각 79개/frameKeys 222개를 고정한다. 현재 composite catalogVersion `f80ebcd21759df179bccfb301415e672194de67691a6383beafc549538ffae7c`는 원문 공개 catalog hash와 별도이며 source·parser·실행 manifest를 함께 결속한다.
+- 로컬 8×8 캠페인의 원문 생성·행마 경로도 실제 호출을 기준으로 대조한다. Janggi 로컬 setup은 8×8이므로 D-009의 비8×8 geometry 제외로 누락하지 않는다. 온라인 authority/recipientLegalMoves의 별도 계약과 headless local 상태를 구분하며 현재 비교·미검증 경계는 [인수 장부](V7-ACCEPTANCE-CLOSURE.md)에 둔다.
 - PR #29 게임 어댑터는 완료된 **검증용** 실행층이다. 그 768개 카드×모드 표면 조사는 특정 국면·후보의 bounded probe이고 전체 규칙의 완성 증명이 아니다. 동결 JS/사이트를 탐색 시의 자동 대체 엔진으로 사용하지 않는다.
 - v6 snapshot·replay·설치 wheel 입력과 기존 세 float32 ONNX bundle은 별도 호환 경로로 보존한다. v6 검사로 v7 최종 GO를 주장하지 않는다. 버전이 다른 규칙·catalog·관측 정책·인코더·모델은 조용히 재해석하지 않는다.
 - GO/NO-GO는 코드·계약·동등성·자원 한도의 판정이다. 실제 학습 캠페인, 장시간 자가대국, 대전 승률, 모델 승격, 동적 Hypernetwork는 이번 완료 범위 밖이다. 작은 synthetic optimizer step은 저장·복구 코드 검사에만 사용한다.
@@ -16,22 +26,22 @@
 
 | 순서 | 코드 소유 경계 | 다른 작업에 제공할 계약 | 국소 완료 증거 |
 |---|---|---|---|
-| P0 | `bridge/catalog/`, `bridge/protocol/`, 동결 oracle | rules/catalog/observation/source/profile 버전과 실행 범위 | source hash·정의 수·기존 v6와 v7 분리 |
-| P1 | `rust-engine/src/geometry.rs`, `state.rs` | checked geometry, 단일 기물 identity, 파생 occupancy | 직사각형·붕괴·합성 resize·원자성 |
+| P0 | `projects/augment-chess/contracts/catalog/`, `projects/augment-chess/contracts/protocol/`, 동결 oracle | rules/catalog/observation/source/profile 버전과 실행 범위 | source hash·정의 수·기존 v6와 v7 분리 |
+| P1 | `projects/augment-chess/engine/src/geometry.rs`, `state.rs` | checked geometry, 단일 기물 identity, 파생 occupancy | 직사각형·붕괴·합성 resize·원자성 |
 | P2a | `move_program.rs`, `movement.rs`, `variant_movement.rs` | typed 행마 프로그램과 후보 provenance | 원점/부모/형제/거리/JUMP/SHIFT |
 | P2b | `card_registry.rs`, `draft.rs`, `card_effects.rs` | definition/instance/RULE·activation/turn policy | v7 registry와 source 정책, v6 보존 |
 | P3 | Rust `transition.rs`, `observation.rs`, `lib.rs` | lossless Position→허용 관측·apply/result | v7 legal/apply/full state/RNG, 기존 v6 |
 | P4 | Python `ir.py`, `encoding.py` | 한 공개 ObservationIR와 typed 입력 | 비누출·history·geometry·ordered target |
 | P5 | `network/mask_resnet.py`, `entity_transformer.py`, `typed_context.py` | 같은 후보 logit/value 계약 | mask·순열·FiLM·LoRA·유한 출력 |
-| P6 | `network/artifacts.py`, `bridge/runtime/`, `bridge/native/` | versioned ONNX와 typed 추론 | 설치 wheel의 ORT/tract 수치·오류 |
+| P6 | `network/artifacts.py`, `projects/accelerate/runtime/`, `projects/accelerate/native/` | versioned ONNX와 typed 추론 | 설치 wheel의 ORT/tract 수치·오류 |
 | P7 | Python `search.py`, `inference.py`, `replay.py`, `training.py`, `cli.py` | 공개 ISMCTS·유한 session·versioned 기록 | 세 모드의 bounded 실행·취소·복구 |
-| P8 | `tests/differential/`와 CI | 독립 source parity/참조 구현 결과 | 최종 같은 SHA의 두 OS 검사와 gap 해소 |
+| P8 | `projects/augment-chess/tests/differential/`와 CI | 독립 source parity/참조 구현 결과 | 최종 같은 SHA의 두 OS 검사와 gap 해소 |
 
 P1/P2a/P2b/P4/P5/P6/P7은 분리 가능한 경계에서 병렬 진행한다. P3은 안정된 P1/P2 계약을 연결하고 P8은 각 기능 완료 뒤 누적 검증한다. 각 단계는 1~3개 논리 커밋 원칙의 검증된 공유 단위로 묶되, 중간 실패를 최종 완료로 표시하지 않는다.
 
 ## P0. 정답과 지원 범위의 고정
 
-1. v7 client·parser·metadata를 각각 SHA-256으로 확인하고 원문 번들을 Git에 넣지 않는다. v6와 v7의 source·policy·schema를 다른 버전으로 유지한다. 원문 실행에는 확정 headless profile을 사용하고 queued settlement·RNG·render hook 중 규칙 변경을 보존한다.
+1. v7 client·parser·metadata를 각각 SHA-256으로 확인하고 원문 번들을 Git에 넣지 않는다. v6와 v7의 source·policy·schema를 다른 버전으로 유지한다. 원문 실행에는 확정 faithful175 profile을 사용하고 queued settlement·RNG·render hook 중 규칙 변경을 보존한다. 최상위 이름·기보·카드 초기화 중 loader가 보존하는 문장과 생략하는 문장을 manifest의 원문 순서·digest로 명시하고 직접 조회/fallback을 구별한다. 선언 전용 또는 initializer 23개·labels 30개 프로필의 영수증은 당시 근거로 보존하며 현재 프로필의 성공으로 바꾸지 않는다. 공개 전체 후보 수집과 원문 내부 위협·no-action collector의 정책을 분리하며, loader/정책을 바꿀 때 해당 full state·history·identity 근거를 다시 생성·검사한다.
 2. v7 256개 공개 카드, 보조 정의 1개, 실제 선택 가능한 RULE 풀과 카탈로그 전체 기물 식별자를 **정의/실제 생성/도달 가능한 기능**으로 구분해 coverage 장부를 만든다. 개수만 같거나 ID가 같다는 사실은 v6↔v7 의미 동등성이 아니다.
 3. 비교 입력은 source가 생성한 초기/draft 및 전제조건을 만족하는 합성 국면을 함께 사용한다. worker의 useful-action filter, AI target truncation, 1~2개 후보 접두 probe를 전체 legal로 취급하지 않는다. Portal Gun 같은 **선택 순서가 다른 입력**이 하나의 후보로 누락되는지 별도 확인한다.
 4. 비교는 legal 후보, 잘못된 행동 거절, apply 뒤 정규화된 **전체** state·history·result·RNG를 묶어 판정한다. presentation 필드 제외는 정확한 field list와 원문 근거를 남긴다. private positionId 단독 일치는 동등성 증거가 아니다.
@@ -97,7 +107,43 @@ P1/P2a/P2b/P4/P5/P6/P7은 분리 가능한 경계에서 병렬 진행한다. P3�
 
 ## P8. 독립 검증과 최종 코드 GO
 
+27 RULE·84 기물·공개 카드 256+보조 정의 1·행동 10종·UI 선택 3종의 실제 호출 경로,
+남은 활성 경계와 메인 검증 recipe는 [v7 전체 규칙 인수 장부](V7-ACCEPTANCE-CLOSURE.md)에
+둔다. 장부의 코드 작성·source 증거 생성·native 비교·최종 통합은 각각 다른 상태이며
+등록 수나 `Unsupported` 문자열 수를 완료율로 사용하지 않는다.
+국소 callback 비교가 PASS여도 공개 host admission·ordinary completeMove와 같은
+실행 경로를 수행했는지 따로 확인한다. 자료 생성 성공, raw callback 일치, terminal
+정산·공개 event 일치와 최종 같은 SHA 검사를 한 결과로 합치지 않는다.
+실제 실행 입력은 env·필터·정확한 파일 SHA·case 집합·복원/연속 VM 경계와 연결한다.
+client SHA와 rulesVersion만 같다고 실행 프로필까지 같다고 간주하지 않는다.
+현행 composite catalog·manifest·loader를 인증하지 않은 raw state 비교나 native가
+합성한 현행 envelope는 생성 provenance의 대체 근거가 아니다. 실행 당시 recipe·
+loader 해시가 없으면 그 부족을 명시하고 현재 파일 해시로 과거 실행을 추정하지 않는다.
+이전 영수증의 metadata만 올리지 않으며 source를 재생성하고 필요한 identity gate를
+수행한다. 파일 수·source 생성 수·native 비교 성공 수와 서로 겹치는 재검증 수를
+합산해 전체 GO로 보고하지 않는다.
+대기는 실제 source-reachable 미구현, 저장된 수정의 재검증, 외부 환경 gate와 유한 표본의
+일반적 한계로 구분한다. 공개 play 일괄 거절은 저장된 source-prior-v1 분기로 대체됐다.
+실제 carry된 경로의 draw 분류·한 번의 prior proposal·전체 공개 projection 동등성과
+불투명 identity 결속은 source chance9/source prior3 및 전달105 bounded 회귀에서 PASS였다.
+미분류 draw는 callsite/RNG cursor를 포함해 정확한 오류로 반환한다. 경로 질량은 IID
+연속 난수 의미이며 유한 LCG seed 전체를 열거한 정확한 posterior나 모든 규칙 조합의
+확률 완전성을 증명하지 않는다. Python 실제 소비자 검사 코드는 저장됐으나 사용자 범위
+조정으로 설치·봇 연동 실행은 미실행·미검증 후속 항목이다.
+activeTrolley 선택 대기·잘못된 identity·비8×8·정해진 한도 오류는 해당 입력 계약으로
+분류한다. callback full state 불일치는 정확한 오류로 남기며 placeholder 개수로 합산하지 않는다.
+
 검증에는 세 층이 있다. 첫째, unit/property/contract 검사는 geometry·registry·IR·모델·FFI의 국소 불변식을 본다. 둘째, 독립 N-version은 geometry·점유·행마의 작은 참조 구현을 **테스트 전용**으로 만들어 Rust 운영판과 비교한다. 셋째, source-pinned JS oracle은 v7 실제 규칙의 legal/reject/apply/full state/history/result/RNG 정답이다. 두 참조 결과가 충돌하면 다수결 대신 동결 source와 계약을 추적한다. 운영 추론·탐색 경로에는 참조판을 연결하지 않는다.
+
+최종 전달105에서는 engine all-targets unit711·integration20과 추가104 gate가 모두 PASS였고
+각 job의 source digest가 불변이었다. 추가104에는 원문 comparator와 기존 등록·회귀 단위가
+섞이므로 독립 규칙 수로 사용하지 않는다. production dead_code11 경고는 정확한 요약으로
+남긴다. 뒤이은 fmt/common registry9/v6migration6은 PASS였지만 엄격 Clippy는53진단·exit101이다.
+사용자 범위에 따라 lint 리팩터링을 확대하지 않고 이 실패를 PR에 기록한다. 로컬Rust1.97.0을
+CIpin1.96.0의 성공으로 표기하지 않는다. 메인이 구조 검사·커밋/push를 확인하며 세부 근거는 인수 장부를 따른다.
+
+아래 표는 전체 프로젝트 GO의 후속 gate다. 사용자 범위 조정으로 제외한 wheel·봇 연동·
+성능 항목을 이번 PR #32 전달의 추가 완료 조건으로 적용하지 않는다.
 
 | Gate | 통과 조건 | 미충족 시 판정 |
 |---|---|---|

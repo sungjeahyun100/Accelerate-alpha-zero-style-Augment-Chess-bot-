@@ -1,8 +1,8 @@
 name: C++ sketch compile check
 
-# pre_cpp_engine_code/engine.cpp is a hand-written sketch meant to be handed
-# to an AI for Rust porting (see pre_cpp_engine_code/README.md). It isn't
-# part of the build and ci.yml's path filter (infra/**) never sees it, so a
+# projects/augment-chess/reference/pre_cpp_engine_code/engine.cpp is a hand-written sketch meant to be handed
+# to an AI for Rust porting (see projects/augment-chess/reference/pre_cpp_engine_code/README.md). It isn't
+# part of the build and ci.yml's reference infra path filter never sees it, so a
 # broken sketch could sit unnoticed for a long time before porting day. This
 # just checks it still compiles -- no test, no artifact, no working code
 # required beyond that.
@@ -10,11 +10,11 @@ on:
   push:
     branches: [main, develop]
     paths:
-      - "pre_cpp_engine_code/**"
+      - "projects/augment-chess/reference/pre_cpp_engine_code/**"
       - ".github/workflows/cpp-sketch.yml"
   pull_request:
     paths:
-      - "pre_cpp_engine_code/**"
+      - "projects/augment-chess/reference/pre_cpp_engine_code/**"
       - ".github/workflows/cpp-sketch.yml"
   workflow_dispatch: {}
 
@@ -29,5 +29,5 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Compile engine.cpp
-        working-directory: pre_cpp_engine_code
+        working-directory: projects/augment-chess/reference/pre_cpp_engine_code
         run: g++ -std=c++20 -Wall -Wextra -c engine.cpp -o /dev/null

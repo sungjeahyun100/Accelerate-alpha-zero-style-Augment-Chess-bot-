@@ -1,9 +1,10 @@
 {
   "name": "accelerate-monorepo",
   "private": true,
-  "workspaces": ["packages/*"],
+  "workspaces": ["packages/adapter-contract", "projects/augment-chess/oracle/game-adapter", "projects/augment-chess/reference/infra"],
   "scripts": {
-    "test:game-adapter": "node --test infra/tools/site-parity/offline-oracle.test.js",
+    "test:game-adapter": "node --test projects/augment-chess/oracle/tools/site-parity/offline-oracle.test.js",
+    "check:adapter-contract": "node packages/adapter-contract/verify.mjs",
     "check:repository-policy": "node --test .github/scripts/check-repository-policy.test.mjs"
   },
   "engines": { "node": ">=22" }

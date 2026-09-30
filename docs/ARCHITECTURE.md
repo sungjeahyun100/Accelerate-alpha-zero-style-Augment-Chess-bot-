@@ -4,8 +4,9 @@
 PyO3/maturin 패키지, Python 공개 정보 탐색·replay·CLI, ResNet·FiLM·LoRA와
 실제 ONNX 추론은 기존 실행 경로다. PR #29의 고정 v7 사이트 게임 어댑터는
 구현·검증 완료된 correctness 기준 실행층이다. 공통 `ObservationIR`과 가변
-ResNet/entity Transformer의 두 경로는 채택된 설계이며 아직 구현되지 않았다.
-공통 계약은 [runtime-v1](../bridge/protocol/runtime-v1.md)이며 기존 draft schema는 과거
+ResNet/entity Transformer의 두 경로는 기반 구현이 있으나 최종 동일 SHA의 설치본과
+전체 게임 규칙 입력까지 통합 검증되지 않았다.
+게임 실행 계약은 [runtime-v1](../projects/augment-chess/contracts/protocol/runtime-v1.md)이며 기존 draft schema는 과거
 자료다. 전체 규칙·카드·visibility 포팅은 진행 중이고 전체 판정은 NO-GO다. 구현·관측한
 검증·남은 조건은 [IMPLEMENTATION](IMPLEMENTATION.md), 채택 결정은 [DECISIONS](DECISIONS.md)에 둔다.
 
@@ -30,22 +31,21 @@ Rust 허용 관측·공개 이력 ──> Python ObservationIR·후보 행동
 JS→Rust 화살표는 검증 관계다. 실제 탐색은 Python MCTS가 Rust 환경을 호출한다.
 JS oracle·독립 참조 구현은 실패한 Rust 규칙 실행의 대체 경로가 아니다.
 추론 adapter는 모델 실행 경계에 두고 순수 규칙 엔진을 의존자로 만들지 않는다.
-추론 adapter는 `bridge/runtime/`, Python 경계는 `bridge/native/`에 둔다.
+추론 adapter는 `projects/accelerate/runtime/`, Python 경계는 `projects/accelerate/native/`에 둔다.
 
 ## 영역별 책임
 
 | 영역 | 소유하는 책임 | 넣지 않는 것 |
 |---|---|---|
-| `rust-engine/` | GameState, Action, legal/apply/terminal/result 규칙 | PyO3·Python·MCTS·학습·ort/tract 의존성 |
-| `bridge/` | 논리 계약, JSON 기록·검증, 얇은 PyO3 바인딩과 독립 ONNX 추론 adapter | 규칙·탐색·학습의 중복 구현 |
-| `python/` | encoding, MCTS, network, self-play, training/evaluation/export | Python으로 다시 쓴 게임 규칙 |
-| `infra/` | 기존 JS oracle·NNUE·검증·실험 도구 | 새 AlphaZero 탐색의 주 실행 환경 |
-| `tests/differential/` | oracle 비교 fixture와 후보 검증 | 운영 데이터셋·모델 |
-| `pre_cpp_engine_code/` | Rust 포팅 참고용 C++ 초안 | 완성된 증강체스 구현이라는 보장 |
+| `packages/adapter-contract/`, `packages/adapter-runtime/` | 게임 비종속 schema·호출·등록 | 특정 게임 상태·규칙 |
+| `projects/augment-chess/engine/`, `projects/augment-chess/contracts/` | GameState·Action·규칙과 게임 전용 catalog | PyO3·Python·MCTS·학습·ort/tract 의존성 |
+| `projects/augment-chess/oracle/`, `projects/augment-chess/tests/` | 동결 client adapter·차분 fixture와 검증 | 운영 데이터셋·모델 |
+| `projects/augment-chess/reference/` | 기존 JS oracle·NNUE 실험 도구와 C++ 초안 | 새 AlphaZero 탐색의 주 실행 환경 |
+| `projects/accelerate/` | PyO3·ONNX runtime·encoding·MCTS·모델·학습 | Python으로 다시 쓴 게임 규칙 |
 | `docs/`, `.github/` | 설계·규약과 저장소 CI | 원시 실행 로그·무거운 학습 실행의 자동 시작 |
 
 새 디렉터리·생성물·WSL2는 [AGENTS](../AGENTS.md)와
-[개발 기준](ENGINEERING-STANDARDS.md)을 따른다. 기존 경로를 일괄 재배치하지 않는다.
+[개발 기준](ENGINEERING-STANDARDS.md)을 따른다. 기존 JS 도구의 내부 상대 배치는 유지한다.
 
 ## 엔진 상태와 공개 입력의 경계
 
@@ -71,10 +71,12 @@ descriptor·public candidate action을 입력으로 받는다. Rust로 encoder�
 독립 참조판은 차분 검사에서만 사용한다. 선택한 운영 규칙 구현에서 오류가 발생하면
 호출자에게 전파하고 JS oracle·Python 참조판으로 전환하지 않는다.
 
-## Bridge와 PyO3/maturin
+## 계약과 PyO3/maturin
 
-`bridge/`는 공통 GameState·Action·결과·카드 정의와 언어 간 해석을 소유한다.
-PyO3 바인딩은 `bridge/native/`의 얇은 독립 crate에서 Rust 규칙 crate를 호출한다.
+`packages/adapter-contract/`와 `packages/adapter-runtime/`는 게임을 모르는 객체 호출
+계약을 소유한다. `projects/augment-chess/contracts/`는 게임 전용 상태·행동·결과·카드
+정의를 소유한다. PyO3 바인딩은 `projects/accelerate/native/`의 얇은 독립 crate에서
+Rust 규칙 crate를 호출한다.
 maturin은 이 바인딩의 빌드·Python 패키징 도구이고 모델 export 도구가 아니다.
 
 반복 호출은 PyO3 타입·배열을 직접 전달한다. JSON은 저장·교환·fixture·차분 검증에

@@ -3,7 +3,7 @@
 현재 전체 판정은 **NO-GO**다. 이는 코드 완성·정답 동등성에 대한 판정이며 실제 학습 또는
 봇 실력의 판정이 아니다. 사용자 채택 요구는 [DECISIONS](DECISIONS.md), 상세 작업·경계·
 단계별 검증 지시는 [IMPLEMENTATION-DIRECTIVES](IMPLEMENTATION-DIRECTIVES.md)에 있다.
-기존 v6 실행 계약은 [runtime-v1](../bridge/protocol/runtime-v1.md)에 보존한다.
+기존 v6 실행 계약은 [runtime-v1](../projects/augment-chess/contracts/protocol/runtime-v1.md)에 보존한다.
 아래 관측한 검사와 계획을 혼동하지 않는다.
 작업 브랜치는 feature/full-stack-implementation, 출발점은 bfc85c886b489f21f6f1037bc291ab0157c3dc6f다.
 
@@ -29,6 +29,9 @@ v7 생성·실행 guard와 `try_observe`의 동적 v7 투영 guard는 유지한�
 이 절은 위 기반 checkpoint 이후의 **로컬 작업 트리**에서 확인한 범위다. 동결 v7
 클라이언트와 독립 N-version의 결과를 분리하고, 공개 native `Position`의 v7
 import·play legal·bind·apply를 아직 열지 않는다.
+아래 seed 19의 Relay·Reposition 등 후보·전이 수치는 당시 headless 원문 로더에서
+관측한 기록이다. 이후 로더 수정으로 같은 seed의 chaos·grand 후보 ID가 달라졌으므로,
+수정된 로더에서 재검증하기 전에는 현재 동결 원문과의 일치 근거로 승격하지 않는다.
 
 | 범위 | 추가 구현과 확인한 증거 | 남은 경계 |
 |---|---|---|
@@ -46,6 +49,8 @@ Linux 전체 workspace 테스트의 PyO3 링크에는 WSL 시스템의 `libpytho
 이 절의 구현은 source v7에서 도달 가능한 **seed 19의 제한된 상태**와 공통 입력 경계를
 넓힌 것이다. 공개 Rust `Position`의 v7 import·bind·apply는 계속 닫혀 있고,
 처음 이동 이후의 일반 왕실 위협·합법 행동·종료 판정은 원문 동등성이 확인되지 않았다.
+seed 19의 도달 경로와 후보 ID를 전제로 한 아래 관측도 앞 절과 같은 로더 수정의 영향을
+받을 수 있으며, 수정된 로더의 재검증 전에는 과거 범위의 기록으로만 읽는다.
 
 | 범위 | 이번 검증 가능한 진전 | 아직 허용하지 않는 범위 |
 |---|---|---|
@@ -93,7 +98,7 @@ Accelerate 전용 Rust 분기문을 공통 패키지로 옮기는 지시가 아�
 | D-016 | 새 설계 | 엔진 상태와 모델 입력 분리, 내부 보드 크기 상수 제거, 검증 전용 N-version, 자동 runtime 대체 금지. |
 | D-017 | 새 설계 | 프로젝트 독립 언어 중립 어댑터 계약과 Rust 첫 구현체를 계획하고, 기물·카드별 객체는 Accelerate 소비 구현으로 분리한다. |
 
-PR #29의 변경 파일에는 `rust-engine/`이 없다. 구현 완료는 게임 어댑터와 고정 v7
+PR #29에는 Rust 엔진 변경이 없다. 구현 완료는 게임 어댑터와 고정 v7
 검증 계층에 대한 것이며, 아래 기록처럼 현재 Rust 엔진은 v7 Position을 실행하지
 못한다. PR #29의 bounded 256카드×3모드 표면 조사는 전체 조합 규칙 coverage의
 증거가 아니다. 완료된 adapter 재구현을 이번 작업에 추가하지 않는다.
@@ -654,7 +659,7 @@ pending decision을 보존하고 환경 전이를 실행하지 않는다. 개별
 
 실제 본체 resetGame/beginInitialGameFlow는 초기 259개 root field를 만든다. 여러 최신 card 효과는
 root field를 lazily 추가하므로 초기 기본값만으로 전체 field 목록이 완성되지는 않는다.
-`bridge/catalog/`에는 공개 256 metadata, semantic CARD_DEFS 257(shotgun-king 보조 정의 포함),
+`projects/augment-chess/contracts/catalog/`에는 공개 256 metadata, semantic CARD_DEFS 257(shotgun-king 보조 정의 포함),
 initial defaults, draft weights/exclusive sets, 명시적 관측 정책을 보관한다. 큰 art/text/원문은 넣지 않는다.
 
 ## 실제 규칙·visibility 근거
@@ -689,10 +694,10 @@ viewer 제한·presentation/다른 mode·visibilityReviewPending을 구분한다
 검사 명령은 다음과 같다. offline 통합 검사는 채택된 외부 baseline이 없으면 skip하지 않고 실패한다.
 
 ```text
-node --test bridge/tools/runtime-contract.test.js infra/tools/site-parity/offline-oracle.test.js
-node bridge/tools/validate.js
-node infra/tools/site-parity/compare-frozen-fixtures.js
-node infra/tools/site-parity/audit-card-surface.js
+node --test projects/augment-chess/contracts/tools/runtime-contract.test.js projects/augment-chess/oracle/tools/site-parity/offline-oracle.test.js
+node projects/augment-chess/contracts/tools/validate.js
+node projects/augment-chess/oracle/tools/site-parity/compare-frozen-fixtures.js
+node projects/augment-chess/oracle/tools/site-parity/audit-card-surface.js
 ```
 
 현재 checkpoint의 depth0 계약/통합 검사는 14개 통과, skip 0이다. 3종 실제 draft lifecycle, passive

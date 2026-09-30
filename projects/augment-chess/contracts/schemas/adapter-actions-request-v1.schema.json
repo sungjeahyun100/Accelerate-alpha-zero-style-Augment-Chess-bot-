@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:augment-chess:adapter:actions-request:v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "limit", "max_examined", "cursor"],
+      "properties": {
+        "kind": { "const": "legal_actions_page" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "max_examined": { "type": "integer", "minimum": 1, "maximum": 65536 },
+        "cursor": { "type": ["string", "null"], "pattern": "^v7p-[0-9a-f]{64}$" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": { "kind": { "const": "legal_actions" } }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "intent"],
+      "properties": {
+        "kind": { "const": "bind_public_intent" },
+        "intent": { "type": "object" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "intent"],
+      "properties": {
+        "kind": { "const": "apply_public_intent" },
+        "intent": { "type": "object" }
+      }
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+[package]
+name = "augment-chess-contracts"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Versioned Augment Chess catalog and protocol resources"
+
+[lib]
+path = "src/lib.rs"

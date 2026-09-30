@@ -13,18 +13,18 @@ PyO3/maturin 패키지, 공개 관측 인코딩과 ResNet·FiLM·LoRA·ONNX 추�
 검증 관계는 다음과 같습니다.
 
 ```text
-infra/ (JS oracle) ── differential validation ──> rust-engine/
+projects/augment-chess/oracle/ ── differential validation ──> projects/augment-chess/engine/
 ```
 
 실제 봇과 self-play의 실행 흐름은 다음과 같습니다.
 
 ```text
-python/ (AI) ──> bridge/ (PyO3 직접 호출, maturin 패키징) ──> rust-engine/
+projects/accelerate/python/ ──> projects/accelerate/native/ ──> projects/augment-chess/engine/
 ```
 
 - JavaScript oracle은 Rust 포팅의 정확성을 검증하는 기준이며 실제 AlphaZero 탐색 루프의 엔진이 아닙니다.
 - Rust 엔진은 Python·PyO3·신경망·ONNX runtime에 의존하지 않습니다.
-- Python은 bridge의 immutable Position/Action과 직접 호출 경계를 통해 Rust 엔진을 사용합니다.
+- Python은 `projects/accelerate/native/`의 immutable Position/Action 직접 호출 경계를 통해 Rust 엔진을 사용합니다.
 - JSON은 저장·교환·검증 계약이며 반복 호출은 PyO3 타입·owned 배열을 사용합니다.
 - ResNet의 FiLM 조건은 ONNX 입력/그래프에 남고, static LoRA는 별도 어댑터로 보존하며 복사본에서 병합합니다.
 - 운영 ONNX 추론은 Rust의 기본 `ort`와 명시 선택 `tract`를 사용합니다.
@@ -36,12 +36,11 @@ python/ (AI) ──> bridge/ (PyO3 직접 호출, maturin 패키징) ──> rus
 
 | 경로 | 책임 | 현재 상태 |
 |---|---|---|
-| `bridge/` | 공통 JSON 계약·얇은 PyO3 연동·독립 ONNX runtime crate | v1 계약, Linux wheel과 실제 ort/tract 검사 checkpoint |
-| `rust-engine/` | 봇 탐색과 self-play용 독립 규칙 엔진 | source 포팅 진행, 전체 catalog coverage 미완료 |
-| `infra/` | JS oracle과 검증/실험 인프라 | 기존 코드와 동결 client adapter |
-| `python/` | 공개 관측·ISMCTS·ResNet·LoRA·FiLM·replay·학습/평가 코드 | 단일 accelerate_chess 패키지에서 구현·통합 진행 |
-| `tests/differential/` | JS oracle과 Rust 엔진의 동등성 검증 | fixture·하네스 존재, 실제 Rust 비교 전 |
-| `pre_cpp_engine_code/` | Rust 포팅 참고용 C++ 초안 | 일부 규칙 골격·자체 검사 존재 |
+| `packages/adapter-contract/`, `packages/adapter-runtime/` | 언어 중립 schema와 게임 비종속 Rust 호출 계약 | 정적 객체 등록과 계약 적합성 검사 |
+| `projects/augment-chess/engine/`, `projects/augment-chess/contracts/` | 독립 규칙 엔진과 게임 전용 계약·catalog | source 포팅 진행, 전체 catalog coverage 미완료 |
+| `projects/augment-chess/oracle/`, `projects/augment-chess/tests/` | 동결 client 어댑터와 JS↔Rust 차분 검증 | bounded 표면 검사와 장기 검증 진행 |
+| `projects/augment-chess/reference/` | 기존 JS oracle·NNUE 도구와 C++ 초안 | 내부 상대 경로를 보존한 참고 자료 |
+| `projects/accelerate/` | PyO3·ONNX runtime·Python 탐색·학습 코드 | 설치 wheel과 봇 통합 검증 진행 |
 | `docs/` | 아키텍처, 로드맵, 결정, 실험, 게임 규칙 문서 | 관리 중 |
 | `.github/workflows/` | 구조·native 패키지·규칙 검증과 기존 실험 Actions | Windows/Linux native CI 추가, 최종 통과 미관측 |
 
@@ -56,16 +55,16 @@ node .github/scripts/check-repository-policy.mjs
 
 ## 기존 JavaScript 인프라 확인
 
-현재 JavaScript oracle과 관련 도구는 경로 호환성을 위해 `infra/` 안에 그대로 둡니다.
+기존 JavaScript 실험 도구의 내부 상대 배치는 `projects/augment-chess/reference/infra/`에서 보존합니다.
 
 ```bash
-cd infra
-npm install                    # tfjs 기반 기존 학습 도구를 쓸 때만 필요
+cd projects/augment-chess/reference/infra
+npm install --workspaces=false # tfjs 기반 기존 학습 도구를 쓸 때만 필요
 node smoke-merged.js           # 통과하면 ALL SMOKE CHECKS PASSED
 node tools/ci/golden-eval.js   # 평가 함수 회귀 검사
 ```
 
-각 파일의 역할과 주의사항은 [infra/FILE-GUIDE.md](infra/FILE-GUIDE.md)에 있습니다.
+각 파일의 역할과 주의사항은 [FILE-GUIDE.md](projects/augment-chess/reference/infra/FILE-GUIDE.md)에 있습니다.
 
 ## 문서
 
@@ -86,4 +85,4 @@ node tools/ci/golden-eval.js   # 평가 함수 회귀 검사
 
 ## 라이선스
 
-저장소 전체의 라이선스는 아직 정하지 않았습니다. `infra/`의 출처와 원본 라이선스는 [NOTICE.md](NOTICE.md)를 반드시 확인하세요.
+저장소 전체의 라이선스는 아직 정하지 않았습니다. 기존 JS 자료의 출처와 원본 라이선스는 [NOTICE.md](NOTICE.md)를 반드시 확인하세요.
