@@ -117,6 +117,7 @@ D-001~D-003은 기존 결정입니다. D-004~D-006과 D-003 보완은 2026-09-27
   엔진 규칙이 정하는 chance outcome의 chance node를 구분한다. 개념적 흐름은
   `decision state → player action → afterstate → chance event → next decision state`다.
   `afterstate`는 설명용이며 필수 저장 타입으로 확정하지 않는다.
+  하나의 player action이 0개, 1개 또는 여러 개의 chance event를 연쇄적으로 발생시킬 수 있으며, 위 흐름은 개념적 모델이지 chance node 개수를 하나로 제한하지 않는다.
 - **이유**: 순수 결정론적 `state + action → next_state`와 action마다 단일 child를
   가정하면 환경의 무작위 결과를 플레이어 선택으로 잘못 취급할 수 있다. Decision node에는
   policy prior·visit count·Q-value·PUCT를 적용할 수 있지만 chance node는 유리한
