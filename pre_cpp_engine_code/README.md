@@ -29,3 +29,5 @@ PR #17 리뷰(구독좋아요님)에서 `B-chain`은 반려되어 제거되었�
 - `apply_action`은 이미 검증된 합법 action만 받는 내부 빠른 경로입니다. 외부 입력(bridge 등)은 먼저 `validateExternalAction`을 통과시킵니다.
 - 카드 효과 추가 절차는 `engine.cpp`의 `registerCardEffect` 아래 `[임의의 카드를 추가하는 절차]` 주석에 있습니다.
 - 왕족 속성 필드는 `Piece::isRoyal` 하나입니다. KING 종류 여부는 `pT == pieceType::KING`으로 판단하고, 기본 KING은 `isRoyal = true`로 만들어집니다.
+- 큰 기물의 `Square.coordinate`는 배치 저장용 anchor입니다. `occupiedCells`가 실제 점유 칸을 복원하고, `moveChunk.maxDistance`는 해당 방향의 맨 앞 구성 칸에서 바깥으로 진행하는 step 수입니다. 이동 적용 시 `moveAction.destination`은 새 anchor로 유지됩니다.
+- `moveAction.clickCell`은 이동 결과 하나의 선택 좌표입니다. 이동 방향 앞면의 동률은 좌표 순서로 결정하며, 같은 최종 이동을 만든 활성화 경로는 같은 클릭 좌표를 씁니다. 착지 footprint 전체는 표시용으로 사용할 수 있지만 클릭 alias가 아닙니다. `resolvePublicClick(pieceCell, clickCell)`은 동일 결과의 중복 경로를 하나로 취급하고, 하나의 클릭이 서로 다른 결과를 가리키면 결과를 반환하지 않습니다. 내부 `allLegalActions`에는 기존 활성화 트리의 원시 결과가 남아 있습니다.

@@ -112,12 +112,10 @@ enum class moveType{
  *    - direction 벡터를 최대 몇 번 연속 적용할 수 있는지를 뜻한다.
  *
  *      maxDistance = 1
- *          현재 위치 + direction
+ *          현재 footprint의 이동 방향 앞면에서 한 step
  *
  *      maxDistance = 3
- *          현재 위치 + direction
- *          현재 위치 + direction * 2
- *          현재 위치 + direction * 3
+ *          이동 방향 앞면에서 direction * 1, * 2, * 3
  *
  *      maxDistance = std::nullopt
  *          보드 경계 또는 행마 규칙상 더 이상 진행할 수 없을 때까지 반복한다.
@@ -714,6 +712,37 @@ struct Square {
     }
 };
 
+// Anchor is only the canonical placement/reference coordinate.
+// Spatial range, collision and distance for multi-cell pieces
+// are evaluated from the piece's actual occupied cells.
+std::vector<Coord> occupiedCells(const Piece& piece, Coord anchor)
+{
+    std::vector<Coord> cells = {anchor};
+    for (const Coord& offset : piece.Pv.footprint) {
+        const Coord cell{anchor.first + offset.first, anchor.second + offset.second};
+        if (std::find(cells.begin(), cells.end(), cell) == cells.end()) {
+            cells.push_back(cell);
+        }
+    }
+    return cells;
+}
+
+// The foremost component defines step 1 along this chunk's direction.
+// Ties use coordinate order so a move has one stable public click cell.
+Coord leadingCell(const Piece& piece, Coord anchor, Coord direction)
+{
+    const auto cells = occupiedCells(piece, anchor);
+    Coord leading = cells.front();
+    for (const Coord& cell : cells) {
+        const int score = cell.first * direction.first + cell.second * direction.second;
+        const int best = leading.first * direction.first + leading.second * direction.second;
+        if (score > best || (score == best && cell < leading)) {
+            leading = cell;
+        }
+    }
+    return leading;
+}
+
 
 struct TurnState {
     colorType player;
@@ -729,6 +758,7 @@ struct moveAction {
 
     Coord start;
     Coord destination;
+    Coord clickCell; // public selection; destination remains the landing anchor for moves
 
     bool isTurnUsed = true;
 
@@ -749,6 +779,7 @@ struct moveAction {
           mT(move),
           start(from),
           destination(to),
+          clickCell(to),
           isTurnUsed(turnUsed)
     {}
 
@@ -1095,6 +1126,10 @@ public:
     // 카드 행동은 효과 목록이 비어 있으므로 여기서 집계하지 않는다.
     std::vector<moveAction> allLegalActions(colorType color);
 
+    // (Position, Piece, ClickCell) is a partial function. Ambiguous clicks
+    // have no public result; landing footprint cells are preview only.
+    std::optional<moveAction> resolvePublicClick(Coord pieceCell, Coord clickCell);
+
     // color 쪽 왕족(킹 또는 isRoyal 표식 기물) 수.
     int countRoyals(colorType color) const;
 
@@ -1288,21 +1323,9 @@ bool AugmentChessGameState::isOccupied(Coord pos) const
 Square* AugmentChessGameState::getOccupyingSquare(Coord pos)
 {
     for (auto& sq : board) {
-        // anchor
-        if (sq.coordinate == pos) {
+        const auto cells = occupiedCells(sq.curr_piece, sq.coordinate);
+        if (std::find(cells.begin(), cells.end(), pos) != cells.end()) {
             return &sq;
-        }
-
-        // footprint
-        for (const Coord& offset : sq.curr_piece.Pv.footprint) {
-            Coord occupiedPos = {
-                sq.coordinate.first + offset.first,
-                sq.coordinate.second + offset.second
-            };
-
-            if (occupiedPos == pos) {
-                return &sq;
-            }
         }
     }
 
@@ -1312,19 +1335,9 @@ Square* AugmentChessGameState::getOccupyingSquare(Coord pos)
 const Square* AugmentChessGameState::getOccupyingSquare(Coord pos) const
 {
     for (const auto& sq : board) {
-        if (sq.coordinate == pos) {
+        const auto cells = occupiedCells(sq.curr_piece, sq.coordinate);
+        if (std::find(cells.begin(), cells.end(), pos) != cells.end()) {
             return &sq;
-        }
-
-        for (const Coord& offset : sq.curr_piece.Pv.footprint) {
-            Coord occupiedPos = {
-                sq.coordinate.first + offset.first,
-                sq.coordinate.second + offset.second
-            };
-
-            if (occupiedPos == pos) {
-                return &sq;
-            }
         }
     }
 
@@ -1358,16 +1371,7 @@ bool AugmentChessGameState::isPieceInsideBoard(
     Coord newAnchor
 ) const
 {
-    if (!isValidSquare(newAnchor)) {
-        return false;
-    }
-
-    for (const Coord& offset : square.curr_piece.Pv.footprint) {
-        Coord pos = {
-            newAnchor.first + offset.first,
-            newAnchor.second + offset.second
-        };
-
+    for (const Coord& pos : occupiedCells(square.curr_piece, newAnchor)) {
         if (!isValidSquare(pos)) {
             return false;
         }
@@ -1408,15 +1412,8 @@ AugmentChessGameState::getPlacementCollisions(
         }
     };
 
-    // anchor
-    checkCell(newAnchor);
-
-    // footprint
-    for (const Coord& offset : movingSquare.curr_piece.Pv.footprint) {
-        checkCell({
-            newAnchor.first + offset.first,
-            newAnchor.second + offset.second
-        });
+    for (const Coord& cell : occupiedCells(movingSquare.curr_piece, newAnchor)) {
+        checkCell(cell);
     }
 
     return collisions;
@@ -1475,8 +1472,8 @@ bool AugmentChessGameState::canCapture(
 //      (그래서 자식은 "중간 포획이 일어난 뒤의 보드"가 아니라 현재 보드를 본다.)
 //   6. 모든 단계에서 유효하게 활성화된 칸은 각각 별개의 moveAction이다. maxDistance > 1인
 //      chunk가 여러 칸을 활성화하면 칸마다 action이고, 각 칸에서 이어지는 자식 결과도 각각
-//      별도 action이다. 서로 다른 경로에서 나온 (start, destination, type)이 같은 action은
-//      규칙에 충실하게 그대로 둔다(dedup하지 않는다). 중복 처리 방침은 리뷰어 판단 대기.
+//      별도 action이다. 내부 생성 결과의 중복은 유지한다. public click 해석은 동일한
+//      결과만 하나로 취급하고, 서로 다른 결과가 겹치는 클릭은 거부한다.
 //
 // 제약 처리: NoCapture는 포획하는 활성화를 유효하지 않은 것으로 본다(노드가 그 칸을
 // 활성화하지 못한다). MustCapture는 "포획이 아닌 action을 내보내지 않는다"는 action 필터라서,
@@ -1543,13 +1540,14 @@ void AugmentChessGameState::walkChunk(
     // 형제/자식 노드와 공유되지 않는다. (규칙 4)
     bool jumpedOver = false;
     int distance = 1;
+    const Coord front = leadingCell(piece, currentOrigin, chunk.direction);
 
     // 이 노드가 destination을 유효하게 활성화했다.
     //  - 원래 위치를 start로 하는 독립 action을 즉시 추가한다. (규칙 1, 6)
     //  - 그 칸을 currentOrigin으로 자식 chunk를 각각 새로 해석한다. (규칙 2, 4)
     //  - 이 노드의 ray가 여기서 멈추는지(포획 등)는 자식 해석과 무관하다. (규칙 5)
     // captures: 이 활성화가 destination의 기물을 제거하는가. MustCapture 필터에 쓴다.
-    auto activate = [&](moveType type, Coord destination, bool captures) {
+    auto activate = [&](moveType type, Coord destination, Coord clickCell, bool captures) {
         if (!(ctx.mustCapture && !captures)) {
             out.emplace_back(
                 piece.cT,
@@ -1558,6 +1556,17 @@ void AugmentChessGameState::walkChunk(
                 ctx.originalOrigin,
                 destination
             );
+            // Public click is derived from the final move, not from the path
+            // through the activation tree. Equivalent paths share one click.
+            const Coord delta{
+                destination.first - ctx.originalOrigin.first,
+                destination.second - ctx.originalOrigin.second
+            };
+            const Coord publicFront = leadingCell(piece, ctx.originalOrigin, delta);
+            out.back().clickCell = type == moveType::CATCH ? clickCell : Coord{
+                publicFront.first + delta.first,
+                publicFront.second + delta.second
+            };
         }
 
         for (const moveChunk& child : chunk.next) {
@@ -1576,6 +1585,10 @@ void AugmentChessGameState::walkChunk(
         const Coord destination = {
             currentOrigin.first + chunk.direction.first * distance,
             currentOrigin.second + chunk.direction.second * distance
+        };
+        const Coord clickCell = {
+            front.first + chunk.direction.first * distance,
+            front.second + chunk.direction.second * distance
         };
 
         bool stopRay = false;
@@ -1597,7 +1610,7 @@ void AugmentChessGameState::walkChunk(
                     break;
                 }
 
-                activate(moveType::MOVE, destination, false);
+                activate(moveType::MOVE, destination, clickCell, false);
                 break;
             }
 
@@ -1626,7 +1639,7 @@ void AugmentChessGameState::walkChunk(
                     !ctx.noCapture &&
                     canCapture(piece, collisions.front()->curr_piece, moveType::TAKE)
                 ) {
-                    activate(moveType::TAKE, destination, true);
+                    activate(moveType::TAKE, destination, clickCell, true);
                 }
 
                 stopRay = true;
@@ -1641,12 +1654,12 @@ void AugmentChessGameState::walkChunk(
             // =========================================================
             case moveType::CATCH:
             {
-                if (!isValidSquare(destination)) {
+                if (!isValidSquare(clickCell)) {
                     stopRay = true;
                     break;
                 }
 
-                const Square* targetSquare = getOccupyingSquare(destination);
+                const Square* targetSquare = getOccupyingSquare(clickCell);
 
                 if (targetSquare == nullptr) {
                     break;
@@ -1656,7 +1669,7 @@ void AugmentChessGameState::walkChunk(
                     !ctx.noCapture &&
                     canCapture(piece, targetSquare->curr_piece, moveType::CATCH)
                 ) {
-                    activate(moveType::CATCH, destination, true);
+                    activate(moveType::CATCH, clickCell, clickCell, true);
                 }
 
                 stopRay = true;
@@ -1681,7 +1694,7 @@ void AugmentChessGameState::walkChunk(
                     getPlacementCollisions(movingSquare, destination);
 
                 if (collisions.empty()) {
-                    activate(chunk.mT, destination, false);
+                    activate(chunk.mT, destination, clickCell, false);
                     break;
                 }
 
@@ -1694,7 +1707,7 @@ void AugmentChessGameState::walkChunk(
                     !ctx.noCapture &&
                     canCapture(piece, collisions.front()->curr_piece, chunk.mT)
                 ) {
-                    activate(chunk.mT, destination, true);
+                    activate(chunk.mT, destination, clickCell, true);
                 }
 
                 stopRay = true;
@@ -1770,7 +1783,7 @@ void AugmentChessGameState::walkChunk(
                 //     }
                 //
                 //     if (swappable) {
-                //         activate(moveType::SHIFT, destination, false);
+                //         activate(moveType::SHIFT, destination, clickCell, false);
                 //     }
                 //
                 //     // 처음 만난 기물이 교환 대상이든 아니든 ray는 거기서 막힌다.
@@ -1801,7 +1814,7 @@ void AugmentChessGameState::walkChunk(
                 if (collisions.empty()) {
                     // 이미 적 기물을 넘었다면 여기가 착지 후보, 아니면 아직 비활성 구간이다.
                     if (jumpedOver) {
-                        activate(moveType::JUMP, destination, false);
+                        activate(moveType::JUMP, destination, clickCell, false);
                     }
 
                     break;
@@ -2143,6 +2156,35 @@ AugmentChessGameState::allLegalActions(colorType color)
     }
 
     return actions;
+}
+
+std::optional<moveAction>
+AugmentChessGameState::resolvePublicClick(Coord pieceCell, Coord clickCell)
+{
+    const Square* selected = getOccupyingSquare(pieceCell);
+    if (selected == nullptr || selected->curr_piece.cT != turn.player) {
+        return std::nullopt;
+    }
+
+    std::optional<moveAction> result;
+    for (const moveAction& action : allLegalActions(turn.player)) {
+        if (action.start != selected->coordinate || action.clickCell != clickCell) {
+            continue;
+        }
+        if (result.has_value()) {
+            // Duplicate paths to one semantic result are harmless. A click
+            // with different outcomes cannot be exposed as a public choice.
+            if (result->mT != action.mT ||
+                result->destination != action.destination ||
+                result->promotion != action.promotion ||
+                result->isTurnUsed != action.isTurnUsed) {
+                return std::nullopt;
+            }
+        } else {
+            result = action;
+        }
+    }
+    return result;
 }
 
 // ============================================================================
@@ -2649,6 +2691,97 @@ int main(){
             royalKnight.pT != pieceType::KING && royalKnight.isRoyal,
             "A: KING이 아니어도 isRoyal 표식을 줄 수 있다"
         );
+    }
+
+    // ---- Footprint range and canonical public click ----
+    {
+        AugmentChessGameState single;
+        single.addPiece({4, 2}, makePiece(colorType::WHITE, pieceType::PAWN));
+        single.addPiece({2, 4}, makePiece(colorType::WHITE, pieceType::ROOK));
+        single.addPiece({6, 4}, makePiece(colorType::WHITE, pieceType::BISHOP));
+        const auto pawn = actionsOf(single, {4, 2});
+        const auto rook = actionsOf(single, {2, 4});
+        const auto bishop = actionsOf(single, {6, 4});
+        check(hasAction(pawn, {4, 2}, {4, 3}, moveType::MOVE) &&
+              hasAction(pawn, {4, 2}, {4, 4}, moveType::MOVE) &&
+              hasAction(rook, {2, 4}, {2, 5}, moveType::TAKEMOVE) &&
+              hasAction(bishop, {6, 4}, {5, 5}, moveType::TAKEMOVE),
+              "footprint: single-cell Pawn/Rook/Bishop movement regression");
+        const auto rookClick = single.resolvePublicClick({2, 4}, {2, 5});
+        check(rookClick.has_value() && rookClick->destination == Coord{2, 5},
+              "footprint: single-cell click remains the destination");
+    }
+
+    {
+        AugmentChessGameState s;
+        Piece big = makePiece(colorType::WHITE, pieceType::KNIGHT);
+        big.Pv.footprint = {{1, 0}, {0, 1}, {1, 1}};
+        big.addNewMovement(moveChunk(moveType::MOVE, {1, 0}, 2));
+        big.addNewMovement(moveChunk(moveType::MOVE, {-1, 0}, 2));
+        big.addNewMovement(moveChunk(moveType::MOVE, {0, 1}, 2));
+        big.addNewMovement(moveChunk(moveType::MOVE, {0, -1}, 2));
+        s.addPiece({4, 4}, big);
+        const auto right = s.resolvePublicClick({5, 5}, {6, 4});
+        const auto left = s.resolvePublicClick({4, 4}, {3, 4});
+        const auto up = s.resolvePublicClick({4, 4}, {4, 6});
+        const auto down = s.resolvePublicClick({4, 4}, {4, 3});
+        check(right && right->destination == Coord{5, 4} &&
+              left && left->destination == Coord{3, 4} &&
+              up && up->destination == Coord{4, 5} &&
+              down && down->destination == Coord{4, 3},
+              "footprint: four cardinal step-1 clicks use the leading component");
+        const auto right2 = s.resolvePublicClick({4, 4}, {7, 4});
+        const auto left2 = s.resolvePublicClick({4, 4}, {2, 4});
+        const auto up2 = s.resolvePublicClick({4, 4}, {4, 7});
+        const auto down2 = s.resolvePublicClick({4, 4}, {4, 2});
+        check(right2 && right2->destination == Coord{6, 4} &&
+              left2 && left2->destination == Coord{2, 4} &&
+              up2 && up2->destination == Coord{4, 6} &&
+              down2 && down2->destination == Coord{4, 2},
+              "footprint: maxDistance 2 reaches two steps beyond each leading edge");
+        check(!s.resolvePublicClick({4, 4}, {5, 5}).has_value(),
+              "footprint: landing preview cell is not a click alias");
+        check(right && occupiedCells(big, right->destination).size() == 4,
+              "footprint: landing preview retains the full translated body");
+        if (right) {
+            s.apply_action(*right);
+            check(s.getPieceAt({6, 4}) != nullptr &&
+                  s.getPieceAt({6, 5}) != nullptr &&
+                  s.getPieceAt({4, 4}) == nullptr,
+                  "footprint: applying a move translates the anchor and entire body");
+        }
+    }
+
+    {
+        AugmentChessGameState s;
+        Piece big = makePiece(colorType::WHITE, pieceType::KNIGHT);
+        big.Pv.footprint = {{1, 0}, {1, -1}, {2, -1}};
+        big.addNewMovement(moveChunk(moveType::TAKEMOVE, {1, 0}, 2));
+        s.addPiece({3, 5}, big);
+        s.addPiece({6, 4}, makePiece(colorType::BLACK, pieceType::PAWN));
+        const auto first = s.resolvePublicClick({5, 4}, {6, 4});
+        check(first && first->destination == Coord{4, 5} &&
+              first->mT == moveType::TAKEMOVE &&
+              !s.resolvePublicClick({3, 5}, {7, 4}).has_value(),
+              "footprint: irregular leading component captures at step 1 and stops ray");
+    }
+
+    {
+        AugmentChessGameState same;
+        Piece p = makePiece(colorType::WHITE, pieceType::KNIGHT);
+        p.addNewMovement(moveChunk(moveType::MOVE, {1, 0}));
+        p.addNewMovement(moveChunk(moveType::MOVE, {1, 0}));
+        same.addPiece({4, 4}, p);
+        check(same.resolvePublicClick({4, 4}, {5, 4}).has_value(),
+              "click: duplicate paths to one result resolve once");
+
+        AugmentChessGameState ambiguous;
+        Piece q = makePiece(colorType::WHITE, pieceType::KNIGHT);
+        q.addNewMovement(moveChunk(moveType::MOVE, {1, 0}));
+        q.addNewMovement(moveChunk(moveType::TAKEMOVE, {1, 0}));
+        ambiguous.addPiece({4, 4}, q);
+        check(!ambiguous.resolvePublicClick({4, 4}, {5, 4}).has_value(),
+              "click: different results at one click are rejected");
     }
 
     // ---- Phase B: moveChunk.next = 활성화 트리 (walkChunk) ----
