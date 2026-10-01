@@ -2963,12 +2963,12 @@ pub(crate) fn execute_large_piece_move(
         .flags
         .get("anchorRow")
         .and_then(Value::as_u64)
-        .filter(|row| *row < 7);
+        .filter(|row| *row < 8);
     let col = target
         .flags
         .get("anchorCol")
         .and_then(Value::as_u64)
-        .filter(|col| *col < 7);
+        .filter(|col| *col < 8);
     let destination = row
         .zip(col)
         .map(|(row, col)| Square {
@@ -2976,9 +2976,7 @@ pub(crate) fn execute_large_piece_move(
             col: col as u8,
         })
         .ok_or_else(|| {
-            EngineError::InvalidState(
-                "v7 large movement requires a complete in-bounds 2x2 anchor".into(),
-            )
+            EngineError::InvalidState("v7 large movement requires an in-bounds anchor".into())
         })?;
     execute_large_piece_move_at(
         state,
@@ -3005,12 +3003,9 @@ fn execute_large_piece_move_at(
     let mut next = state.clone();
     let mut moving = require_origin(&next, from)?;
     let actor = moving.color.owner().ok_or(EngineError::WrongActor)?;
-    let cells = crate::v7_quantum_state::quantum_cells_for_item_at(&moving, destination);
-    if cells.len() != 4 {
-        return Err(EngineError::InvalidState(
-            "v7 large movement needs a physical 2x2 mover".into(),
-        ));
-    }
+    let footprint = crate::movement::source_large_footprint(&next, &moving, from)?;
+    let cells = crate::movement::translated_large_cells(&footprint, destination)
+        .ok_or_else(|| EngineError::InvalidState("v7 large movement clips its footprint".into()))?;
     let quantum_candidates = if next.flag("quantumPending", moving.color) {
         let legal = crate::movement::v7_legal_move_targets(
             &next,
@@ -3079,9 +3074,22 @@ fn execute_large_piece_move_at(
         refresh_alias(&next, captured);
         captured_royal |= defeat_royal(&next, captured)?;
     }
-    let source = large_anchor(&moving)?;
+    let source = Square {
+        row: u8::try_from(footprint.anchor.row)
+            .map_err(|_| EngineError::InvalidState("large source anchor outside board".into()))?,
+        col: u8::try_from(footprint.anchor.col)
+            .map_err(|_| EngineError::InvalidState("large source anchor outside board".into()))?,
+    };
     crate::transition::clear_piece(&mut next, &moving.id);
-    place_large_swap(&mut next, &mut moving, destination);
+    moving
+        .extra
+        .insert("anchorRow".into(), json!(destination.row));
+    moving
+        .extra
+        .insert("anchorCol".into(), json!(destination.col));
+    for cell in &cells {
+        next.board[usize::from(cell.row)][usize::from(cell.col)] = Some(moving.clone());
+    }
     let capture = !entries.is_empty();
     let sound = if giant {
         "chessatronMove"
@@ -3859,6 +3867,58 @@ mod tests {
         state.turn = Color::White;
         state.board[4][4] = Some(Piece::new(kind, Color::White, "mover"));
         state
+    }
+
+    #[test]
+    fn large_move_places_exact_translated_footprint() {
+        let mut state = state("bigRook");
+        state.board = vec![vec![None; 8]; 8];
+        let from = Square { row: 3, col: 3 };
+        let to = Square { row: 2, col: 3 };
+        let mut piece = Piece::new("bigRook", Color::White, "mover");
+        piece.extra.insert("anchorRow".into(), json!(from.row));
+        piece.extra.insert("anchorCol".into(), json!(from.col));
+        for row in 3..=4 {
+            for col in 3..=4 {
+                state.board[row][col] = Some(piece.clone());
+            }
+        }
+        let target = crate::movement::v7_large_moves(&state, &piece, from)
+            .unwrap()
+            .into_iter()
+            .find(|target| target.square() == to)
+            .unwrap();
+        let privacy = privacy_snapshot(&state, &piece, from).unwrap();
+        execute_large_piece_move(&mut state, from, &target, &privacy, false).unwrap();
+        let occupied = state
+            .board
+            .iter()
+            .enumerate()
+            .flat_map(|(row, cells)| {
+                cells.iter().enumerate().filter_map(move |(col, item)| {
+                    item.as_ref()
+                        .filter(|item| item.id == "mover")
+                        .map(|_| Square {
+                            row: row as u8,
+                            col: col as u8,
+                        })
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            occupied,
+            vec![
+                Square { row: 2, col: 3 },
+                Square { row: 2, col: 4 },
+                Square { row: 3, col: 3 },
+                Square { row: 3, col: 4 },
+            ]
+        );
+        for cell in occupied {
+            let moved = state.at(cell).unwrap();
+            assert_eq!(moved.extra["anchorRow"], json!(2));
+            assert_eq!(moved.extra["anchorCol"], json!(3));
+        }
     }
 
     #[test]

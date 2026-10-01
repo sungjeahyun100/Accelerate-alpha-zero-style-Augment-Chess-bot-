@@ -123,6 +123,10 @@ impl SpatialPiece {
     }
 
     pub fn occupied_cells(&self) -> Result<Vec<Coord>> {
+        self.cells_at(self.anchor)
+    }
+
+    pub fn cells_at(&self, anchor: Coord) -> Result<Vec<Coord>> {
         if self.footprint.len() > MAX_ENGINE_CELLS {
             return Err(EngineError::InvalidState(format!(
                 "piece {} footprint exceeds {MAX_ENGINE_CELLS} cells",
@@ -132,7 +136,7 @@ impl SpatialPiece {
         self.footprint
             .iter()
             .map(|&offset| {
-                self.anchor.offset(offset).ok_or_else(|| {
+                anchor.offset(offset).ok_or_else(|| {
                     EngineError::InvalidState(format!("piece {} footprint overflows i32", self.id))
                 })
             })

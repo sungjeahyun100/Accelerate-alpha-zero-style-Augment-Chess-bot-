@@ -1785,7 +1785,13 @@ pub(crate) fn v7_public_move_intents(state: &GameState, action: &Action) -> Resu
     } else {
         None
     };
-    v7_click_cells(target)?
+    let destinations = if target.flag("bigRookMove") || target.flag("colossusMove") {
+        // Presentation cells describe the body; the anchor identifies one move.
+        vec![target.square()]
+    } else {
+        v7_click_cells(target)?
+    };
+    destinations
         .into_iter()
         .map(|destination| {
             let mut intent =
@@ -9130,24 +9136,67 @@ enum V7LargeModifier {
     PromotionRush,
 }
 
-fn v7_full_large_cells(anchor: Square) -> Option<[Square; 4]> {
-    (anchor.row < 7 && anchor.col < 7).then(|| {
-        [
-            anchor,
-            Square {
-                row: anchor.row,
-                col: anchor.col + 1,
-            },
-            Square {
-                row: anchor.row + 1,
-                col: anchor.col,
-            },
-            Square {
-                row: anchor.row + 1,
-                col: anchor.col + 1,
-            },
-        ]
-    })
+/// Read the source board clones once as a physical footprint. Source v7 still
+/// stores large pieces in multiple cells, while movement uses translated offsets.
+pub(crate) fn source_large_footprint(
+    state: &GameState,
+    piece: &Piece,
+    from: Square,
+) -> Result<SpatialPiece> {
+    let anchor = match (
+        piece.extra.get("anchorRow").and_then(Value::as_u64),
+        piece.extra.get("anchorCol").and_then(Value::as_u64),
+    ) {
+        (Some(row), Some(col)) if row < 8 && col < 8 => crate::Coord::new(row as i32, col as i32),
+        (None, None) => crate::Coord::new(i32::from(from.row), i32::from(from.col)),
+        _ => {
+            return Err(EngineError::InvalidState(
+                "large piece has invalid anchor".into(),
+            ));
+        }
+    };
+    let footprint = state
+        .board
+        .iter()
+        .enumerate()
+        .flat_map(|(row, cells)| {
+            cells.iter().enumerate().filter_map(move |(col, occupant)| {
+                occupant
+                    .as_ref()
+                    .filter(|part| part.id == piece.id)
+                    .map(|_| crate::Offset::new(row as i32 - anchor.row, col as i32 - anchor.col))
+            })
+        })
+        .collect::<BTreeSet<_>>();
+    if footprint.is_empty() || !footprint.contains(&crate::Offset::new(0, 0)) {
+        return Err(EngineError::InvalidState(
+            "large piece has no anchor footprint cell".into(),
+        ));
+    }
+    Ok(SpatialPiece::new(
+        piece.id.clone(),
+        piece.kind.clone(),
+        piece.color,
+        anchor,
+        footprint,
+    ))
+}
+
+pub(crate) fn translated_large_cells(piece: &SpatialPiece, anchor: Square) -> Option<Vec<Square>> {
+    piece
+        .cells_at(crate::Coord::new(
+            i32::from(anchor.row),
+            i32::from(anchor.col),
+        ))
+        .ok()?
+        .into_iter()
+        .map(|cell| {
+            Some(Square {
+                row: u8::try_from(cell.row).ok().filter(|&row| row < 8)?,
+                col: u8::try_from(cell.col).ok().filter(|&col| col < 8)?,
+            })
+        })
+        .collect()
 }
 
 fn v7_colossus_display_cells(from: Square, dr: i8, dc: i8) -> Vec<Square> {
@@ -9175,6 +9224,7 @@ fn v7_large_modifier_moves(
     from: Square,
     modifier: V7LargeModifier,
 ) -> Result<Vec<MoveTarget>> {
+    let footprint = source_large_footprint(state, piece, from)?;
     let actor = piece.color.owner().ok_or(EngineError::WrongActor)?;
     let big = matches!(piece.kind.as_str(), "bigRook" | "bigBishop");
     let capture_limit = if piece.kind == "bigBishop" {
@@ -9200,7 +9250,7 @@ fn v7_large_modifier_moves(
                 break;
             };
             anchor = next;
-            let Some(cells) = v7_full_large_cells(anchor) else {
+            let Some(cells) = translated_large_cells(&footprint, anchor) else {
                 break;
             };
             let rush = matches!(modifier, V7LargeModifier::PromotionRush);
@@ -9291,38 +9341,21 @@ pub(crate) fn v7_large_moves(
     piece: &Piece,
     from: Square,
 ) -> Result<Vec<MoveTarget>> {
-    if !matches!(piece.kind.as_str(), "bigRook" | "bigBishop") || from.row >= 7 || from.col >= 7 {
+    if !matches!(piece.kind.as_str(), "bigRook" | "bigBishop") || from.row >= 8 || from.col >= 8 {
         return Err(EngineError::InvalidState(
             "v7 large movement requires an in-bounds bigRook or bigBishop anchor".into(),
         ));
     }
-    let cells_at = |anchor: Square| -> Option<[Square; 4]> {
-        if anchor.row >= 7 || anchor.col >= 7 {
-            return None;
-        }
-        Some([
-            anchor,
-            Square {
-                row: anchor.row,
-                col: anchor.col + 1,
-            },
-            Square {
-                row: anchor.row + 1,
-                col: anchor.col,
-            },
-            Square {
-                row: anchor.row + 1,
-                col: anchor.col + 1,
-            },
-        ])
-    };
-    let body = cells_at(from).expect("checked large-piece anchor");
+    let footprint = source_large_footprint(state, piece, from)?;
+    let body = translated_large_cells(&footprint, from).ok_or_else(|| {
+        EngineError::InvalidState("v7 large movement has an out-of-bounds footprint".into())
+    })?;
     if body
         .iter()
         .any(|&cell| state.at(cell).is_none_or(|part| part.id != piece.id))
     {
         return Err(EngineError::InvalidState(
-            "v7 large movement requires a complete 2x2 identity footprint".into(),
+            "v7 large movement requires a complete identity footprint".into(),
         ));
     }
     let mut stationary = MoveTarget::at(from);
@@ -9339,7 +9372,7 @@ pub(crate) fn v7_large_moves(
         let mut anchor = from;
         while let Some(next) = anchor.offset(dr, dc) {
             anchor = next;
-            let Some(cells) = cells_at(anchor) else {
+            let Some(cells) = translated_large_cells(&footprint, anchor) else {
                 break;
             };
             let occupants = cells
@@ -9381,6 +9414,9 @@ pub(crate) fn v7_large_moves(
 }
 
 fn large_rays(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget> {
+    let Ok(footprint) = source_large_footprint(state, piece, from) else {
+        return Vec::new();
+    };
     let dirs = if piece.kind == "bigBishop" {
         DIAG
     } else {
@@ -9391,24 +9427,9 @@ fn large_rays(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget>
         let mut cursor = from;
         while let Some(anchor) = cursor.offset(dr, dc) {
             cursor = anchor;
-            if anchor.row > 6 || anchor.col > 6 {
+            let Some(cells) = translated_large_cells(&footprint, anchor) else {
                 break;
-            }
-            let cells = [
-                anchor,
-                Square {
-                    row: anchor.row + 1,
-                    col: anchor.col,
-                },
-                Square {
-                    row: anchor.row,
-                    col: anchor.col + 1,
-                },
-                Square {
-                    row: anchor.row + 1,
-                    col: anchor.col + 1,
-                },
-            ];
+            };
             if cells.iter().any(|&cell| {
                 collapsed(state, cell)
                     || state.at(cell).is_some_and(|target| {
@@ -10425,6 +10446,136 @@ mod v7_movement_tests {
         assert_eq!(
             bishop[1].flags.get("bigRookLandingCaptures"),
             Some(&json!([{"row":2,"col":2}]))
+        );
+    }
+
+    #[test]
+    fn v7_large_translation_has_one_public_anchor_and_complete_footprint() {
+        let mut state = empty_v7();
+        state.mode = "play".into();
+        state.turn = Color::White;
+        let from = Square { row: 3, col: 3 };
+        let to = Square { row: 2, col: 3 };
+        let mut piece = Piece::new("bigRook", Color::White, "large-translation");
+        piece.extra.insert("anchorRow".into(), json!(3));
+        piece.extra.insert("anchorCol".into(), json!(3));
+        for row in 3..=4 {
+            for col in 3..=4 {
+                state.board[row][col] = Some(piece.clone());
+            }
+        }
+        let targets = v7_large_moves(&state, &piece, from).unwrap();
+        let moves = targets
+            .iter()
+            .filter(|target| target.square() == to)
+            .collect::<Vec<_>>();
+        assert_eq!(moves.len(), 1);
+        let action = Action::movement(Color::White, from, moves[0].clone());
+        let intents = v7_public_move_intents(&state, &action).unwrap();
+        assert_eq!(
+            intents,
+            vec![json!({
+                "type":"move", "color":"white", "from":from, "destination":to
+            })]
+        );
+        let target = action.destination.as_ref().unwrap();
+        assert_eq!(target.flags["highlightCells"].as_array().unwrap().len(), 4);
+        assert_eq!(
+            v7_resolve_public_move_from_candidates(&state, &intents[0], &[action.clone()]).unwrap(),
+            action
+        );
+
+        let footprint = source_large_footprint(&state, &piece, from).unwrap();
+        let origin = footprint.occupied_cells().unwrap();
+        let landing = translated_large_cells(&footprint, to).unwrap();
+        assert_eq!(
+            landing,
+            vec![
+                Square { row: 2, col: 3 },
+                Square { row: 2, col: 4 },
+                Square { row: 3, col: 3 },
+                Square { row: 3, col: 4 },
+            ]
+        );
+        for (before, after) in origin.iter().zip(&landing) {
+            assert_eq!(after.row as i32 - before.row, -1);
+            assert_eq!(after.col as i32 - before.col, 0);
+        }
+
+        let mut with_display = action.clone();
+        with_display.destination.as_mut().unwrap().flags.insert(
+            "displayCells".into(),
+            json!([{"row":2,"col":3},{"row":2,"col":4}]),
+        );
+        assert_eq!(
+            v7_public_move_intents(&state, &with_display).unwrap(),
+            intents
+        );
+
+        // The anchor is clear, but another destination body cell is blocked.
+        let mut blocker = Piece::new("pawn", Color::Black, "blocked-body");
+        blocker.extra.insert("metalized".into(), json!(true));
+        state.board[2][4] = Some(blocker);
+        assert!(
+            !v7_large_moves(&state, &piece, from)
+                .unwrap()
+                .iter()
+                .any(|target| target.square() == to)
+        );
+    }
+
+    #[test]
+    fn v7_ordinary_public_move_still_binds_by_destination() {
+        let mut state = empty_v7();
+        state.mode = "play".into();
+        state.turn = Color::White;
+        let from = Square { row: 4, col: 4 };
+        let to = Square { row: 4, col: 5 };
+        state.board[4][4] = Some(Piece::new("rook", Color::White, "ordinary"));
+        let action = Action::movement(Color::White, from, MoveTarget::at(to));
+        let intents = v7_public_move_intents(&state, &action).unwrap();
+        assert_eq!(
+            intents,
+            vec![json!({
+                "type":"move", "color":"white", "from":from, "destination":to
+            })]
+        );
+        assert_eq!(
+            v7_resolve_public_move_from_candidates(&state, &intents[0], &[action.clone()]).unwrap(),
+            action
+        );
+    }
+
+    #[test]
+    fn large_move_geometry_uses_observed_offsets_instead_of_two_by_two() {
+        let mut state = empty_v7();
+        let from = Square { row: 3, col: 3 };
+        let to = Square { row: 2, col: 3 };
+        let mut piece = Piece::new("bigRook", Color::White, "wide-large");
+        piece.extra.insert("anchorRow".into(), json!(3));
+        piece.extra.insert("anchorCol".into(), json!(3));
+        for col in 3..=5 {
+            state.board[3][col] = Some(piece.clone());
+        }
+        let target = v7_large_moves(&state, &piece, from)
+            .unwrap()
+            .into_iter()
+            .find(|target| target.square() == to)
+            .unwrap();
+        assert_eq!(
+            target.flags["highlightCells"],
+            json!([
+                {"row":2,"col":3}, {"row":2,"col":4}, {"row":2,"col":5}
+            ])
+        );
+        let mut blocker = Piece::new("pawn", Color::Black, "wide-blocker");
+        blocker.extra.insert("metalized".into(), json!(true));
+        state.board[2][5] = Some(blocker);
+        assert!(
+            !v7_large_moves(&state, &piece, from)
+                .unwrap()
+                .iter()
+                .any(|target| target.square() == to)
         );
     }
 
