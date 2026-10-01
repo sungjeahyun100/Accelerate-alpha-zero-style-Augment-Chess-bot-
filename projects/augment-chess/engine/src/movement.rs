@@ -329,19 +329,19 @@ pub(crate) fn v7_normalize_origin(piece: &Piece, square: Square) -> Result<Squar
         .extra
         .get("anchorRow")
         .and_then(Value::as_f64)
-        .filter(|v| v.fract() == 0.0 && (0.0..7.0).contains(v));
+        .filter(|v| v.fract() == 0.0 && (0.0..8.0).contains(v));
     let col = piece
         .extra
         .get("anchorCol")
         .and_then(Value::as_f64)
-        .filter(|v| v.fract() == 0.0 && (0.0..7.0).contains(v));
+        .filter(|v| v.fract() == 0.0 && (0.0..8.0).contains(v));
     match (row, col) {
         (Some(row), Some(col)) => Ok(Square {
             row: row as u8,
             col: col as u8,
         }),
         _ => Err(EngineError::InvalidState(format!(
-            "v7 {} lacks a valid 2x2 anchor",
+            "v7 {} lacks an in-bounds anchor",
             piece.kind
         ))),
     }
@@ -9136,13 +9136,9 @@ enum V7LargeModifier {
     PromotionRush,
 }
 
-/// Read the source board clones once as a physical footprint. Source v7 still
-/// stores large pieces in multiple cells, while movement uses translated offsets.
-pub(crate) fn source_large_footprint(
-    state: &GameState,
-    piece: &Piece,
-    from: Square,
-) -> Result<SpatialPiece> {
+/// Source-shaped boards store aliases, not a canonical footprint. The source
+/// placement contract for these kinds is 2x2, even when exile relocates one alias.
+pub(crate) fn source_large_footprint(piece: &Piece, from: Square) -> Result<SpatialPiece> {
     let anchor = match (
         piece.extra.get("anchorRow").and_then(Value::as_u64),
         piece.extra.get("anchorCol").and_then(Value::as_u64),
@@ -9155,24 +9151,23 @@ pub(crate) fn source_large_footprint(
             ));
         }
     };
-    let footprint = state
-        .board
-        .iter()
-        .enumerate()
-        .flat_map(|(row, cells)| {
-            cells.iter().enumerate().filter_map(move |(col, occupant)| {
-                occupant
-                    .as_ref()
-                    .filter(|part| part.id == piece.id)
-                    .map(|_| crate::Offset::new(row as i32 - anchor.row, col as i32 - anchor.col))
-            })
-        })
-        .collect::<BTreeSet<_>>();
-    if footprint.is_empty() || !footprint.contains(&crate::Offset::new(0, 0)) {
-        return Err(EngineError::InvalidState(
-            "large piece has no anchor footprint cell".into(),
-        ));
+    if !matches!(
+        piece.kind.as_str(),
+        "bigRook" | "bigBishop" | "colossus" | "big-rook" | "big-bishop"
+    ) {
+        return Err(EngineError::InvalidState(format!(
+            "{} has no source large-piece footprint",
+            piece.kind
+        )));
     }
+    let footprint = [
+        crate::Offset::new(0, 0),
+        crate::Offset::new(0, 1),
+        crate::Offset::new(1, 0),
+        crate::Offset::new(1, 1),
+    ]
+    .into_iter()
+    .collect();
     Ok(SpatialPiece::new(
         piece.id.clone(),
         piece.kind.clone(),
@@ -9224,7 +9219,7 @@ fn v7_large_modifier_moves(
     from: Square,
     modifier: V7LargeModifier,
 ) -> Result<Vec<MoveTarget>> {
-    let footprint = source_large_footprint(state, piece, from)?;
+    let footprint = source_large_footprint(piece, from)?;
     let actor = piece.color.owner().ok_or(EngineError::WrongActor)?;
     let big = matches!(piece.kind.as_str(), "bigRook" | "bigBishop");
     let capture_limit = if piece.kind == "bigBishop" {
@@ -9346,16 +9341,13 @@ pub(crate) fn v7_large_moves(
             "v7 large movement requires an in-bounds bigRook or bigBishop anchor".into(),
         ));
     }
-    let footprint = source_large_footprint(state, piece, from)?;
+    let footprint = source_large_footprint(piece, from)?;
     let body = translated_large_cells(&footprint, from).ok_or_else(|| {
         EngineError::InvalidState("v7 large movement has an out-of-bounds footprint".into())
     })?;
-    if body
-        .iter()
-        .any(|&cell| state.at(cell).is_none_or(|part| part.id != piece.id))
-    {
+    if state.at(from).is_none_or(|part| part.id != piece.id) {
         return Err(EngineError::InvalidState(
-            "v7 large movement requires a complete identity footprint".into(),
+            "v7 large movement requires its anchor identity".into(),
         ));
     }
     let mut stationary = MoveTarget::at(from);
@@ -9414,7 +9406,7 @@ pub(crate) fn v7_large_moves(
 }
 
 fn large_rays(state: &GameState, piece: &Piece, from: Square) -> Vec<MoveTarget> {
-    let Ok(footprint) = source_large_footprint(state, piece, from) else {
+    let Ok(footprint) = source_large_footprint(piece, from) else {
         return Vec::new();
     };
     let dirs = if piece.kind == "bigBishop" {
@@ -10485,7 +10477,7 @@ mod v7_movement_tests {
             action
         );
 
-        let footprint = source_large_footprint(&state, &piece, from).unwrap();
+        let footprint = source_large_footprint(&piece, from).unwrap();
         let origin = footprint.occupied_cells().unwrap();
         let landing = translated_large_cells(&footprint, to).unwrap();
         assert_eq!(
@@ -10547,36 +10539,79 @@ mod v7_movement_tests {
     }
 
     #[test]
-    fn large_move_geometry_uses_observed_offsets_instead_of_two_by_two() {
+    fn synthetic_large_geometry_keeps_offsets_outside_v7_source_shape() {
         let mut state = empty_v7();
         let from = Square { row: 3, col: 3 };
         let to = Square { row: 2, col: 3 };
-        let mut piece = Piece::new("bigRook", Color::White, "wide-large");
-        piece.extra.insert("anchorRow".into(), json!(3));
-        piece.extra.insert("anchorCol".into(), json!(3));
-        for col in 3..=5 {
-            state.board[3][col] = Some(piece.clone());
-        }
-        let target = v7_large_moves(&state, &piece, from)
-            .unwrap()
-            .into_iter()
-            .find(|target| target.square() == to)
-            .unwrap();
+        let piece = Piece::new("bigRook", Color::White, "wide-large");
+        let shape = SpatialPiece::new(
+            piece.id.clone(),
+            piece.kind.clone(),
+            piece.color,
+            crate::Coord::new(3, 3),
+            [Offset::new(0, 0), Offset::new(0, 1), Offset::new(0, 2)].into(),
+        );
+        let cells = translated_large_cells(&shape, to).unwrap();
         assert_eq!(
-            target.flags["highlightCells"],
-            json!([
-                {"row":2,"col":3}, {"row":2,"col":4}, {"row":2,"col":5}
-            ])
+            cells,
+            vec![
+                Square { row: 2, col: 3 },
+                Square { row: 2, col: 4 },
+                Square { row: 2, col: 5 }
+            ]
+        );
+        assert_ne!(
+            source_large_footprint(&piece, from).unwrap().footprint,
+            shape.footprint
+        );
+        assert!(
+            v7_large_landing_captures(&state, &piece, &cells, 2, true)
+                .unwrap()
+                .is_some()
         );
         let mut blocker = Piece::new("pawn", Color::Black, "wide-blocker");
         blocker.extra.insert("metalized".into(), json!(true));
         state.board[2][5] = Some(blocker);
         assert!(
-            !v7_large_moves(&state, &piece, from)
+            v7_large_landing_captures(&state, &piece, &cells, 2, true)
                 .unwrap()
-                .iter()
-                .any(|target| target.square() == to)
+                .is_none()
         );
+    }
+
+    #[test]
+    fn large_anchor_accepts_board_edge_then_footprint_checks_clipping() {
+        let mut piece = Piece::new("bigRook", Color::White, "edge-large");
+        piece.extra.insert("anchorRow".into(), json!(7));
+        piece.extra.insert("anchorCol".into(), json!(3));
+        let anchor = Square { row: 7, col: 3 };
+        assert_eq!(v7_normalize_origin(&piece, anchor).unwrap(), anchor);
+        let narrow = SpatialPiece::new(
+            piece.id.clone(),
+            piece.kind.clone(),
+            piece.color,
+            crate::Coord::new(7, 3),
+            [Offset::new(0, 0), Offset::new(0, 1), Offset::new(0, 2)].into(),
+        );
+        assert_eq!(translated_large_cells(&narrow, anchor).unwrap().len(), 3);
+        assert!(
+            translated_large_cells(&source_large_footprint(&piece, anchor).unwrap(), anchor)
+                .is_none()
+        );
+
+        piece.extra.insert("anchorRow".into(), json!(3));
+        piece.extra.insert("anchorCol".into(), json!(7));
+        let last_col = Square { row: 3, col: 7 };
+        assert_eq!(v7_normalize_origin(&piece, last_col).unwrap(), last_col);
+        assert!(
+            translated_large_cells(&source_large_footprint(&piece, last_col).unwrap(), last_col)
+                .is_none()
+        );
+        piece.extra.insert("anchorRow".into(), json!(8));
+        assert!(matches!(
+            v7_normalize_origin(&piece, last_col),
+            Err(EngineError::InvalidState(message)) if message.contains("in-bounds anchor")
+        ));
     }
 
     #[test]

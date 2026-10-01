@@ -3003,7 +3003,7 @@ fn execute_large_piece_move_at(
     let mut next = state.clone();
     let mut moving = require_origin(&next, from)?;
     let actor = moving.color.owner().ok_or(EngineError::WrongActor)?;
-    let footprint = crate::movement::source_large_footprint(&next, &moving, from)?;
+    let footprint = crate::movement::source_large_footprint(&moving, from)?;
     let cells = crate::movement::translated_large_cells(&footprint, destination)
         .ok_or_else(|| EngineError::InvalidState("v7 large movement clips its footprint".into()))?;
     let quantum_candidates = if next.flag("quantumPending", moving.color) {
@@ -3871,53 +3871,71 @@ mod tests {
 
     #[test]
     fn large_move_places_exact_translated_footprint() {
-        let mut state = state("bigRook");
-        state.board = vec![vec![None; 8]; 8];
-        let from = Square { row: 3, col: 3 };
-        let to = Square { row: 2, col: 3 };
-        let mut piece = Piece::new("bigRook", Color::White, "mover");
-        piece.extra.insert("anchorRow".into(), json!(from.row));
-        piece.extra.insert("anchorCol".into(), json!(from.col));
-        for row in 3..=4 {
-            for col in 3..=4 {
-                state.board[row][col] = Some(piece.clone());
+        for displaced_alias in [false, true] {
+            let mut state = state("bigRook");
+            state.board = vec![vec![None; 8]; 8];
+            let from = Square { row: 3, col: 3 };
+            let to = Square { row: 2, col: 3 };
+            let mut piece = Piece::new("bigRook", Color::White, "mover");
+            piece.extra.insert("anchorRow".into(), json!(from.row));
+            piece.extra.insert("anchorCol".into(), json!(from.col));
+            for row in 3..=4 {
+                for col in 3..=4 {
+                    state.board[row][col] = Some(piece.clone());
+                }
             }
-        }
-        let target = crate::movement::v7_large_moves(&state, &piece, from)
-            .unwrap()
-            .into_iter()
-            .find(|target| target.square() == to)
-            .unwrap();
-        let privacy = privacy_snapshot(&state, &piece, from).unwrap();
-        execute_large_piece_move(&mut state, from, &target, &privacy, false).unwrap();
-        let occupied = state
-            .board
-            .iter()
-            .enumerate()
-            .flat_map(|(row, cells)| {
-                cells.iter().enumerate().filter_map(move |(col, item)| {
-                    item.as_ref()
-                        .filter(|item| item.id == "mover")
-                        .map(|_| Square {
-                            row: row as u8,
-                            col: col as u8,
-                        })
+            if displaced_alias {
+                state.board[4][4] = None;
+                state.board[6][0] = Some(piece.clone());
+            }
+            let footprint = crate::movement::source_large_footprint(&piece, from).unwrap();
+            assert_eq!(footprint.footprint.len(), 4);
+            assert!(!footprint.footprint.contains(&crate::Offset::new(3, -3)));
+            let target = crate::movement::v7_large_moves(&state, &piece, from)
+                .unwrap()
+                .into_iter()
+                .find(|target| target.square() == to)
+                .unwrap();
+            assert_eq!(target.flags["highlightCells"].as_array().unwrap().len(), 4);
+            let action = crate::Action::movement(Color::White, from, target.clone());
+            assert_eq!(
+                crate::movement::v7_public_move_intents(&state, &action)
+                    .unwrap()
+                    .len(),
+                1
+            );
+            let privacy = privacy_snapshot(&state, &piece, from).unwrap();
+            execute_large_piece_move(&mut state, from, &target, &privacy, false).unwrap();
+            let occupied = state
+                .board
+                .iter()
+                .enumerate()
+                .flat_map(|(row, cells)| {
+                    cells.iter().enumerate().filter_map(move |(col, item)| {
+                        item.as_ref()
+                            .filter(|item| item.id == "mover")
+                            .map(|_| Square {
+                                row: row as u8,
+                                col: col as u8,
+                            })
+                    })
                 })
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            occupied,
-            vec![
-                Square { row: 2, col: 3 },
-                Square { row: 2, col: 4 },
-                Square { row: 3, col: 3 },
-                Square { row: 3, col: 4 },
-            ]
-        );
-        for cell in occupied {
-            let moved = state.at(cell).unwrap();
-            assert_eq!(moved.extra["anchorRow"], json!(2));
-            assert_eq!(moved.extra["anchorCol"], json!(3));
+                .collect::<Vec<_>>();
+            assert_eq!(
+                occupied,
+                vec![
+                    Square { row: 2, col: 3 },
+                    Square { row: 2, col: 4 },
+                    Square { row: 3, col: 3 },
+                    Square { row: 3, col: 4 },
+                ]
+            );
+            for cell in occupied {
+                let moved = state.at(cell).unwrap();
+                assert_eq!(moved.extra["anchorRow"], json!(2));
+                assert_eq!(moved.extra["anchorCol"], json!(3));
+            }
+            assert!(state.board[6][0].is_none());
         }
     }
 
