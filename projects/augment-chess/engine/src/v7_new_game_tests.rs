@@ -92,6 +92,22 @@ fn v7_initial_draft_matches_frozen_source_across_styles_and_seeds() {
             212,
             4240030067,
         ),
+        // Frozen source replacement draws make these initial cursors
+        // seed dependent, while the complete setup remains deterministic.
+        (
+            "chaos",
+            15,
+            "9d6b3874001c53fe561f2d2beb588306fdd64b1e9980712d6a4f4a229ec21439",
+            156,
+            2140418635,
+        ),
+        (
+            "chaos",
+            54,
+            "9b801d531d28a0e1e012bd5362cafe902ba4f6ae2ed5064a8fbd3a73c28bee75",
+            242,
+            113116040,
+        ),
         (
             "grand",
             0,

@@ -89,7 +89,7 @@ class MaskResNetConfig:
                              f"{(self.max_batch, self.max_board_axis, self.max_board_axis)}")
         if not 1 <= candidates <= self.max_candidates:
             raise ValueError(f"candidate count {candidates} exceeds limit {self.max_candidates}")
-        if not 1 <= candidate_nodes <= 64 or not 1 <= records <= 2048 or not 0 <= relations <= 8192:
+        if not 1 <= candidate_nodes <= 256 or not 1 <= records <= 2048 or not 0 <= relations <= 8192:
             raise ValueError("typed record, relation, or candidate node count exceeds model limits")
         # Conservative inference estimate for the spatial stack and the shared
         # typed record/relation/candidate computations, before allocating output.
