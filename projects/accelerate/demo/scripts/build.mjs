@@ -1,4 +1,4 @@
-import { copyFile, lstat, mkdir, open, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
@@ -37,7 +37,11 @@ async function prepareAssets() {
   const stamp = JSON.parse(await readFile(join(paths.wasm, 'wasm-inputs.json'), 'utf8'));
   if (stamp.schemaVersion !== 1 || JSON.stringify(stamp.features) !== '[]' || stamp.inputFingerprint !== await sourceFingerprint('wasm') || JSON.stringify(stamp.files) !== JSON.stringify(await wasmFileRecords())) throw new Error('WASM 소스 입력·배포 feature 또는 compiled artifact가 바뀌었습니다. npm run wasm으로 다시 빌드하세요.');
   ensureOwnedDirectory(paths.public);
-  await mkdir(join(paths.public, 'wasm'), { recursive: true });
+  // This verified, checkout-owned slot contains only regenerated public assets.
+  // Remove prior inputs so an old manifest or test binding cannot enter the site.
+  await rm(paths.public, { recursive: true });
+  ensureOwnedDirectory(paths.public);
+  ensureOwnedDirectory(join(paths.public, 'wasm'));
   for (const name of wasmFiles) {
     await copyFile(join(paths.wasm, name), join(paths.public, 'wasm', name));
   }
