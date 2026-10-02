@@ -240,6 +240,14 @@ class Fixed8x8ResNet(_SharedModel):
         self.state = nn.Linear(channels + typed.hidden_dim, typed.hidden_dim)
         self.configure_training("base")
 
+    def train(self, mode: bool = True) -> Fixed8x8ResNet:
+        super().train(mode)
+        if mode and self.training_mode == "adapter":
+            for module in self.modules():
+                if isinstance(module, nn.BatchNorm2d):
+                    module.eval()
+        return self
+
     def forward(self, batch: ModelBatch) -> tuple[Tensor, Tensor]:
         tokens = self.entities(batch)
         context = self._context(batch, tokens)

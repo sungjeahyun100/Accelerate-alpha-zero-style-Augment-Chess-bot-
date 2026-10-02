@@ -52,6 +52,53 @@ def test_fixed_spatial_and_entity_projections_preserve_one_piece_and_public_stat
     assert encoder.spec.metadata(encoder.typed_encoder, "fixed8-resnet")["value_perspective"] == "observation.viewer"
 
 
+def test_large_piece_entity_uses_canonical_anchor_independent_of_first_footprint_cell():
+    contract = replace(spec(), observation_version=SYNTHETIC_OBSERVATION_VERSION)
+    encoder = EntityTokenEncoder(TypedEncoder(contract))
+    anchor = (3, 3)
+
+    def project(cells, *, with_anchor=True):
+        board = [[None] * 8 for _ in range(8)]
+        kinds = [["empty"] * 8 for _ in range(8)]
+        piece = {"type": "pawn", "color": "white"}
+        if with_anchor:
+            piece.update(anchorRow=anchor[0], anchorCol=anchor[1])
+        for row, col in cells:
+            board[row][col] = piece
+            kinds[row][col] = "piece"
+        ir = ObservationIR.from_components(spec=contract, geometry=BoardGeometry(0, 0, 8, 8),
+                                           viewer="white", turn="white", board=board, cell_kinds=kinds)
+        return encoder.encode(ir, [])
+
+    footprints = (((2, 2), (2, 3), (3, 2), (3, 3)),
+                  ((2, 3), (2, 4), (3, 3), (3, 4)))
+    for cells in footprints:
+        projected = project(cells)
+        pieces = (projected.entity_category[:, 0] == 1).nonzero()[0]
+        assert len(pieces) == 1
+        index = int(pieces[0])
+        assert projected.entity_coord[index].tolist() == pytest.approx([3 / 7, 3 / 7])
+        assert projected.entity_numeric[index, 3:5].tolist() == pytest.approx([3 / 7, 3 / 7])
+        assert projected.occupancy[index].sum() == 4
+        assert all(projected.occupancy[index, row, col] == 1 for row, col in cells)
+    single = project(((4, 5),), with_anchor=False)
+    single_index = int((single.entity_category[:, 0] == 1).nonzero()[0][0])
+    assert single.entity_coord[single_index].tolist() == pytest.approx([4 / 7, 5 / 7])
+
+
+@pytest.mark.parametrize("anchor", ({"anchorRow": 3}, {"anchorRow": 99, "anchorCol": 3}))
+def test_malformed_or_out_of_bounds_piece_anchor_is_rejected(anchor):
+    contract = replace(spec(), observation_version=SYNTHETIC_OBSERVATION_VERSION)
+    board = [[None] * 8 for _ in range(8)]
+    kinds = [["empty"] * 8 for _ in range(8)]
+    board[2][2] = {"type": "pawn", "color": "white", **anchor}
+    kinds[2][2] = "piece"
+    ir = ObservationIR.from_components(spec=contract, geometry=BoardGeometry(0, 0, 8, 8),
+                                       viewer="white", turn="white", board=board, cell_kinds=kinds)
+    with pytest.raises(ValueError, match="anchor|outside geometry"):
+        EntityTokenEncoder(TypedEncoder(contract)).encode(ir, [])
+
+
 def test_fixed8_rejects_other_geometry_while_entity_projection_accepts_it():
     ir = _synthetic(7, 6)
     encoder = TypedEncoder(replace(spec(), observation_version=SYNTHETIC_OBSERVATION_VERSION))
@@ -195,3 +242,39 @@ def test_new_models_keep_static_lora_separate_from_film():
         model.eval().evaluate(batch)
         with torch.no_grad():
             assert not torch.allclose(baseline, module(probe))
+
+
+def test_resnet_adapter_step_preserves_all_base_weights_and_batchnorm_buffers():
+    torch.set_num_threads(1)
+    torch.manual_seed(317)
+    encoder = Fixed8x8SpatialEncoder(TypedEncoder(spec()))
+    batch = batch_projected_positions([encoder.encode(ObservationIR.from_public(frame(), spec()), intents()[:1])])
+    model = Fixed8x8ResNet(_context(), channels=16, residual_blocks=1, lora_rank=2, lora_alpha=2.)
+    bn = [module for module in model.modules() if isinstance(module, torch.nn.BatchNorm2d)]
+    assert bn and all(module.training for module in bn)
+    model.train()
+    model(batch)
+    assert all(int(module.num_batches_tracked) == 1 for module in bn)
+
+    base_before = {name: tensor.detach().clone() for name, tensor in model.base_state().items()}
+    adapter_before = {name: tensor.detach().clone() for name, tensor in model.adapter_state().items()}
+    bn_before = {name: tensor.detach().clone() for name, tensor in model.named_buffers()
+                 if name.endswith(("running_mean", "running_var", "num_batches_tracked"))}
+
+    optimizer = torch.optim.SGD(model.configure_training("adapter"), lr=0.1)
+    model.train()  # A later caller must not re-enable BatchNorm updates.
+    assert all(not module.training for module in bn)
+    optimizer.zero_grad()
+    logits, value = model(batch)
+    (logits.sum() + value.sum()).backward()
+    optimizer.step()
+
+    assert any(not torch.equal(adapter_before[name], tensor) for name, tensor in model.adapter_state().items())
+    assert all(torch.equal(base_before[name], tensor) for name, tensor in model.base_state().items())
+    assert set(bn_before) == {name for name, tensor in model.named_buffers()
+                              if name.endswith(("running_mean", "running_var", "num_batches_tracked"))}
+    assert all(torch.equal(bn_before[name], tensor) for name, tensor in model.named_buffers() if name in bn_before)
+
+    model.configure_training("base")
+    model.train()
+    assert all(module.training for module in bn)

@@ -189,14 +189,20 @@ class EntityTokenEncoder:
                 if piece is None:
                     continue
                 absolute = (geometry.origin_row + y, geometry.origin_col + x)
+                has_anchor = "anchorRow" in piece or "anchorCol" in piece
                 anchor = (piece.get("anchorRow"), piece.get("anchorCol"))
-                identity = (anchor, piece.get("type"), piece.get("color")) if all(type(v) is int for v in anchor) else (absolute,)
+                if has_anchor:
+                    if any(type(value) is not int for value in anchor):
+                        raise ValueError("piece anchor needs integer row and column")
+                    geometry.local(*anchor)
+                identity = (anchor, piece.get("type"), piece.get("color")) if has_anchor else (absolute,)
                 if identity in piece_identity:
                     index = piece_identity[identity]
                     # The underlying typed encoder already rejects inconsistent aliases.
                     entities[index][3].append((y, x))
                 else:
-                    index = add("piece", piece.get("type"), piece.get("color"), row=absolute[0], col=absolute[1],
+                    coordinate = anchor if has_anchor else absolute
+                    index = add("piece", piece.get("type"), piece.get("color"), row=coordinate[0], col=coordinate[1],
                                 data=piece, cells=[(y, x)])
                     piece_identity[identity] = index
                 cell_owner[absolute] = index
