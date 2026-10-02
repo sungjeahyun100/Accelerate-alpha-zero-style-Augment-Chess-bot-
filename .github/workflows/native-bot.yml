@@ -116,7 +116,7 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || (inputs.adapter_only != true && inputs.core_only != true) }}
     name: Installed native wheel / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
