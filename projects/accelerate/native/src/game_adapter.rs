@@ -17,7 +17,7 @@ use augment_chess_engine::adapter::{
 use augment_chess_engine::v7_action_admission::AdmissionErrorKind;
 use augment_chess_engine::v7_adapter_actions::{self, V7ActionHostError};
 use augment_chess_engine::v7_conditioning;
-use augment_chess_engine::{GameConfig, V7HostPosition};
+use augment_chess_engine::{EngineError, GameConfig, V7HostPosition};
 use pyo3::{
     exceptions::PyValueError,
     prelude::*,
@@ -61,6 +61,107 @@ fn json_value(value: impl Serialize) -> PyResult<Value> {
         serde_json::to_value(value).map_err(|error| NativeError::new_err(error.to_string()))?;
     conversion::validate(&value)?;
     Ok(value)
+}
+
+const MAX_FROZEN_SOURCE_PROBE_BYTES: usize = 16 * 1024 * 1024;
+
+#[derive(Default)]
+struct FrozenSourceProbeByteBudget {
+    bytes: usize,
+}
+
+impl std::io::Write for FrozenSourceProbeByteBudget {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.bytes = self.bytes.saturating_add(bytes.len());
+        if self.bytes > MAX_FROZEN_SOURCE_PROBE_BYTES {
+            return Err(std::io::Error::other(
+                "frozen source probe byte limit exceeded",
+            ));
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// An actual-frame export failure may name private identities. Keep its class
+/// and precise failed phase; expected comparison diagnostics remain unchanged.
+fn frozen_source_probe_export_error(error: EngineError) -> PyErr {
+    let detail = "frozen source probe actual envelope export failed".into();
+    let safe = match error {
+        EngineError::InvalidState(_) => EngineError::InvalidState(detail),
+        EngineError::InvalidConfig(_) => EngineError::InvalidConfig(detail),
+        EngineError::Serialization(_) => EngineError::Serialization(detail),
+        EngineError::UnsupportedFeature(_) => EngineError::UnsupportedFeature(detail),
+        EngineError::ConditioningMismatch(_) => EngineError::ConditioningMismatch(detail),
+        other => other,
+    };
+    crate::error(safe)
+}
+
+fn verify_frozen_source_probe_position(
+    position: &V7HostPosition,
+    expected_envelope: &Value,
+    expected_actions: Option<&[Value]>,
+) -> PyResult<()> {
+    let mut budget = FrozenSourceProbeByteBudget::default();
+    serde_json::to_writer(&mut budget, expected_envelope).map_err(|_| {
+        PyValueError::new_err("frozen source probe envelope/actions JSON exceeds 16 MiB")
+    })?;
+    if let Some(actions) = expected_actions {
+        serde_json::to_writer(&mut budget, actions).map_err(|_| {
+            PyValueError::new_err("frozen source probe envelope/actions JSON exceeds 16 MiB")
+        })?;
+    }
+    let actual = position
+        .export_envelope()
+        .map_err(frozen_source_probe_export_error)?;
+    let expected_bytes = crate::canonical_bytes(expected_envelope).map_err(|_| {
+        NativeError::new_err("frozen source probe expected envelope cannot be canonicalized")
+    })?;
+    let actual_bytes = crate::canonical_bytes(&actual).map_err(|_| {
+        NativeError::new_err("frozen source probe actual envelope cannot be canonicalized")
+    })?;
+    if expected_bytes != actual_bytes {
+        let path = frozen_source_envelope_path(expected_envelope, &actual)?;
+        return Err(NativeError::new_err(format!(
+            "frozen source probe canonical envelope mismatch at {path}"
+        )));
+    }
+    if let Some(actions) = expected_actions {
+        v7_adapter_actions::verify_source_action_envelopes(position, actions)
+            .map_err(v7_action_error)?;
+    }
+    Ok(())
+}
+
+fn frozen_source_envelope_path(expected: &Value, actual: &Value) -> PyResult<&'static str> {
+    // These names are fixed protocol fields. Descending through arbitrary
+    // source maps could reveal private identities in dynamic object keys.
+    for (field, path) in [
+        ("protocolVersion", "$.protocolVersion"),
+        ("rulesVersion", "$.rulesVersion"),
+        ("catalogVersion", "$.catalogVersion"),
+        ("state", "$.state"),
+        ("rng", "$.rng"),
+        ("history", "$.history"),
+        ("positionId", "$.positionId"),
+    ] {
+        let expected = expected.get(field);
+        let actual = actual.get(field);
+        if expected.is_some() != actual.is_some()
+            || serde_jcs::to_vec(&expected).map_err(|_| {
+                NativeError::new_err("frozen source probe expected field cannot be canonicalized")
+            })? != serde_jcs::to_vec(&actual).map_err(|_| {
+                NativeError::new_err("frozen source probe actual field cannot be canonicalized")
+            })?
+        {
+            return Ok(path);
+        }
+    }
+    Ok("$")
 }
 
 struct InvocationCancellation(Arc<AtomicBool>);
@@ -264,6 +365,46 @@ impl GameAdapterSession {
         })
     }
 
+    /// Frozen-source differential receipt verification only. Python supplies
+    /// expected private frames; no actual state, RNG or source action accessor
+    /// is exposed. Omitting actions checks a sampled transition's full frame.
+    #[pyo3(signature = (expected_envelope, expected_actions=None, *, snapshot_revision=None))]
+    fn _verify_frozen_source_probe(
+        &self,
+        py: Python<'_>,
+        expected_envelope: &Bound<'_, PyAny>,
+        expected_actions: Option<&Bound<'_, PyAny>>,
+        snapshot_revision: Option<&str>,
+    ) -> PyResult<()> {
+        let expected_envelope = conversion::from_python(expected_envelope)?;
+        let expected_actions = expected_actions
+            .map(conversion::from_python)
+            .transpose()?
+            .map(|value| match value {
+                Value::Array(actions) => Ok(actions),
+                _ => Err(PyValueError::new_err(
+                    "frozen source probe expected_actions must be an array or None",
+                )),
+            })
+            .transpose()?;
+        let position = self
+            .cloned_position(py, snapshot_revision)
+            .map_err(|error| {
+                if error.is_instance_of::<StaleActionError>(py) {
+                    StaleActionError::new_err("frozen source probe snapshot revision is stale")
+                } else {
+                    error
+                }
+            })?;
+        py.detach(move || {
+            verify_frozen_source_probe_position(
+                &position,
+                &expected_envelope,
+                expected_actions.as_deref(),
+            )
+        })
+    }
+
     /// Return a source-valid hidden opening proposal with its p/q correction.
     /// Neither the source position nor an unvalidated probability is exposed.
     #[pyo3(signature = (expected_next_public, independent_seed, *, snapshot_revision=None))]
@@ -432,6 +573,136 @@ mod tests {
     use crate::RULES_VERSION_V7;
     use augment_chess_engine::{RngState, V7HostPosition};
     use serde_json::json;
+    use sha2::{Digest, Sha256};
+
+    #[test]
+    fn frozen_source_probe_is_read_only_private_and_revision_bound() {
+        Python::initialize();
+        Python::attach(|py| {
+            let engine = EngineGameAdapterSession::new_game(GameConfig::default(), 19).unwrap();
+            let position = engine.position().clone();
+            let before = position.export_envelope().unwrap();
+            // Initial draft choices have identical source/public payloads.
+            // The existing engine tests pin their full ordered source digest;
+            // this receipt exercises conversion and the diagnostic FFI hook.
+            let actions: Vec<Value> = v7_adapter_actions::legal_public_intents(&position)
+                .unwrap()
+                .into_iter()
+                .map(|payload| {
+                    let action_id =
+                        format!("{:x}", Sha256::digest(serde_jcs::to_vec(&payload).unwrap()));
+                    json!({
+                        "protocolVersion":"accelerate-action-v1",
+                        "positionId":position.position_id(),
+                        "actionId":action_id,
+                        "payload":payload,
+                    })
+                })
+                .collect();
+            let session = GameAdapterSession::from_position(position).unwrap();
+            let revision = session.snapshot_revision(py).unwrap();
+            let expected = conversion::to_python(py, &before).unwrap();
+            let actions = conversion::to_python(py, &Value::Array(actions)).unwrap();
+            session
+                ._verify_frozen_source_probe(
+                    py,
+                    expected.bind(py),
+                    Some(actions.bind(py)),
+                    Some(&revision),
+                )
+                .unwrap();
+            session
+                ._verify_frozen_source_probe(py, expected.bind(py), None, None)
+                .unwrap();
+            let mut numeric = before.clone();
+            let cursor = numeric["rng"]["cursor"].as_f64().unwrap();
+            numeric["rng"]["cursor"] = json!(cursor);
+            let numeric = conversion::to_python(py, &numeric).unwrap();
+            session
+                ._verify_frozen_source_probe(py, numeric.bind(py), None, Some(&revision))
+                .unwrap();
+
+            let mut corrupt = before.clone();
+            corrupt["state"]["privateProbeMarker"] = json!("private-value-must-not-be-returned");
+            let corrupt = conversion::to_python(py, &corrupt).unwrap();
+            let error = session
+                ._verify_frozen_source_probe(py, corrupt.bind(py), None, Some(&revision))
+                .unwrap_err();
+            assert!(error.is_instance_of::<NativeError>(py));
+            assert!(
+                error
+                    .to_string()
+                    .contains("canonical envelope mismatch at $.state")
+            );
+            assert!(
+                !error
+                    .to_string()
+                    .contains("private-value-must-not-be-returned")
+            );
+
+            let omitted = conversion::to_python(py, &json!([])).unwrap();
+            let error = session
+                ._verify_frozen_source_probe(
+                    py,
+                    expected.bind(py),
+                    Some(omitted.bind(py)),
+                    Some(&revision),
+                )
+                .unwrap_err();
+            assert!(error.is_instance_of::<NativeError>(py));
+            assert!(error.to_string().contains("actions count differs"));
+            let error = session
+                ._verify_frozen_source_probe(
+                    py,
+                    expected.bind(py),
+                    Some(actions.bind(py)),
+                    Some("private-stale-revision"),
+                )
+                .unwrap_err();
+            assert!(error.is_instance_of::<StaleActionError>(py));
+            assert!(!error.to_string().contains("private-stale-revision"));
+            assert!(!error.to_string().contains(&revision));
+            assert_eq!(session.snapshot_revision(py).unwrap(), revision);
+            assert_eq!(
+                session
+                    .cloned_position(py, None)
+                    .unwrap()
+                    .export_envelope()
+                    .unwrap(),
+                before,
+            );
+            session
+                ._verify_frozen_source_probe(
+                    py,
+                    expected.bind(py),
+                    Some(actions.bind(py)),
+                    Some(&revision),
+                )
+                .unwrap();
+            assert!(!session.cancel_current().unwrap());
+        });
+    }
+
+    #[test]
+    fn frozen_source_probe_combined_json_budget_counts_escaped_envelope_and_actions() {
+        Python::initialize();
+        Python::attach(|py| {
+            let engine = EngineGameAdapterSession::new_game(GameConfig::default(), 19).unwrap();
+            let position = engine.position();
+            // Each raw string fits the existing 8 MiB conversion budget, but
+            // escaping their combined JSON exceeds this probe's 16 MiB cap.
+            let expected = json!({"padding":"\n".repeat(MAX_FROZEN_SOURCE_PROBE_BYTES / 4)});
+            let actions = vec![json!({"padding":"\n".repeat(MAX_FROZEN_SOURCE_PROBE_BYTES / 4)})];
+            let error = verify_frozen_source_probe_position(position, &expected, Some(&actions))
+                .unwrap_err();
+            assert!(error.is_instance_of::<PyValueError>(py));
+            assert!(
+                error
+                    .to_string()
+                    .contains("envelope/actions JSON exceeds 16 MiB")
+            );
+        });
+    }
 
     #[test]
     fn python_boundary_uses_exact_descriptor_and_preserves_revision_on_rejection() {

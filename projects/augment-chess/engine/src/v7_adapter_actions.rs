@@ -9,6 +9,7 @@
 
 use crate::v7_action_admission::{
     AdmissionError, AdmittedV7Action, V7_ACTION_PROTOCOL, VerifiedV7ActionSet, admit_v7_action,
+    admit_v7_action_from_set,
 };
 use crate::{
     Action, ActionKind, Color, EngineError, GameResult, Piece, RULES_VERSION_V7, V7HostPosition,
@@ -18,6 +19,8 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, VecDeque};
 
 const MAX_LEGAL_ACTIONS: usize = 4096;
+const MAX_SOURCE_PROBE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_SOURCE_PROBE_NODES: usize = 100_000;
 
 #[derive(Debug)]
 pub enum V7ActionHostError {
@@ -232,6 +235,187 @@ pub(crate) fn legal_action_envelopes(position: &V7HostPosition) -> V7ActionHostR
         .collect()
 }
 
+/// Compare a bounded frozen-source receipt with the complete ordered private
+/// action authority. Only success or an error leaves this function; source
+/// envelopes, action IDs and execution payloads never become public intents.
+pub fn verify_source_action_envelopes(
+    position: &V7HostPosition,
+    expected: &[Value],
+) -> V7ActionHostResult<()> {
+    if expected.len() > MAX_LEGAL_ACTIONS {
+        return Err(EngineError::InvalidState(
+            "frozen source actions exceed the 4096-action probe limit".into(),
+        )
+        .into());
+    }
+    let mut remaining_nodes = MAX_SOURCE_PROBE_NODES;
+    for value in expected {
+        validate_source_probe_value(value, &mut remaining_nodes)?;
+    }
+    serde_json::to_writer(&mut SourceProbeByteBudget::default(), expected).map_err(|_| {
+        EngineError::InvalidState("frozen source actions exceed the 16 MiB JSON probe limit".into())
+    })?;
+
+    let actual = legal_action_envelopes(position)
+        .map_err(|error| source_probe_rule_error(error, "complete source enumeration"))?;
+    if actual.len() != expected.len() {
+        return Err(EngineError::InvalidState(
+            "frozen source actions count differs from the complete ordered set".into(),
+        )
+        .into());
+    }
+    if actual.is_empty() {
+        return Ok(());
+    }
+    let mut checked = Vec::with_capacity(expected.len());
+    for (index, (expected, actual)) in expected.iter().zip(&actual).enumerate() {
+        let expected_bytes = serde_jcs::to_vec(expected).map_err(|_| {
+            EngineError::Serialization("frozen source action cannot be canonicalized".into())
+        })?;
+        let actual_bytes = serde_jcs::to_vec(actual).map_err(|_| {
+            EngineError::Serialization("native source action cannot be canonicalized".into())
+        })?;
+        if expected_bytes != actual_bytes {
+            let field = source_probe_envelope_field(expected, actual)?;
+            return Err(EngineError::InvalidState(format!(
+                "frozen source actions[{index}] canonical envelope mismatch at {field}"
+            ))
+            .into());
+        }
+        // The exact JCS equality above admits equivalent numeric spellings.
+        // Keep the authority's owned numeric representation for typed source
+        // membership checks, which also compare its original JSON payload.
+        checked.push(actual.clone());
+    }
+
+    // Complete source enumeration has already proved transition acceptance.
+    // Reuse one verified set for both snapshot and payload admission instead
+    // of running validate_source_selection twice per action. This repeats
+    // complete enumeration once, never once per candidate, and retains the
+    // existing exact payload/decoded-action and position/revision checks.
+    let verified = VerifiedV7ActionSet::complete(position)
+        .map_err(|error| source_probe_rule_error(error.into(), "complete source proof"))?;
+    for (index, expected) in checked.into_iter().enumerate() {
+        let payload_envelope = source_envelope(position, expected["payload"].clone())?;
+        let snapshot_bound = admit_v7_action_from_set(position, expected, verified.clone())
+            .map_err(|error| source_probe_rule_error(error.into(), "snapshot admission"))?;
+        let payload_bound = admit_v7_action_from_set(position, payload_envelope, verified.clone())
+            .map_err(|error| source_probe_rule_error(error.into(), "payload admission"))?;
+        snapshot_bound
+            .revalidate(position)
+            .map_err(|error| source_probe_rule_error(error.into(), "snapshot revision proof"))?;
+        payload_bound
+            .revalidate(position)
+            .map_err(|error| source_probe_rule_error(error.into(), "payload revision proof"))?;
+        if snapshot_bound.action() != payload_bound.action()
+            || snapshot_bound.source_payload() != payload_bound.source_payload()
+            || snapshot_bound.action_id() != payload_bound.action_id()
+        {
+            return Err(EngineError::InvalidState(format!(
+                "frozen source actions[{index}] snapshot and payload admission differ"
+            ))
+            .into());
+        }
+    }
+    Ok(())
+}
+
+fn source_probe_envelope_field(expected: &Value, actual: &Value) -> crate::Result<&'static str> {
+    for (field, path) in [
+        ("protocolVersion", "$.protocolVersion"),
+        ("positionId", "$.positionId"),
+        ("actionId", "$.actionId"),
+        ("payload", "$.payload"),
+    ] {
+        let expected = expected.get(field);
+        let actual = actual.get(field);
+        if expected.is_some() != actual.is_some()
+            || serde_jcs::to_vec(&expected).map_err(EngineError::serialization)?
+                != serde_jcs::to_vec(&actual).map_err(EngineError::serialization)?
+        {
+            return Ok(path);
+        }
+    }
+    Ok("$")
+}
+
+/// Rule errors can contain private piece identities or hidden candidates.
+/// Retain their class/code and failed phase, while comparison/limit errors
+/// generated above keep their complete safe path and original diagnostic.
+fn source_probe_rule_error(error: V7ActionHostError, phase: &str) -> V7ActionHostError {
+    let detail = format!("frozen source probe {phase} failed");
+    match error {
+        V7ActionHostError::Admission(mut error) => {
+            error.detail = detail;
+            error.into()
+        }
+        V7ActionHostError::Engine(error) => {
+            let error = match error {
+                EngineError::InvalidState(_) => EngineError::InvalidState(detail),
+                EngineError::InvalidConfig(_) => EngineError::InvalidConfig(detail),
+                EngineError::Serialization(_) => EngineError::Serialization(detail),
+                EngineError::UnsupportedFeature(_) => EngineError::UnsupportedFeature(detail),
+                EngineError::ConditioningMismatch(_) => EngineError::ConditioningMismatch(detail),
+                other => other,
+            };
+            error.into()
+        }
+    }
+}
+
+fn validate_source_probe_value(value: &Value, remaining_nodes: &mut usize) -> crate::Result<()> {
+    let mut pending = vec![(value, 0usize)];
+    *remaining_nodes = remaining_nodes.checked_sub(1).ok_or_else(|| {
+        EngineError::InvalidState("frozen source actions exceed the 100000-node probe limit".into())
+    })?;
+    while let Some((value, depth)) = pending.pop() {
+        if depth > 64 {
+            return Err(EngineError::InvalidState(
+                "frozen source action JSON exceeds depth 64".into(),
+            ));
+        }
+        let children = match value {
+            Value::Array(values) => values.len(),
+            Value::Object(values) => values.len(),
+            _ => 0,
+        };
+        *remaining_nodes = remaining_nodes.checked_sub(children).ok_or_else(|| {
+            EngineError::InvalidState(
+                "frozen source actions exceed the 100000-node probe limit".into(),
+            )
+        })?;
+        match value {
+            Value::Array(values) => pending.extend(values.iter().map(|value| (value, depth + 1))),
+            Value::Object(values) => {
+                pending.extend(values.values().map(|value| (value, depth + 1)))
+            }
+            _ => {}
+        }
+    }
+    crate::state::validate_json_value(value, 0)
+}
+
+#[derive(Default)]
+struct SourceProbeByteBudget {
+    bytes: usize,
+}
+
+impl std::io::Write for SourceProbeByteBudget {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.bytes = self.bytes.saturating_add(bytes.len());
+        if self.bytes > MAX_SOURCE_PROBE_BYTES {
+            return Err(std::io::Error::other(
+                "source probe JSON byte limit exceeded",
+            ));
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 fn public_intents_for_source_action(
     state: &crate::GameState,
     action: &Action,
@@ -421,6 +605,61 @@ mod tests {
         )
         .unwrap();
         V7HostPosition::from_state(state).unwrap()
+    }
+
+    #[test]
+    fn frozen_source_probe_preserves_complete_order_identity_and_host_state() {
+        let host = draft_host("normal", 19);
+        let before = host.export_envelope().unwrap();
+        let expected = legal_action_envelopes(&host).unwrap();
+        verify_source_action_envelopes(&host, &expected).unwrap();
+
+        for field in ["protocolVersion", "positionId", "actionId", "payload"] {
+            let mut corrupt = expected.clone();
+            corrupt[0][field] = json!("private-value-must-not-be-returned");
+            let error = verify_source_action_envelopes(&host, &corrupt).unwrap_err();
+            let detail = error.to_string();
+            assert!(detail.contains(&format!(
+                "actions[0] canonical envelope mismatch at $.{field}"
+            )));
+            assert!(!detail.contains("private-value-must-not-be-returned"));
+            assert_eq!(host.export_envelope().unwrap(), before);
+        }
+        let mut reordered = expected.clone();
+        reordered.swap(0, 1);
+        let mut duplicated = expected.clone();
+        duplicated[1] = duplicated[0].clone();
+        let mut omitted = expected.clone();
+        omitted.pop();
+        for invalid in [reordered, duplicated, omitted] {
+            assert!(verify_source_action_envelopes(&host, &invalid).is_err());
+            assert_eq!(host.export_envelope().unwrap(), before);
+        }
+        verify_source_action_envelopes(&host, &expected).unwrap();
+        assert_eq!(host.export_envelope().unwrap(), before);
+    }
+
+    #[test]
+    fn frozen_source_probe_rejects_count_byte_node_and_depth_overflow_before_rule_work() {
+        let host = draft_host("normal", 19);
+        let before = host.export_envelope().unwrap();
+        let too_many = vec![Value::Null; MAX_LEGAL_ACTIONS + 1];
+        let too_large = vec![Value::String("x".repeat(MAX_SOURCE_PROBE_BYTES))];
+        let too_wide = vec![Value::Array(vec![Value::Null; MAX_SOURCE_PROBE_NODES])];
+        let mut too_deep = Value::Null;
+        for _ in 0..66 {
+            too_deep = Value::Array(vec![too_deep]);
+        }
+        for (invalid, limit) in [
+            (too_many, "4096-action"),
+            (too_large, "16 MiB"),
+            (too_wide, "100000-node"),
+            (vec![too_deep], "depth 64"),
+        ] {
+            let error = verify_source_action_envelopes(&host, &invalid).unwrap_err();
+            assert!(error.to_string().contains(limit));
+            assert_eq!(host.export_envelope().unwrap(), before);
+        }
     }
 
     #[test]
