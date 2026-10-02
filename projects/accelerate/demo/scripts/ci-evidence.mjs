@@ -47,7 +47,7 @@ export async function validationIdentity(scope) {
   const commands = {
     bindings: ['npm run test:native', 'npm run wasm', 'npm run wasm-test', 'npm run test:wasm'],
     frontend: ['npm run check', 'npm test'],
-    browser: ['npm run build', 'npm run test:browser', 'npm run bundle', 'npm run verify-bundle']
+    browser: ['npm run build', 'npm run test:browser', 'npm run bundle', 'npm run verify-bundle', 'npm run test:bundle']
   }[scope];
   const inputs = await sourceFingerprint();
   const environment = { platform: process.platform, arch: process.arch, runnerImage, node, npm: execute(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['--version']), rust, wasmBindgen: '0.2.126', rustFlags: process.env.RUSTFLAGS || '', encodedRustFlags: process.env.CARGO_ENCODED_RUSTFLAGS || '' };

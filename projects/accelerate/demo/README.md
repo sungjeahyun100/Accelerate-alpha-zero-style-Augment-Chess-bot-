@@ -137,7 +137,13 @@ SHA가 달라도 이 입력이 동일한 경우에만 재사용한다. marker와
 npm --prefix projects/accelerate/demo --workspaces=false run build
 npm --prefix projects/accelerate/demo --workspaces=false run bundle
 npm --prefix projects/accelerate/demo --workspaces=false run verify-bundle
+npm --prefix projects/accelerate/demo --workspaces=false run test:bundle
 ```
+
+`test:bundle`은 최종 묶음을 `/static-demo/` 하위 경로에서 제공해 상대 자산 경로와
+manifest의 소스 커밋을 확인한다. JS·WASM 응답 변조 시 각각 정확한 무결성 오류를
+표시하고 새 게임을 비활성화하는지도 검사한다. 이 검사는 배포 manifest가 없는
+개발 미리보기의 `test:browser`와 별도로 CI에서 항상 실행한다.
 
 묶음에는 `sdk: static`, `app_file: index.html`인 `README.md`, 화면·Worker·WASM·동결 공개
 카탈로그, `NOTICE.md`, `source-manifest.json`을 담는다. manifest는 Git commit과 상대 경로별

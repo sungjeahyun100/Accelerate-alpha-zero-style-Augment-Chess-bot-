@@ -11,6 +11,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.json && tsc --project tsconfig.node.json --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "test:browser": "playwright test",
+    "test:bundle": "playwright test --config playwright.bundle.config.ts",
     "test:wasm": "node tests/wasm-roundtrip.mjs",
     "test:native": "node scripts/build.mjs native",
     "wasm": "node scripts/build.mjs wasm",
