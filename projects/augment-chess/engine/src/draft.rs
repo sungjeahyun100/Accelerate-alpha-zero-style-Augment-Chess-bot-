@@ -1681,7 +1681,7 @@ pub(crate) fn reset_for_ruleset(
             rng.algorithm
         )));
     }
-    if rng.cursor > 9_007_199_254_740_991usize
+    if rng.cursor as u64 > 9_007_199_254_740_991u64
         || rng
             .tape
             .iter()

@@ -771,7 +771,7 @@ impl RngState {
                 self.algorithm
             )));
         }
-        if self.cursor >= 9_007_199_254_740_991usize {
+        if self.cursor as u64 >= 9_007_199_254_740_991u64 || self.cursor == usize::MAX {
             return Err(EngineError::InvalidState("RNG cursor overflow".into()));
         }
         if let Some(trace) = self.source_chance_trace.as_mut() {
@@ -1264,7 +1264,7 @@ impl GameState {
             .tape
             .iter()
             .any(|value| !value.is_finite() || !(0.0..1.0).contains(value))
-            || self.rng.cursor > 9_007_199_254_740_991usize
+            || self.rng.cursor as u64 > 9_007_199_254_740_991u64
         {
             return Err(EngineError::InvalidState("invalid random tape".into()));
         }

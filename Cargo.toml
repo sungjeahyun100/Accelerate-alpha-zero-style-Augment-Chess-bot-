@@ -5,6 +5,7 @@ members = [
   "projects/accelerate/native",
   "projects/accelerate/runtime",
   "projects/augment-chess/contracts",
+  "projects/augment-chess/browser",
   "projects/augment-chess/engine",
   "projects/augment-chess/tools/v6-migration",
 ]
