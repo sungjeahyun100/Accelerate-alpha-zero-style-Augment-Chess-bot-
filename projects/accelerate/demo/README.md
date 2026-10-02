@@ -113,6 +113,16 @@ reports 슬롯의 `native-fixtures.json`에 저장한다. `test:wasm` 전에 실
 이 조건을 확인한다. 시험용 compiled 파일은 별도 CI artifact로만 보존한다.
 Chromium 자동 검사, Chrome·Edge의 관측한 실행, HF iframe에서의 관측한 실행을 구분해 보고한다.
 
+native 조건화 통합의 CHAOS 완료 검사는 공개 드래프트에서 수동으로 활성화하는
+`switcheroo`/`royal-command` 묶음을 선택한다. 같은 2개 드래프트와 양쪽의 이동,
+입자 2개·제안 16개·전이 후보 4096개 한도, 전체 공개 관측·이력 비교와 재구성을 유지한다.
+이는 시험 입력 정책이며 게임 규칙이나 source-prior 알고리즘을 바꾸지 않는다.
+첫 묶음의 `otherworld`를 선택한 원래 경로는 첫 이동의 무작위 변화와 독립 RNG가
+일치하지 않아 유한한 제안 예산을 소진할 수 있다. 실제 Rust 검사는 균등 확률
+`p=q=1/8`, 가중치 1, 불일치 거절과 원본 snapshot 보존을 별도로 확인한다.
+이 완료 검사로 임의의 확률적 공개 이력을 16개 제안 안에 재구성한다고 보장하지 않는다.
+더 효율적인 확률 전이 제안과 그 `p/q` 근거는 부모 PR의 AI 후속 범위다.
+
 ## 수동 CI와 근거 재사용
 
 [Static browser demo validation](../../../.github/workflows/static-demo.yml)은 상시 유지하는
@@ -146,8 +156,9 @@ manifest의 소스 커밋을 확인한다. JS·WASM 응답 변조 시 각각 정
 개발 미리보기의 `test:browser`와 별도로 CI에서 항상 실행한다.
 
 묶음에는 `sdk: static`, `app_file: index.html`인 `README.md`, 화면·Worker·WASM·동결 공개
-카탈로그, `NOTICE.md`, `source-manifest.json`을 담는다. manifest는 Git commit과 상대 경로별
-크기·SHA256만 결속하고 로컬 경로나 사용자 이름을 기록하지 않는다. 경로 탈출·link·비밀
+카탈로그, `NOTICE.md`, `source-manifest.json`을 담는다. manifest는 Git commit·공개 소스
+저장소·계획된 HF 소유자와 상대 자산 경로별 크기·SHA256을 기록한다. checkout 절대 경로와
+로컬 계정 이름을 기록하지 않는다. 경로 탈출·link·비밀
 파일 형식·누락·변조를 거부하며 최대 512개, 파일당 32 MiB, 총 128 MiB로 제한한다.
 학습 모델은 이후 고정 revision·해시·인코더 계약을 확인하는 지연 로드 경계에서 제공한다.
 

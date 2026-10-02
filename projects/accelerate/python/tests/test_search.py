@@ -783,7 +783,13 @@ def test_native_supported_conditioned_modes_and_public_intent_integration(mode, 
 
 @pytest.mark.parametrize("mode", ["normal", "chaos"])
 def test_native_default_weighted_conditioning_completion_gate(mode, record_property):
-    """No skip: draft and both actors' play require real public posteriors."""
+    """No skip: public fixture choices complete draft and both actors' play.
+
+    Completion uses reviewed manual cards; source-prior stochastic rejection
+    is a separate contract, not a promise that every trace fits 16 proposals.
+    Both draft actors, both play actors, complete public projection/history,
+    reconstruction, and the original finite work limits remain required.
+    """
     from accelerate_chess import GameAdapterClient
     encoder = TypedEncoder(typed_spec())
     started = time.monotonic()
@@ -816,12 +822,36 @@ def _native_mode_flow(mode, draft_delete, encoder, GameAdapterClient):
         observation = trackers[actor].latest
         mode_before = observation["publicState"]["mode"]
         sampled = posterior.draw()
+        requested_bundle = None
+        if mode == "chaos" and mode_before == "draft" and actor == "white":
+            # This is a public test input policy, not a game-rule predicate.
+            # These source-pinned MIDDLE cards require manual activation and
+            # preserve the completion flow without an automatic Otherworld
+            # pawn draw on the first move. Real stochastic p/q and rejection
+            # remain covered by native source-prior tests.
+            choices = observation["publicState"]["draft"]["choices"]
+            requested_cards = {"switcheroo", "royal-command"}
+            candidates = [index // 2 for index in range(0, len(choices), 2)
+                          if {card["id"] for card in choices[index:index + 2]} == requested_cards]
+            assert len(candidates) == 1, (
+                "chaos completion fixture requires one public switcheroo/royal-command bundle; "
+                f"got {[card['id'] for card in choices]}"
+            )
+            requested_bundle = candidates[0]
+            assert all(card.get("phase") == "MIDDLE" for card in choices[
+                requested_bundle * 2:requested_bundle * 2 + 2
+            ]), "reviewed completion cards must retain their source-pinned MIDDLE metadata"
         streamed = None
         for actions, _ in _stream(sampled, 1, 4096):
-            if actions:
-                streamed = actions[0]
+            if not actions:
+                continue
+            candidate = actions[0]
+            public_intent = candidate.public_intent()
+            if (requested_bundle is None or public_intent.get("type") == "draftBundlePick"
+                    and public_intent.get("bundleIndex") == requested_bundle):
+                streamed = candidate
                 break
-        assert streamed is not None
+        assert streamed is not None, "source stream did not admit the requested public fixture intent"
         intent = streamed.public_intent()
         if mode_before == "draft" and trackers[actor].steps == 0:
             assert posterior.factory.bind_streamed_public_intent(sampled, streamed, intent) is streamed

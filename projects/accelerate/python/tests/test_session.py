@@ -942,15 +942,24 @@ def test_actual_native_cli_choose_bounded_episode_evaluate_and_explicit_activati
                                  architecture_family="mask-resnet")
     trace_path = session_directory / "public-trace.json"
     atomic_json(trace_path, PublicTracker(initial.observe(initial.decision_actor)).snapshot())
-    prefix = ["--artifact-root", str(session_directory), "--threads", "1", "--model-family", "mask-resnet"]
+    model_prefix = ["--artifact-root", str(session_directory), "--model-family", "mask-resnet"]
+    prefix = model_prefix + ["--threads", "1"]
     activation = session_directory / "models" / "active" / "activation.json"
     previous_activation = activation.read_bytes() if activation.exists() else None
-    arguments = ["--manifest", str(manifest), "--config", str(config_path), "--iterations", "4", "--depth", "1", "--particles", "2", "--proposals", "4"]
+    # This is a finite-work correctness check, not a one-second performance
+    # gate. Keep real Rust/ORT/tract calls and control only the Python clock;
+    # the elapsed branch below advances it after actual search has completed.
+    logical_now = 0.
+    monkeypatch.setattr(cli.time, "monotonic", lambda: logical_now)
+    arguments = ["--manifest", str(manifest), "--config", str(config_path), "--iterations", "4", "--depth", "1",
+                 "--particles", "2", "--proposals", "4", "--search-ms", "1000", "--belief-ms", "5000"]
+    episode_budget_ms = 10000
+    episode_limits = ["--max-plies", "1", "--elapsed-ms", str(episode_budget_ms)]
     assert cli.main(prefix + ["choose", "--trace", str(trace_path)] + arguments) == 0
     chosen = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert chosen["iterations"] == 4 and chosen["max_inference_batch"] == 4 and chosen["inference_batches"] == 2
     assert initial.bind_public_intent(chosen["intent"])
-    assert cli.main(prefix + ["selfplay", "--verification", "--run-id", "verification", "--max-plies", "1"] + arguments) == 0
+    assert cli.main(prefix + ["selfplay", "--verification", "--run-id", "verification"] + episode_limits + arguments) == 0
     capsys.readouterr()
     episode_path = session_directory / "datasets" / "verification" / "episode-0000.json"
     episode = ReplayEpisode.load(episode_path, contract)
@@ -959,7 +968,7 @@ def test_actual_native_cli_choose_bounded_episode_evaluate_and_explicit_activati
     assert cli.main(prefix + ["evaluate", "--manifest", str(manifest), "--backend", "tract", "--replay", str(episode_path), "--max-samples", "1"]) == 0
     capsys.readouterr()
     assert (activation.read_bytes() if activation.exists() else None) == previous_activation
-    assert cli.main(["--artifact-root", str(session_directory), "--threads", "2", "evaluate", "--manifest", str(manifest), "--backend", "tract", "--replay", str(episode_path)]) == 2
+    assert cli.main(model_prefix + ["--threads", "2", "evaluate", "--manifest", str(manifest), "--backend", "tract", "--replay", str(episode_path)]) == 2
     assert "requires threads=1" in capsys.readouterr().err
     assert (activation.read_bytes() if activation.exists() else None) == previous_activation
     assert cli.main(prefix + ["activate", "--manifest", str(manifest), "--sample-replay", str(episode_path),
@@ -972,22 +981,22 @@ def test_actual_native_cli_choose_bounded_episode_evaluate_and_explicit_activati
     capsys.readouterr()
     assert read_json(activation)["model_sha256"] == sha
     original_run = cli.InformationSetSearch.run
-    real_clock = cli.time.monotonic
-    deadline_expired = False
     def deadline_after_search(*args, **kwargs):
-        nonlocal deadline_expired
+        nonlocal logical_now
         result = original_run(*args, **kwargs)
-        deadline_expired = True
+        # Expire the explicit episode deadline by one millisecond only after
+        # real inference/search, before binding/applying the selected intent.
+        logical_now += (episode_budget_ms + 1) / 1000
         return result
-    monkeypatch.setattr(cli.time, "monotonic", lambda: real_clock() + (11. if deadline_expired else 0.))
     monkeypatch.setattr(cli.InformationSetSearch, "run", deadline_after_search)
-    assert cli.main(prefix + ["selfplay", "--verification", "--run-id", "elapsed", "--max-plies", "1"] + arguments) == 2
+    assert cli.main(prefix + ["selfplay", "--verification", "--run-id", "elapsed"] + episode_limits + arguments) == 2
     capsys.readouterr()
     elapsed = ReplayEpisode.load(session_directory / "datasets" / "elapsed" / "episode-0000.json", contract)
     assert elapsed.outcome == {"status": "unfinished", "winner": None, "reason": "elapsed"}
     assert len(elapsed.decisions) == 1 and not elapsed.decisions[0]["transition_completed"]
+    assert elapsed.decisions[0]["search"]["iterations"] == 4
     assert all(tracker.steps == 0 for tracker in elapsed.trackers.values())
-    monkeypatch.setattr(cli.time, "monotonic", real_clock)
+    logical_now = 0.
     # Cancel after actual Rust inference completes, before the selected choice
     # can bind/apply in the actual environment. Preserve the pending decision.
     def cancel_after_search(*args, **kwargs):
@@ -995,7 +1004,7 @@ def test_actual_native_cli_choose_bounded_episode_evaluate_and_explicit_activati
         signal.raise_signal(signal.SIGINT)
         return result
     monkeypatch.setattr(cli.InformationSetSearch, "run", cancel_after_search)
-    assert cli.main(prefix + ["selfplay", "--verification", "--run-id", "cancelled", "--max-plies", "1"] + arguments) == 130
+    assert cli.main(prefix + ["selfplay", "--verification", "--run-id", "cancelled"] + episode_limits + arguments) == 130
     capsys.readouterr()
     cancelled = ReplayEpisode.load(session_directory / "datasets" / "cancelled" / "episode-0000.json", contract)
     assert cancelled.outcome == {"status": "unfinished", "winner": None, "reason": "cancelled"}

@@ -40,6 +40,8 @@ def test_frozen_catalog_and_observation_policy_are_versioned_owned_copies():
 
 def _state():
     # A small explicit v7 host state tests field presence and game behavior.
+    # Frozen v7 endMove always updates the source-owned palaces array, even
+    # when no palace effect is active; absence is not an executable default.
     board = [[None for _ in range(8)] for _ in range(8)]
     for row, col, kind, color, identity in (
         (7, 7, "king", "white", "white-king"),
@@ -53,6 +55,7 @@ def _state():
             "middleDraftDone": True, "endDraftDone": False,
             "turnsTaken": {"white": 0, "black": 0}, "moveCount": 0,
             "castlingCanceled": {"white": False, "black": False},
+            "palaces": [],
             "deckSlots": {"white": [None], "black": []},
             "marker": {"nested": [1, True, None]}}
 
@@ -252,8 +255,15 @@ def test_lifetime_branching_and_stale_actions_are_immutable():
     assert (position.snapshot_revision, position.observe("white")) == before
     payload = action.public_intent()
     payload["destination"]["magicCapture"] = True
-    with pytest.raises(NativeError):
+    with pytest.raises(ValueError, match="destination needs exact integer row and col coordinates"):
         position.bind_public_intent(payload)
+    assert (position.snapshot_revision, position.observe("white")) == before
+    # Bypassing the Python facade must still reject private execution flags at
+    # the native host, preserving its precise error and the committed state.
+    request = _request(position._session, "public-actions", "bind-public-intent",
+                       {"kind": "bind_public_intent", "intent": payload})
+    with pytest.raises(NativeError, match="illegal_game_action"):
+        position._session.invoke(request)
     assert action.public_intent() != payload
     assert (position.snapshot_revision, position.observe("white")) == before
     assert position.apply(action).position.snapshot_revision == branch.snapshot_revision

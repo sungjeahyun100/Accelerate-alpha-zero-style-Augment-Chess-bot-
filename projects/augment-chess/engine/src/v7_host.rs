@@ -553,9 +553,9 @@ mod completion_tests {
                     piece["id"] = json!("test-large-rook");
                 }
                 let mut board = vec![vec![Value::Null; 8]; 8];
-                for row in 3..if source_large { 5 } else { 4 } {
-                    for col in 1..if source_large { 3 } else { 2 } {
-                        board[row][col] = piece.clone();
+                for row in &mut board[3..if source_large { 5 } else { 4 }] {
+                    for cell in &mut row[1..if source_large { 3 } else { 2 }] {
+                        *cell = piece.clone();
                     }
                 }
                 let original = V7HostPosition::from_parts(
