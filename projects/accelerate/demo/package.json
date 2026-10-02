@@ -1,0 +1,33 @@
+{
+  "name": "@accelerate/static-engine-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0 <23"
+  },
+  "scripts": {
+    "dev": "node scripts/build.mjs dev",
+    "check": "svelte-check --tsconfig ./tsconfig.json && tsc --project tsconfig.node.json --noEmit",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:browser": "playwright test",
+    "test:wasm": "node tests/wasm-roundtrip.mjs",
+    "test:native": "node scripts/build.mjs native",
+    "wasm": "node scripts/build.mjs wasm",
+    "wasm-test": "node scripts/build.mjs wasm-test",
+    "build": "node scripts/build.mjs build",
+    "bundle": "node scripts/delivery.mjs bundle",
+    "verify-bundle": "node scripts/delivery.mjs verify",
+    "preview": "node scripts/build.mjs preview",
+    "paths": "node scripts/paths.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@types/node": "22.20.5",
+    "svelte": "5.57.1",
+    "svelte-check": "4.7.6",
+    "typescript": "6.0.3",
+    "vite": "8.3.2"
+  }
+}
