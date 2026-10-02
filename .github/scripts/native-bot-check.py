@@ -481,7 +481,7 @@ def tests():
         "projects/accelerate/python/tests/test_inference_runtime.py", "projects/accelerate/python/tests/test_search.py", "projects/accelerate/python/tests/test_session.py",
         "projects/accelerate/python/tests/test_adapter_client.py", "projects/accelerate/python/tests/test_architecture_v1.py",
         "-p", "no:cacheprovider",
-        "--junitxml", report, "-ra")
+        "--junitxml", report, "-ra", timeout=1800)
     suites = ET.parse(report).getroot().findall("testsuite")
     if not suites or any(int(suite.get("skipped", "0")) for suite in suites):
         raise RuntimeError("native bot CI requires real tests with no skips")
