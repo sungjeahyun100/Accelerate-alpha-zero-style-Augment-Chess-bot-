@@ -1582,8 +1582,40 @@ mod tests {
                     .get("hostAction")
                     .filter(|value| value.is_object())
                     .ok_or_else(|| invalid("source UI hostAction is missing"))?;
-                let action =
-                    crate::v7_action_surface::resolve_public_move(before.state(), public_intent)?;
+                // 원문 receipt의 좌표는 UI 몸체 별칭 클릭이다. 원문과 같은
+                // native query 순서로 descriptor를 고른 뒤 canonical 공개
+                // intent로 투영한다. source hostAction은 실행 입력으로 쓰지 않는다.
+                let mut clicked_target = None;
+                for target in &moves {
+                    if crate::movement::v7_click_cells(target)?.contains(&destination) {
+                        clicked_target = Some(target.clone());
+                        break;
+                    }
+                }
+                let clicked_action = crate::Action::movement(
+                    before.state().turn,
+                    selected.origin,
+                    clicked_target
+                        .ok_or_else(|| invalid("native UI click has no move descriptor"))?,
+                );
+                let canonical_intents = crate::v7_action_surface::quantum_ui_public_intents(
+                    before.state(),
+                    &clicked_action,
+                )?
+                .ok_or_else(|| invalid("native UI descriptor lacks a quantum public projection"))?;
+                let canonical_intent = canonical_intents.first().ok_or_else(|| {
+                    invalid("native UI descriptor has no canonical public intent")
+                })?;
+                let action = crate::v7_action_surface::resolve_public_move(
+                    before.state(),
+                    canonical_intent,
+                )?;
+                compare_value(
+                    &serde_json::to_value(&clicked_action).map_err(EngineError::serialization)?,
+                    &serde_json::to_value(&action).map_err(EngineError::serialization)?,
+                    &format!("{name}.canonicalBinding.nativeUiAction"),
+                    mismatches,
+                )?;
                 compare_value(
                     source_action,
                     &serde_json::to_value(&action).map_err(EngineError::serialization)?,

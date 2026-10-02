@@ -15,7 +15,7 @@ const SOURCE_SHA256: &str = "e5ed84fcf8e72a24e6a8cfeb9050787387a616c55184e6501fc
 // faithful175 재생성 자료. 기존 21개 입력·행동·순서와 source 출력의 이행 감사가
 // 완료된 전체 corpus만 사용한다. 원문 자료 생성 성공은 native 성공과 별도다.
 const SOURCE_CASES_SHA256: &str =
-    "ec6fcbcbd3067eec61838298a600d49c808038ef206db48d5f99ee943d0e6471";
+    "5de198ccdb213481126c4f9af832b50d45f150be740ee175b6caf3d7653f52ab";
 const PROFILE: &str = "accelerate-headless-semantic-v7-faithful-init-v1";
 const EXPECTED_CASES: usize = 21;
 const MAX_SOURCE_BYTES: u64 = 128 * 1024 * 1024;

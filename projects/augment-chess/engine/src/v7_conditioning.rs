@@ -1306,69 +1306,16 @@ mod tests {
         cases
     }
 
-    fn first_receipt_difference(actual: &Value, expected: &Value, path: &str) -> Option<String> {
-        if actual == expected {
-            return None;
-        }
-        match (actual, expected) {
-            (Value::Object(actual), Value::Object(expected)) => {
-                let keys = actual
-                    .keys()
-                    .chain(expected.keys())
-                    .collect::<std::collections::BTreeSet<_>>();
-                // 전체 identity 비교는 유지하되, 파생 hash가 원인인 state/RNG/
-                // history 차이를 가리지 않도록 진단에서만 마지막에 살핀다.
-                let derived_identity =
-                    |key: &&String| matches!(key.as_str(), "positionId" | "informationStateKey");
-                for key in keys
-                    .iter()
-                    .copied()
-                    .filter(|key| !derived_identity(key))
-                    .chain(keys.iter().copied().filter(derived_identity))
-                {
-                    let child = format!("{path}.{key}");
-                    match (actual.get(key), expected.get(key)) {
-                        (Some(actual), Some(expected)) => {
-                            if let Some(difference) =
-                                first_receipt_difference(actual, expected, &child)
-                            {
-                                return Some(difference);
-                            }
-                        }
-                        (actual, expected) => {
-                            return Some(format!(
-                                "{child}: actual={actual:?}, expected={expected:?}"
-                            ));
-                        }
-                    }
-                }
-                None
-            }
-            (Value::Array(actual), Value::Array(expected)) if actual.len() == expected.len() => {
-                actual
-                    .iter()
-                    .zip(expected)
-                    .enumerate()
-                    .find_map(|(index, (actual, expected))| {
-                        first_receipt_difference(actual, expected, &format!("{path}[{index}]"))
-                    })
-            }
-            (Value::Array(actual), Value::Array(expected)) => Some(format!(
-                "{path}: actual length {}, expected length {}",
-                actual.len(),
-                expected.len()
-            )),
-            _ => Some(format!("{path}: actual={actual}, expected={expected}")),
-        }
-    }
-
     fn assert_receipt_json_eq(actual: &Value, expected: &Value, context: &str) {
-        if !same_content(actual, expected).unwrap() {
-            panic!(
-                "{context}: {}",
-                first_receipt_difference(actual, expected, "$").unwrap()
-            );
-        }
+        let mut mismatches = Vec::new();
+        crate::tests::source_callback_fixture::compare_value(
+            expected,
+            actual,
+            context,
+            &mut mismatches,
+        )
+        .unwrap();
+        assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
     }
 
     fn apply_faithful_receipt_step(

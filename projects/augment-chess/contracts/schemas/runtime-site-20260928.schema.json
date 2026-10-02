@@ -2696,7 +2696,7 @@
               }
             },
             "projectionVersion": {
-              "const": "source-visible-20260928-v1"
+              "const": "source-visible-20260928-v2"
             },
             "observationPolicyHash": {
               "type": "string",
@@ -4435,6 +4435,22 @@
                   "maximum": 9007199254740991
                 }
               },
+              "additionalProperties": false
+            },
+            "reversal": {
+              "type": "object",
+              "properties": {
+                "white": {
+                  "type": "boolean"
+                },
+                "black": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "white",
+                "black"
+              ],
               "additionalProperties": false
             },
             "revolvingDoorGuard": {

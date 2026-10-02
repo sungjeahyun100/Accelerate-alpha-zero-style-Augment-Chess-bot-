@@ -184,7 +184,7 @@ def test_source_pinned_grappler_primary_hint_allows_compound_public_choices():
     # at d1, while the source exposes four public minor choices at b1/c1/f1/g1.
     instance = "grappler-xvn13x9he"
     observation = {"publicState": {"rulesVersion": catalog["rulesVersion"],
-        "projectionVersion": "source-visible-20260928-v1", "legalHints": {"moves": [], "cardTargets": [
+        "projectionVersion": "source-visible-20260928-v2", "legalHints": {"moves": [], "cardTargets": [
         {"cardInstanceId": instance, "targets": [{"row": 7, "col": 3}]}
     ]}}}
     intent = {"type": "card", "color": "white", "cardId": "grappler", "cardInstanceId": instance}

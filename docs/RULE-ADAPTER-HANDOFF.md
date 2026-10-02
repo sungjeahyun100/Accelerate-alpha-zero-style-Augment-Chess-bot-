@@ -10,12 +10,36 @@ strict lint·구조 검사, PR #28 base 통합, Windows/Linux `core_only` CI와 
 실제 봇 연동·sdist/wheel 빌드와 설치·성능 측정은 제외하며 기존 소스·검사 코드의 존재를
 실행 성공으로 기록하지 않는다. 전체 프로젝트 GO는 이번 검증 완료와 구분한다.
 
-메인이 관측한 Rust 1.96의 fmt와 core 4개 crate의 `--all-targets --locked -- -D warnings`
-strict Clippy는 PASS다. Node 6개 파일의 검사 62개(skip 0), CI helper 17개, 저장소 구조
-검사 테스트 14개, 변경 Python 8개 파일의 AST 검사, Actionlint 1.7.12의 workflow 2개도
-PASS다. AST 검사는 Python 소비자 실행이나 설치본 검증이 아니다.
+공개 관측 v2와 PR #36 로컬 통합 이후 메인이 관측한 Node 6개 파일·63개 검사(skip 0),
+카드 표면 8/8 shard의 256개 카드×3스타일 768개 bounded cell, Rust 1.96 fmt와 core
+4개 crate의 all-targets strict Clippy(`-D warnings`)는 PASS다. 새 core 실행은 engine
+단위 720개·통합 20개, 공통 registry 9개·v6 변환 6개 PASS이며 컴파일 경고는 0건이다.
+source-input 53개 ignored를 자동 PASS로 세지 않는다. 실제 core 결과는
+`reports/root-pr32-v2-final-core-summary.json`에 결속한다. native quantum UI의
+query 6개·move 4개와 새 원문 내부 21국면·42 apply 표본의 비교 필터도 PASS다.
+weighted source는 원래 helper를 그대로 복사해 재실행했고 `publicAfter` 외 raw 필드가
+이전 자료와 완전히 같다는 guard를 통과했다. 공유 JCS 비교기는 실제 차이를 엄격히
+검사한다. 새 core와 full105 계획 `reports/root-pr32-finish-v2-final105-jobs.json`의
+105개 작업은 모두 PASS다. 실패 0건·컴파일 경고 0건이며 모든 작업의 source digest는
+`7468646c4378cc6dfd8d06ac84287a630148a0ca056823dd428c22d72ff22c9f`로 전후 동일하다.
+계획·요약 SHA와 Windows에 보존한 111개 자료의 범위는 [인수 장부](V7-ACCEPTANCE-CLOSURE.md)를
+따른다. 같은 head의 원격 CI·통합 commit·push·병합 상태는 PR #32 본문의 실제 관측에
+별도로 결속하며 로컬 PASS로 원격 성공을 대신하지 않는다.
+Python 정책 identity를 v2로 정합화한 3개 파일의 새 AST 검사도 PASS다. 이전 AST
+8개 대상 중 `test_search.py`만 재변경했고 `encoding.py`·`test_model_stack.py`는 새 대상이다.
+변경 없는 기존 7개 blob의 결과 재사용과 현재 3개 AST PASS로 유일 대상 10개를 결속한다.
+`reports/root-pr32-v2-python-identity-ast.json`에 결속하며 실제 Python/native/ONNX
+소비자·봇·runtime 실행 성공으로 확대하지 않는다.
+workflow 2개·CI helper 4개의 HEAD·index·working blob이 동일함을 확인해 기존 정적
+검사 결과를 재사용한다.
 
-최종 계획 `reports/root-pr32-finish-final105-jobs.json`의 105개 작업은 모두 PASS다.
+공개 관측 v2 변경 전 메인이 관측한 Rust 1.96 fmt와 core 4개 crate strict Clippy,
+로컬 Node 6개 파일의 검사 62개(skip 0), CI helper 17개, 저장소 구조
+검사 테스트 14개, 변경 Python 8개 파일의 AST 검사, Actionlint 1.7.12의 workflow 2개도
+당시 PASS였다. AST 검사는 Python 소비자 실행이나 설치본 검증이 아니다.
+
+공개 관측 v2 변경 전 계획 `reports/root-pr32-finish-final105-jobs.json`의 105개 작업은
+모두 PASS다.
 engine all-targets는 단위 713개·통합 20개 PASS, source-input 53개 ignored이며
 추가 104개 작업에서 입력을 결속한 차분·회귀를 수행했다. 공통 registry 9개와 v6 변환
 6개도 PASS다. 모든 작업의 source digest는 `5638d6c8…` 전후 동일하고 컴파일 경고는 0건이다.
@@ -26,6 +50,28 @@ PR #28 base `45edfe1`을 통합한 검증 checkpoint를 merge commit으로 공�
 [PR #32](https://github.com/sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-/pull/32)에
 별도로 기록한다. 자동 PR 검사에 포함된 봇·wheel을 실행하지 않도록 `[skip ci]`와
 수동 `core_only=true, adapter_only=false` 실행을 사용하며 전체 CI 성공으로 확대하지 않는다.
+
+첫 [core_only CI run 36984620438](https://github.com/sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-/actions/runs/36984620438)은
+head `ab30c2c2793edbad3835ee8bf3b5c9444033f76e`에서 Windows/Linux Rust와 Windows JS는
+성공했지만 Linux JS는 실패했다. Linux shard 2/8의 `reversal` 카드 normal/chaos/grand
+검사는 정확한 오류 `Unclassified site state fields require a visibility review: reversal`로
+종료했다. 공개 관측 v2 변경 전 native105와 Node 62개의 PASS는 당시 source
+closure·제공 입력의 검증 결과이며 JS CI 전체 성공을 증명하지 않는다. 동결 원문의
+공개 owner flag를 반영한 `source-visible-20260928-v2`의 입력 계약으로 이 PASS를
+옮기지 않는다. v2 변경 후 native105의 새 실제 결과는 상단과 인수 장부를 따르고,
+후속 head·run의 원격 관측 결과는 PR #32 본문에 별도로 결속한다. 이 최초 실패 기록을 후속 CI 성공으로 바꾸거나
+미관측 결과를 PASS로 표시하지 않는다.
+
+[PR #36](https://github.com/sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-/pull/36)의
+`fix/large-piece-contract` head `4ccf28f`를 PR #32 작업 트리에 로컬 통합해 검토했다.
+검토에서 발견한 문제는 4셀 정지 행동의 공개 intent가 오른쪽·아래 1칸 anchor 이동과 중복되어
+전체 후보 resolver가 정지를 선택하는 경우, v6 `large_rays`의 셀·포획 순서 변화,
+새 `as_u64` helper가 `3.0`/`3` 혼합형 정수 anchor를 거절하는 경우다. 최소 수정 후
+세 회귀는 red 3건→green 3건으로 전환했다. v2 이후 첫105의 101 PASS·4 FAIL은
+UI 클릭과 canonical 행동 경계 1건, 이전 원문 사례 SHA 1건, weighted v1 관측 2건으로
+보존하며 입력 재생성과 후속 실행 범위는 [인수 장부](V7-ACCEPTANCE-CLOSURE.md)를 따른다.
+통합 commit·push·원격 병합 및 새 full105의 실제 결과는 PR #32 본문에 별도로
+결속한다. 세 회귀의 PASS는 전체105나 원격 병합의 성공을 뜻하지 않는다.
 
 ## 공유 계약
 
@@ -84,7 +130,7 @@ trait AdapterObject<S, P, R>: Send + Sync {
 1. **공유 계약**: `packages/adapter-contract/`의 schema ID/hash와 `packages/adapter-runtime/`의 sealed registry, exact 버전/schema 선택, 읽기·transaction 분리, 취소·한도·rollback은 구현됐다. 서로 다른 두 가짜 프로젝트로 wire 왕복과 오류 경계를 검사했다. 게임 타입을 공유 패키지로 옮기지 않는다.
 2. **게임 host와 형식**: `V7HostPosition`은 source envelope/JCS identity와 staged state·RNG·history의 원자성을 담당한다. 게임 전용 계약 자료는 `projects/augment-chess/contracts/`, v6 읽기·검증된 부분 변환은 `projects/augment-chess/tools/v6-migration/`에 둔다. 실제 원문 Position 왕복은 국소 증거이며 전이 정답은 별도로 검증한다.
 3. **규칙 객체**: 이동·카드의 정적 객체 registry, 특수 기물/RULE 직접 효과와 턴 중간 callback의 이관 구현을 기능 유형별 단일 담당으로 저장했다. raw 후보, UI 힌트, AI 공개 의도, `AiNoCards` 위협 후보를 서로 바꾸어 사용하지 않는다. 미지원 활성 분기는 정확한 오류를 유지하며 저장 사실을 전체 규칙 실행 완료로 취급하지 않는다.
-4. **통합**: 공통 `GameAdapterSession`에는 source-versioned `public-observation/observe`와 `public-actions`의 `legal-actions`·`legal-actions-page`·`bind-public-intent`·`apply-public-intent`가 등록됐다. draft 외 play의 원문 순서 후보·선택 family 검증과 transaction 실행을 연결했으며 실패·취소·한도 초과 시 state/RNG/history를 버린다. 공개 page는 발급된 불투명 cursor, page 1..4096, examined 1..65536과 snapshot identity를 결속한다. 이 통합의 bounded source comparator는 2026-10-01 전달105에서 통과했으며 변경 후 새105의 결과는 진행 중이다. 단일 RULE 시작 상태 324개와 source internal 21사례·43표본, normal/chaos 실제 첫 이동 2개의 faithful scoped PASS도 당시 실행에 한정한다. 이전 복합 설정 7개·draft 국소 근거와 현재 실행을 혼용하지 않는다. 관측 기반 `public_transition_compatible`·`apply_weighted_conditioned_public`의 play 분기는 저장됐다. 한 번의 source-prior-v1 실행·실제 carried draw trace·전체 공개 projection 동등성과 opaque identity 결속의 source chance9/source prior3 및 전달105 bounded 회귀가 당시 PASS였다. 경로 질량은 IID 연속 난수 해석이며 유한 LCG seed 전체의 정확한 posterior나 모든 조합의 확률 완전성은 증명하지 않는다. Python 소비자 검사 코드는 저장됐으나 설치 wheel·실제 봇 연동은 사용자 범위 조정으로 미실행·미검증 후속 항목이다. 객체 등록을 전체 play 지원의 증거로 취급하지 않는다.
+4. **통합**: 공통 `GameAdapterSession`에는 source-versioned `public-observation/observe`와 `public-actions`의 `legal-actions`·`legal-actions-page`·`bind-public-intent`·`apply-public-intent`가 등록됐다. draft 외 play의 원문 순서 후보·선택 family 검증과 transaction 실행을 연결했으며 실패·취소·한도 초과 시 state/RNG/history를 버린다. 공개 page는 발급된 불투명 cursor, page 1..4096, examined 1..65536과 snapshot identity를 결속한다. 이 통합의 bounded source comparator는 2026-10-01 전달105와 2026-10-02 공개 관측 v2 변경 전105에서 각각 통과했다. v2 변경 후 새 내부21의 42 apply 표본과 새 실제 full105 PASS는 상단 결과를 따른다. 단일 RULE 시작 상태 324개와 source internal 21사례·43표본, normal/chaos 실제 첫 이동 2개의 faithful scoped PASS도 당시 실행에 한정한다. 이전 복합 설정 7개·draft 국소 근거와 현재 실행을 혼용하지 않는다. 관측 기반 `public_transition_compatible`·`apply_weighted_conditioned_public`의 play 분기는 저장됐다. 한 번의 source-prior-v1 실행·실제 carried draw trace·전체 공개 projection 동등성과 opaque identity 결속의 source chance9/source prior3 및 전달105 bounded 회귀가 당시 PASS였다. 경로 질량은 IID 연속 난수 해석이며 유한 LCG seed 전체의 정확한 posterior나 모든 조합의 확률 완전성은 증명하지 않는다. Python 소비자 검사 코드는 저장됐으나 설치 wheel·실제 봇 연동은 사용자 범위 조정으로 미실행·미검증 후속 항목이다. 객체 등록을 전체 play 지원의 증거로 취급하지 않는다.
 5. **이번 후속 gate**: source loader의 legal/reject/full state/RNG/history/result와 source-reachable 분기 장부, core/common/JS/source 회귀·strict lint·구조 검사, PR #28 base 통합과 Windows/Linux `core_only` CI, PR #32 커밋/push·원격 SHA를 확인한다. 설치 wheel·실제 봇 연동·성능 측정과 전체 프로젝트 GO는 별도다. v6 내부 회귀 검사는 v7 실행 근거가 아니며 공개 v6 규칙 실행은 열지 않는다.
 
 같은 유형의 작업에 두 구현자를 동시에 배치하지 않는다. 파일 하나마다 담당자를 나누지 않고 기능·변경 이유·API 책임으로 유형을 정한다. `lib.rs`·`transition.rs`처럼 공통 호출 순서를 바꾸는 파일은 인터페이스가 안정된 뒤 통합 담당자가 순차적으로 수정한다. N-version과 동결 JS oracle은 검증용이고 운영 fallback이 아니다. 카드별 거대 snapshot fixture를 쌓지 않고 기존 작은 사례와 저장소 밖 보고서를 이용한다.

@@ -1425,6 +1425,10 @@ pub(crate) fn quantum_ui_public_intents(
             intent["from"] = serde_json::to_value(origin).map_err(EngineError::serialization)?;
             intents.push(intent);
         }
+        if piece.is_large() {
+            // One ghost body has one public origin for the same translation.
+            break;
+        }
     }
     Ok(Some(intents))
 }
@@ -1434,6 +1438,45 @@ mod tests {
     use super::*;
     use crate::GameConfig;
     use serde_json::json;
+
+    #[test]
+    fn large_quantum_body_projects_one_public_move_origin() {
+        let mut state = GameState::new(GameConfig::default(), 19).unwrap();
+        state.ruleset_id = RULES_VERSION_V7.into();
+        state.mode = "play".into();
+        state.turn = Color::White;
+        state.board = vec![vec![None; 8]; 8];
+        let physical = crate::Square { row: 5, col: 5 };
+        let ghost = crate::Square { row: 2, col: 2 };
+        let destination = crate::Square { row: 2, col: 3 };
+        let mut piece = crate::Piece::new("bigRook", Color::White, "quantum-large");
+        piece.extra.insert("anchorRow".into(), json!(physical.row));
+        piece.extra.insert("anchorCol".into(), json!(physical.col));
+        piece.extra.insert("quantum".into(), json!(ghost));
+        for row in 5..=6 {
+            for col in 5..=6 {
+                state.board[row][col] = Some(piece.clone());
+            }
+        }
+        let mut target = crate::MoveTarget::at(destination);
+        target.flags.insert("bigRookMove".into(), json!(true));
+        target.flags.insert("quantumFrom".into(), json!(ghost));
+        target.flags.insert(
+            "highlightCells".into(),
+            json!([
+                {"row":2,"col":3}, {"row":2,"col":4},
+                {"row":3,"col":3}, {"row":3,"col":4}
+            ]),
+        );
+        let action = Action::movement(Color::White, physical, target);
+        let intents = quantum_ui_public_intents(&state, &action).unwrap().unwrap();
+        assert_eq!(
+            intents,
+            vec![json!({
+                "type":"move", "color":"white", "from":ghost, "destination":destination
+            })]
+        );
+    }
 
     fn first_play(style: &str) -> GameState {
         let mut state = crate::draft::initialize_for_ruleset(

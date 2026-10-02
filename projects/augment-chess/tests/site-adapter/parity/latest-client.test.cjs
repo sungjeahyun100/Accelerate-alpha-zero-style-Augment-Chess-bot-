@@ -156,6 +156,62 @@ test("unknown source state is named in the visibility failure and later calls re
   adapter.dispose();
 });
 
+test("reversal projects source activation, movement and expiry for both viewers in every style", () => {
+  for (const style of ["normal", "chaos", "grand"]) {
+    const direct = makeDirect();
+    direct.newGame({ gameStyle: style, draftDelete: true }, 19);
+    direct.evaluate(`
+      state.mode='play';state.turn='white';state.board=Array.from({length:8},()=>Array(8).fill(null));
+      state.board[7][7]=piece('white','king');state.board[0][7]=piece('black','king');
+      state.board[4][3]=piece('white','rook');state.board[5][3]=piece('white','bishop');
+      state.board[6][1]=piece('white','knight');state.positionCounts=new Map();
+      state.deckSlots.white=[cloneCard(CARD_DEFS.find(card=>card.id==='reversal')),null,null];
+      state.deckSlots.black=[null,null,null];state.deck.white=state.deckSlots.white.filter(Boolean);
+      state.deck.black=[];state.playerCards=state.deckSlots;
+    `);
+    const before = direct.snapshot();
+    const saved = JSON.stringify(before);
+    const adapter = makeAdapter();
+    try {
+      const action = contract.action(before, { type: "card", color: "white", cardId: "reversal",
+        cardInstanceId: before.state.deckSlots.white[0].instanceId, target: { row: 6, col: 1 } });
+      const step = adapter.apply(before, action, { recordHistory: false });
+      assert.equal(step.ok, true, `${style}: ${step.error?.message}`);
+      assert.deepEqual(step.position.state.reversal, { white: true, black: false });
+      assert.equal(step.position.state.board[6][1], null, "the source sacrifices the selected minor");
+      assert.equal(JSON.stringify(before), saved, "activation preserves the caller's snapshot");
+      for (const viewer of ["white", "black"]) {
+        const observation = adapter.observe(step.position, viewer);
+        contract.validateObservation(observation);
+        assert.deepEqual(observation.publicState.reversal, { white: true, black: false });
+        assert.notStrictEqual(observation.publicState.reversal, step.position.state.reversal);
+        assert.ok(Object.isFrozen(observation.publicState.reversal));
+      }
+      const hints = adapter.publicHints(step.position, "white");
+      const destinations = (row, col) => hints.moves.find(move => move.from.row === row && move.from.col === col)?.destinations || [];
+      assert.ok(destinations(4, 3).some(square => square.row === 3 && square.col === 2), "active rook uses source bishop directions");
+      assert.ok(destinations(5, 3).some(square => square.row === 5 && square.col === 2), "active bishop uses source rook directions");
+      const unexpected = copy(step.position.state);
+      unexpected.reversal.futureChoice = "unreviewed";
+      assert.throws(() => adapter.observe(contract.position(unexpected, step.position.rng), "white"),
+        /Invalid source public value.*reversal.*futureChoice/);
+      const invalidFlag = copy(step.position.state);
+      invalidFlag.reversal.white = "true";
+      assert.throws(() => adapter.observe(contract.position(invalidFlag, step.position.rng), "white"),
+        /Invalid source public value.*reversal\.white/);
+      direct.restore(step.position);
+      direct.evaluate("completeTurnAfterMove('white')");
+      const expired = direct.snapshot();
+      assert.deepEqual(expired.state.reversal, { white: false, black: false });
+      for (const viewer of ["white", "black"]) {
+        assert.deepEqual(adapter.observe(expired, viewer).publicState.reversal, { white: false, black: false });
+      }
+    } finally {
+      adapter.dispose();
+    }
+  }
+});
+
 test("independent cursors retain page order across observation and rejected apply", () => {
   const adapter = makeAdapter();
   const position = adapter.newGame({ draftDelete: true }, 22);

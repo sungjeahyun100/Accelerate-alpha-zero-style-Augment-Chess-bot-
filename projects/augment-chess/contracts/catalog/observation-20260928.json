@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "protocolVersion": "accelerate-observation-v2",
-  "projectionVersion": "source-visible-20260928-v1",
+  "projectionVersion": "source-visible-20260928-v2",
   "rulesVersion": "augment-site-20260928-e5ed84fcf8e72a24",
   "statePublicFields": [
     "acceleration",
@@ -107,6 +107,7 @@
     "religiousVictory",
     "resolve",
     "retreat",
+    "reversal",
     "revolvingDoorGuard",
     "roller",
     "rookLift",
@@ -384,6 +385,7 @@
       "synchronization",
       "assembly",
       "vigilance",
+      "reversal",
       "roller",
       "proficiency",
       "majesty",
@@ -4293,6 +4295,19 @@
         111175
       ]
     },
+    "reversal": {
+      "representation": "공개 반전 카드의 진영별 활성 여부만 보존한다. 공개 getLegalMoves에서 룩과 비숍의 방향을 바꾸며 해당 진영 턴이 끝나면 해제된다. 기물 식별자·좌표·미래 난수는 포함하지 않는다.",
+      "sourceAnchors": [
+        82751,
+        93661,
+        95730,
+        95739,
+        100187,
+        100194,
+        100195,
+        110952
+      ]
+    },
     "revolvingDoorGuard": {
       "representation": "public rule configuration or publicly activated owner flag; no piece identity/coordinates",
       "sourceAnchors": [
@@ -6204,6 +6219,22 @@
           "maximum": 9007199254740991
         }
       },
+      "additionalProperties": false
+    },
+    "reversal": {
+      "type": "object",
+      "properties": {
+        "white": {
+          "type": "boolean"
+        },
+        "black": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "white",
+        "black"
+      ],
       "additionalProperties": false
     },
     "revolvingDoorGuard": {

@@ -15,7 +15,14 @@ const LEGACY = "20260927";
 const CURRENT = "20260928";
 const EXPECTED_MAIN_SHA256 = "e5ed84fcf8e72a24e6a8cfeb9050787387a616c55184e6501fca2077e302c45c";
 const RULES_VERSION = `augment-site-${CURRENT}-${EXPECTED_MAIN_SHA256.slice(0, 16)}`;
-const PROJECTION_VERSION = "source-visible-20260928-v1";
+const PROJECTION_VERSION = "source-visible-20260928-v2";
+const REVERSAL_PUBLIC_SCHEMA = { type: "object",
+  properties: { white: { type: "boolean" }, black: { type: "boolean" } },
+  required: ["white", "black"], additionalProperties: false };
+const REVERSAL_FIELD_EVIDENCE = {
+  representation: "공개 반전 카드의 진영별 활성 여부만 보존한다. 공개 getLegalMoves에서 룩과 비숍의 방향을 바꾸며 해당 진영 턴이 끝나면 해제된다. 기물 식별자·좌표·미래 난수는 포함하지 않는다.",
+  sourceAnchors: [82751, 93661, 95730, 95739, 100187, 100194, 100195, 110952],
+};
 const EXECUTION_PROFILE = executionProfileForSha(EXPECTED_MAIN_SHA256);
 const PROFILE_VERSION = EXECUTION_PROFILE.profileVersion;
 const EXECUTION_PROFILE_SHA256 = metadataDigest(EXECUTION_PROFILE);
@@ -34,6 +41,15 @@ function materialize(target, value, write) {
   if (write) fs.writeFileSync(target, content);
   else assert.equal(fs.readFileSync(target, "utf8").replace(/\r\n/g, "\n"), content,
     `Frozen baseline metadata differs: ${path.basename(target)}`);
+}
+
+function withReviewedReversalField(fields, value) {
+  const entries = Object.entries(fields);
+  const index = entries.findIndex(([name]) => name === "revolvingDoorGuard");
+  assert.ok(index >= 0 && !Object.hasOwn(fields, "reversal"),
+    "Expected the legacy projection before the reviewed reversal field.");
+  entries.splice(index, 0, ["reversal", value]);
+  return Object.fromEntries(entries);
 }
 
 function deriveInitialTemplate(root, main, previous) {
@@ -256,9 +272,17 @@ function prepare(root, { write = false } = {}) {
   const visibilityReview = oldObservation.visibilityReview.replace("remaining 52 raw state fields", "remaining 53 raw state fields");
   assert.notEqual(visibilityReview, oldObservation.visibilityReview,
     "Expected the pre-Othello visibility review count.");
+  assert.ok(!oldObservation.statePublicFields.includes("reversal") &&
+    oldObservation.dynamicPublicFieldEvidence.fields.includes("roller"),
+  "Expected the inherited public state before the reviewed reversal field.");
   const currentObservation = { ...oldObservation, rulesVersion: RULES_VERSION,
     projectionVersion: PROJECTION_VERSION,
+    statePublicFields: [...oldObservation.statePublicFields, "reversal"].sort(),
     stateFieldClassification: { ...oldObservation.stateFieldClassification, internalBookkeeping },
+    dynamicPublicFieldEvidence: { ...oldObservation.dynamicPublicFieldEvidence,
+      fields: oldObservation.dynamicPublicFieldEvidence.fields.flatMap(name => name === "roller" ? ["reversal", name] : [name]) },
+    reviewedFieldEvidence: withReviewedReversalField(oldObservation.reviewedFieldEvidence, REVERSAL_FIELD_EVIDENCE),
+    stateValueSchemas: withReviewedReversalField(oldObservation.stateValueSchemas, REVERSAL_PUBLIC_SCHEMA),
     visibilityReview,
     remainingStateReview: Object.fromEntries(oldReview),
     sourceAudit: {
@@ -289,6 +313,8 @@ function prepare(root, { write = false } = {}) {
   assert.equal(currentSchema.$defs.Position.properties.catalogVersion.const, oldSite.catalogVersion,
     "Expected the legacy official catalog constant before applying the execution profile identity");
   currentSchema.$defs.Position.properties.catalogVersion.const = CATALOG_VERSION;
+  currentSchema.$defs.Observation.properties.publicState.properties = withReviewedReversalField(
+    currentSchema.$defs.Observation.properties.publicState.properties, REVERSAL_PUBLIC_SCHEMA);
   currentSchema.$id = `runtime-site-${CURRENT}.schema.json`;
 
   const currentSchemaPath = path.resolve(__dirname, `../../../contracts/schemas/runtime-site-${CURRENT}.schema.json`);

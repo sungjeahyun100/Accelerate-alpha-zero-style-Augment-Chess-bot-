@@ -325,7 +325,7 @@ fn frozen_baseline(rules_version: &str) -> Result<(Value, Value, &'static str)> 
         "augment-site-20260928-e5ed84fcf8e72a24" => (
             include_str!("../../../augment-chess/contracts/catalog/site-20260928.json"),
             include_str!("../../../augment-chess/contracts/catalog/observation-20260928.json"),
-            "source-visible-20260928-v1",
+            "source-visible-20260928-v2",
         ),
         _ => anyhow::bail!("unsupported frozen rules version"),
     };

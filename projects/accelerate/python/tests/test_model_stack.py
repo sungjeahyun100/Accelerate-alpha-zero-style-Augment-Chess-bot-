@@ -447,7 +447,7 @@ def test_frozen_v7_public_projection_is_explicit_and_incompatible_with_v6():
     latest = EncoderSpec.from_catalog(catalog, observation_policy=policy,
                                       action_encoding="public-decision-intent-v1")
     assert latest.rules_version == "augment-site-20260928-e5ed84fcf8e72a24"
-    assert policy["projectionVersion"] == "source-visible-20260928-v1"
+    assert policy["projectionVersion"] == "source-visible-20260928-v2"
     with pytest.raises(ValueError, match="policy version or rules provenance"):
         EncoderSpec.from_catalog(catalog, observation_policy=observation_policy())
 

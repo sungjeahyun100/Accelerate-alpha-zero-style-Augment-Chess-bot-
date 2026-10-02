@@ -27,7 +27,7 @@ LEGACY_RULES_VERSION = "augment-site-20260927-abfe01a035813875"
 V7_RULES_VERSION = "augment-site-20260928-e5ed84fcf8e72a24"
 SOURCE_PROJECTIONS = {
     LEGACY_RULES_VERSION: "source-visible-20260927-v3",
-    V7_RULES_VERSION: "source-visible-20260928-v1",
+    V7_RULES_VERSION: "source-visible-20260928-v2",
 }
 HISTORY_SUMMARY_VERSION = "public-history-summary-v1"
 ACTION_TYPES = ("move", "card", "promotion", "promotionChoice", "shotgunReload", "wizardSpell", "fileSurgeSkip", "draftPick", "draftBundlePick", "trolleyChoice")

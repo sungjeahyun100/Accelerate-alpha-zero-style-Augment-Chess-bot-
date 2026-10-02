@@ -19,10 +19,30 @@ manifest와 원문 SHA를 검사한 뒤에만 실행한다. 이전 `site-baselin
 client 실행은 main과 parser에 의존하며 worker는 이번 어댑터 실행의 일부가 아니다.
 
 규칙 버전은 `augment-site-20260928-e5ed84fcf8e72a24`, 실행 profile은
-`accelerate-headless-semantic-v7-faithful-init-v1`, 공개 관측 projection은 `source-visible-20260928-v1`이다.
+`accelerate-headless-semantic-v7-faithful-init-v1`, 공개 관측 projection은 `source-visible-20260928-v2`다.
 이전 v6와 새 v7의 Position을 서로 받아들이지 않는다. 공개 카드 catalog hash
 `yt63f_Lcq4xUPu4GbbdwAyv5IUTuC079nNxvF3IFrj4`는 동일하지만 원문 코드와
 전이 의미가 달라졌으므로 catalog hash만으로 버전을 판정하지 않는다.
+
+v2는 같은 동결 client의 `reversal` 공개 owner flag를 `statePublicFields`에 포함한다.
+원문의 `applyCardEffect`는 아군 마이너 희생 뒤 `{white: false, black: false}`에서
+현재 색을 `true`로 설정하고, `getLegalMoves`는 비숍·룩의 ray 방향을 이 값으로
+교환한다. `completeTurnAfterMove`는 이동한 색을 `false`로 초기화한다. 원문의
+`aiWorkerStateSnapshot`과 `applyBetaFriendlyCardAuthority`도 이 값을 `clonePlain`으로
+보존한다. 기물 ID·좌표·미래 RNG를 포함하지 않는 색별 공개 활성 효과이며 정책은
+white/black boolean만 허용하고 추가 nested key를 거절한다. v1 당시 검증을 이 입력
+계약의 성공으로 승계하지 않는다. 최초 CI 실패와 v2 변경 후 재검증의 실제 관측 범위는
+[v7 인수 장부](V7-ACCEPTANCE-CLOSURE.md) 및 PR #32 본문을 따른다.
+
+v2·PR #36 로컬 통합 뒤 Node 6개 파일·63개 검사와 8/8 카드 표면 shard의
+256개 카드×3스타일 768개 bounded cell이 PASS였다. weighted source 재생성은
+동결 원문의 원래 helper를 그대로 복사해 실행하고 `publicAfter` 외 raw 필드가
+완전히 같음을 guard로 확인했다. 새 weighted 입력과 내부21 입력의 SHA·필터 결과는
+인수 장부에 결속하며 이전 v1 자료도 보존한다. 공유 JCS 비교기는 실제 차이를 엄격히
+검사한다. 국소 결과와 별도로 v2·PR #36 통합 후 core와 새 full105 실행을 완료했고
+105/105 PASS·실패0·컴파일 경고0·모든 job source digest 전후 동일을 관측했다. 계획·요약의
+SHA와 보존한 최초 실패 기록은 인수 장부를 따른다. 같은 head의 원격 CI·병합 결과는
+PR #32 본문의 실제 관측에 결속하며 로컬 성공으로 원격 결과를 대신하지 않는다.
 
 현재 `execution-profile-20260928.json`은 최상위 initializer 175개와 제외 168개,
 원문 순서·dependency/bootstrap digest와 replay labels·codes 각 79개/frameKeys 222개를

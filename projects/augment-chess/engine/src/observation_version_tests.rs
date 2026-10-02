@@ -413,8 +413,8 @@ fn pinned_observation_metadata_matches_both_js_contract_digests() {
         ),
         (
             RULES_VERSION_V7,
-            "source-visible-20260928-v1",
-            "baa57576dd60387813e87fc0dbfc095ce68c951fc51797031b22be62a419c270",
+            "source-visible-20260928-v2",
+            "825f74365c63061990fdf8a84dfd1ff83935d2a280b6cb253f1661a02981b693",
         ),
     ];
     for (ruleset, projection, hash) in versions {
@@ -914,6 +914,8 @@ fn v7_seed19_full_observations_match_frozen_source_for_both_viewers() {
     // FrozenClientSource main-OahWs0tU.js with reviewed top-level initializers
     // at SHA-256
     // e5ed84fcf8e72a24e6a8cfeb9050787387a616c55184e6501fca2077e302c45c.
+    // Projection v2 values were regenerated from the same source positions,
+    // RNG and draft payloads by root-pr32-v2-observation-refresh.cjs.
     // Full source/native JCS comparison evidence stays outside Git at
     // %APPDATA%/Accelerate/reports/v7-public-hints/full-observation.
     type ViewerDigests = (&'static str, &'static str);
@@ -924,12 +926,12 @@ fn v7_seed19_full_observations_match_frozen_source_for_both_viewers() {
             &[1, 0],
             [
                 (
-                    "86d53ee66f05e6fe2255af096b17dacc147fb330f0da4503a7cfa7347a5e1044",
-                    "f4e94c2e164d00021edcbae7e02ece8ac20708afca2cdc20be4dc9284faaa650",
+                    "3b38aed446d40b21a2db99482a5a60573a126b1bad45f8a6dd663b4cae3c2eea",
+                    "6bbacffaf8c87354d777367fea81e83750c4af98e36780e57d9da95f2477fad7",
                 ),
                 (
-                    "8022d52672f8f45f8400f5c5e99caff33b4f6f568959a34f7925f623a9ec39f3",
-                    "2af0ad0b24b21839b1832d815674a355d60d0538494b4c2f94a96a504cdc326a",
+                    "4aa9540f111b6a3ed2bbb5d986e6dc281bcb5dbdd329eec866d4c14548910ff8",
+                    "d7cb06c8264f219bf33efd07584f408d58e9111b7834c9d80186850d2cb51f2c",
                 ),
             ],
         ),
@@ -938,12 +940,12 @@ fn v7_seed19_full_observations_match_frozen_source_for_both_viewers() {
             &[1, 2],
             [
                 (
-                    "b51066d043bdc337d536b6772b2b7236cd8e72b15e1b9ae0b6c2a85523f3cae7",
-                    "1d222c63d9e6930ed51474929b9a9ae4ea55c4e098023b65eb64d0517a039b8e",
+                    "b9b91ebea45aefcf33c3c59ffda7b79a9fb2f88cf6e5975b52fb51605155b732",
+                    "8fe6005a4482e4e060c80d218963cf0d8f11892a467e85e68a2e5b3913a7fae3",
                 ),
                 (
-                    "8a49a9fef52f6c058ae02a91dc6751d609ceb2663bd2e3444a27c67dbfa2e442",
-                    "56cde3d9ac7b3eaf37e697e1225e893c12901115f19f629cc311ff143058191a",
+                    "6803ca17266d3d46aa963979d26cf4674ccf33096002269e83bd22c0a2193389",
+                    "dc7b5a3b9e78d17dd5dc8fe0fa3d3540b3e20d49ef0e2470cb8795084d85e190",
                 ),
             ],
         ),
@@ -952,12 +954,12 @@ fn v7_seed19_full_observations_match_frozen_source_for_both_viewers() {
             &[1, 3, 3, 3, 3, 3, 3, 3, 5, 5, 5, 5],
             [
                 (
-                    "9aeb7af41047a5739ca045cd7ff2e294e2a3badc11b58453abd5984fc005ff6f",
-                    "1ad50399aa2b3d10e950a8fc9daeab18e23169c6eec59273af5e474c4d3afc59",
+                    "f5a54fe3b0ea91b4cf46b736ed69951419862b621b0bd515acc97d24c14efabf",
+                    "45f63dc945b18eca48ed3095e1d8858bb61351ec1a9ce158471bba5169e55748",
                 ),
                 (
-                    "2e19348734676f5ed14d080e63c8b9fb36ee6d44b79cd0444a7f1b0c0ff9749e",
-                    "bc2ef5547bc0329b946d4f1a907cbd1830fd170c969fa8358732345240127bc9",
+                    "08bd9f62f6d7a727bf0b3327085c8f2592ff68da26099fd793e7058d600b61fb",
+                    "d1781133527e68cff2a9b841964545186854432d86b18de77f750848f6943c5a",
                 ),
             ],
         ),

@@ -21,19 +21,65 @@ source closure의 역사적 증거로 보존한다. 아래의 새 실행 상태�
 
 ## 2026-10-02 후속 검증 상태
 
-다음 결과는 메인이 실제 실행해 확인한 로컬 검증이다. 원격 SHA와 같은 commit의
-Windows/Linux CI 관측은 PR #32에 별도로 결속하며 전체 프로젝트 GO와 구분한다.
+다음 결과는 메인이 실제 실행해 확인한 로컬 검증과 첫 Windows/Linux CI 관측이다.
+각 source closure·head와 실행 범위를 구분하며 후속 head의 CI 관측은 PR #32 본문에
+별도로 결속한다. 전체 프로젝트 GO와 구분한다.
 
 | 항목 | 현재 관측 상태 |
 |---|---|
 | Rust 최소 toolchain | 실제 Rust 1.96의 fmt와 core 4개 crate all-targets strict Clippy(`-D warnings`) PASS |
-| Node 관련 회귀 | 6개 파일·62개 검사 PASS, skip 0 |
-| CI helper·구조 | CI helper 17개와 저장소 구조 검사 테스트 14개 PASS |
-| Python 변경 입력 | 8개 파일 AST PASS. 실제 소비자 실행·봇 연동·설치 검증은 아님 |
-| workflow 정적 검사 | Actionlint 1.7.12로 2개 workflow PASS |
-| 최종 native105 | `reports/root-pr32-finish-final105-jobs.json` 전체 105개 PASS. engine all-targets 단위 713개·통합 20개, 일반 실행의 source-input 53개 ignored. 공통 registry 9개·v6 변환 6개 PASS. 전 job source digest 불변·컴파일 경고 0건 |
+| v2·PR #36 통합 후 core | `reports/root-pr32-v2-final-core-summary.json`의 fmt·strict Clippy·core-tests exit 0, 컴파일 경고 0건. engine 단위 720개·통합 20개·공통 registry 9개·v6 변환 6개 PASS. source-input 53개 ignored를 자동 PASS로 세지 않음 |
+| v2·PR #36 통합 후 Node 회귀 | 로컬 6개 파일·63개 검사 PASS, skip 0. JS CI 전체 matrix의 성공을 의미하지 않음 |
+| v2 카드 표면 | 로컬 8/8 shard PASS. 256개 카드×normal/chaos/grand 3스타일의 768개 bounded cell이며 모든 규칙 조합의 완전성 증명은 아님 |
+| PR #36 계약 회귀 | stationary 공개 intent 충돌·v6 large_rays 순서·3.0/3 혼합 anchor의 세 회귀가 red 3건→green 3건. 원격 병합이나 전체105 PASS와 구분 |
+| v2 native 국소 비교 | quantum UI 10개(query 6·move 4)와 새 source internal 21국면·42 apply 표본의 실제 비교 필터 PASS |
+| v2 weighted source | 원래 helper exact-copy 재실행과 `publicAfter` 외 raw 필드 완전 동일 guard PASS. 공유 JCS의 실제 차이 비교는 엄격히 유지 |
+| v2·PR #36 통합 후 full105 | `reports/root-pr32-finish-v2-final105-jobs.json`의 새 실제 실행105/105 PASS·실패0·컴파일 경고0. 모든 job의 source digest는 `7468646c4378cc6dfd8d06ac84287a630148a0ca056823dd428c22d72ff22c9f`로 전후 동일. 이전105 PASS의 승계가 아님 |
+| v2 Python 정책 identity | v2 식별자 최소 정합성 수정 3개 파일의 새 AST PASS를 `reports/root-pr32-v2-python-identity-ast.json`에 결속. 이전 8개 중 `test_search.py`만 재변경했고 `encoding.py`·`test_model_stack.py`는 새 대상. 변경 없는 기존 7개 blob의 결과 재사용과 현재 3개 AST PASS로 유일 대상 10개. 실제 Python/native/ONNX 소비자·봇·runtime 실행은 하지 않음 |
+| workflow·CI helper 재사용 | workflow 2개·CI helper 4개의 HEAD·index·working blob이 동일함을 확인해 기존 Actionlint 2개 workflow·CI helper 17개 검사 결과를 재사용. CI의 실제 실행 성공과 구분 |
+| v2 변경 전 Node 회귀 | 로컬 6개 파일·62개 검사 PASS, skip 0. 이전 입력 계약의 역사적 결과 |
+| v2 변경 전 CI helper·구조 | CI helper 17개와 저장소 구조 검사 테스트 14개 PASS |
+| v2 변경 전 Python 변경 입력 | 8개 파일 AST PASS. 실제 소비자 실행·봇 연동·설치 검증은 아님 |
+| v2 변경 전 workflow 정적 검사 | Actionlint 1.7.12로 2개 workflow PASS |
+| 공개 관측 v2 변경 전 native105 | `reports/root-pr32-finish-final105-jobs.json` 전체 105개 PASS. engine all-targets 단위 713개·통합 20개, 일반 실행의 source-input 53개 ignored. 공통 registry 9개·v6 변환 6개 PASS. 전 job source digest 불변·컴파일 경고 0건. v2 변경 후 결과로 재사용하지 않음 |
 | PR #28 base 통합 | base `45edfe1`의 충돌을 해소한 source로 검증했다. merge checkpoint·push·원격 SHA는 PR #32에 기록 |
-| Windows/Linux CI | 같은 commit의 `core_only=true, adapter_only=false` 관측 결과를 PR #32에 기록. 자동 PR의 봇·wheel 실행을 제외하려고 `[skip ci]` 뒤 수동 실행하며 전체 CI 성공으로 확대하지 않음 |
+| Windows/Linux CI | 첫 `core_only=true, adapter_only=false` run `36984620438`의 head `ab30c2c2793edbad3835ee8bf3b5c9444033f76e`에서 Windows/Linux Rust와 Windows JS 성공, Linux JS 실패. 정확한 오류와 후속 head의 관측 경계는 아래 기록과 PR #32 본문을 따름 |
+
+첫 [core_only CI run 36984620438](https://github.com/sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-/actions/runs/36984620438)의
+Linux JS shard 2/8은 `reversal` 카드의 normal/chaos/grand 검사에서
+`Unclassified site state fields require a visibility review: reversal` 오류로 실패했다.
+이 run은 `[skip ci]` 뒤 수동 실행해 자동 PR의 봇·wheel 실행을 제외했으며 전체 CI
+성공으로 기록하지 않는다. 로컬 native105와 Node 62개 결과는 공개 관측 v2 변경 전
+각 실행의 source closure와 제공 입력에 한정한다. 동결 원문의 공개 owner flag를
+반영한 `source-visible-20260928-v2`는 입력 계약 변경이므로 이전105의 PASS를
+승계하지 않는다. v2 변경 후 native105의 새 실제 결과는 상단과 아래 요약을 따르고,
+후속 head·run의 원격 결과는 PR #32 본문에 별도로 결속하며 이 최초 실패 기록을 지우거나 미관측 CI를 PASS로
+표시하지 않는다.
+
+v2 이후 첫105는 101 PASS·4 FAIL로 종료했다. 실패는 UI 클릭과 canonical 행동의
+경계 1건, 이전 원문 사례 SHA 1건, weighted v1 관측 2건이며 각각 실제 원인으로
+보존한다. 요약 `reports/root-native-root-pr32-finish-surface105-jobs-summary.json`의
+SHA-256은 `abb22d00b6d6c20e39bc0a638ad2ff21c47707787aedda134d843ef9216fa2f4`다.
+weighted source는 원래 helper를 그대로 복사해 재실행했고 공개 관측의 `publicAfter`
+외 raw 필드의 완전 동일 guard를 통과했다. 갱신 입력
+`reports/pr32-v2-weighted-refresh/weighted-draft-cases.jsonl`의 SHA-256은
+`51c64e0bad277c3ff62f5a12d1e8c94d178f256634f92af78e001e17f50d0d3f`,
+`refresh-manifest.json`은
+`ed169b3eb76f5fd4cf98abb476770c83e5561b018a630e4b3a1b1962f384af66`이다.
+새 내부21 입력 `reports/pr32-finish-v2-internal21/source-cases.jsonl`의 SHA-256은
+`5de198ccdb213481126c4f9af832b50d45f150be740ee175b6caf3d7653f52ab`, 같은 경로의
+`report.json`은 `23cc4c1b0acc84f5404901973209612c9735af65bf7d687986ed97043613b090`이다.
+이 입력으로 21국면·42 apply 표본의 native 필터 PASS를 관측했다. 이전 자료와 실패
+요약은 남기고 비교기는 공유 JCS로 실제 차이를 엄격히 검사한다. 이후 새 실제 실행
+`reports/root-pr32-finish-v2-final105-jobs.json`은 105/105 PASS·실패0·컴파일 경고0이었다.
+계획 SHA-256은 `3aa3e5fecd6d2d50150420a1899b8128ebf4575a2c523ffdd5dc205ac373d268`,
+요약 `reports/root-native-root-pr32-finish-v2-final105-jobs-summary.json`의 SHA-256은
+`6ee0b4a02143d0fc952014cfffe279f7a3a42381f9dd196860579f6e49525989`다.
+모든 job의 source digest는
+`7468646c4378cc6dfd8d06ac84287a630148a0ca056823dd428c22d72ff22c9f`로 전후 동일하다.
+Windows에 raw105개·최초 실패4개·최종 summary1개·internal report1개, 총111개 자료를
+보존했다. 같은 head의 원격 CI·통합 commit·push·병합 결과는 PR #32 본문의 실제 관측에
+별도로 결속하며 이 로컬 결과로 원격 성공을 대신하지 않는다.
 
 첫 all-targets 시도의 부모 회귀 2건을 실패 기록으로 보존한다. overtime 새 게임의 이전
 golden `c2af18…`은 faithful 원문을 재생성한 `4dca89…`과 달랐다. 메인이 대조한 새 원문
@@ -41,21 +87,22 @@ golden `c2af18…`은 faithful 원문을 재생성한 `4dca89…`과 달랐다. 
 다른 검사는 `AiNoCards` 미지원 오류를 기대하지만 현재 지원된 실행 경로와 충돌한다.
 overtime golden을 새 원문 결과로 갱신하고, 위협 검사는 실제 v7 생성 상태의 malformed
 `pendingOtherworld`가 정확한 `InvalidState`를 전파하며 원본 state/RNG를 보존하는 경계로
-바꿨다. 이후 최종105 전체 재실행은 모두 PASS다. 최초 실패 요약
+바꿨다. 이후 공개 관측 v2 변경 전105 전체 재실행은 모두 PASS다. 최초 실패 요약
 `reports/root-native-root-pr32-finish105-jobs-summary.json`의 SHA는
 `1b94c563d730b8dfaee192d4195d00b8fd1c19941015fa52cb7ff2456788b908`로 보존한다.
 
-핵심 원문 21국면을 새로 생성했다. cases bytes SHA-256은
+공개 관측 v2 변경 전 핵심 원문 21국면을 새로 생성했다. cases bytes SHA-256은
 `ec6fcbcbd3067eec61838298a600d49c808038ef206db48d5f99ee943d0e6471`, report bytes SHA-256은
 `b111c386130bf3ac5b362352fc2a233e6a9893ca7832ce9709a8cac6557d4c8c`다.
 원문 생성 자체는 `oracle-only`·exit 1(native 비교 명시적 제외)이며, 이후 동일 입력으로
 Rust의 21국면·42 apply 표본을 비교해 `bounded-internal-pass`를 관측했다.
 내부 비교 보고서 SHA는 `3701f49b4e86c36ee5f26a554fd726e20a2b8f9ba87283f88431065bffc9892b`다.
-최종105 계획 SHA는 `2e404be2b7fe1c7881a48bf0ec531cc155814d9225f114b070c07826d807950f`,
+이 v2 변경 전105 계획 SHA는 `2e404be2b7fe1c7881a48bf0ec531cc155814d9225f114b070c07826d807950f`,
 요약 `reports/root-native-root-pr32-finish-final105-jobs-summary.json`의 SHA는
 `73fda7786b22c2cde00ca8b0cc48abcab7e09e8c0f0932efb6a6a182befcc471`다.
-전 job source digest는 `5638d6c8f812a41a3a0b6fb20c3f471f59c7d624a8774232e9698545a3b15e13`로
-동일하다. 105는 실행 작업 수이며 독립 규칙·시나리오 수가 아니다. 원문 입력을 요구하는
+이 v2 변경 전 실행의 전 job source digest는
+`5638d6c8f812a41a3a0b6fb20c3f471f59c7d624a8774232e9698545a3b15e13`로 동일하다.
+105는 실행 작업 수이며 독립 규칙·시나리오 수가 아니다. 원문 입력을 요구하는
 53개 ignored를 자동 PASS로 세지 않으며 각 제공 입력·필터의 실제 실행 결과를 따른다.
 
 ## 정답과 최종 범위
@@ -382,9 +429,9 @@ RNG/history는 같으며 서로 다른 실행 경계를 metadata 변경으로 �
 | 구분 | 실제 경로와 현재 판단 |
 |---|---|
 | play 공개 조건화의 저장된 구현·국소 검증 | `v7_conditioning.rs`의 play 일괄 거절은 source prior 분기로 교체됐다. 독립 seed로 한 번 실행하고 `source_chance_trace.rs`가 실제 carry된 경로의 semantic mass·opaque identity·불변 소비·그룹을 분류한다. 미분류 draw는 callsite와 RNG cursor를 포함한 정확한 오류다. 전체 공개 history를 보존하고 공개 projection의 차이는 opaque identity 결속 외에는 거절한다. source chance 9·source prior 3 및 전달105의 bounded 회귀가 PASS지만 모든 확률 family·규칙 조합의 완전성이나 설치 봇 성공은 선언하지 않는다. |
-| 이전 실패·강화된 gate의 당시 결과 | stable50 continuation22 실패와 checkpoint105 Otherworld 문맥 차이를 보존했다. 이후 continuation22·schema2 raw81·Transcendence4·milestone2·명시 문맥 Otherworld26의 comparator는 2026-10-01 전달105와 2026-10-02 최종105에서 각각 PASS였다. 이전 PASS를 새 metadata/gate에 승격한 결과가 아니며 입력 fingerprint와 실제 재실행 경계를 따른다. |
+| 이전 실패·강화된 gate의 당시 결과 | stable50 continuation22 실패와 checkpoint105 Otherworld 문맥 차이를 보존했다. 이후 continuation22·schema2 raw81·Transcendence4·milestone2·명시 문맥 Otherworld26의 comparator는 2026-10-01 전달105와 2026-10-02 공개 관측 v2 변경 전105에서 각각 PASS였다. 이전 PASS를 새 metadata/gate에 승격한 결과가 아니며 입력 fingerprint와 실제 재실행 경계를 따른다. |
 | 정확한 입력·결정·범위 오류 | activeTrolley가 남은 endMove 거절은 선택 대기 경계다. `v7_decision_actions`가 bundle 선택을 마치면 activeTrolley를 null로 바꾼 뒤 정산한다. serialized private context, 원문에 없는 legacy queue, 잘못된 ID·alias·버전·catalog, 알려진 factory가 만들지 않는 object/array 숫자 coercion, 비8×8 및 정해진 실행 한도 초과도 해당 오류 계약으로 남긴다. 그 문자열을 정상 source 경로의 포팅 누락으로 합산하지 않는다. |
-| 이번 후속 확인과 제외 범위 | 과거 전달105·Rust1.97·Clippy 53진단/exit101은 역사로 보존한다. 현재 Rust1.96 fmt·strict Clippy·최종105·common과 Node/helper/구조/AST/workflow 검사는 PASS다. base 통합 merge checkpoint·원격 SHA와 같은 commit의 Windows/Linux `core_only` CI 관측 근거는 PR #32에 별도로 기록한다. 실제 봇 연동·sdist/wheel 빌드와 설치·성능 측정은 현재 범위에서 제외한다. finite callback/source slice의 일반적 한계는 실제 미구현 placeholder와 분리한다. |
+| 이번 후속 확인과 제외 범위 | 과거 전달105·Rust1.97·Clippy 53진단/exit101 및 v2 변경 전713·Node62·digest5638은 역사로 보존한다. v2·PR #36 통합 후 Node63·카드 표면768·Rust1.96 fmt와 strict Clippy·core720/20·세 계약 회귀·quantum UI10·새 internal21/42 필터와 weighted source raw 동일 guard 및 새 실제 full105/105는 PASS다. Python AST는 기존7개 blob 재사용+현재3개로 유일10개이며 workflow2개도 blob 불변 재사용이다. 첫 `core_only` CI의 Linux JS `reversal` 오류와 v2 첫105의101 PASS·4 FAIL도 상단에서 보존한다. 원격 SHA·후속 head의 두 OS CI와 원격 병합의 실제 결과는 PR #32 본문에 별도로 기록한다. 실제 봇 연동·sdist/wheel 빌드와 설치·성능 측정은 현재 범위에서 제외한다. finite callback/source slice의 일반적 한계는 실제 미구현 placeholder와 분리한다. |
 
 현재 읽기 전용 호출 경로 감사에서는 정상 factory가 만든 cold 8×8 core 카드·RULE·
 기물·행동의 추가 미구현 Unsupported placeholder를 확정하지 못했다. 이 판단은
@@ -472,8 +519,12 @@ generator가 지원하는 `_LATEST`에 지정한다. 원문·영수증·전체 �
 검사와 Blood 19개 외부 Python comparator의 지도다. Colossus timer/history 22개와
 RULE 환경의 ignored 이행, Janggi 생성의 새 cold boundary 및 실제 84/43/50 실행 입력을
 반영한 역사적 snapshot이다. revision 11은 저장하지 않았으며, revision 10을 최종 source의
-검증 근거로 사용하지 않는다. 최종 전달 실행은 `reports/root-pr32-delivery105-jobs.json`과
+검증 근거로 사용하지 않는다. 2026-10-01 전달 실행은 `reports/root-pr32-delivery105-jobs.json`과
 `reports/root-native-root-pr32-delivery105-jobs-summary.json` 및 개별 로그에 결속한다.
+2026-10-02 공개 관측 v2 변경 전 계획 `reports/root-pr32-finish-final105-jobs.json`과 요약
+`reports/root-native-root-pr32-finish-final105-jobs-summary.json`은 상단의 역사적 실행 기록을 따른다.
+v2·PR #36 통합 후 계획은 `reports/root-pr32-finish-v2-final105-jobs.json`이며 새 실제
+105/105 PASS와 요약 SHA는 상단 결과를 따른다. 이전 계획의 PASS로 대체하지 않는다.
 이후 비교기·생성 경계가 바뀌면 기존 PASS의 적용 범위를 다시 대조한다.
 mismatch assertion이 없는 진단 필터와 env 없이 조기 반환하는 검사를
 영수증 parity PASS로 세지 않는다. 큐의 최신 개별 32개 job 지도는
@@ -540,7 +591,8 @@ faithful 초기 상태 324개의 2026-10-01 scoped PASS와 이전 대표 복합 
 범위에서 보존한다. faithful 초기화·composite identity와 변경된 규칙·helper·schema·테스트 엔진의 의존 fingerprint가 영향을
 주면 다시 검사한다. 이전 성공을 최신 변경의 성공으로 표기하지 않는다. 현재 장부에는
 공개 play source prior의 저장된 구현과 bounded gate는 위 실행 범위에서 검증됐다.
-이번 PR #32 후속 검증 완료는 새105와 관련 회귀·strict lint·구조 검사, base 통합,
-Windows/Linux `core_only` CI와 원격 공유의 실제 결과를 확인해 판정한다. 새105·CI·원격이
-pending인 동안 완료로 표기하지 않는다. 제외한 봇/wheel/성능을 포함한 전체 프로젝트 GO는
-선언하지 않는다.
+이번 PR #32 후속 검증의 로컬 결과는 v2·PR #36 통합 후105/105와 위의 관련 회귀·
+strict lint·구조 검사 범위에 한정한다. 같은 head의 원격 SHA·통합 commit·push·
+Windows/Linux `core_only` CI·원격 병합의 최종 판정은 PR #32 본문의 실제 관측에
+결속하며 로컬 성공을 원격 성공으로 대신하지 않는다. 제외한 봇/wheel/성능을 포함한
+전체 프로젝트 GO는 선언하지 않는다.
