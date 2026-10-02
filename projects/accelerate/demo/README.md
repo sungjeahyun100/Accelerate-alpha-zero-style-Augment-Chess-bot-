@@ -152,11 +152,15 @@ manifest의 소스 커밋을 확인한다. JS·WASM 응답 변조 시 각각 정
 학습 모델은 이후 고정 revision·해시·인코더 계약을 확인하는 지연 로드 경계에서 제공한다.
 
 CI의 `hf-static-demo-<sha>` artifact 또는 로컬 `hf-bundle` 슬롯이 업로드 대상이다.
-HF 계정과 대상 Space를 별도로 지정한 후 기존 인증을 이용해 수동으로 업로드한다.
+계획된 HF 소유자는 **`daejunnom`**이며 GitHub 저장소 소유자와 별개다.
+Space 이름은 아직 지정하지 않았으며 GitHub 원격에서 HF namespace를 추론하지 않는다.
+묶음 manifest의 `deploymentPlan`에 이 소유자와 이름 미정 상태를 기록한다.
+현재 작업에서는 Space 생성·업로드·게재를 진행하지 않는다. 이후 대상 Space와
+게재 작업을 지정한 뒤 기존 인증을 이용해 수동으로 업로드한다.
 인증 토큰을 소스·명령·문서에 넣지 않는다.
 
 ```text
-hf upload <namespace>/<space-name> <verified-hf-bundle-directory> . --type space --commit-message "Verified static engine demo"
+hf upload daejunnom/<space-name> <verified-hf-bundle-directory> . --type space --commit-message "Verified static engine demo"
 ```
 
 이 PR의 workflow는 Space 생성·업로드·모델 게시를 실행하지 않는다. 실제 게시 후에는

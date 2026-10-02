@@ -51,10 +51,11 @@ export가 없어야 한다. 테스트와 배포 산출물 슬롯을 구분하고
 HF 배포 묶음으로 복사하지 않는다. 같은 feature로 `browser-fixtures`를 실행하면
 기본 세 스타일 case에 고정 네 case를 더해 native 기준 자료를 생성한다.
 
-현재 부모 엔진의 고정 2×2 bigRook case에서 `(3,1) → (2,1)` 겹치는 이동은 공개
-후보로 승인되지만 적용 시 `invalid_game_state` / `invalid state: conflicting identity
-test-large-rook`로 실패한다. 테스트는 이 원문과 rollback을 native/WASM 양쪽에서
-비교하고, 별도로 겹치지 않는 이동의 성공 경로를 확인한다. 오류 parity 성공을
-해당 이동의 정상 지원으로 보고하지 않는다. 이 재현은 부모 엔진의 후속 항목이며
-예제에 규칙 우회를 넣지 않는다. 부모 엔진이 수정되면 알려진 실패 기대와
-`knownIntegrationLimit`을 재검토하고 성공하는 원래 이동을 다시 검증한다.
+고정 2×2 bigRook case는 `(3,1) → (2,1)`로 기존 footprint와 겹치는 공개 이동을
+적용하고 정확히 네 셀의 같은 기물 identity·anchor와 이전 셀의 해제를 검사한다.
+기존 실패 원인은 이동 후 JCS 정렬된 기물과 source-shape 복원 시 남은 원본 기물의
+key 순서가 같은 identity 안에 섞이는 host 재수입 경계였다. 엔진 host는 기물의
+anchor가 바뀌거나 추가·제거된 셀을 새 footprint의 점유로 복원한다. 동일 identity의
+상충한 실제 필드를 거부하는 검증은 유지하며 예제에는 규칙 우회를 넣지 않는다.
+엔진의 별도 host 회귀는 겹침·비겹침 이동과 작은 기물의 대형 변환, 명시·파생 ID를
+검사하고 browser 기준 자료는 원래 겹침 이동의 성공 결과를 native/WASM 양쪽에서 비교한다.

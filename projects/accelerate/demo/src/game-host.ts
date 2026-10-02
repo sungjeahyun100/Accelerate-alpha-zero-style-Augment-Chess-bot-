@@ -36,7 +36,11 @@ export class GameHost {
     const actor = session.decision_actor();
     const result = session.result() ?? null;
     if (!['white', 'black'].includes(actor) || (result !== null && !['white', 'black', 'draw'].includes(result))) throw fault('invalid_engine_state', 'Invalid decision actor or result', 'observe');
-    return {gameId, revision: session.revision(), viewer, decisionActor: actor as Color, result: result as GameSnapshot['result'], observation: value.observation, diagnostics: [...this.diagnostics]};
+    const snapshot: GameSnapshot = {gameId, revision: session.revision(), viewer, decisionActor: actor as Color, result: result as GameSnapshot['result'], observation: value.observation, diagnostics: [...this.diagnostics]};
+    // 개별 adapter 응답이 한도 안이어도 합쳐진 진단과 전송 envelope는
+    // 한도를 넘을 수 있다. 최종 응답 검증도 상태 확정 전 transaction에 둔다.
+    boundedJson({requestId: request.requestId, gameId: request.gameId, ok: true, value: snapshot});
+    return snapshot;
   }
   private create(config: GameConfig, seed: number): WasmSession {
     if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff) throw fault('invalid_seed', 'Game seed must be a u32 integer', 'new-game');

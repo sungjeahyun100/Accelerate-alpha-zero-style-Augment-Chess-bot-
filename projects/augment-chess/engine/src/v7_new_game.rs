@@ -26,15 +26,22 @@ pub(crate) fn new_game(config: GameConfig, seed: u64) -> Result<GameState> {
         "grand" => 28,
         _ => unreachable!("configuration was checked above"),
     };
-    let expected_rng_cursor = if !requested_rules.is_empty() {
+    let expected_rng_cursor_bounds = if !requested_rules.is_empty() {
         None
     } else if config.draft_delete {
-        Some(32)
+        Some((32, 32))
     } else {
         Some(match config.game_style.as_str() {
-            "normal" => 122,
-            "chaos" => 212,
-            "grand" => 112,
+            // 초기 기물 identity 32회와 weighted 선택/카드 identity 각 1회.
+            // 표준 보드의 trolley와 black-box availability는 각각 최대
+            // 15개 비왕 기물 shuffle(14회)을 소비한다. 이미 선택한 카드를
+            // pool에서 제외하면 후속 predicate 소비량도 감소한다.
+            "normal" => (32 + 3 * 2, 32 + 3 * (2 + 2 * 14)),
+            // 원문 chaos의 금지 bundle/배타 OPENING 두 loop는 각 3개
+            // pair에서 최대 한 번 replacement를 호출한다. 기본 6장에
+            // replacement 최대 6장을 더하되 draw trace는 seed별로 다르다.
+            "chaos" => (32 + 6 * 2, 32 + (6 + 6) * (2 + 2 * 14)),
+            "grand" => (112, 112),
             _ => unreachable!("configuration was checked above"),
         })
     };
@@ -50,6 +57,9 @@ pub(crate) fn new_game(config: GameConfig, seed: u64) -> Result<GameState> {
     let expected_deathmatch_limit = u64::from(config.deathmatch_limit_turns);
     let mut state = candidate_new_game(config, seed)?;
     state.validate_v7_snapshot_shape_and_identify()?;
+    if let Some(bounds) = expected_rng_cursor_bounds {
+        validate_initial_rng(&state, seed, bounds)?;
+    }
     let selected_rule = if requested_rules.is_empty() {
         None
     } else {
@@ -76,52 +86,95 @@ pub(crate) fn new_game(config: GameConfig, seed: u64) -> Result<GameState> {
     let opening_notation_id = selected_rule
         .as_deref()
         .map(|rule| format!("opening-rule-{rule}"));
-    if state.mode != expected_mode
-        || !state.history.is_empty()
-        || state.rng.algorithm != "lcg32-v1"
-        || expected_rng_cursor.is_some_and(|cursor| state.rng.cursor != cursor)
-        || !state.rng.tape.is_empty()
-        || state.extra.get("gameStyle").and_then(Value::as_str) != Some(expected_style.as_str())
-        || state.extra.get("draftDelete").and_then(Value::as_bool) != Some(expected_draft_delete)
-        || state.extra.get("starWinLimit").and_then(Value::as_u64) != Some(expected_stars)
-        || state
+    let extra = |key: &str| state.extra.get(key).cloned().unwrap_or(Value::Null);
+    let array_length = |key: &str| {
+        state
             .extra
-            .get("deathmatchEnabled")
-            .and_then(Value::as_bool)
-            != Some(expected_deathmatch_enabled)
-        || state
-            .extra
-            .get("deathmatchLimitTurns")
-            .and_then(Value::as_u64)
-            != Some(expected_active_deathmatch_limit)
-        || state
-            .extra
-            .get("replayEvents")
+            .get(key)
             .and_then(Value::as_array)
-            .is_none_or(|events| !events.is_empty())
-        || state
+            .map_or(Value::Null, |values| serde_json::json!(values.len()))
+    };
+    let array_field = |key: &str, field: &str| {
+        state
             .extra
-            .get("pendingNotations")
+            .get(key)
             .and_then(Value::as_array)
-            .is_none_or(|entries| match opening_notation_id.as_deref() {
-                Some(expected_id) => {
-                    entries.len() != 1
-                        || entries[0].get("id").and_then(Value::as_str) != Some(expected_id)
-                }
-                None => !entries.is_empty(),
+            .map_or(Value::Null, |values| {
+                Value::Array(
+                    values
+                        .iter()
+                        .map(|value| value.get(field).cloned().unwrap_or(Value::Null))
+                        .collect(),
+                )
             })
-        || state
-            .extra
-            .get("boardHistory")
-            .and_then(Value::as_array)
-            .is_none_or(|entries| {
-                entries.len() != 1
-                    || entries[0].get("label").and_then(Value::as_str) != Some("initial")
-            })
-    {
-        return Err(EngineError::InvalidState(
-            "v7 source initial setup shape is invalid".into(),
-        ));
+    };
+    for (field, actual, expected) in [
+        (
+            "mode",
+            serde_json::json!(state.mode),
+            serde_json::json!(expected_mode),
+        ),
+        (
+            "history.length",
+            serde_json::json!(state.history.len()),
+            serde_json::json!(0),
+        ),
+        (
+            "rng.algorithm",
+            serde_json::json!(state.rng.algorithm),
+            serde_json::json!("lcg32-v1"),
+        ),
+        (
+            "rng.tape.length",
+            serde_json::json!(state.rng.tape.len()),
+            serde_json::json!(0),
+        ),
+        (
+            "gameStyle",
+            extra("gameStyle"),
+            serde_json::json!(expected_style),
+        ),
+        (
+            "draftDelete",
+            extra("draftDelete"),
+            serde_json::json!(expected_draft_delete),
+        ),
+        (
+            "starWinLimit",
+            extra("starWinLimit"),
+            serde_json::json!(expected_stars),
+        ),
+        (
+            "deathmatchEnabled",
+            extra("deathmatchEnabled"),
+            serde_json::json!(expected_deathmatch_enabled),
+        ),
+        (
+            "deathmatchLimitTurns",
+            extra("deathmatchLimitTurns"),
+            serde_json::json!(expected_active_deathmatch_limit),
+        ),
+        (
+            "replayEvents.length",
+            array_length("replayEvents"),
+            serde_json::json!(0),
+        ),
+        (
+            "pendingNotations[*].id",
+            array_field("pendingNotations", "id"),
+            serde_json::json!(opening_notation_id.iter().collect::<Vec<_>>()),
+        ),
+        (
+            "boardHistory[*].label",
+            array_field("boardHistory", "label"),
+            serde_json::json!(["initial"]),
+        ),
+    ] {
+        if actual != expected {
+            return Err(EngineError::InvalidState(format!(
+                "v7 source initial setup field {field} is invalid: expected {expected}, got {actual}"
+            )));
+        }
     }
     if let Some(rule) = selected_rule.as_deref()
         && (state.extra.get("ruleSelectionEnabled") != Some(&Value::Bool(true))
@@ -216,6 +269,32 @@ pub(crate) fn new_game(config: GameConfig, seed: u64) -> Result<GameState> {
         }
     }
     Ok(state)
+}
+
+/// 내부 factory 결과만 검사한다. 외부 snapshot이나 RNG tape를 승인하는
+/// 경계가 아니며 seed/cursor의 독립 재계산 전에 반드시 유한 소비량을 확인한다.
+fn validate_initial_rng(
+    state: &GameState,
+    seed: u64,
+    (minimum, maximum): (usize, usize),
+) -> Result<()> {
+    if !(minimum..=maximum).contains(&state.rng.cursor) {
+        return Err(EngineError::InvalidState(format!(
+            "v7 source initial setup field rng.cursor is invalid: expected {minimum}..={maximum}, got {}",
+            state.rng.cursor
+        )));
+    }
+    let mut expected = crate::RngState::seeded(seed);
+    for _ in 0..state.rng.cursor {
+        expected.sample()?;
+    }
+    if state.rng.state != expected.state {
+        // 진단에 private seed나 미래 RNG state를 노출하지 않는다.
+        return Err(EngineError::InvalidState(
+            "v7 source initial setup field rng.state does not match the independent seed and admitted cursor".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn candidate_new_game(config: GameConfig, seed: u64) -> Result<GameState> {

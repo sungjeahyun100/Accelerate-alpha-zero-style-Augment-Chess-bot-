@@ -3,6 +3,7 @@ import {test, expect} from '@playwright/test';
 test('verified HF bundle loads its pinned engine from a nested asset path', async ({page, request}) => {
   const manifest = await (await request.get('source-manifest.json')).json();
   expect(manifest.sourceCommit).toMatch(/^[0-9a-f]{40}$/);
+  expect(manifest.deploymentPlan).toEqual({provider: 'hugging-face', sdk: 'static', owner: 'daejunnom', spaceName: null});
   await page.goto('./');
   await expect(page.getByText('Rust 엔진 준비', {exact: true})).toBeVisible();
   await page.locator('.diagnostics > summary').click();

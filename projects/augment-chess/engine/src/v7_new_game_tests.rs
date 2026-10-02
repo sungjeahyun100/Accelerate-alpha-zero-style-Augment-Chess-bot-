@@ -1,4 +1,4 @@
-use super::new_game;
+use super::{new_game, validate_initial_rng};
 use crate::{EngineError, GameConfig, GameState};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -92,6 +92,15 @@ fn v7_initial_draft_matches_frozen_source_across_styles_and_seeds() {
             212,
             4240030067,
         ),
+        // 실제 동결 원문에서 독립 particle seed가 replacement draw를
+        // 추가해 242회를 소비한 사례의 전체 상태와 RNG를 함께 결속한다.
+        (
+            "chaos",
+            222_869_471,
+            "fe22688bde874a9cb4156e7fee9e53a91ae66cdf79c2b0f89b18f7ceffe08a81",
+            242,
+            2290166233,
+        ),
         (
             "grand",
             0,
@@ -175,6 +184,96 @@ fn v7_initial_draft_keeps_empty_public_history() {
         assert!(state.history.is_empty(), "{style} initial public history");
         assert_eq!(state.extra["replayEvents"], Value::Array(Vec::new()));
     }
+}
+
+#[test]
+fn v7_initial_rng_admits_seed_dependent_draw_predicate_consumption() {
+    // 실제 Python ParticleBelief의 독립 seed 71/72에서 뽑는 첫 16개
+    // NumPy uint32 seed다. 카드 pool의 제외·chaos replacement 분기를
+    // 고정 cursor 212로 거부했던 입력을 유한한 작은 집합으로 보존한다.
+    let seeds = [
+        4_090_132_643,
+        1_088_403_456,
+        2_024_295_645,
+        2_265_762_046,
+        2_270_796_630,
+        3_268_412_382,
+        1_665_097_542,
+        2_726_278_004,
+        2_776_352_285,
+        876_913_908,
+        82_867_307,
+        196_579_360,
+        3_823_469_741,
+        2_246_978_459,
+        2_066_210_267,
+        865_057_268,
+        4_090_557_808,
+        3_598_481_373,
+        2_579_369_226,
+        28_669_433,
+        1_667_226_644,
+        994_062_688,
+        333_445_547,
+        490_637_928,
+        1_969_345_973,
+        3_073_406_880,
+        2_615_056_827,
+        1_333_393_982,
+        1_765_281_945,
+        2_462_338_413,
+        3_485_874_927,
+        222_869_471,
+    ];
+    let mut cursors = BTreeSet::new();
+    for seed in seeds {
+        let state = new_game(
+            GameConfig {
+                game_style: "chaos".into(),
+                ..GameConfig::default()
+            },
+            seed,
+        )
+        .unwrap_or_else(|error| panic!("independent seed {seed}: {error}"));
+        cursors.insert(state.rng.cursor);
+        assert_eq!(state.extra["draft"]["choices"].as_array().unwrap().len(), 6);
+        assert!(state.history.is_empty());
+        assert!(state.rng.tape.is_empty());
+    }
+    assert!(
+        cursors.iter().any(|cursor| *cursor != 212),
+        "this regression must exercise seed-dependent draw consumption: {cursors:?}"
+    );
+}
+
+#[test]
+fn v7_initial_rng_rejects_over_budget_or_unbound_streams() {
+    let source = new_game(
+        GameConfig {
+            game_style: "chaos".into(),
+            ..GameConfig::default()
+        },
+        37,
+    )
+    .unwrap();
+    for cursor in [43, 393, usize::MAX] {
+        let mut malformed = source.clone();
+        malformed.rng.cursor = cursor;
+        assert!(matches!(
+            validate_initial_rng(&malformed, 37, (44, 392)),
+            Err(EngineError::InvalidState(message)) if message.contains("rng.cursor")
+        ));
+    }
+    let mut malformed = source.clone();
+    malformed.rng.state ^= 1;
+    assert!(matches!(
+        validate_initial_rng(&malformed, 37, (44, 392)),
+        Err(EngineError::InvalidState(message)) if message.contains("rng.state")
+    ));
+    assert!(matches!(
+        validate_initial_rng(&source, 38, (44, 392)),
+        Err(EngineError::InvalidState(message)) if message.contains("rng.state")
+    ));
 }
 
 #[test]

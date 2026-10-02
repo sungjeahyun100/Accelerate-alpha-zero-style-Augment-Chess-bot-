@@ -17,6 +17,7 @@ import torch
 from torch import Tensor, nn
 
 from ..encoding import canonical_json
+from ..ir import MAX_CANDIDATE_NODES
 from .model import AdapterDescriptor, LoRAConv2d, PolicyValueNetwork, is_adapter_parameter, tensor_state_hash
 from .typed_context import CandidateScorer, TypedContextConfig, TypedContextEncoder, masked_mean, validate_typed_inputs
 
@@ -89,7 +90,7 @@ class MaskResNetConfig:
                              f"{(self.max_batch, self.max_board_axis, self.max_board_axis)}")
         if not 1 <= candidates <= self.max_candidates:
             raise ValueError(f"candidate count {candidates} exceeds limit {self.max_candidates}")
-        if not 1 <= candidate_nodes <= 64 or not 1 <= records <= 2048 or not 0 <= relations <= 8192:
+        if not 1 <= candidate_nodes <= MAX_CANDIDATE_NODES or not 1 <= records <= 2048 or not 0 <= relations <= 8192:
             raise ValueError("typed record, relation, or candidate node count exceeds model limits")
         # Conservative inference estimate for the spatial stack and the shared
         # typed record/relation/candidate computations, before allocating output.

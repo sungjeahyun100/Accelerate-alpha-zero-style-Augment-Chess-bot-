@@ -6,6 +6,7 @@ import type { EngineInfo, GameSnapshot, Reply, Request } from '../src/protocol.t
 import { PendingBrowserBotDriver, validateBotChoice } from '../src/bot-driver.ts';
 import type { BotInput } from '../src/bot-driver.ts';
 import { createPublicReport } from '../src/report.ts';
+import {diagnostic, fault} from '../src/protocol.ts';
 
 const info = {rulesVersion: 'test', descriptors: []} as unknown as EngineInfo;
 const snapshot = (id = 'game-1', revision = 'r1'): GameSnapshot => ({gameId: id, revision, viewer: 'white', decisionActor: 'white', result: null, observation: {protocolVersion: 'test', viewer: 'white', turn: 'white', board: [], ownCards: [], publicState: {}, history: [], opponentHandCount: 0, informationStateKey: 'public'}, diagnostics: []});
@@ -63,6 +64,13 @@ test('AI pending driver does not silently substitute a bot; late/private/invalid
 });
 test('research export contains public projection and strips local paths without private seed/journal', () => {
   const current = snapshot(); current.observation = new Proxy(current.observation, {});
-  const report = createPublicReport(current, info, [{severity: 'error', kind: 'execution_failed', code: 'file', message: 'load C:\\Users\\private-user\\example', stage: 'load', requestId: '1', gameId: '1'}]);
-  const json = JSON.stringify(report); assert.ok(json.includes('[local-path]')); assert.ok(!json.includes('private-user')); assert.ok(!json.includes('seed')); assert.ok(!json.includes('revision')); assert.deepEqual(report.publicHistory, []);
+  const engineInfo = {...info, diagnostics: [{severity: 'warning' as const, kind: 'integrity', code: 'local', message: 'load /home/private-account/example', stage: 'load', requestId: '0', gameId: null}]};
+  const report = createPublicReport(current, engineInfo, [{severity: 'error', kind: 'execution_failed', code: 'file', message: 'load C:\\Users\\private-user\\example', stage: 'load', requestId: '1', gameId: '1'}]);
+  const json = JSON.stringify(report); assert.ok(json.includes('[local-path]')); assert.ok(!json.includes('private-user')); assert.ok(!json.includes('private-account')); assert.ok(!json.includes('seed')); assert.ok(!json.includes('revision')); assert.ok(!('diagnostics' in report.versions)); assert.equal(report.diagnostics.length, 2); assert.deepEqual(report.publicHistory, []);
+});
+
+test('diagnostic preserves a specific failure stage while binding the request identifiers', () => {
+  const item = diagnostic(fault('wasm_integrity_failed', 'exact hash mismatch', 'integrity'), 'initialize', 'request-7', 'game-2');
+  assert.equal(item.stage, 'integrity'); assert.equal(item.requestId, 'request-7'); assert.equal(item.gameId, 'game-2');
+  assert.equal(diagnostic(fault('stale_revision', 'old revision'), 'apply', 'request-8', 'game-2').stage, 'apply');
 });

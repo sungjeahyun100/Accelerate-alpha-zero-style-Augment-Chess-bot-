@@ -64,3 +64,17 @@ evidence; Linux parity does not establish Windows completion. Source-package
 validation also builds an sdist, extracts it outside the checkout and builds an
 installable wheel from that source. See [native binding](../native/README.md)
 and [project rules](../../../AGENTS.md) for ownership and generated-file policy.
+
+## typed v3 계약
+
+`onnx-policy-value-v3`는 `mask-resnet`과 `entity-transformer`의 같은 공개 typed IR을
+사용한다. 후보별 노드 상한은 Python IR의 `MAX_CANDIDATE_NODES=256`이며 두 PyTorch
+모델, ONNX manifest와 네이티브 runtime이 이 상한을 공유한다. 공개 선택 64개를
+담는 199개 노드도 손실 없이 전달하며 257개 노드는 거부한다. 입력 64 MiB와 중간
+버퍼 256 MiB 한도는 별도로 유지한다.
+
+category ID 순서는 동결 catalog·관측 정책과 IR의 semantic symbol에 결속된다.
+네이티브 로더의 vocabulary JCS SHA-256 pin은 현재 Python `TypedEncoderSpec`에서
+파생한 순서를 확인한다. 공개 intent symbol이나 동결 입력을 바꾸면 pin과 관련
+검증을 함께 갱신하고 기존 wheel·성공 근거를 재사용하지 않는다. manifest 내부
+hash를 전부 다시 계산하더라도 category ID를 교환한 모델은 허용하지 않는다.

@@ -24,7 +24,7 @@ export type Reply = { requestId: string; gameId: string | null; ok: true; value:
 export const MAX_BYTES = 8_388_608;
 export const MAX_HISTORY = 512;
 export function diagnostic(error: unknown, stage: string, requestId: string, gameId: string | null): Diagnostic {
-  if (error instanceof EngineFault) return {...error.diagnostic, stage, requestId, gameId};
+  if (error instanceof EngineFault) return {...error.diagnostic, stage: error.diagnostic.stage === 'transport' ? stage : error.diagnostic.stage, requestId, gameId};
   let value: unknown = error;
   if (typeof value === 'string') { try { value = JSON.parse(value); } catch { /* Preserve raw thrown text below. */ } }
   if (value && typeof value === 'object' && 'message' in value) {

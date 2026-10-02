@@ -996,6 +996,34 @@ mod tests {
     }
 
     #[test]
+    fn chaos_initial_particle_keeps_complete_public_projection_with_independent_search_seeds() {
+        let config = GameConfig {
+            game_style: "chaos".into(),
+            ..GameConfig::default()
+        };
+        let source = crate::v7_new_game::new_game(config.clone(), 37).unwrap();
+        // 실제 ParticleBelief 71/72 stream의 첫 독립 초기화 seed.
+        // source game의 seed/RNG나 private offer를 proposal에 넘기지 않는다.
+        for seed in [4_090_132_643, 1_088_403_456, 4_090_557_808, 3_598_481_373] {
+            let independent =
+                crate::v7_new_game::new_game(config.clone(), u64::from(seed)).unwrap();
+            for viewer in [Color::White, Color::Black] {
+                let expected = source.try_observe(viewer).unwrap();
+                let particle = sample_initial_public(
+                    config.clone(),
+                    serde_json::to_value(&expected).unwrap(),
+                    seed,
+                )
+                .unwrap_or_else(|error| panic!("viewer {viewer:?}, seed {seed}: {error}"));
+                assert_eq!(particle.state().try_observe(viewer).unwrap(), expected);
+                assert_eq!(particle.state().rng, independent.rng);
+                assert_ne!(particle.state().rng, source.rng);
+                assert!(particle.state().history.is_empty());
+            }
+        }
+    }
+
+    #[test]
     fn initial_particle_matches_a_public_single_rule_activation() {
         let config = GameConfig {
             rule_card_ids: vec!["revelation".into()],

@@ -10,6 +10,7 @@ import { sourceFingerprint } from './ci-evidence.mjs';
 const MAX_FILES = 512;
 const MAX_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 128 * 1024 * 1024;
+const HF_OWNER = 'daejunnom';
 const sha256 = data => createHash('sha256').update(data).digest('hex');
 
 export function validateAssetName(name) {
@@ -39,6 +40,10 @@ export async function filesAt(directory, prefix = '', result = []) {
 export async function verifyBundle(directory) {
   const manifest = JSON.parse(await readFile(join(directory, 'source-manifest.json'), 'utf8'));
   if (manifest.schemaVersion !== 1 || !/^[0-9a-f]{40}$/.test(manifest.sourceCommit) || !Array.isArray(manifest.files)) throw new Error('source-manifest의 버전·소스 commit·files가 유효하지 않습니다.');
+  if (manifest.deploymentPlan?.provider !== 'hugging-face' || manifest.deploymentPlan?.sdk !== 'static'
+      || manifest.deploymentPlan?.owner !== HF_OWNER || manifest.deploymentPlan?.spaceName !== null) {
+    throw new Error('계획된 HF 배포 대상은 daejunnom 소유의 이름 미정 Static Space여야 합니다.');
+  }
   const actual = (await filesAt(directory)).filter(file => file.path !== 'source-manifest.json');
   const recorded = manifest.files;
   for (const file of recorded) {
@@ -73,11 +78,12 @@ async function bundle() {
     ensureOwnedDirectory(dirname(target));
     await copyFile(join(paths.site, file.path), target);
   }
-  await writeFile(join(paths.bundle, 'README.md'), '---\nsdk: static\napp_file: index.html\n---\n\n# Augment Chess 엔진 시험 예제\n\n브라우저에서 Rust WASM 엔진을 실행하는 Svelte 예제입니다.\nAI 백엔드와 학습 모델의 준비 상태는 화면에서 별도로 표시합니다.\n공개 관측 기반 자료는 비공개 전체 상태의 완전 재현을 보장하지 않습니다.\n\n원본 게임: https://augmentchess.org/\n소스와 파일 SHA256: [source-manifest.json](source-manifest.json)\n');
+  await writeFile(join(paths.bundle, 'README.md'), `---\nsdk: static\napp_file: index.html\n---\n\n# Augment Chess 엔진 시험 예제\n\n브라우저에서 Rust WASM 엔진을 실행하는 Svelte 예제입니다.\nAI 백엔드와 학습 모델의 준비 상태는 화면에서 별도로 표시합니다.\n공개 관측 기반 자료는 비공개 전체 상태의 완전 재현을 보장하지 않습니다.\n\n계획된 HF 소유자는 \`${HF_OWNER}\`이며 GitHub 저장소 소유자와 별개입니다.\nSpace 이름은 미정입니다. 이 묶음의 생성·검증은 Space 생성·업로드·게재를 실행하지 않습니다.\n\n원본 게임: https://augmentchess.org/\n소스와 파일 SHA256: [source-manifest.json](source-manifest.json)\n`);
   await copyFile(join(repositoryRoot, 'NOTICE.md'), join(paths.bundle, 'NOTICE.md'));
   const manifest = {
     schemaVersion: 1, sourceCommit: commit,
     sourceRepository: 'https://github.com/sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-',
+    deploymentPlan: { provider: 'hugging-face', sdk: 'static', owner: HF_OWNER, spaceName: null },
     ai: { backend: 'backend-pending', model: 'model-missing' },
     files: await filesAt(paths.bundle)
   };

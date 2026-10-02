@@ -205,37 +205,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             else {
                 return Err(format!("{fixture_id}: action page failed").into());
             };
-            if fixture_id == "large-piece-move" {
-                // Retain the observed parent-engine integration failure as a
-                // native/WASM error-parity and rollback witness. Do not hide
-                // an overlapping translation failure by testing only a more
-                // convenient destination. A parent fix must update this case.
-                let overlap = intents
-                    .iter()
-                    .find(|intent| {
-                        intent["type"] == "move"
-                            && intent["from"] == json!({"row":3,"col":1})
-                            && intent["destination"] == json!({"row":2,"col":1})
-                    })
-                    .cloned()
-                    .ok_or("large-piece-move: overlapping translation missing")?;
-                let revision = session.position().position_id().to_owned();
-                let overlap_request = request(
-                    &session,
-                    "apply-public-intent",
-                    GameAdapterPayload::ApplyPublicIntent { intent: overlap },
-                );
-                if record(&mut session, &mut steps, overlap_request)?.is_some()
-                    || session.position().position_id() != revision
-                    || steps.last().is_none_or(|step| {
-                        step["outcome"]["error"]["code"] != "invalid_game_state"
-                            || step["outcome"]["error"]["message"]
-                                != "invalid state: conflicting identity test-large-rook"
-                    })
-                {
-                    return Err("large-piece-move: known overlapping-translation error/rollback changed; reassess parent integration boundary".into());
-                }
-            }
             intents
                 .iter()
                 .find(|intent| match fixture_id {
@@ -245,7 +214,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "large-piece-move" => {
                         intent["type"] == "move"
                             && intent["from"] == json!({"row":3,"col":1})
-                            && intent["destination"]["row"] == 1
+                            && intent["destination"]["row"] == 2
                             && intent["destination"]["col"] == 1
                     }
                     "private-projection" => {
@@ -323,13 +292,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .is_some_and(|piece| piece.kind == "pawn")
             }
             "large-piece-move" => {
-                (1..3).all(|row| {
+                let large = state.board[2][1].as_ref();
+                (2..4).all(|row| {
                     (1..3).all(|col| {
-                        state.board[row][col]
-                            .as_ref()
-                            .is_some_and(|piece| piece.kind == "bigRook")
+                        state.board[row][col].as_ref().is_some_and(|piece| {
+                            piece.kind == "bigRook"
+                                && piece.id == "test-large-rook"
+                                && piece.extra["anchorRow"] == 2
+                                && piece.extra["anchorCol"] == 1
+                                && Some(piece) == large
+                        })
                     })
                 }) && state.board[4][1].is_none()
+                    && state.board[4][2].is_none()
+                    && state
+                        .board
+                        .iter()
+                        .flatten()
+                        .flatten()
+                        .filter(|piece| piece.id == "test-large-rook")
+                        .count()
+                        == 4
             }
             "private-projection" => state.result() == Some(augment_chess_engine::GameResult::White),
             _ => false,
@@ -352,7 +335,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "finalDecisionActor": session.position().state().decision_actor().as_str(),
             "finalResult": serde_json::to_value(session.position().state().result())?,
             "semanticWitness": true,
-            "knownIntegrationLimit": if fixture_id == "large-piece-move" { Some("overlapping-large-translation-conflicting-identity") } else { None },
         }));
     }
     println!(

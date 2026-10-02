@@ -16,7 +16,7 @@ from accelerate_chess import InferenceSession, ProductionEvaluator
 from accelerate_chess.encoding import EncoderSpec
 from accelerate_chess.network.artifacts import export_onnx, export_typed_onnx, load_manifest
 from accelerate_chess.network.model import ModelConfig, PolicyValueNetwork, tensor_state_hash
-from accelerate_chess.ir import TypedEncoderSpec
+from accelerate_chess.ir import MAX_CANDIDATE_NODES, TypedEncoderSpec
 from accelerate_chess.network.typed_context import TypedContextConfig
 from accelerate_chess.network.entity_transformer import EntityTransformer, EntityTransformerConfig
 from accelerate_chess.network.mask_resnet import MaskResNetConfig, MaskResNetPolicyValueNetwork
@@ -153,11 +153,23 @@ def test_typed_v3_native_backend_parity_and_input_boundary(family):
     no_relations = _typed_arrays(spec, family, relations=0)
     complete_selection_extent = _typed_arrays(spec, family, batch=1, records=1, relations=0,
                                               actions=1, nodes=199, height=1, width=1)
+    maximum_node_extent = _typed_arrays(spec, family, batch=1, records=1, relations=0,
+                                        actions=1, nodes=MAX_CANDIDATE_NODES, height=1, width=1)
+    for extent in (complete_selection_extent, maximum_node_extent):
+        extent["candidate_node_mask"][:] = True
+        extent["candidate_parent"][..., 1:] = 0
+        extent["candidate_numeric"][..., -1, 0] = 13.
+    oversized_nodes = _typed_arrays(spec, family, batch=1, records=1, relations=0,
+                                    actions=1, nodes=MAX_CANDIDATE_NODES + 1, height=1, width=1)
+    with pytest.raises(ValueError, match="exceeds.*(?:axis limit|model limits)"):
+        model.evaluate(*(torch.from_numpy(value) for value in oversized_nodes.values()))
     with torch.no_grad():
         reference = model.evaluate(*(torch.from_numpy(value) for value in arrays.values()))
         no_relations_reference = model.evaluate(*(torch.from_numpy(value) for value in no_relations.values()))
         complete_selection_reference = model.evaluate(
             *(torch.from_numpy(value) for value in complete_selection_extent.values()))
+        maximum_node_reference = model.evaluate(
+            *(torch.from_numpy(value) for value in maximum_node_extent.values()))
     manifest_path = export_typed_onnx(model, spec, _root() / f"typed-native-{family}", arrays,
                                       architecture_family=family,
                                       descriptor=model.adapter_descriptor(spec.digest))
@@ -178,6 +190,9 @@ def test_typed_v3_native_backend_parity_and_input_boundary(family):
             np.testing.assert_allclose(actual, expected.detach().numpy(), atol=1e-5, rtol=1e-4)
         complete_selection_observed = evaluator.evaluate_typed(complete_selection_extent)
         for actual, expected in zip(complete_selection_observed, complete_selection_reference, strict=True):
+            np.testing.assert_allclose(actual, expected.detach().numpy(), atol=1e-5, rtol=1e-4)
+        maximum_node_observed = evaluator.evaluate_typed(maximum_node_extent)
+        for actual, expected in zip(maximum_node_observed, maximum_node_reference, strict=True):
             np.testing.assert_allclose(actual, expected.detach().numpy(), atol=1e-5, rtol=1e-4)
         for actual, expected in zip(observed, owned_output, strict=True):
             np.testing.assert_array_equal(actual, expected)
@@ -211,8 +226,6 @@ def test_typed_v3_native_backend_parity_and_input_boundary(family):
         invalid["candidate_numeric"] = invalid["candidate_numeric"][:, :, :1, :]
         with pytest.raises(ValueError, match="axis"):
             evaluator.evaluate_typed(invalid)
-        oversized_nodes = _typed_arrays(spec, family, batch=1, records=1, relations=0,
-                                        actions=1, nodes=257, height=1, width=1)
         with pytest.raises(ValueError, match="typed axis nodes size 257 exceeds limit 256"):
             evaluator.evaluate_typed(oversized_nodes)
         # A broadcast view can describe far more logical elements than its
@@ -257,7 +270,8 @@ def test_typed_v3_rejects_self_consistent_wrong_feature_schema():
     invalid = _root() / "typed-schema-invalid"
     invalid.mkdir(parents=True, exist_ok=True)
     (invalid / "model.onnx").write_bytes(manifest_path.with_name("model.onnx").read_bytes())
-    for semantic in ("numeric_slots", "descriptor_identity", "card_aliases", "belief_summary", "public_move_selection"):
+    for semantic in ("numeric_slots", "descriptor_identity", "card_aliases", "belief_summary",
+                     "public_move_selection", "category_vocabulary"):
         altered = deepcopy(original)
         schema = altered["encoder"]["feature_schema"]
         if semantic == "numeric_slots":
@@ -268,14 +282,20 @@ def test_typed_v3_rejects_self_consistent_wrong_feature_schema():
             schema["card_aliases"] = "duplicate each public card instance without identity links"
         elif semantic == "belief_summary":
             schema["belief_summary"]["chance_prior"] = "private-outcome-prior"
-        else:
+        elif semantic == "public_move_selection":
             schema["public_move_selection"]["modes"].append("move")
+        else:
+            # Preserve shapes, embedding sizes, uniqueness and all self-hashes;
+            # changing category IDs still changes the source-bound meaning.
+            schema["category_vocabulary"][1:3] = reversed(schema["category_vocabulary"][1:3])
         altered["encoder"]["feature_schema_hash"] = hashlib.sha256(jcs.canonicalize(schema)).hexdigest()
         altered["encoder_hash"] = hashlib.sha256(jcs.canonicalize(altered["encoder"])).hexdigest()
         (invalid / "manifest.json").write_text(json.dumps(altered), encoding="utf-8")
         with pytest.raises(ValueError, match="feature schema"):
             load_manifest(invalid / "manifest.json")
-        with pytest.raises(ValueError, match="feature semantics"):
+        native_message = ("category vocabulary differs from frozen source"
+                          if semantic == "category_vocabulary" else "feature semantics")
+        with pytest.raises(ValueError, match=native_message):
             InferenceSession(invalid / "manifest.json")
 
 
