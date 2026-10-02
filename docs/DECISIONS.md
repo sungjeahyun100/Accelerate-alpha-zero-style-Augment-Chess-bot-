@@ -360,6 +360,26 @@ PR #29에는 `rust-engine/` 변경이 없다. 어댑터의 완료·검증 범위
   등록하며, 미지원 규칙은 오류로 남기고 운영 중 JS/N-version으로 자동 대체하지 않는다.
   상세 계약·현황·다음 작업 수용 기준은 [RULE-ADAPTER-HANDOFF](RULE-ADAPTER-HANDOFF.md)에 둔다.
 
+## D-018: 현재 모델 입력은 고정 8×8 공간 경로와 의미 단위 entity 경로로 분리
+
+- **날짜**: 2026-10-02
+- **상태**: 구조·입력 의미 채택. 새 경로의 학습·ONNX·운영 MCTS 연결은 별도 검증 대상.
+- **결정**: D-016의 엔진과 `ObservationIR` geometry 일반화는 유지한다. 현재 비교할
+  ResNet 입력 `fixed8-spatial-v1`만 원점 (0,0)의 정확한 8×8을 허용하며 다른 크기는
+  거부한다. Transformer `entity-token-v1`은 한 logical piece를 한 token으로 표현하고
+  footprint를 별도 점유 tensor와 관계로 보존한다. 두 계열은 같은 공개 IR, 카드·규칙·
+  효과·지형·이력 의미와 같은 `typed-input-v1` 후보 행동 tree를 사용한다. 후보별 logit과
+  관측 viewer의 value를 반환하며 padding은 별도 mask로 구분한다.
+- **이유**: 현재 학습 대상의 보드 크기를 고정하면서 규칙 엔진의 합성 가변 geometry
+  검증을 계속할 수 있다. 동적 기물 embedding을 여러 점유 칸에 평균 집계하고 추가
+  공간 상태 채널을 사용하면 종류별 one-hot plane과 마지막 기물 덮어쓰기를 피한다.
+- **대안과 제외 이유**: D-002의 가변 ResNet은 과거 비교 방향으로 기록을 보존하지만
+  현재 모델 v1의 요구가 아니다. JSON 필드별 token화와 BPE는 채택하지 않는다.
+- **영향**: 기존 `PolicyValueNetwork`, `TypedEncoder`, `MaskResNetPolicyValueNetwork`,
+  `EntityTransformer`와 배포 artifact의 버전·API는 유지한다. 새 버전의 spec·projection·
+  모델은 추가 경로이며, 훈련 checkpoint와 ONNX manifest는 기존 것을 새 모델로
+  해석하지 않는다. 자세한 현황·미완료 경계는 [MODEL-ARCHITECTURE](MODEL-ARCHITECTURE.md)에 둔다.
+
 ## 열린 질문
 
 O-001과 O-002는 각각 D-007과 D-008로 해결했다. 새로운 의미 또는 성능 선택이 필요하면
