@@ -1009,8 +1009,7 @@ fn collapse_would_defeat(state: &GameState, color: Color) -> Result<bool> {
         raw
     })
     .floor()
-    .max(0.0)
-    .min(4.0) as u8;
+    .clamp(0.0, 4.0) as u8;
     if depth == 4 {
         return Ok(false);
     }

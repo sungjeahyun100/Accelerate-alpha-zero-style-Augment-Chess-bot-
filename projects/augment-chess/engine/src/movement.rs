@@ -400,11 +400,10 @@ fn v7_collect_movement_candidates(
                 let reached_rank =
                     matches!(piece.kind.as_str(), "pawn" | "squire" | "standardBearer")
                         && v7_should_promote(state, piece, from.row)?;
-                if (reached_rank || field_promotion)
-                    && (!field_promotion
-                        || reached_rank
-                        || !crate::v7_promotion::promotion_choices_for_v7(state, piece, from)?
-                            .is_empty())
+                if reached_rank
+                    || field_promotion
+                        && !crate::v7_promotion::promotion_choices_for_v7(state, piece, from)?
+                            .is_empty()
                 {
                     actions.push(v7_piece_action(state.turn, from, ActionKind::Promotion));
                 }
@@ -1345,6 +1344,7 @@ pub(crate) fn v7_has_any_legal_move_live(state: &mut GameState, color: Color) ->
 /// also apply the source target, ability, terrain and action-option policies;
 /// a `true` result alone does not authorize a capture. Malformed live counters
 /// are returned as errors rather than quietly producing a legal move.
+#[cfg(test)]
 pub(crate) fn v7_movement_capture_constraints_allow(
     state: &GameState,
     attacker: &Piece,
@@ -3014,6 +3014,15 @@ fn v7_nominal_nullification_type(kind: &str) -> String {
     }
 }
 
+/// 재관측 후 확보한 목적지·portal 점유자와 Mad Horse 분기다.
+pub(crate) struct V7CaptureLanding<'a> {
+    pub(crate) actual_destination: Square,
+    pub(crate) landing_target: Option<&'a Piece>,
+    pub(crate) portal_entry_target: Option<&'a Piece>,
+    pub(crate) mad_horse_entry: bool,
+    pub(crate) mad_horse_exit: bool,
+}
+
 /// applyMove91949의 재관측 이후 시도 가드. false는 source의 취소/return이며,
 /// 지원하지 않는 상태와 잘못된 입력은 Result 오류로 구별한다.
 pub(crate) fn v7_move_attempt_capture_allowed(
@@ -3021,12 +3030,15 @@ pub(crate) fn v7_move_attempt_capture_allowed(
     moving: &Piece,
     from: Square,
     target: &MoveTarget,
-    actual_destination: Square,
-    landing_target: Option<&Piece>,
-    portal_entry_target: Option<&Piece>,
-    mad_horse_entry: bool,
-    mad_horse_exit: bool,
+    landing: V7CaptureLanding<'_>,
 ) -> Result<bool> {
+    let V7CaptureLanding {
+        actual_destination,
+        landing_target,
+        portal_entry_target,
+        mad_horse_entry,
+        mad_horse_exit,
+    } = landing;
     if state.ruleset_id != RULES_VERSION_V7
         || from.row >= 8
         || from.col >= 8
@@ -4205,10 +4217,16 @@ pub(crate) fn v7_time_phase_transparent_blocker(
     attacker: &Piece,
     target: &Piece,
 ) -> bool {
-    v7_time_traveler_campaign(state)
-        && !matches!(target.kind.as_str(), "wall" | "football")
-        && !(attacker.color == Color::Black && target.color == Color::Black)
-        && !v7_time_phase_interacts(state, attacker, target)
+    if !v7_time_traveler_campaign(state) {
+        return false;
+    }
+    if matches!(target.kind.as_str(), "wall" | "football") {
+        return false;
+    }
+    if attacker.color == Color::Black && target.color == Color::Black {
+        return false;
+    }
+    !v7_time_phase_interacts(state, attacker, target)
 }
 
 /// 원문의 attackerType 인자는 실제 기물의 포획 정책을 바꾸지 않고
@@ -6290,7 +6308,7 @@ fn v7_filter_move_targets_with_query_effects(
         effects.mono_shades.push(V7MonoShadeWrite {
             piece_id: piece.id.clone(),
             square: from,
-            shade: if (from.row + from.col) % 2 == 0 {
+            shade: if (from.row + from.col).is_multiple_of(2) {
                 "light"
             } else {
                 "dark"
@@ -6871,10 +6889,10 @@ fn v7_landing_cells_for_reservation(target: &MoveTarget) -> Result<Vec<Square>> 
         }
         return Ok(cells);
     }
-    if target.flag("colossusMove") || target.flag("bigRookMove") {
-        if target.flags.contains_key("highlightCells") {
-            return highlight_cells(target);
-        }
+    if (target.flag("colossusMove") || target.flag("bigRookMove"))
+        && target.flags.contains_key("highlightCells")
+    {
+        return highlight_cells(target);
     }
     if target.flag("portalLanding")
         && let Some(exit) = target
@@ -7286,16 +7304,28 @@ fn v7_fresh_capture_locked(state: &GameState, piece: &Piece) -> bool {
             .is_some_and(|until| f64::from(*state.turns_taken.get(actor)) < until)
 }
 
-fn v7_pawn_directional_moves(
-    state: &GameState,
-    piece: &Piece,
-    from: Square,
+/// 같은 pawn 기하 분기의 방향과 허용 조건이다. en passant 권리는
+/// 해당 관측에서 준비한 slice를 그대로 사용한다.
+struct V7PawnDirection {
     direction: i8,
     double_step: bool,
     allow_en_passant: bool,
     converted: bool,
+}
+
+fn v7_pawn_directional_moves(
+    state: &GameState,
+    piece: &Piece,
+    from: Square,
+    options: V7PawnDirection,
     rights: &[V7EnPassantRight],
 ) -> Vec<MoveTarget> {
+    let V7PawnDirection {
+        direction,
+        double_step,
+        allow_en_passant,
+        converted,
+    } = options;
     let Some(actor) = piece.color.owner() else {
         return Vec::new();
     };
@@ -7606,10 +7636,12 @@ fn v7_pawn_moves(state: &GameState, piece: &Piece, from: Square) -> Result<Vec<M
             state,
             piece,
             from,
-            actor.pawn_dir(),
-            true,
-            true,
-            converted,
+            V7PawnDirection {
+                direction: actor.pawn_dir(),
+                double_step: true,
+                allow_en_passant: true,
+                converted,
+            },
             &rights,
         );
         if state.flag("retreat", actor) {
@@ -7617,10 +7649,12 @@ fn v7_pawn_moves(state: &GameState, piece: &Piece, from: Square) -> Result<Vec<M
                 state,
                 piece,
                 from,
-                -actor.pawn_dir(),
-                false,
-                false,
-                converted,
+                V7PawnDirection {
+                    direction: -actor.pawn_dir(),
+                    double_step: false,
+                    allow_en_passant: false,
+                    converted,
+                },
                 &rights,
             ));
         }
@@ -7850,10 +7884,12 @@ fn v7_has_forced_en_passant(state: &GameState, actor: Color) -> Result<bool> {
                 state,
                 piece,
                 from,
-                actor.pawn_dir(),
-                true,
-                true,
-                false,
+                V7PawnDirection {
+                    direction: actor.pawn_dir(),
+                    double_step: true,
+                    allow_en_passant: true,
+                    converted: false,
+                },
                 &rights,
             ) {
                 if target.flag("enPassant")
@@ -9730,9 +9766,8 @@ mod v7_movement_tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .filter_map(|entry| {
-                    (entry["payload"]["type"] == "move").then(|| entry["payload"].clone())
-                })
+                .filter(|entry| entry["payload"]["type"] == "move")
+                .map(|entry| entry["payload"].clone())
                 .collect::<Vec<_>>();
             match legal_move_candidates(state) {
                 Ok(actions) => {

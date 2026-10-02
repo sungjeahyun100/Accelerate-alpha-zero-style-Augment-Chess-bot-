@@ -1069,8 +1069,9 @@ class TypedInformationSetSearch(InformationSetSearch):
             raise InformationMismatchError("typed leaf batch is empty")
         family = self.evaluator.architecture_family
         order = self.encoder.spec.feature_schema["input_order"][family]
-        # Bound the padded family tensors before allocating the batch. The
-        # encoder may produce differently sized records and candidate trees.
+        # Each position is already encoded, so the exact padded dimensions are
+        # known before allocating the batch. The model family determines which
+        # of those tensors count toward its inference resource limits.
         estimated_elements = estimated_bytes = 0
         for name in order:
             if any(name not in position.inputs for position in positions):

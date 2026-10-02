@@ -12,13 +12,17 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import platform
+import re
 import subprocess
 import sys
 import tarfile
 import urllib.request
 import xml.etree.ElementTree as ET
 
-from native_validation_profile import EXECUTION_SOURCE_PATHS, execution_identity, require_execution_identity
+from native_validation_profile import (
+    EXECUTION_SOURCE_PATHS, RUST_CORE_PACKAGES, RUST_REQUIRED_TESTS,
+    execution_identity, require_execution_identity, rust_test_command,
+)
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 
@@ -54,11 +58,45 @@ def sha(path):
         return hashlib.file_digest(file, "sha256").hexdigest()
 
 
-def rust_scope():
-    """Confirm the workspace run still contains the new core contract tests."""
+def validation_scope():
+    """두 수동 선택이 겹치거나 잘못된 boolean이면 실행 전에 정확히 실패한다."""
+    selections = {}
+    for name in ("ACCELERATE_CI_CORE_ONLY", "ACCELERATE_CI_ADAPTER_ONLY"):
+        value = os.environ.get(name, "false")
+        if value not in {"true", "false"}:
+            raise RuntimeError(f"{name} requires true or false, observed {value!r}")
+        selections[name] = value == "true"
+    if all(selections.values()):
+        raise RuntimeError("core_only and adapter_only cannot both be true; select exactly one scope or full validation")
+    scope = ("core" if selections["ACCELERATE_CI_CORE_ONLY"] else
+             "adapter" if selections["ACCELERATE_CI_ADAPTER_ONLY"] else "rust")
+    print(f"Requested validation scope: {scope}", flush=True)
+    return scope
+
+
+def rust_scope(scope="rust"):
+    """선택한 실제 cargo 검사를 실행하고 필수 검사가 ok였는지 함께 보존한다."""
     _, _, _, reports, _ = locations()
+    reports.mkdir(parents=True, exist_ok=True)
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
+    command = rust_test_command(scope)
+    print("+", " ".join(command), flush=True)
+    executed = subprocess.run(command, cwd=REPOSITORY, env=environment,
+                              capture_output=True, text=True, timeout=1200)
+    # 종료 코드가 실패여도 원래 stdout/stderr를 먼저 남긴다. ignored는 ok로 세지 않는다.
+    output = executed.stdout + executed.stderr
+    (reports / f"{scope}-test-output.txt").write_text(output, encoding="utf-8")
+    if executed.stdout:
+        print(executed.stdout, end="" if executed.stdout.endswith("\n") else "\n", flush=True)
+    if executed.stderr:
+        print(executed.stderr, end="" if executed.stderr.endswith("\n") else "\n", file=sys.stderr, flush=True)
+    executed.check_returncode()
+    passed = {match.group(1).rsplit("::", 1)[-1] for match in
+              re.finditer(r"^test (\S+) \.\.\. ok$", executed.stdout, re.MULTILINE)}
+    not_passed = sorted(set(RUST_REQUIRED_TESTS) - passed)
+    if not_passed:
+        raise RuntimeError(f"Rust {scope} validation did not execute required tests successfully: {not_passed}")
     result = subprocess.run(
         ["cargo", "test", "-p", "augment-chess-engine", "--locked", "--", "--list"],
         cwd=REPOSITORY, env=environment, capture_output=True, text=True,
@@ -66,28 +104,25 @@ def rust_scope():
     )
     if result.stderr:
         print(result.stderr, end="" if result.stderr.endswith("\n") else "\n", file=sys.stderr)
-    required = (
-        "geometry_maps_rectangles_and_signed_extents_without_relabeling_coordinates",
-        "synthetic_resize_requires_new_cells_and_an_explicit_clipping_policy",
-        "child_search_uses_parent_square_but_preserves_original_origin_and_board",
-        "shift_checks_third_party_collision_mutual_overlap_and_stops_on_first_piece",
-        "explicit_stack_matches_independent_recursive_oracle_for_singletons",
-    )
+    required_engine_tests = RUST_REQUIRED_TESTS[:5]
     listed = {line.removesuffix(": test").rsplit("::", 1)[-1]
               for line in result.stdout.splitlines() if line.endswith(": test")}
-    missing = [name for name in required if name not in listed]
+    missing = [name for name in required_engine_tests if name not in listed]
     if missing:
         raise RuntimeError(f"Rust workspace omitted required geometry or MoveProgram tests: {missing}")
-    reports.mkdir(parents=True, exist_ok=True)
-    (reports / "rust-test-list.txt").write_text(result.stdout, encoding="utf-8")
-    (reports / "rust-scope.json").write_text(json.dumps({
-        "crate": "augment-chess-engine", "required_tests": list(required),
-        "listed": True, "execution": "cargo test --workspace --locked in the preceding CI step",
-        "scope": "geometry and MoveProgram code contracts; full v7 rules parity remains pending",
+    (reports / f"{scope}-test-list.txt").write_text(result.stdout, encoding="utf-8")
+    (reports / f"{scope}-scope.json").write_text(json.dumps({
+        "crate": "augment-chess-engine", "required_tests": list(RUST_REQUIRED_TESTS),
+        "required_engine_tests": list(required_engine_tests), "validationScope": scope,
+        "packages": list(RUST_CORE_PACKAGES) if scope == "core" else ["--workspace"],
+        "listed": True, "executed": True, "exitCode": executed.returncode, "command": command,
+        "execution": " ".join(command),
+        "scope": "core contract tests; external source receipts and full v7 rules parity are separate evidence",
     }, indent=2) + "\n", encoding="utf-8")
 
 
 def configure():
+    scope = validation_scope()
     root, system, build, reports, _ = locations()
     reports.mkdir(parents=True, exist_ok=True)
     values = {
@@ -102,6 +137,7 @@ def configure():
         "PYTHONUTF8": "1",
         "ACCELERATE_TEST_ARTIFACTS": str(root / "models" / system / "native-bot-validation"),
         "ACCELERATE_SITE_BASELINE": str(root / "cache" / "site-baseline-client"),
+        "ACCELERATE_RUST_SCOPE": "core" if scope == "core" else "rust",
     }
     with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as file:
         for key, value in values.items():
@@ -111,7 +147,8 @@ def configure():
     (reports / "environment.json").write_text(json.dumps({
         "python": sys.version, "platform": platform.platform(),
         "artifact_root": str(root), "rust_minimum": "1.96.0",
-        "scope": "code and bounded synthetic optimizer/export/inference checks; no learning campaign",
+        "scope": ("Rust core contracts; installed wheel, bot integration and measurements excluded" if scope == "core"
+                  else "code and bounded synthetic optimizer/export/inference checks; no learning campaign"),
     }, indent=2) + "\n", encoding="utf-8")
 
 
@@ -637,7 +674,8 @@ def current_client():
     os.environ["ACCELERATE_SITE_BASELINE_LATEST"] = str(destination)
     run("node", "projects/augment-chess/oracle/tools/site-parity/prepare-current-baseline.js", "--verify", destination, timeout=180)
     run("node", "--test", "projects/augment-chess/contracts/tools/runtime-contract.test.js",
-        "projects/augment-chess/tests/site-adapter/parity/latest-client.test.cjs", timeout=180)
+        "projects/augment-chess/tests/site-adapter/parity/latest-client.test.cjs",
+        "projects/augment-chess/tests/differential/v7-native-response.test.cjs", timeout=180)
     # Cache에 보존할 검증 보고서와 원문 loader의 baseline manifest를 구별한다.
     # 성공한 current-client 단계만 실제 composite 실행 식별자를 보고서에 남긴다.
     (reports / "current-client-source.json").write_text(json.dumps({
@@ -668,11 +706,14 @@ def v7_differential():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=("configure", "rust-scope", "build", "tests", "frozen", "current-client",
+    parser.add_argument("phase", choices=("configure", "validate-scope", "rust-scope", "build", "tests", "frozen", "current-client",
                                           "v7-differential"))
-    phase = parser.parse_args().phase
+    parser.add_argument("--scope", choices=("rust", "core"), default="rust")
+    arguments = parser.parse_args()
+    phase = arguments.phase
     try:
-        {"configure": configure, "rust-scope": rust_scope, "build": build, "tests": tests, "frozen": frozen,
+        {"configure": configure, "validate-scope": validation_scope,
+         "rust-scope": lambda: rust_scope(arguments.scope), "build": build, "tests": tests, "frozen": frozen,
          "current-client": current_client, "v7-differential": v7_differential}[phase]()
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         for stream in (error.stdout, error.stderr):

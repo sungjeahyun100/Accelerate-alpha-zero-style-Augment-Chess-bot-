@@ -687,15 +687,17 @@ mod tests {
         // Each digest was produced by the SHA-pinned client after restoring
         // its draft-deleted seed-19 opening, installing the same campaign and
         // board edits, then calling `checkCampaignObjectives()` directly.
-        let cases: [(
-            &str,
-            &str,
-            &[(usize, usize)],
-            &str,
-            &str,
-            Option<&str>,
-            &str,
-        ); 10] = [
+        // 캠페인·플레이어·제거 셀·전후 source digest·승자·종료 이유를 묶는다.
+        type FrozenCampaignObjectiveCase<'a> = (
+            &'a str,
+            &'a str,
+            &'a [(usize, usize)],
+            &'a str,
+            &'a str,
+            Option<&'a str>,
+            &'a str,
+        );
+        let cases: [FrozenCampaignObjectiveCase<'_>; 10] = [
             (
                 "machineRebellion",
                 "white",

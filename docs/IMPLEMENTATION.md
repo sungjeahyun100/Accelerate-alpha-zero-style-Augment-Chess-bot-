@@ -5,7 +5,53 @@
 단계별 검증 지시는 [IMPLEMENTATION-DIRECTIVES](IMPLEMENTATION-DIRECTIVES.md)에 있다.
 기존 v6 실행 계약은 [runtime-v1](../projects/augment-chess/contracts/protocol/runtime-v1.md)에 보존한다.
 아래 관측한 검사와 계획을 혼동하지 않는다.
-작업 브랜치는 feature/full-stack-implementation, 출발점은 bfc85c886b489f21f6f1037bc291ab0157c3dc6f다.
+기존 부모 구현 기록의 브랜치는 `feature/full-stack-implementation`, 출발점은
+`bfc85c886b489f21f6f1037bc291ab0157c3dc6f`다. 아래 2026-09-29 및 이전 checkpoint는
+그때의 지원 상태·검사·설치본을 보존하며 현재 PR #32 변경의 성공으로 재사용하지 않는다.
+
+## 2026-10-02 PR #32 후속 통합·검증
+
+현재 작업 브랜치는 `feature/object-rule-adapter`다. 2026-10-01 전달에는 모노레포 이전,
+객체형 공통 어댑터와 v7 규칙 이관을 저장했다. 전달105는 당시 source closure에서 모두
+PASS였지만 Rust 1.97의 production lib dead_code 11건과 strict Clippy 53진단/exit 101이
+있었다. 이 역사적 결과는 [인수 장부](V7-ACCEPTANCE-CLOSURE.md)에 남긴다.
+
+후속 요청은 core/common/JS/source 회귀·strict lint·구조 검사, PR #28 base 통합,
+Windows/Linux `core_only` CI 및 PR #32 원격 공유를 마무리하는 범위다. 실제 봇 연동,
+sdist/wheel 빌드와 설치, 성능 측정은 제외하며 과거 wheel 성공을 현행 설치본으로 승격하지 않는다.
+
+| 항목 | 메인이 관측한 현재 상태 |
+|---|---|
+| 최소 Rust 검사 | Rust 1.96 fmt·core 4개 crate all-targets strict Clippy(`-D warnings`) PASS |
+| Node·검사 도구 | 6개 파일·62개 검사(skip 0), CI helper 17개, 구조 검사 테스트 14개 PASS |
+| Python·workflow 입력 | 변경 Python 8개 파일 AST PASS, Actionlint 1.7.12의 workflow 2개 PASS. AST는 소비자 실행 증거가 아님 |
+| 새 source 자료 | 원문 생성은 `oracle-only`로 종료하고, 별도로 exported 21국면·42 apply 표본의 Rust 내부 비교 `bounded-internal-pass`를 관측 |
+| 최종 native105 | `reports/root-pr32-finish-final105-jobs.json` 전체 105개 PASS. engine 단위 713개·통합 20개, 일반 실행의 source-input 53개 ignored. 공통 registry 9개·v6 변환 6개 PASS. 전 job source digest `5638d6c8…` 불변·컴파일 경고 0건 |
+| base·원격·CI | PR #28 base `45edfe1`을 통합한 source로 검증했다. merge checkpoint·원격 SHA와 같은 commit의 Windows/Linux `core_only` CI 관측 근거는 PR #32 본문에 별도로 기록 |
+
+105는 실행 작업 수이며 독립 시나리오 수나 전체 규칙 완료율이 아니다. 실행 source digest,
+입력 hash·실행 recipe·source digest와 결과는 [인수 장부](V7-ACCEPTANCE-CLOSURE.md)에
+결속한다. 최초 부모 회귀 2건 실패는 원문 조사와 계약 갱신 뒤 전체 재실행으로 닫았다.
+로컬 검사와 같은 commit의 CI 관측, 제외한 설치·봇·성능 및 전체 프로젝트 GO를 구분한다.
+
+## 2026-09-29 비어댑터 병렬 구현 checkpoint
+
+카드 효과와 기물 이동의 규칙 객체화는 [별도 담당자 이관](RULE-ADAPTER-HANDOFF.md)에 따라
+동결했다. 이번 단계는 공통 상태·입력·배포 계약과 독립 검증을 보강한 것이다. 공개 v7
+`Position`의 import/legal/bind/apply와 플레이 행동자의 후속 힌트는 계속 미지원이다.
+
+| 범위 | 이번 변경과 국소 증거 | 완료하지 않은 범위 |
+|---|---|---|
+| Rust 상태·흐름 | 명시 anchor와 파생 점유의 충돌을 거부하고, 손실 있는 레거시 export를 막는다. 가변 직사각형 replay의 빈·ragged 입력 및 크기 변경은 상태 변경 전에 거부한다. v7 deathmatch 설정을 원문 수치 규칙으로 정규화하고 좁은 seed 37 직접 호출에서 전체 상태·RNG를 대조했다. 왕실 위협은 내부 `AiNoCards` 후보·포획 실행이 검증될 때까지 닫았다. | 자연 대국 전이와 모든 source-reachable 상태·카드·기물 규칙. |
+| 공개 AI 입력·실행 | 공개 이력의 최근 8개와 집계 일관성을 검증한다. 탐색의 루트 posterior를 조건화하지 않은 자식 posterior로 표기하지 않고, hidden opening의 확률·native 지원이 없으면 거부한다. replay의 중복·actor 불일치와 CLI의 실행 오류·예산 종료를 구분한다. | 공개 v7 native Position을 이용한 세 모드 bounded 탐색·자가대국. |
+| 모델·추론 | A/B typed v3 ONNX에 model-config SHA-256을 정확히 한 번 기록하고 양쪽 로더가 검사한다. NumPy 소유 복사 전에 dtype/shape/총 원소 수/명시 byte 한도를 검사하며 관계 수 0을 기존 A/B 패리티 검사에 포함했다. Python 두 모델 검사 24개가 로컬에서 통과했다. | 최종 설치 wheel의 두 OS ORT·tract 검사. 중간 메모리 값은 검증된 exporter 계열에 대한 추정이며 임의 ONNX의 hard bound가 아니다. 기존 typed v3 bundle은 재export가 필요하다. |
+| 차등 gate | 원문 행동을 새 Position에 재사용하면 거부되는지 검사하고 native bind/apply 뒤 원자성을 확인한다. 응답 건수·순서·실패 상태가 잘못되면 성공으로 보고하지 않는다. 동결 원문 전용 9국면 생성은 `oracle-only`·NO-GO로 끝났다. | native v7 import 미지원으로 실제 9국면 동등성 판정 불가. |
+
+로컬 통합 검사에서 Rust 엔진 142개, 통합 1·4·8개, runtime 4개와 workspace
+strict Clippy/rustfmt가 통과했다. WSL의 native 라이브러리 테스트 링크는 호스트의
+`libpython3.12` 부재로 실행되지 않았고, 설치 wheel은 CI에서만 판단한다. Python
+공개 IR·탐색·session 소스 검사 49개는 7개 native 의존 사례를 제외하고 통과했다.
+이 단계의 검사 개수는 전체 규칙 GO나 모델 성능 증거가 아니다. 실제 학습은 수행하지 않았다.
 
 ## 2026-09-29 구현 checkpoint
 

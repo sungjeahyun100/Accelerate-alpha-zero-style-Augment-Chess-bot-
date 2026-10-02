@@ -19,7 +19,10 @@ import re
 import subprocess
 import sys
 
-from native_validation_profile import EXECUTION_SOURCE_PATHS, execution_identity, require_execution_identity
+from native_validation_profile import (
+    EXECUTION_SOURCE_PATHS, RUST_CORE_PACKAGES, RUST_REQUIRED_TESTS,
+    execution_identity, require_execution_identity, rust_test_command,
+)
 
 
 REPOSITORY = Path(__file__).resolve().parents[2]
@@ -30,6 +33,8 @@ SHARED_PATHS = (
     "projects/accelerate/runtime/", "projects/augment-chess/contracts/",
     "projects/augment-chess/engine/", "projects/augment-chess/tools/v6-migration/",
 )
+CORE_PATHS = tuple(path for path in SHARED_PATHS
+                   if path not in {"projects/accelerate/native/", "projects/accelerate/runtime/"})
 NATIVE_EXTRA_PATHS = (
     ".gitignore", "package.json", "pyproject.toml", "uv.lock",
     "projects/accelerate/pyproject.toml",
@@ -46,8 +51,10 @@ ADAPTER_PATHS = (
     ".github/workflows/native-bot.yml", "package.json",
     "projects/augment-chess/contracts/",
     "projects/augment-chess/oracle/", "projects/augment-chess/tests/site-adapter/",
+    "projects/augment-chess/tests/differential/v7-native-differential.cjs",
+    "projects/augment-chess/tests/differential/v7-native-response.test.cjs",
 )
-SCOPES = {"rust": SHARED_PATHS, "native": SHARED_PATHS + NATIVE_EXTRA_PATHS,
+SCOPES = {"rust": SHARED_PATHS, "core": CORE_PATHS, "native": SHARED_PATHS + NATIVE_EXTRA_PATHS,
           "adapter": ADAPTER_PATHS}
 
 
@@ -80,7 +87,7 @@ def identity(scope: str) -> dict[str, object]:
         names.add(name.decode("utf-8"))
     required = {".github/workflows/native-bot.yml", ".github/scripts/native-ci-reuse.py",
                 ".github/scripts/native_validation_profile.py", *EXECUTION_SOURCE_PATHS}
-    if scope in {"rust", "native"}:
+    if scope in {"rust", "core", "native"}:
         required.update({"Cargo.toml", "Cargo.lock"})
     if scope == "native":
         required.update({".gitignore", "package.json", "uv.lock",
@@ -90,7 +97,9 @@ def identity(scope: str) -> dict[str, object]:
         required.update({"package.json", ".github/scripts/native-bot-check.py",
                          "projects/augment-chess/contracts/catalog/site-20260928.json",
                          "projects/augment-chess/oracle/game-adapter/src/index.js",
-                         "projects/augment-chess/tests/site-adapter/parity/latest-client.test.cjs"})
+                         "projects/augment-chess/tests/site-adapter/parity/latest-client.test.cjs",
+                         "projects/augment-chess/tests/differential/v7-native-differential.cjs",
+                         "projects/augment-chess/tests/differential/v7-native-response.test.cjs"})
     missing = required - names
     if missing:
         raise RuntimeError(f"CI cache identity omitted required tracked inputs: {sorted(missing)}")
@@ -135,19 +144,33 @@ def report_json(path: Path, label: str) -> dict:
 def validate_evidence(scope: str, marker: Path) -> None:
     reports = marker.parents[2]
     job_reports = marker.parent
-    if scope == "rust":
-        listed = report_json(job_reports / "rust-scope.json", "Rust test scope report")
-        test_list = job_reports / "rust-test-list.txt"
+    if scope in {"rust", "core"}:
+        listed = report_json(job_reports / f"{scope}-scope.json", "Rust test scope report")
+        test_list = job_reports / f"{scope}-test-list.txt"
         if test_list.is_symlink() or not test_list.is_file():
             raise RuntimeError("Rust test list is missing or not a regular file")
+        expected_packages = list(RUST_CORE_PACKAGES) if scope == "core" else ["--workspace"]
+        if (listed.get("validationScope") != scope or listed.get("command") != rust_test_command(scope)
+                or listed.get("packages") != expected_packages):
+            raise RuntimeError(f"Rust {scope} test scope report differs from the requested validation scope or command")
         names = listed.get("required_tests")
         if (listed.get("listed") is not True or listed.get("crate") != "augment-chess-engine"
-                or not isinstance(names, list) or not names
-                or any(not isinstance(name, str) or not name for name in names)):
+                or listed.get("executed") is not True or type(listed.get("exitCode")) is not int
+                or listed["exitCode"] != 0 or names != list(RUST_REQUIRED_TESTS)
+                or listed.get("required_engine_tests") != list(RUST_REQUIRED_TESTS[:5])):
             raise RuntimeError("Rust test scope report lacks executed required tests")
         listing = test_list.read_text(encoding="utf-8")
-        if any(f"{name}: test" not in listing for name in names):
+        if any(f"{name}: test" not in listing for name in RUST_REQUIRED_TESTS[:5]):
             raise RuntimeError("Rust test list does not contain every required test")
+        output_path = job_reports / f"{scope}-test-output.txt"
+        if output_path.is_symlink() or not output_path.is_file():
+            raise RuntimeError("Rust executed test output is missing or not a regular file")
+        output = output_path.read_text(encoding="utf-8")
+        passed = {match.group(1).rsplit("::", 1)[-1] for match in
+                  re.finditer(r"^test (\S+) \.\.\. ok$", output, re.MULTILINE)}
+        missing = sorted(set(RUST_REQUIRED_TESTS) - passed)
+        if missing:
+            raise RuntimeError(f"Rust {scope} executed output lacks passed required tests: {missing}")
     elif scope == "native":
         packaging = report_json(job_reports / "packaging.json", "installed wheel report")
         tests = report_json(job_reports / "test-scope.json", "installed test scope report")
@@ -265,6 +288,7 @@ def main() -> None:
             raise RuntimeError("GITHUB_OUTPUT is required for CI cache key export")
         with Path(output).open("a", encoding="utf-8") as stream:
             stream.write(f"key={expected['key']}\n")
+            stream.write(f"scope={args.scope}\n")
         print(f"{args.scope} validation identity: {expected['inputFingerprint']}")
         return
     marker = marker_path(args.scope)

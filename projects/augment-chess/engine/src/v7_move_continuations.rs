@@ -289,17 +289,30 @@ fn should_retain_backward_knight(
         }
 }
 
+/// Backward Knight의 한 번의 이동과 이미 준비된 continuation 판정 입력.
+pub(crate) struct V7BackwardKnightMove<'a> {
+    pub(crate) color: Color,
+    pub(crate) moved_as_type: &'a str,
+    pub(crate) from: Square,
+    pub(crate) to: Square,
+    pub(crate) captured: bool,
+    pub(crate) queued: bool,
+}
+
 /// main91430. 이미 queue된 턴은 free-move predicate와 별개로 우선한다.
 pub(crate) fn retain_backward_knight_turn_v7(
     state: &mut GameState,
     piece: &mut Piece,
-    color: Color,
-    moved_as_type: &str,
-    from: Square,
-    to: Square,
-    captured: bool,
-    queued: bool,
+    input: V7BackwardKnightMove<'_>,
 ) -> Result<bool> {
+    let V7BackwardKnightMove {
+        color,
+        moved_as_type,
+        from,
+        to,
+        captured,
+        queued,
+    } = input;
     boundary(state)?;
     if !queued
         && piece.extra.get("queuedBackwardKnightTurn") != Some(&json!(true))
@@ -867,12 +880,14 @@ pub(crate) fn after_middle_callbacks_v7(
     if retain_backward_knight_turn_v7(
         state,
         &mut piece,
-        color,
-        &input.start.moved_as_type,
-        input.from,
-        input.landing,
-        input.captured_something,
-        false,
+        V7BackwardKnightMove {
+            color,
+            moved_as_type: &input.start.moved_as_type,
+            from: input.from,
+            to: input.landing,
+            captured: input.captured_something,
+            queued: false,
+        },
     )? {
         return Ok(V7ContinuationControl::Retained);
     }

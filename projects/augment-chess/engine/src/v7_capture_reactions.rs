@@ -819,7 +819,7 @@ fn capture_at_inner_optional(
     )?;
     replace_captured_piece(state, capturer, &captured);
     crate::v7_capture_objectives::check_campaign_objectives(state)?;
-    if let Some(active) = attacker.as_deref_mut()
+    if let Some(active) = attacker
         && let Some(live) = piece_square(state, &active.id)
             .and_then(|at| state.at(at))
             .cloned()
@@ -1343,7 +1343,7 @@ fn quantum_destination_available(state: &GameState, piece: &Piece, destination: 
     }
     cells.into_iter().all(|square| {
         let same = state.at(square).is_some_and(|item| item.id == piece.id);
-        if reserved_evasion_square(state, square) && !same || state.at(square).is_some() && !same {
+        if (reserved_evasion_square(state, square) || state.at(square).is_some()) && !same {
             return false;
         }
         !state.board.iter().flatten().flatten().any(|other| {

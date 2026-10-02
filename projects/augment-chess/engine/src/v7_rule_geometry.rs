@@ -918,7 +918,7 @@ fn three_move_allowed_inner(
     {
         return Ok(false);
     }
-    if (from.row + from.col) % 2 == 0
+    if (from.row + from.col).is_multiple_of(2)
         || !state
             .board
             .iter()

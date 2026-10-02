@@ -586,10 +586,10 @@ fn normalize_visual_v7(value: &Value) -> Result<Option<Value>> {
     ) {
         object.shift_remove("color");
     }
-    if kind == "card" {
-        if let Some(animation) = object.get_mut("animation").and_then(Value::as_object_mut) {
-            animation.shift_remove("html");
-        }
+    if kind == "card"
+        && let Some(animation) = object.get_mut("animation").and_then(Value::as_object_mut)
+    {
+        animation.shift_remove("html");
     }
     if let Some(cells) = object.get("cells").and_then(Value::as_array) {
         let cells = cells
@@ -893,6 +893,22 @@ pub(crate) fn attach_notation_redactions(
     Ok(event)
 }
 
+/// 이동 전 privacy와 실제 포획·목격 셀은 같은 기보 판정에서 함께 사용한다.
+#[derive(Clone, Copy)]
+pub(crate) struct MoveNotationVisibility<'a> {
+    pub(crate) privacy: &'a Value,
+    pub(crate) capture: bool,
+    pub(crate) capture_known_squares: &'a Value,
+}
+
+struct SourceMoveNotation<'a> {
+    color: Color,
+    piece_type: &'a str,
+    text: String,
+    description: String,
+    visibility: MoveNotationVisibility<'a>,
+}
+
 /// 원문 moveNotationRedactions의 현재 목적지·이전 typeKnown·목격 포획 셀.
 pub(crate) fn queue_special_move_notation(
     state: &mut GameState,
@@ -900,22 +916,20 @@ pub(crate) fn queue_special_move_notation(
     at: Square,
     text: String,
     description: String,
-    privacy: &Value,
-    capture: bool,
-    capture_known_squares: &Value,
+    visibility: MoveNotationVisibility<'_>,
 ) -> Result<()> {
     let color = piece.color.owner().ok_or(EngineError::WrongActor)?;
     queue_source_move_notation(
         state,
         piece,
         at,
-        color,
-        &piece.kind,
-        text,
-        description,
-        privacy,
-        capture,
-        capture_known_squares,
+        SourceMoveNotation {
+            color,
+            piece_type: &piece.kind,
+            text,
+            description,
+            visibility,
+        },
     )
 }
 
@@ -923,27 +937,9 @@ fn queue_source_move_notation(
     state: &mut GameState,
     piece: &Piece,
     at: Square,
-    color: Color,
-    piece_type: &str,
-    text: String,
-    description: String,
-    privacy: &Value,
-    capture: bool,
-    capture_known_squares: &Value,
+    notation: SourceMoveNotation<'_>,
 ) -> Result<()> {
-    queue_source_move_notation_kind(
-        state,
-        piece,
-        at,
-        color,
-        piece_type,
-        "special",
-        text,
-        description,
-        privacy,
-        capture,
-        capture_known_squares,
-    )
+    queue_source_move_notation_kind(state, piece, at, "special", notation)
 }
 
 fn source_notation_move_number(state: &GameState) -> Result<u64> {
@@ -963,30 +959,22 @@ fn queue_source_move_notation_kind(
     state: &mut GameState,
     piece: &Piece,
     at: Square,
-    color: Color,
-    piece_type: &str,
     kind: &str,
-    text: String,
-    description: String,
-    privacy: &Value,
-    capture: bool,
-    capture_known_squares: &Value,
+    notation: SourceMoveNotation<'_>,
 ) -> Result<()> {
+    let SourceMoveNotation {
+        color,
+        piece_type,
+        text,
+        description,
+        visibility,
+    } = notation;
     let move_number = source_notation_move_number(state)?;
     let event = queue_notation(state, kind, color, text.clone(), description, move_number)?;
     if event.is_null() {
         return Ok(());
     }
-    let redactions = source_move_redactions(
-        state,
-        piece,
-        at,
-        piece_type,
-        &text,
-        privacy,
-        capture,
-        capture_known_squares,
-    )?;
+    let redactions = source_move_redactions(state, piece, at, piece_type, &text, visibility)?;
     attach_notation_redactions(state, event, redactions)?;
     Ok(())
 }
@@ -997,10 +985,13 @@ fn source_move_redactions(
     at: Square,
     piece_type: &str,
     text: &str,
-    privacy: &Value,
-    capture: bool,
-    capture_known_squares: &Value,
+    visibility: MoveNotationVisibility<'_>,
 ) -> Result<serde_json::Map<String, Value>> {
+    let MoveNotationVisibility {
+        privacy,
+        capture,
+        capture_known_squares,
+    } = visibility;
     let mut redactions = serde_json::Map::new();
     let code = piece_code(&state.ruleset_id, piece_type);
     let code = if code.is_empty() { "P" } else { &code };
@@ -1091,13 +1082,24 @@ pub(crate) fn queue_automatic_move_notation(
         piece,
         from,
         to,
-        privacy,
-        color,
-        &piece.kind,
-        capture,
-        state.mode == "gameover",
-        &description,
+        AutomaticMoveNotationOptions {
+            privacy,
+            notation_color: color,
+            piece_type: &piece.kind,
+            capture,
+            game_end: state.mode == "gameover",
+            description: &description,
+        },
     )
+}
+
+pub(crate) struct AutomaticMoveNotationOptions<'a> {
+    pub(crate) privacy: Option<&'a Value>,
+    pub(crate) notation_color: Color,
+    pub(crate) piece_type: &'a str,
+    pub(crate) capture: bool,
+    pub(crate) game_end: bool,
+    pub(crate) description: &'a str,
 }
 
 /// Source 88342. The notation color may differ from a neutral mover's color;
@@ -1108,13 +1110,16 @@ pub(crate) fn queue_automatic_move_notation_with_options(
     piece: &Piece,
     from: Square,
     to: Square,
-    privacy: Option<&Value>,
-    notation_color: Color,
-    piece_type: &str,
-    capture: bool,
-    game_end: bool,
-    description: &str,
+    options: AutomaticMoveNotationOptions<'_>,
 ) -> Result<()> {
+    let AutomaticMoveNotationOptions {
+        privacy,
+        notation_color,
+        piece_type,
+        capture,
+        game_end,
+        description,
+    } = options;
     let code = piece_code(&state.ruleset_id, piece_type);
     let prefix = if piece_type == "pawn" && capture {
         char::from(b'a' + from.col).to_string()
@@ -1131,13 +1136,17 @@ pub(crate) fn queue_automatic_move_notation_with_options(
         state,
         piece,
         to,
-        notation_color,
-        piece_type,
-        text,
-        description.to_owned(),
-        privacy.unwrap_or(&Value::Null),
-        capture,
-        &Value::Null,
+        SourceMoveNotation {
+            color: notation_color,
+            piece_type,
+            text,
+            description: description.to_owned(),
+            visibility: MoveNotationVisibility {
+                privacy: privacy.unwrap_or(&Value::Null),
+                capture,
+                capture_known_squares: &Value::Null,
+            },
+        },
     )
 }
 
@@ -1524,11 +1533,13 @@ pub(crate) fn queue_v7_move_notation_with_options(
             piece,
             from,
             to,
-            options.privacy,
-            options.capture,
+            MoveNotationVisibility {
+                privacy: options.privacy,
+                capture: options.capture,
+                capture_known_squares: options.capture_known_squares,
+            },
             false,
             options.piece_type,
-            options.capture_known_squares,
         );
     }
     let color = piece.color.owner().ok_or(EngineError::WrongActor)?;
@@ -1549,14 +1560,18 @@ pub(crate) fn queue_v7_move_notation_with_options(
         state,
         piece,
         to,
-        color,
-        options.piece_type,
         "move",
-        text,
-        description,
-        options.privacy,
-        options.capture,
-        options.capture_known_squares,
+        SourceMoveNotation {
+            color,
+            piece_type: options.piece_type,
+            text,
+            description,
+            visibility: MoveNotationVisibility {
+                privacy: options.privacy,
+                capture: options.capture,
+                capture_known_squares: options.capture_known_squares,
+            },
+        },
     )
 }
 
@@ -1575,11 +1590,13 @@ pub(crate) fn queue_don_quixote_move_notation(
         piece,
         from,
         to,
-        privacy,
-        capture,
+        MoveNotationVisibility {
+            privacy,
+            capture,
+            capture_known_squares: &Value::Null,
+        },
         rampage,
         &piece.kind,
-        &Value::Null,
     )
 }
 
@@ -1588,12 +1605,11 @@ fn queue_don_quixote_notation_with_type(
     piece: &Piece,
     from: Square,
     to: Square,
-    privacy: &Value,
-    capture: bool,
+    visibility: MoveNotationVisibility<'_>,
     rampage: bool,
     piece_type: &str,
-    capture_known_squares: &Value,
 ) -> Result<()> {
+    let capture = visibility.capture;
     if state.ruleset_id != RULES_VERSION_V7 {
         return Err(EngineError::InvalidState(
             "Don Quixote notation requires v7 rules".into(),
@@ -1627,16 +1643,7 @@ fn queue_don_quixote_notation_with_type(
     if event.is_null() {
         return Ok(());
     }
-    let redactions = source_move_redactions(
-        state,
-        piece,
-        to,
-        piece_type,
-        &text,
-        privacy,
-        capture,
-        capture_known_squares,
-    )?;
+    let redactions = source_move_redactions(state, piece, to, piece_type, &text, visibility)?;
     attach_notation_redactions(state, event, redactions).map(|_| ())
 }
 
@@ -1677,9 +1684,11 @@ pub(crate) fn queue_mistake_attempt_notation_v7(
         to,
         options.piece_type,
         &attempted,
-        options.privacy,
-        true,
-        options.capture_known_squares,
+        MoveNotationVisibility {
+            privacy: options.privacy,
+            capture: true,
+            capture_known_squares: options.capture_known_squares,
+        },
     )?;
     for value in redactions.values_mut() {
         let masked = value.get("text").and_then(Value::as_str).ok_or_else(|| {
@@ -1754,9 +1763,11 @@ pub(crate) fn queue_jump_capture_notation_v7(
         destination,
         &piece.kind,
         &text,
-        privacy,
-        true,
-        &known,
+        MoveNotationVisibility {
+            privacy,
+            capture: true,
+            capture_known_squares: &known,
+        },
     )?;
     for value in redactions.values_mut() {
         let masked = value.get("text").and_then(Value::as_str).ok_or_else(|| {
@@ -1774,11 +1785,14 @@ pub(crate) fn queue_v7_move_notation(
     from: Square,
     to: Square,
     target: &MoveTarget,
-    privacy: &Value,
-    capture: bool,
-    capture_known_squares: &Value,
+    visibility: MoveNotationVisibility<'_>,
     game_end: bool,
 ) -> Result<()> {
+    let MoveNotationVisibility {
+        privacy,
+        capture,
+        capture_known_squares,
+    } = visibility;
     let disambiguation = move_notation_disambiguation_v7(state, piece, from, to)?;
     queue_v7_move_notation_with_options(
         state,
@@ -1975,10 +1989,10 @@ pub(crate) fn begin_move(state: &mut GameState, actor: Color) -> Result<GameStat
 pub(crate) fn commit_active_move(state: &mut GameState, actor: Color) -> Result<()> {
     let capture = active_move_capture(state)?;
     replace_active_move_capture(state, None)?;
-    if let Some(capture) = capture {
-        if capture.actor == actor {
-            commit_move(state, &capture.before, actor)?;
-        }
+    if let Some(capture) = capture
+        && capture.actor == actor
+    {
+        commit_move(state, &capture.before, actor)?;
     }
     Ok(())
 }

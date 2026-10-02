@@ -481,6 +481,7 @@ pub(crate) fn time_phase_of(state: &GameState, piece: &Piece) -> Result<Option<&
 
 /// traveler의 truthy phase가 data fallback보다 먼저 평가된다. truthy 잘못된
 /// phase도 future로 정규화하므로 그 분기에서는 campaign data를 읽지 않는다.
+#[cfg(test)]
 pub(crate) fn current_time_traveler_phase(state: &GameState) -> Result<&'static str> {
     if state.ruleset_id != RULES_VERSION_V7 {
         return Err(EngineError::UnsupportedFeature(format!(
@@ -504,6 +505,7 @@ pub(crate) fn current_time_traveler_phase(state: &GameState) -> Result<&'static 
     ))
 }
 
+#[cfg(test)]
 pub(crate) fn is_time_phase_distant(state: &GameState, piece: &Piece) -> Result<bool> {
     if !time_traveler_setup(state)
         || matches!(piece.kind.as_str(), "timeTraveler" | "wall" | "football")
@@ -1428,7 +1430,7 @@ fn journey_hint_route_exists(state: &GameState) -> Result<bool> {
         return Ok(false);
     };
     let king_index = king.row * 8 + king.col;
-    let required = u64::MAX & !(1u64 << king_index);
+    let required = !(1u64 << king_index);
     let mut visited = 1u64 << (current.row * 8 + current.col);
     if let Some(entries) = knight_journey_data(state)?
         .and_then(|data| data.get("visited"))
@@ -2423,7 +2425,7 @@ mod tests {
                     let text = value.to_string();
                     let mut prefix = text.chars().take(240).collect::<String>();
                     if text.chars().count() > 240 {
-                        prefix.push_str("…");
+                        prefix.push('…');
                     }
                     prefix
                 };

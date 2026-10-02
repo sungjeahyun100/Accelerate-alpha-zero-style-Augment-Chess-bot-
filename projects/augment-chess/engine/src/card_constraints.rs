@@ -1,9 +1,12 @@
 //! Typed v7 capture constraints created by card and RULE effects. The source
 //! stores their live counters in the legacy piece/game DTO, so conversion is
 //! explicit at the execution boundary and leaves the v6 path untouched.
-use crate::{Color, EngineError, GameState, Piece, RULES_VERSION_V7, Result, observation};
+#[cfg(test)]
+use crate::Color;
+use crate::{EngineError, GameState, Piece, RULES_VERSION_V7, Result, observation};
 use serde_json::Value;
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CaptureLockSource {
     FreshPiece,
@@ -11,6 +14,7 @@ pub(crate) enum CaptureLockSource {
     PromotionRush,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum PieceConstraint {
     CaptureLockedUntil {
@@ -22,6 +26,7 @@ pub(crate) enum PieceConstraint {
     },
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum GameConstraint {
     SaturationRule { max_captures: u32 },
@@ -30,9 +35,13 @@ pub(crate) enum GameConstraint {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CaptureConstraints {
+    #[cfg(test)]
     pub(crate) piece: Vec<PieceConstraint>,
+    #[cfg(test)]
     pub(crate) game: Vec<GameConstraint>,
+    #[cfg(test)]
     owner_turns: u32,
+    #[cfg(test)]
     captures_made: f64,
 }
 
@@ -55,42 +64,63 @@ impl CaptureConstraints {
             ));
         }
         let actor = attacker.color.owner().ok_or(EngineError::IllegalAction)?;
-        let owner_turns = *state.turns_taken.get(actor);
-        let captures_made = source_number(attacker.extra.get("capturesMade"), "capturesMade")?;
+        // The production decoder validates the live counters. The isolated
+        // veto projection belongs to the tests; source movement keeps its own
+        // ordered ability, protection and option checks.
+        let _owner_turns = *state.turns_taken.get(actor);
+        let _captures_made = source_number(attacker.extra.get("capturesMade"), "capturesMade")?;
+        #[cfg(test)]
         let mut piece = Vec::new();
-        for (field, source) in [
-            ("freshNoCaptureUntil", CaptureLockSource::FreshPiece),
-            ("cardNoCaptureUntil", CaptureLockSource::CardEffect),
-            ("promotionRushUntil", CaptureLockSource::PromotionRush),
+        for field in [
+            "freshNoCaptureUntil",
+            "cardNoCaptureUntil",
+            "promotionRushUntil",
         ] {
             if let Some(value) = attacker.extra.get(field) {
+                // Parsing stays in production even though only tests retain
+                // the isolated veto projection of these validated values.
+                let _owner_turn = source_number(Some(value), field)?;
+                #[cfg(test)]
                 piece.push(PieceConstraint::CaptureLockedUntil {
-                    source,
-                    owner_turn: source_number(Some(value), field)?,
+                    source: match field {
+                        "freshNoCaptureUntil" => CaptureLockSource::FreshPiece,
+                        "cardNoCaptureUntil" => CaptureLockSource::CardEffect,
+                        _ => CaptureLockSource::PromotionRush,
+                    },
+                    owner_turn: _owner_turn,
                 });
             }
         }
+        #[cfg(test)]
         if observation::truth(attacker.extra.get("potionSaturation")) {
             piece.push(PieceConstraint::PotionSaturation { max_captures: 3 });
         }
+        #[cfg(test)]
         let mut game = Vec::new();
+        #[cfg(test)]
         if observation::truth(state.extra.get("saturationRule")) {
             game.push(GameConstraint::SaturationRule { max_captures: 3 });
         }
+        #[cfg(test)]
         for protected_side in [Color::White, Color::Black] {
             if state.flag("genevaConvention", protected_side) {
                 game.push(GameConstraint::GenevaConvention { protected_side });
             }
         }
         Ok(Self {
+            #[cfg(test)]
             piece,
+            #[cfg(test)]
             game,
-            owner_turns,
-            captures_made,
+            #[cfg(test)]
+            owner_turns: _owner_turns,
+            #[cfg(test)]
+            captures_made: _captures_made,
         })
     }
 
     /// Call at the source's early lock check, before target-side protection.
+    #[cfg(test)]
     pub(crate) fn piece_veto(&self) -> bool {
         self.piece.iter().any(|constraint| {
             matches!(constraint, PieceConstraint::CaptureLockedUntil { owner_turn, .. }
@@ -100,6 +130,7 @@ impl CaptureConstraints {
 
     /// Call after ability/protection checks, in place of the source saturation
     /// and Geneva Convention branches. It has no RNG or state mutation.
+    #[cfg(test)]
     pub(crate) fn game_veto(&self, attacker: &Piece, target: &Piece) -> bool {
         let saturation_cap = self
             .piece

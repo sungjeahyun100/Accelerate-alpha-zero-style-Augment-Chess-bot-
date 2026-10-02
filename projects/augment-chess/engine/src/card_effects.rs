@@ -1723,8 +1723,8 @@ pub(crate) struct SourceCardCandidateCursor {
 
 #[derive(Clone)]
 enum SourceCardCandidateFamily {
-    OrderedSquares(OrderedSelectionCursor),
-    FreeMove(FreeMovePlanCursor),
+    OrderedSquares(Box<OrderedSelectionCursor>),
+    FreeMove(Box<FreeMovePlanCursor>),
 }
 
 #[derive(Clone)]
@@ -1930,7 +1930,9 @@ pub(crate) fn source_card_candidate_cursor(
                 "v7 free-move target preparation returned an empty piece group".into(),
             ));
         }
-        SourceCardCandidateFamily::FreeMove(FreeMovePlanCursor::new(state.turn, card, groups))
+        SourceCardCandidateFamily::FreeMove(Box::new(FreeMovePlanCursor::new(
+            state.turn, card, groups,
+        )))
     } else {
         let raw = target_squares(state, card)?.ok_or_else(|| {
             EngineError::InvalidState(format!(
@@ -1956,9 +1958,9 @@ pub(crate) fn source_card_candidate_cursor(
             })
             .collect();
         let length = if card.effect == "hypocrisy" { 4 } else { 2 };
-        SourceCardCandidateFamily::OrderedSquares(OrderedSelectionCursor::new(
+        SourceCardCandidateFamily::OrderedSquares(Box::new(OrderedSelectionCursor::new(
             state.turn, card, squares, length, length,
-        ))
+        )))
     };
     Ok(Some(SourceCardCandidateCursor { family }))
 }
@@ -4712,14 +4714,27 @@ pub(crate) fn set_last_move(
 ) -> Result<()> {
     set_last_move_with_medium_memory(
         state,
-        from,
-        to,
-        sound_name,
-        sound_color,
-        hidden_from,
-        moved_override,
-        None,
+        LastMoveContext {
+            from,
+            to,
+            sound_name,
+            sound_color,
+            hidden_from,
+            moved_override,
+            original_medium: None,
+        },
     )
+}
+
+/// movePiece 한 번에서 확보한 이동·표시·medium 기억을 함께 전달한다.
+pub(crate) struct LastMoveContext<'a> {
+    pub(crate) from: Square,
+    pub(crate) to: Square,
+    pub(crate) sound_name: &'a str,
+    pub(crate) sound_color: Color,
+    pub(crate) hidden_from: &'a str,
+    pub(crate) moved_override: Option<&'a Piece>,
+    pub(crate) original_medium: Option<(&'a str, &'a Value)>,
 }
 
 /// movePiece가 시작 시 캡처한 literal medium의 baseMemory를 전달한다.
@@ -4727,14 +4742,17 @@ pub(crate) fn set_last_move(
 /// 카드·자동 이동처럼 그 context가 없는 호출자는 set_last_move를 사용한다.
 pub(crate) fn set_last_move_with_medium_memory(
     state: &mut GameState,
-    from: Square,
-    to: Square,
-    sound_name: &str,
-    sound_color: Color,
-    hidden_from: &str,
-    moved_override: Option<&Piece>,
-    original_medium: Option<(&str, &Value)>,
+    context: LastMoveContext<'_>,
 ) -> Result<()> {
+    let LastMoveContext {
+        from,
+        to,
+        sound_name,
+        sound_color,
+        hidden_from,
+        moved_override,
+        original_medium,
+    } = context;
     let moved = moved_override
         .or_else(|| state.at(from))
         .or_else(|| state.at(to))
@@ -6648,26 +6666,30 @@ mod tests {
             .insert("parrotMovement".into(), json!({"white":null,"black":null}));
         set_last_move_with_medium_memory(
             &mut state,
-            from,
-            to,
-            "capture",
-            Color::White,
-            "",
-            None,
-            Some((&id, &original)),
+            LastMoveContext {
+                from,
+                to,
+                sound_name: "capture",
+                sound_color: Color::White,
+                hidden_from: "",
+                moved_override: None,
+                original_medium: Some((&id, &original)),
+            },
         )
         .unwrap();
         assert_eq!(state.extra["parrotMovement"]["white"], original);
 
         set_last_move_with_medium_memory(
             &mut state,
-            from,
-            to,
-            "capture",
-            Color::White,
-            "",
-            None,
-            Some(("another-medium", &original)),
+            LastMoveContext {
+                from,
+                to,
+                sound_name: "capture",
+                sound_color: Color::White,
+                hidden_from: "",
+                moved_override: None,
+                original_medium: Some(("another-medium", &original)),
+            },
         )
         .unwrap();
         assert_eq!(
@@ -6676,13 +6698,15 @@ mod tests {
         );
         set_last_move_with_medium_memory(
             &mut state,
-            from,
-            to,
-            "capture",
-            Color::White,
-            "",
-            None,
-            Some((&id, &Value::Null)),
+            LastMoveContext {
+                from,
+                to,
+                sound_name: "capture",
+                sound_color: Color::White,
+                hidden_from: "",
+                moved_override: None,
+                original_medium: Some((&id, &Value::Null)),
+            },
         )
         .unwrap();
         assert_eq!(state.extra["parrotMovement"]["white"], Value::Null);
@@ -7008,11 +7032,11 @@ mod tests {
         let c = json!({"from":{"row":7,"col":1},"to":{"row":5,"col":0}});
         let card = source_v7_card("premove");
         let mut cursor = SourceCardCandidateCursor {
-            family: SourceCardCandidateFamily::FreeMove(FreeMovePlanCursor::new(
+            family: SourceCardCandidateFamily::FreeMove(Box::new(FreeMovePlanCursor::new(
                 Color::White,
                 &card,
                 vec![vec![a.clone(), b.clone()], vec![c.clone()]],
-            )),
+            ))),
         };
         let deep = Action::card(Color::White, &card, Some(json!({"selections":[c,b]})));
         assert!(cursor.contains_candidate(&deep).unwrap());
@@ -7306,11 +7330,11 @@ mod tests {
         let d = json!({"from":{"row":7,"col":2},"to":{"row":5,"col":1}});
         let card = source_v7_card("premove");
         let mut cursor = SourceCardCandidateCursor {
-            family: SourceCardCandidateFamily::FreeMove(FreeMovePlanCursor::new(
+            family: SourceCardCandidateFamily::FreeMove(Box::new(FreeMovePlanCursor::new(
                 Color::White,
                 &card,
                 vec![vec![a.clone(), b.clone()], vec![c.clone()], vec![d.clone()]],
-            )),
+            ))),
         };
         cursor.resume_prefix(&[c.clone(), b.clone()]).unwrap();
         assert_eq!(

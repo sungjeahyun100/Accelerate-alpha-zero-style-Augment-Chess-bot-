@@ -1006,7 +1006,7 @@ fn reaper_capture_count(value: Option<&Value>) -> Result<Option<f64>> {
         .into_iter()
         .any(|(prefix, radix)| {
             text.strip_prefix(prefix).is_some_and(|digits| {
-                !digits.is_empty() && digits.chars().all(|digit| digit.to_digit(radix).is_some())
+                !digits.is_empty() && digits.chars().all(|digit| digit.is_digit(radix))
             })
         }) {
             // A valid radix string reached here only when the common finite

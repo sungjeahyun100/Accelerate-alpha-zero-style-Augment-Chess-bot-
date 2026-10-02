@@ -218,6 +218,15 @@ pub(crate) fn evaluate_royal_capture(
             "royal threat automatic piece reaction".into(),
         ));
     }
+    if state.ruleset_id == RULES_VERSION_V7 {
+        // Source collectValidAiActions(includeCards:false) is an internal,
+        // ordered candidate stream. The public legal stream cannot stand in
+        // for it, even if public v7 movement becomes available separately.
+        // The v7 capture executor also remains unverified.
+        return Err(EngineError::UnsupportedFeature(
+            "v7 royal threat ordered AiNoCards candidates and capture execution".into(),
+        ));
+    }
     let window = clone_window(state, defender);
     let automatic = window.board.iter().flatten().flatten().any(|piece| {
         crate::observation::truth(piece.extra.get("logDir"))
@@ -350,4 +359,29 @@ pub(crate) fn play_move_sound(state: &mut GameState, default: &str, color: Color
         last.insert("soundName".into(), json!("checkDanger"));
     }
     Ok(executed)
+}
+
+#[cfg(test)]
+mod v7_threat_gate_tests {
+    use super::*;
+
+    #[test]
+    fn malformed_v7_royal_probe_propagates_error_without_mutating_state_or_rng() {
+        let mut state = crate::v7_new_game::new_game(
+            GameConfig {
+                draft_delete: true,
+                ..GameConfig::default()
+            },
+            19,
+        )
+        .unwrap();
+        state.extra.insert("pendingOtherworld".into(), json!({}));
+        let before = state.clone();
+        assert!(matches!(
+            evaluate_royal_capture(&mut state, Color::White),
+            Err(EngineError::InvalidState(reason))
+                if reason == "v7 pendingOtherworld must be an array"
+        ));
+        assert_eq!(state, before);
+    }
 }

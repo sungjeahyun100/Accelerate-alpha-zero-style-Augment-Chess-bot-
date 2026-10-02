@@ -81,9 +81,9 @@ fn boundary(
                 "v7 moved-piece effects contain a square outside the frozen board".into(),
             ));
         }
-        if !state
+        if state
             .at(context.landing)
-            .is_some_and(|piece| piece.id == moving.id)
+            .is_none_or(|piece| piece.id != moving.id)
         {
             return Err(EngineError::InvalidState(
                 "v7 moved-piece effects require the mover at its actual landing".into(),
@@ -189,7 +189,7 @@ fn disassemble_moved_queen(
         // main67854/67857의 기본 source=state 두 predicate는 동일하다.
         || crate::v7_board_hazards::source_royal_identity(state, moving)?
         || context.from == context.landing
-        || !state.at(context.landing).is_some_and(|piece| piece.id == moving.id)
+        || state.at(context.landing).is_none_or(|piece| piece.id != moving.id)
     {
         return Ok(false);
     }
@@ -454,7 +454,7 @@ pub(crate) fn transform_chimera_after_move_v7(
     // Source의 local 객체가 포획·제거되거나 landing이 바뀌었으면 동작하지 않는다.
     // 이 guard보다 앞에서 profile 검사, RNG, 기물 필드 정리를 실행하지 않는다.
     if !crate::observation::truth(moving.extra.get("chimera"))
-        || !state.at(landing).is_some_and(|piece| piece.id == moving.id)
+        || state.at(landing).is_none_or(|piece| piece.id != moving.id)
     {
         return Ok(());
     }
@@ -1062,15 +1062,15 @@ mod tests {
                     }
                     other => panic!("unknown move-piece effects receipt stage {other}"),
                 };
-                if fixture["reconcile"] == true {
-                    if let Err(error) = reconcile_after_type_change(
+                if fixture["reconcile"] == true
+                    && let Err(error) = reconcile_after_type_change(
                         &mut state,
                         &mut moving,
                         &start.moved_as_type,
                         false,
-                    ) {
-                        mismatch.push(format!("reconcile: {error}"));
-                    }
+                    )
+                {
+                    mismatch.push(format!("reconcile: {error}"));
                 }
                 operation
             };

@@ -546,12 +546,11 @@ fn apply_move(state: &mut GameState, action: &Action, threat_probe: bool) -> Res
         let undo = capture_first_move_undo(state, action.color);
         state.extra.insert("firstMoveUndo".into(), undo);
     }
-    if state.ruleset_id == RULES_VERSION_V7 {
-        if let Some(outcome) =
+    if state.ruleset_id == RULES_VERSION_V7
+        && let Some(outcome) =
             crate::v7_move_execution::execute_shotgun(state, from, target, threat_probe)?
-        {
-            return finish_stationary_move(state, outcome);
-        }
+    {
+        return finish_stationary_move(state, outcome);
     }
     let replay_before = crate::replay::begin_move(state, action.color)?;
     let actor = piece.color.owner().ok_or(EngineError::WrongActor)?;
@@ -570,13 +569,14 @@ fn apply_move(state: &mut GameState, action: &Action, threat_probe: bool) -> Res
         if let (Some(row), Some(col)) = (
             target.flags.get("capturedRow").and_then(Value::as_u64),
             target.flags.get("capturedCol").and_then(Value::as_u64),
-        ) {
-            if target.flag("enPassant") && row < 8 && col < 8 {
-                defense_squares.push(Square {
-                    row: row as u8,
-                    col: col as u8,
-                });
-            }
+        ) && target.flag("enPassant")
+            && row < 8
+            && col < 8
+        {
+            defense_squares.push(Square {
+                row: row as u8,
+                col: col as u8,
+            });
         }
         defense_squares.push(to);
         for at in defense_squares {
@@ -1548,13 +1548,15 @@ pub(crate) fn finalize_immediate_reaper_execution(
             .map(|(id, memory)| (id.to_owned(), memory.clone()));
         crate::card_effects::set_last_move_with_medium_memory(
             state,
-            origin,
-            to,
-            "capture",
-            actor,
-            "",
-            None,
-            medium.as_ref().map(|(id, memory)| (id.as_str(), memory)),
+            crate::card_effects::LastMoveContext {
+                from: origin,
+                to,
+                sound_name: "capture",
+                sound_color: actor,
+                hidden_from: "",
+                moved_override: None,
+                original_medium: medium.as_ref().map(|(id, memory)| (id.as_str(), memory)),
+            },
         )?;
         let message = if crate::replay::fog_log_redaction_active_v7(state) {
             format!("{} 기물이 이동했습니다.", crate::replay::label(actor))

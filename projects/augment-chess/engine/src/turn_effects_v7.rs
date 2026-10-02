@@ -879,17 +879,16 @@ pub(crate) fn resolve_don_quixote_turn_entry(
                     row: row as u8,
                     col: col as u8,
                 };
-                if let Some(victim) = next.at(at) {
-                    if victim.color == moving.color
+                if let Some(victim) = next.at(at)
+                    && (victim.color == moving.color
                         || !crate::movement::v7_can_capture_target_without_attacker(
                             &next,
                             incoming,
                             victim,
                             "donQuixote",
-                        )?
-                    {
-                        continue;
-                    }
+                        )?)
+                {
+                    continue;
                 }
                 if legal.iter().any(|target| target.square() == at) {
                     choices.push(at);

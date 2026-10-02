@@ -304,7 +304,7 @@ fn scheduler_number(value: Option<&Value>) -> Option<f64> {
         ("0B", 2),
     ] {
         if text.strip_prefix(prefix).is_some_and(|digits| {
-            !digits.is_empty() && digits.chars().all(|digit| digit.to_digit(radix).is_some())
+            !digits.is_empty() && digits.chars().all(|digit| digit.is_digit(radix))
         }) {
             return Some(f64::INFINITY);
         }

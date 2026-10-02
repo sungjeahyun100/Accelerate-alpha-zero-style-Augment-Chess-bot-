@@ -316,6 +316,32 @@ fn legacy_board_roundtrips_one_disconnected_large_piece_identity() {
     assert_eq!(exported.ruleset_id, source.ruleset_id);
     assert_eq!(exported.rng, source.rng);
 
+    let before = spatial.position_key().unwrap();
+    let mut moved = spatial.piece("disconnected").unwrap().clone();
+    moved.anchor = Coord::new(3, 2);
+    assert!(matches!(
+        spatial.with_piece(moved.clone()),
+        Err(EngineError::InvalidState(_))
+    ));
+    assert_eq!(spatial.position_key().unwrap(), before);
+    moved.attributes.insert("anchorRow".into(), json!(3));
+    moved.attributes.insert("anchorCol".into(), json!(2));
+    let moved_state = spatial.with_piece(moved).unwrap();
+    let moved_legacy = moved_state.to_legacy(&source).unwrap();
+    assert!(moved_legacy.board[2][2].is_none());
+    assert_eq!(
+        moved_legacy.board[3][2].as_ref().unwrap().id,
+        "disconnected"
+    );
+    assert_eq!(
+        moved_legacy.board[5][5].as_ref().unwrap().id,
+        "disconnected"
+    );
+    assert_eq!(
+        moved_legacy.board[3][2].as_ref().unwrap().extra["anchorRow"],
+        json!(3)
+    );
+
     source.board[2][2]
         .as_mut()
         .unwrap()
@@ -342,6 +368,13 @@ fn legacy_board_roundtrips_one_disconnected_large_piece_identity() {
         no_anchor.piece("disconnected").unwrap().anchor,
         Coord::new(2, 2)
     );
+    let mut anchorless = no_anchor.piece("disconnected").unwrap().clone();
+    anchorless.footprint = offsets(&[(0, 1), (2, 3)]);
+    let anchorless_state = no_anchor.with_piece(anchorless).unwrap();
+    assert!(matches!(
+        anchorless_state.to_legacy(&source),
+        Err(EngineError::UnsupportedFeature(_))
+    ));
 }
 
 #[test]

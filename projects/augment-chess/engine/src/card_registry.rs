@@ -805,8 +805,9 @@ pub(crate) fn forced_first_move_policy(
             !owned.vacant && owned.id == card.id && owned.instance_id == card.instance_id
         })
         .ok_or(EngineError::IllegalAction)?;
-    if definition.activation != Some(CardActType::Active) && !special_opening
-        || definition.card_type != Some(CardType::Opening) && !special_opening
+    if (definition.activation != Some(CardActType::Active)
+        || definition.card_type != Some(CardType::Opening))
+        && !special_opening
         || owned != card
         || card.used
         || card.recovering

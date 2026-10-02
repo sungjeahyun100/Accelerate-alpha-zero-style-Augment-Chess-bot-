@@ -607,8 +607,7 @@ fn replay_delta_coordinate(value: Option<&Value>) -> Option<usize> {
     let number = value?.as_f64()?;
     if !number.is_finite()
         || number.fract() != 0.0
-        || number < 0.0
-        || number > 9_007_199_254_740_991.0
+        || !(0.0..=9_007_199_254_740_991.0).contains(&number)
         || number > usize::MAX as f64
     {
         return None;

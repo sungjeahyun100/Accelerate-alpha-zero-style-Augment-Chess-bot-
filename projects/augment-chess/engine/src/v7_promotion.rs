@@ -80,7 +80,10 @@ pub(crate) enum V7PromotionContinuation {
     },
     /// Atomic base promotion still needs the common movePiece kernel. The
     /// pending window and selection are already cleared, as in source 92946.
-    AtomicMove { action: Action, piece_id: String },
+    AtomicMove {
+        action: Box<Action>,
+        piece_id: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1084,7 +1087,7 @@ pub(crate) fn apply_pending_promotion_choice_v7(
         crate::flow::start_clock(&mut next)?;
         *state = next;
         return Ok(V7PromotionContinuation::AtomicMove {
-            action: Action::movement(color, from, destination),
+            action: Box::new(Action::movement(color, from, destination)),
             piece_id,
         });
     }

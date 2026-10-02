@@ -1,26 +1,62 @@
 # v7 전체 규칙 인수 장부와 남은 구현 지시
 
 이 문서는 [구현 지시서](IMPLEMENTATION-DIRECTIVES.md)의 P0/P2/P3/P8과
-[객체형 어댑터 이관](RULE-ADAPTER-HANDOFF.md)의 인수 장부다. 2026-10-01 작업
-중 소스 호출 경로와 각 기능 담당자의 상태를 대조한 기록이다. 이전 실행에서 읽은
+[객체형 어댑터 이관](RULE-ADAPTER-HANDOFF.md)의 인수 장부다. 2026-10-01의 호출 경로
+감사와 2026-10-02 후속 검증 상태를 구분해 기록한다. 이전 실행에서 읽은
 로그와 메인 실행자가 전달한 최신 결과를 구분하며, 전체 v7 인수는 진행 중이다. 구현이 존재하거나
 정의 수가 맞는다는 이유로 source-reachable 기능을 지원 완료로 처리하지 않는다.
 
 ## 이번 PR #32 전달 범위
 
 2026-10-01 사용자는 봇 연동과 성능 측정을 진행하지 않고 PR #32에 push한 뒤 이번
-전달 목표를 완료하도록 범위를 조정했다. 현재 완료 조건은 규칙·공통 계약 구현,
-bounded 원문 비교와 engine/common 회귀·구조 검사, 검증된 커밋의 PR #32 공유 및
-원격 SHA 확인이다. 설치 wheel·실제 Python 봇 연동·성능 측정은 **사용자 범위 조정으로
-미실행·미검증이며 후속 검증이 필요**하다. 기존 관련 검사 코드를 저장한 사실이나
+전달 목표를 완료하도록 범위를 조정했다. 2026-10-02 후속 요청은 core/common/JS/source
+회귀와 strict lint·구조 검사, PR #28 base 통합, Windows/Linux `core_only` CI 및
+검증된 커밋의 PR #32 공유·원격 SHA 확인을 포함한다. 실제 Python 봇 연동,
+sdist/wheel 빌드와 설치, 성능 측정은 **현재 범위에서 제외**한다. 기존 관련 검사 코드를 저장한 사실이나
 이전 중간 wheel 결과를 최종 설치·봇 연동 성공으로 기록하지 않는다.
 
-이 문서의 전체 프로젝트 GO와 이번 PR 전달 완료는 서로 다른 판정이다. 최종 전달
-검사 105개는 해당 source closure에서 통과했다. fmt와 common 회귀도 통과했지만
-엄격한 Clippy는 실제 53개 진단으로 exit 101이었다. 이 미통과를 보존하고 사용자
-범위에 따라 lint 리팩터링을 확대하지 않는다. staged index의 구조 검사는 통과했으며,
-커밋/push와 원격 SHA는 메인이 확인한다. CI는 요청·실행·관측한 결과를 별도로 기록하고,
-CI 대기나 제외한 봇·성능 검증으로 현재 전달 범위를 다시 늘리지 않는다.
+이 문서의 전체 프로젝트 GO와 이번 PR 검증 완료는 서로 다른 판정이다. 2026-10-01
+전달105의 PASS·Rust 1.97·production dead_code 11건·Clippy 53진단/exit 101은 당시
+source closure의 역사적 증거로 보존한다. 아래의 새 실행 상태와 혼동하지 않는다.
+
+## 2026-10-02 후속 검증 상태
+
+다음 결과는 메인이 실제 실행해 확인한 로컬 검증이다. 원격 SHA와 같은 commit의
+Windows/Linux CI 관측은 PR #32에 별도로 결속하며 전체 프로젝트 GO와 구분한다.
+
+| 항목 | 현재 관측 상태 |
+|---|---|
+| Rust 최소 toolchain | 실제 Rust 1.96의 fmt와 core 4개 crate all-targets strict Clippy(`-D warnings`) PASS |
+| Node 관련 회귀 | 6개 파일·62개 검사 PASS, skip 0 |
+| CI helper·구조 | CI helper 17개와 저장소 구조 검사 테스트 14개 PASS |
+| Python 변경 입력 | 8개 파일 AST PASS. 실제 소비자 실행·봇 연동·설치 검증은 아님 |
+| workflow 정적 검사 | Actionlint 1.7.12로 2개 workflow PASS |
+| 최종 native105 | `reports/root-pr32-finish-final105-jobs.json` 전체 105개 PASS. engine all-targets 단위 713개·통합 20개, 일반 실행의 source-input 53개 ignored. 공통 registry 9개·v6 변환 6개 PASS. 전 job source digest 불변·컴파일 경고 0건 |
+| PR #28 base 통합 | base `45edfe1`의 충돌을 해소한 source로 검증했다. merge checkpoint·push·원격 SHA는 PR #32에 기록 |
+| Windows/Linux CI | 같은 commit의 `core_only=true, adapter_only=false` 관측 결과를 PR #32에 기록. 자동 PR의 봇·wheel 실행을 제외하려고 `[skip ci]` 뒤 수동 실행하며 전체 CI 성공으로 확대하지 않음 |
+
+첫 all-targets 시도의 부모 회귀 2건을 실패 기록으로 보존한다. overtime 새 게임의 이전
+golden `c2af18…`은 faithful 원문을 재생성한 `4dca89…`과 달랐다. 메인이 대조한 새 원문
+결과는 현재 native와 정확히 일치했으며 overtime 값 `1.6`을 `2`로 정규화한다.
+다른 검사는 `AiNoCards` 미지원 오류를 기대하지만 현재 지원된 실행 경로와 충돌한다.
+overtime golden을 새 원문 결과로 갱신하고, 위협 검사는 실제 v7 생성 상태의 malformed
+`pendingOtherworld`가 정확한 `InvalidState`를 전파하며 원본 state/RNG를 보존하는 경계로
+바꿨다. 이후 최종105 전체 재실행은 모두 PASS다. 최초 실패 요약
+`reports/root-native-root-pr32-finish105-jobs-summary.json`의 SHA는
+`1b94c563d730b8dfaee192d4195d00b8fd1c19941015fa52cb7ff2456788b908`로 보존한다.
+
+핵심 원문 21국면을 새로 생성했다. cases bytes SHA-256은
+`ec6fcbcbd3067eec61838298a600d49c808038ef206db48d5f99ee943d0e6471`, report bytes SHA-256은
+`b111c386130bf3ac5b362352fc2a233e6a9893ca7832ce9709a8cac6557d4c8c`다.
+원문 생성 자체는 `oracle-only`·exit 1(native 비교 명시적 제외)이며, 이후 동일 입력으로
+Rust의 21국면·42 apply 표본을 비교해 `bounded-internal-pass`를 관측했다.
+내부 비교 보고서 SHA는 `3701f49b4e86c36ee5f26a554fd726e20a2b8f9ba87283f88431065bffc9892b`다.
+최종105 계획 SHA는 `2e404be2b7fe1c7881a48bf0ec531cc155814d9225f114b070c07826d807950f`,
+요약 `reports/root-native-root-pr32-finish-final105-jobs-summary.json`의 SHA는
+`73fda7786b22c2cde00ca8b0cc48abcab7e09e8c0f0932efb6a6a182befcc471`다.
+전 job source digest는 `5638d6c8f812a41a3a0b6fb20c3f471f59c7d624a8774232e9698545a3b15e13`로
+동일하다. 105는 실행 작업 수이며 독립 규칙·시나리오 수가 아니다. 원문 입력을 요구하는
+53개 ignored를 자동 PASS로 세지 않으며 각 제공 입력·필터의 실제 실행 결과를 따른다.
 
 ## 정답과 최종 범위
 
@@ -286,7 +322,7 @@ private context를 복구하고 replay를 정산한다. 공개 host spatial admi
 source 생성 성공과 native 성공을 각각 기록한 실행 지도는
 `reports/root-v7-validation-map.json`에 유지한다. 전체 v7 인수는 여전히 NO-GO다.
 
-## checkpoint105와 최종 전달105의 관측 결과
+## 2026-10-01 checkpoint105와 전달105의 관측 결과
 
 `reports/root-native-root-core-checkpoint105-jobs-summary.json`과 해당 105개 로그를
 읽어 lib 699 passed·0 failed·53 ignored, 추가 104개 gate 중 103 PASS·Otherworld
@@ -306,7 +342,7 @@ source chance 9개·source prior 3개·Quantum 14개(ignored 2개), 새 Otherwor
 comparator 1개가 모두 PASS였다. 이 실행과 최종 전달105의 source digest는
 `cecfc80a1fbb091f3ff06d869a00962834ec70022e686862f0c2df8d736ad7b2`다.
 
-최종 `reports/root-native-root-pr32-delivery105-jobs-summary.json`의 bytes SHA는
+당시 `reports/root-native-root-pr32-delivery105-jobs-summary.json`의 bytes SHA는
 `7700c014560b70168d1a3063efaf3f3fea2ae00f6e0be7ab6b27c2956019fe48`다. 실제 105개
 로그의 footer가 모두 이 요약과 일치했고 모든 job이 exit 0·동일 source digest를
 유지했다. core `--all-targets --locked`는 unit 711 passed·0 failed·53 ignored와
@@ -315,7 +351,7 @@ integration 20 passed·0 failed였다. 추가 104개 gate도 모두 PASS지만 �
 Otherworld26·continuation22·관측126·visibility20·schema2 raw81·contexts4·milestone2·
 RULE324·internal21/43표본의 성공도 각 comparator 경계에 한정한다.
 
-최종 all-targets production lib에는 `dead_code` 경고 11건이 실제 발생했고 실행 요약은
+당시 all-targets production lib에는 `dead_code` 경고 11건이 실제 발생했고 실행 요약은
 집계 행을 포함해 12행을 보존한다. 뒤이은 `reports/root-pr32-core-checks-summary.json`은
 fmt `--all --check` PASS, common registry 9개·v6 migration 6개 PASS와 엄격한
 Clippy exit 101을 기록했다. Clippy 로그 `reports/root-pr32-core-clippy.log`의 SHA는
@@ -324,11 +360,12 @@ engine lib 53 errors였다. 진단은 `dead_code` 11, `collapsible_if` 16,
 `too_many_arguments` 13, `manual_is_multiple_of` 3, `to_digit_is_some` 2,
 `manual_clamp` 2, `large_enum_variant` 2, `manual_range_contains` 1,
 `needless_option_as_deref` 1, `identity_op` 1, `double_ended_iterator_last` 1이다.
-경고 일괄 허용·숨김·코드 삭제는 적용하지 않았다. 사용자 범위에 따라 이 미통과를
-PR에 남기고 53개 lint 리팩터링으로 작업을 확대하지 않는다. 실제 로컬 toolchain은
+이 전달 당시 경고 일괄 허용·숨김·코드 삭제는 적용하지 않았다. 당시 로컬 toolchain은
 rustc/cargo 1.97.0이며 CI pin 1.96.0에서 성공했다는 증거로 쓰지 않는다.
-이전 lib/focus의 warnings 0을 최종 all-targets의 warnings 0으로 재사용하지 않는다.
-커밋/push·원격 SHA·CI의 최종 관측은 별도 확인 전까지 완료로 표시하지 않는다.
+이전 lib/focus의 warnings 0을 당시 all-targets의 warnings 0으로 재사용하지 않는다.
+2026-10-02 후속 요청으로 lint를 정리했고 실제 Rust1.96 fmt·strict Clippy PASS를
+메인이 관측했다. 새105·merge commit·원격 SHA·CI의 결과는 상단 후속 상태를 따르며
+역사적 진단을 삭제하거나 변경 후 실행의 실패로 재표기하지 않는다.
 
 Roulette의 cold/warm 원문 자료도 별도로 보존한다.
 `reports/card-dispatch-roulette-cold-warm-source.json`의 SHA는
@@ -345,15 +382,16 @@ RNG/history는 같으며 서로 다른 실행 경계를 metadata 변경으로 �
 | 구분 | 실제 경로와 현재 판단 |
 |---|---|
 | play 공개 조건화의 저장된 구현·국소 검증 | `v7_conditioning.rs`의 play 일괄 거절은 source prior 분기로 교체됐다. 독립 seed로 한 번 실행하고 `source_chance_trace.rs`가 실제 carry된 경로의 semantic mass·opaque identity·불변 소비·그룹을 분류한다. 미분류 draw는 callsite와 RNG cursor를 포함한 정확한 오류다. 전체 공개 history를 보존하고 공개 projection의 차이는 opaque identity 결속 외에는 거절한다. source chance 9·source prior 3 및 전달105의 bounded 회귀가 PASS지만 모든 확률 family·규칙 조합의 완전성이나 설치 봇 성공은 선언하지 않는다. |
-| 이전 실패·강화된 gate의 현재 결과 | stable50 continuation22 실패와 checkpoint105 Otherworld 문맥 차이를 보존했다. 이후 continuation22·schema2 raw81·Transcendence4·milestone2·명시 문맥 Otherworld26의 comparator는 전달105에서 PASS다. 이전 PASS를 새 metadata/gate에 승격한 결과가 아니며 원문 재생성과 새 native 비교의 정확한 경계를 따른다. |
+| 이전 실패·강화된 gate의 당시 결과 | stable50 continuation22 실패와 checkpoint105 Otherworld 문맥 차이를 보존했다. 이후 continuation22·schema2 raw81·Transcendence4·milestone2·명시 문맥 Otherworld26의 comparator는 2026-10-01 전달105와 2026-10-02 최종105에서 각각 PASS였다. 이전 PASS를 새 metadata/gate에 승격한 결과가 아니며 입력 fingerprint와 실제 재실행 경계를 따른다. |
 | 정확한 입력·결정·범위 오류 | activeTrolley가 남은 endMove 거절은 선택 대기 경계다. `v7_decision_actions`가 bundle 선택을 마치면 activeTrolley를 null로 바꾼 뒤 정산한다. serialized private context, 원문에 없는 legacy queue, 잘못된 ID·alias·버전·catalog, 알려진 factory가 만들지 않는 object/array 숫자 coercion, 비8×8 및 정해진 실행 한도 초과도 해당 오류 계약으로 남긴다. 그 문자열을 정상 source 경로의 포팅 누락으로 합산하지 않는다. |
-| 이번 전달의 후속 확인과 제외 범위 | 전달105·fmt·common PASS와 엄격 Clippy 53진단/exit101을 기록한다. 구조 검사·커밋/push·원격 SHA는 메인 최종 확인 대상이다. 설치 wheel·실제 Python 봇 연동·성능 측정은 사용자 범위 조정으로 미실행·미검증 후속 항목이다. CI dispatch/관측은 따로 기록하며 이 항목을 이유로 현재 전달 범위를 늘리지 않는다. finite callback/source slice의 일반적 한계는 실제 미구현 placeholder와 분리한다. |
+| 이번 후속 확인과 제외 범위 | 과거 전달105·Rust1.97·Clippy 53진단/exit101은 역사로 보존한다. 현재 Rust1.96 fmt·strict Clippy·최종105·common과 Node/helper/구조/AST/workflow 검사는 PASS다. base 통합 merge checkpoint·원격 SHA와 같은 commit의 Windows/Linux `core_only` CI 관측 근거는 PR #32에 별도로 기록한다. 실제 봇 연동·sdist/wheel 빌드와 설치·성능 측정은 현재 범위에서 제외한다. finite callback/source slice의 일반적 한계는 실제 미구현 placeholder와 분리한다. |
 
 현재 읽기 전용 호출 경로 감사에서는 정상 factory가 만든 cold 8×8 core 카드·RULE·
 기물·행동의 추가 미구현 Unsupported placeholder를 확정하지 못했다. 이 판단은
 알려진 누락 목록이며 256+aux1·27 RULE·84 기물·10 행동·3 UI family 전체의 실행
-완료 선언이 아니다. 알려진 comparator 실패는 해당 bounded gate의 재검증으로 닫혔고,
-실제 lint 미통과와 구조 검사·원격 공유 및 이번 범위에서 제외한 후속 검증은 별도로 남긴다.
+완료 선언이 아니다. 2026-10-01의 알려진 comparator 실패는 당시 bounded gate의 재검증으로
+닫혔다. 변경 후 새105 결과·원격 공유·두 OS CI와 이번 범위에서 제외한 후속 검증은
+별도로 남긴다. 현재 strict lint의 PASS는 전체 source 회귀 성공을 대체하지 않는다.
 source prior 경로 질량은 분류된 실제 carry 경로의 IID 연속 난수 해석이며, 유한 LCG
 seed 전체를 열거한 정확한 posterior나 모든 규칙 조합의 확률 완전성 증명이 아니다.
 
@@ -414,6 +452,10 @@ ability/traits, ongoing 상태, hidden identity, RNG·종료가 맞아야 한다
 
 ## 메인 담당자가 실행할 검증
 
+아래 표에서 전달105·focus4 등의 PASS는 2026-10-01까지의 해당 입력·source closure에
+한정한 기록이다. 2026-10-02 변경 후 새105의 최종 결과는 상단에서 별도로 확인하며,
+과거 비교기의 성공을 새로 생성한 source 입력이나 변경한 native 소스에 자동 승격하지 않는다.
+
 아래 자료 루트는 Windows `%APPDATA%/Accelerate/reports`, CI
 `$RUNNER_TEMP/Accelerate/reports`다. WSL에서는 Windows 루트를 변환하거나 승인된
 외부 reports를 명시한다. 동결 source 루트는 `ACCELERATE_SITE_BASELINE` 또는 해당
@@ -468,7 +510,7 @@ comparator, 나머지 closure 25개는 end-move comparator로 연결하며 whole
 | 일반 이동의 trait 후속 | `v7-move-piece-effects/source-probe.cjs` 18사례(12 stage + Chimera 6), typed `cases.jsonl` | `frozen_move_piece_effect_boundaries_match_full_state_rng_and_history`; `ACCELERATE_V7_MOVE_PIECE_EFFECT_CASES`. 후속 18개 source-slice native PASS를 관측했다. 착지 승급 전후·생존 후·Chimera API의 국소 비교와 ordinary transition 전체를 구분한다. |
 | 이동 연속 정산 | `v7-card-coverage/move-continuations-probe.cjs`의 22 합성 사례 계획 | `frozen_move_continuations_when_receipts_are_supplied`; `ACCELERATE_V7_MOVE_CONTINUATION_CASES`. stationary direct HP의 Desperado와 모든 HP의 Frenzy 차이, 이동/승급 뒤 계속 이동을 전체 전이와 연결한다. |
 | Otherworld 복귀 | `v7-otherworld-differential/source-context-explicit.cjs`→`source-context-explicit-faithful.json` 26사례 | `temporary_source_otherworld_matrix`; `ACCELERATE_OTHERWORLD_SOURCE_RECEIPT`. source AI/probe 두 private depth를 명시 복원한 raw/settled 전체 Position·RNG·history·ID comparator가 focus4와 전달105에서 PASS다. 이전 원자료·문맥 불일치 실패는 보존하며 callback 자료를 whole public turn 인수로 확대하지 않는다. |
-| 관측·fog·양자 | visibility 10×2, quantum state 16, quantum UI 10, seed 19 full observations 6 | `source_pinned_v7_visibility_and_fog_surfaces_match_bounded_cases`, `source_pinned_quantum_state_rng_history_and_identity_match`, `source_pinned_v7_seed19_full_observations_match_regenerated_first_play` 및 실행 지도 ENV/필수 SHA256을 사용한다. 현재 bounded full 관측 126·visibility 20·양자 state 16·full observations 6·UI 10의 실제 native PASS를 개별 경계로 기록하며 ordinary landing 전체 증거로 확대하지 않는다. |
+| 관측·fog·양자 | visibility 10×2, quantum state 16, quantum UI 10, seed 19 full observations 6 | `source_pinned_v7_visibility_and_fog_surfaces_match_bounded_cases`, `source_pinned_quantum_state_rng_history_and_identity_match`, `source_pinned_v7_seed19_full_observations_match_regenerated_first_play` 및 실행 지도 ENV/필수 SHA256을 사용한다. 2026-10-01까지 관측한 bounded full 관측 126·visibility 20·양자 state 16·full observations 6·UI 10의 실제 native PASS를 개별 경계로 기록하며 ordinary landing 전체 증거로 확대하지 않는다. |
 | 공개 경계 | scalar/eager/page intent와 양측 공개 ObservationIR | `v7_action_`, `v7_adapter_actions`, adapter/native/Python 소비자 검사. opaque token 재사용·stale·비누출·페이지 원자성을 실제 facade로 확인한다. |
 
 이전 프로필의 고정 21사례 JSONL SHA-256은
@@ -490,12 +532,15 @@ message, 단계와 상태 차이를 보존한다. 미지원 사례를 filter에�
    보강한다. 생성 시 source 함수가 호출됐다는 증거와 합성 전제조건을 구분한다.
 5. 검증된 checkpoint를 커밋·push하고 PR #32의 원격 SHA를 확인한다. 이번 범위의
    fmt/clippy/test·관련 Node/common 검사와 의도한 stage의 구조 검사를 수행한다.
-   CI는 dispatch·실행·관측한 결과를 별도로 기록한다. 설치 wheel·실제 Python 봇 연동·
-   성능 측정은 사용자 범위 조정에 따른 미실행·미검증 후속 항목으로 남긴다.
+   Windows/Linux `core_only` CI는 dispatch·실행·관측한 결과를 별도로 기록한다.
+   PR #28 base 통합의 merge commit도 확인한다. 실제 Python 봇 연동·sdist/wheel 빌드와
+   설치·성능 측정은 현재 범위에서 제외한 미실행·미검증 후속 항목으로 남긴다.
 
-faithful 초기 상태 324개의 현재 scoped PASS와 이전 대표 복합 설정 7개, acquisition·관측의 국소 근거는 각각 유효한
+faithful 초기 상태 324개의 2026-10-01 scoped PASS와 이전 대표 복합 설정 7개, acquisition·관측의 국소 근거는 각각 유효한
 범위에서 보존한다. faithful 초기화·composite identity와 변경된 규칙·helper·schema·테스트 엔진의 의존 fingerprint가 영향을
 주면 다시 검사한다. 이전 성공을 최신 변경의 성공으로 표기하지 않는다. 현재 장부에는
 공개 play source prior의 저장된 구현과 bounded gate는 위 실행 범위에서 검증됐다.
-이번 PR #32 전달 완료는 lint 미통과를 명시하고 구조 검사·원격 공유를 확인해 판정하며, 제외한
-봇/wheel/성능과 미관측 CI까지 포함한 전체 프로젝트 GO는 선언하지 않는다.
+이번 PR #32 후속 검증 완료는 새105와 관련 회귀·strict lint·구조 검사, base 통합,
+Windows/Linux `core_only` CI와 원격 공유의 실제 결과를 확인해 판정한다. 새105·CI·원격이
+pending인 동안 완료로 표기하지 않는다. 제외한 봇/wheel/성능을 포함한 전체 프로젝트 GO는
+선언하지 않는다.

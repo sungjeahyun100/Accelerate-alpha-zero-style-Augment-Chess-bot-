@@ -12,6 +12,11 @@ on:
         type: boolean
         required: false
         default: false
+      core_only:
+        description: Rust core와 동결 JS adapter만 검사합니다. wheel·봇은 제외하며 adapter_only와 함께 선택할 수 없습니다.
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -28,7 +33,7 @@ concurrency:
 jobs:
   rust-checks:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.adapter_only != true }}
-    name: Rust workspace / ${{ matrix.os }}
+    name: Rust ${{ inputs.core_only == true && 'core' || 'workspace' }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -47,18 +52,22 @@ jobs:
         with:
           node-version: '22'
       - name: Configure external artifact slots
+        env:
+          ACCELERATE_CI_CORE_ONLY: ${{ inputs.core_only == true }}
+          ACCELERATE_CI_ADAPTER_ONLY: ${{ inputs.adapter_only == true }}
         run: python .github/scripts/native-bot-check.py configure
       - name: Identify Rust validation inputs
         id: identity
-        run: python .github/scripts/native-ci-reuse.py key rust
+        run: python .github/scripts/native-ci-reuse.py key "$ACCELERATE_RUST_SCOPE"
       - name: Restore successful Rust validation
         id: verified
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            ${{ runner.temp }}/Accelerate/reports/native-bot/${{ runner.os }}/rust-success.json
-            ${{ runner.temp }}/Accelerate/reports/native-bot/${{ runner.os }}/rust-scope.json
-            ${{ runner.temp }}/Accelerate/reports/native-bot/${{ runner.os }}/rust-test-list.txt
+            ${{ runner.temp }}/Accelerate/reports/native-bot/${{ runner.os }}/${{ steps.identity.outputs.scope }}-success.json
+            ${{ runner.temp }}/Accelerate/reports/native-bot/${{ runner.os }}/${{ steps.identity.outputs.scope }}-scope.json
+            ${{ runner.temp }}/Accelerate/reports/native-bot/${{ runner.os }}/${{ steps.identity.outputs.scope }}-test-list.txt
+            ${{ runner.temp }}/Accelerate/reports/native-bot/${{ runner.os }}/${{ steps.identity.outputs.scope }}-test-output.txt
           key: ${{ steps.identity.outputs.key }}
       - name: Repository and adapter contract policy
         run: |
@@ -69,7 +78,7 @@ jobs:
           git diff --check
       - name: Verify reused Rust success
         if: ${{ steps.verified.outputs.cache-hit == 'true' }}
-        run: python .github/scripts/native-ci-reuse.py verify rust
+        run: python .github/scripts/native-ci-reuse.py verify "$ACCELERATE_RUST_SCOPE"
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch, 2026-09-12
         if: ${{ steps.verified.outputs.cache-hit != 'true' }}
         with:
@@ -78,30 +87,33 @@ jobs:
       - name: Rust workspace formatting and strict lint
         if: ${{ steps.verified.outputs.cache-hit != 'true' }}
         run: |
-          cargo fmt --all --check
-          cargo clippy --workspace --all-targets --locked -- -D warnings
-      # The workspace run includes canonical geometry, composite MoveProgram,
-      # independent core checks, and the retained v6 engine tests.
-      - name: Rust workspace tests including geometry and MoveProgram
+          if [ "$ACCELERATE_RUST_SCOPE" = core ]; then
+            cargo fmt -p augment-chess-engine -p augment-chess-contracts -p adapter-runtime -p augment-chess-v6-migration --check
+            cargo clippy -p augment-chess-engine -p augment-chess-contracts -p adapter-runtime -p augment-chess-v6-migration --all-targets --locked -- -D warnings
+          else
+            cargo fmt --all --check
+            cargo clippy --workspace --all-targets --locked -- -D warnings
+          fi
+      # scope=core excludes PyO3/ONNX crates; scope=rust keeps the workspace run.
+      # Both execute core tests, rather than accepting only a test-name list.
+      - name: Rust tests including geometry and MoveProgram
         id: rust_tests
         if: ${{ steps.verified.outputs.cache-hit != 'true' }}
-        run: |
-          cargo test --workspace --locked
-          python .github/scripts/native-bot-check.py rust-scope
+        run: python .github/scripts/native-bot-check.py rust-scope --scope "$ACCELERATE_RUST_SCOPE"
       - name: Record successful Rust validation
         if: ${{ success() && steps.verified.outputs.cache-hit != 'true' && steps.rust_tests.outcome == 'success' }}
-        run: python .github/scripts/native-ci-reuse.py record rust
+        run: python .github/scripts/native-ci-reuse.py record "$ACCELERATE_RUST_SCOPE"
       - name: Preserve Rust validation reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rust-workspace-reports-${{ matrix.os }}
+          name: rust-${{ steps.identity.outputs.scope }}-reports-${{ matrix.os }}
           path: ${{ runner.temp }}/Accelerate/reports/native-bot/${{ runner.os }}
           if-no-files-found: warn
           retention-days: 7
 
   native-bot:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.adapter_only != true }}
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.adapter_only != true && inputs.core_only != true) }}
     name: Installed native wheel / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -200,6 +212,12 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
+      - name: Validate requested validation scope
+        id: requested_scope
+        env:
+          ACCELERATE_CI_CORE_ONLY: ${{ inputs.core_only == true }}
+          ACCELERATE_CI_ADAPTER_ONLY: ${{ inputs.adapter_only == true }}
+        run: python .github/scripts/native-bot-check.py validate-scope
       - name: Identify frozen adapter validation inputs
         id: identity
         run: python .github/scripts/native-ci-reuse.py key adapter
@@ -223,7 +241,7 @@ jobs:
         run: python .github/scripts/native-bot-check.py frozen
       - name: Verify pinned current v7 client, metadata and three-mode parity
         id: current
-        if: ${{ !cancelled() && steps.verified.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && steps.requested_scope.outcome == 'success' && steps.verified.outputs.cache-hit != 'true' }}
         run: python .github/scripts/native-bot-check.py current-client
       - name: Audit bounded current card surface
         id: adapter_audit

@@ -503,9 +503,10 @@ mod tests {
                     {"cardInstanceId":"feudal-contract-95egdth063n","targets":
                         (0..8).map(|col| json!({"row":6,"col":col})).collect::<Vec<_>>()},
                     {"cardInstanceId":"panic-4oibaqnxzz8","targets":
-                        (0..=1).flat_map(|row| (0..8).filter_map(move |col| {
-                            (row != 0 || col != 4).then(|| json!({"row":row,"col":col}))
-                        })).collect::<Vec<_>>()},
+                        (0..=1).flat_map(|row| (0..8)
+                            .filter(move |&col| row != 0 || col != 4)
+                            .map(move |col| json!({"row":row,"col":col})))
+                            .collect::<Vec<_>>()},
                 ]),
             ),
         ] {

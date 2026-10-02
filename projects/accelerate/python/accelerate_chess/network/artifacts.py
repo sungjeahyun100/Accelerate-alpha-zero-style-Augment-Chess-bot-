@@ -471,10 +471,10 @@ def _validate_typed_graph(path: Path, contract: Mapping[str, Any], expected_conf
 
 
 def _bind_typed_model_config(path: Path, config_hash: str) -> None:
-    """Bind the model config to the graph before hashing the exported file.
+    """Bind the declared config to this ONNX file, before its file hash is taken.
 
-    The graph metadata catches manifest-only drift. It cannot authenticate a
-    graph and manifest that an attacker has rewritten together.
+    This catches manifest-only config drift; it does not prove a graph's peak
+    memory use or authenticate a jointly rewritten graph and manifest.
     """
     import onnx
 
@@ -657,7 +657,7 @@ def _typed_family(model: Any) -> str:
 
 
 def _typed_config_from_metadata(family: str, config: Mapping[str, Any]) -> Any:
-    """Validate typed model metadata without allocating model weights."""
+    """Validate typed deployment metadata without allocating model weights."""
     from .typed_context import TypedContextConfig
     from .mask_resnet import MaskResNetConfig
     from .entity_transformer import EntityTransformerConfig

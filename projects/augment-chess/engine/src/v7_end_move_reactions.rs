@@ -143,6 +143,7 @@ pub(crate) fn preflight_end_move(state: &GameState, actor: Color) -> Result<()> 
 /// must not run the legacy v6 `tick_piece_turn_effects` on the same v7 turn.
 /// A `Continue` result must be followed by the move-counted callbacks and
 /// then `settle_end_move_after_count`, before first-move cards are forced.
+#[cfg(test)]
 pub(crate) fn settle_end_move_before_count(
     state: &mut GameState,
     actor: Color,
@@ -1161,12 +1162,14 @@ pub(crate) fn move_rule_monsters(state: &mut GameState, moving_color: Color) -> 
             &monster,
             from,
             to,
-            Some(&privacy),
-            moving_color,
-            "monster",
-            captured.is_some(),
-            game_end,
-            &description,
+            crate::replay::AutomaticMoveNotationOptions {
+                privacy: Some(&privacy),
+                notation_color: moving_color,
+                piece_type: "monster",
+                capture: captured.is_some(),
+                game_end,
+                description: &description,
+            },
         )?;
         transitions.push(json!({"from":from,"to":to,
             "item":{"id":monster.id,"color":monster.color,"type":"monster"},
@@ -1640,7 +1643,7 @@ fn resolve_wanted_arrests(state: &mut GameState, actor: Color) -> Result<()> {
     })?;
     let mut removals = Vec::new();
     for (square, piece) in due {
-        if !state.at(square).is_some_and(|item| item.id == piece.id) {
+        if state.at(square).is_none_or(|item| item.id != piece.id) {
             continue;
         }
         let threat_source = json!({"label":"수배"});

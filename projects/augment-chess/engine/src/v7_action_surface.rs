@@ -539,7 +539,7 @@ fn ui_card_completion(state: &GameState) -> Result<Option<UiCardCompletion>> {
 #[derive(Clone)]
 enum CandidateCursor {
     Source(crate::card_effects::SourceCardCandidateCursor),
-    Ui(crate::card_effects::OrderedSelectionCursor),
+    Ui(Box<crate::card_effects::OrderedSelectionCursor>),
 }
 
 impl CandidateCursor {
@@ -573,7 +573,7 @@ fn card_cursor(
     if let Some(completion) = completion {
         if let Some(mut cursor) = crate::card_effects::staged_cursor(state, card)? {
             cursor.resume_prefix(completion.selection_prefix())?;
-            return Ok(Some(CandidateCursor::Ui(cursor)));
+            return Ok(Some(CandidateCursor::Ui(Box::new(cursor))));
         }
         if let Some(mut cursor) = crate::card_effects::source_card_candidate_cursor(state, card)? {
             cursor.resume_prefix(completion.selection_prefix())?;

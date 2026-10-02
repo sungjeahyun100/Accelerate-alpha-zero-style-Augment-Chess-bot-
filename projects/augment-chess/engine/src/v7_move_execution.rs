@@ -107,7 +107,7 @@ pub(crate) fn capture_move_execution_context(
                 continue;
             };
             if !truth(piece.extra.get("metalized"))
-                || only_mover && !mover.is_some_and(|mover| mover.id == piece.id)
+                || only_mover && mover.is_none_or(|mover| mover.id != piece.id)
             {
                 continue;
             }
@@ -254,8 +254,7 @@ pub(crate) fn finish_roller_context(
         let destination = origin.arrival.or_else(|| {
             (0..8)
                 .flat_map(|row| (0..8).map(move |col| Square { row, col }))
-                .filter(|cell| next.at(*cell).is_some_and(|piece| piece.id == origin.id))
-                .last()
+                .rfind(|cell| next.at(*cell).is_some_and(|piece| piece.id == origin.id))
         });
         let Some(destination) = destination else {
             continue;
@@ -582,9 +581,11 @@ pub(crate) fn execute_log_direction(
             "{} 통나무 방향 {notation_direction}",
             crate::replay::label(actor)
         ),
-        &privacy,
-        false,
-        &json!({}),
+        crate::replay::MoveNotationVisibility {
+            privacy: &privacy,
+            capture: false,
+            capture_known_squares: &json!({}),
+        },
     )?;
     crate::replay::add_piece_action_log(
         &mut next,
@@ -922,9 +923,11 @@ pub(crate) fn execute_shotgun(
         from,
         text,
         description,
-        &privacy,
-        removed > 0,
-        &capture_known_squares(&entries),
+        crate::replay::MoveNotationVisibility {
+            privacy: &privacy,
+            capture: removed > 0,
+            capture_known_squares: &capture_known_squares(&entries),
+        },
     )?;
     crate::replay::add_piece_action_log(&mut next, &shooter, Some(from), Some(&privacy), message)?;
     // Both shotgun sounds use playSound directly, without an ordinary move
@@ -1216,6 +1219,7 @@ fn can_resolve_dragon_swap(
 /// main91802/91846/108829/108914. Geometry admits the exact descriptor;
 /// this executor swaps source objects and supplies the common endMove replay
 /// capture. It never uses ordinary capture/landing/promotion or notation.
+#[cfg(test)]
 pub(crate) fn execute_position_swap(
     state: &mut GameState,
     from: Square,
@@ -1543,9 +1547,11 @@ pub(crate) fn execute_position_swap_with_privacy(
             to,
             format!("{code}↔{}{ending}", square_name(to)),
             description,
-            &privacy,
-            false,
-            &json!({}),
+            crate::replay::MoveNotationVisibility {
+                privacy: &privacy,
+                capture: false,
+                capture_known_squares: &json!({}),
+            },
         )?;
         let log = swap_move_log(&next, &moving, from, to, &privacy)?;
         crate::replay::add_log(&mut next, log)?;
@@ -1980,9 +1986,9 @@ pub(crate) fn roll_mistake_reversal(
     if roll >= chance {
         return Ok(None);
     }
-    if !state
+    if state
         .at(counter_from)
-        .is_some_and(|current| current.id == counter.id)
+        .is_none_or(|current| current.id != counter.id)
     {
         return Ok(None);
     }
@@ -2009,9 +2015,9 @@ pub(crate) fn begin_mistake_reversal(
 ) -> Result<MistakeReversalContext> {
     let actor = plan.moving.color.owner().ok_or(EngineError::WrongActor)?;
     let counter = plan.counter.color.owner().ok_or(EngineError::WrongActor)?;
-    if !state
+    if state
         .at(plan.counter_from)
-        .is_some_and(|current| current.id == plan.counter.id)
+        .is_none_or(|current| current.id != plan.counter.id)
     {
         return Err(EngineError::InvalidState(
             "v7 mistake counter identity changed before reverse execution".into(),
@@ -2460,10 +2466,8 @@ pub(crate) fn execute_merchant_purchase(
     )?;
     let democracy_protected = next.flag("democracy", purchased.color)
         && crate::v7_board_hazards::source_royal_king(&next, &purchased)?;
-    if democracy_protected {
-        if let Some(owner) = purchased.color.owner() {
-            next.set_flag("kingDead", owner, true);
-        }
+    if democracy_protected && let Some(owner) = purchased.color.owner() {
+        next.set_flag("kingDead", owner, true);
     }
     let terminal = !democracy_protected
         && defeat_royal(&next, &purchased)?
@@ -2501,9 +2505,11 @@ pub(crate) fn execute_merchant_purchase(
             if terminal { "#" } else { "" }
         ),
         description,
-        &privacy,
-        false,
-        &json!({}),
+        crate::replay::MoveNotationVisibility {
+            privacy: &privacy,
+            capture: false,
+            capture_known_squares: &json!({}),
+        },
     )?;
     // Both subjects retain their original audience color. Visibility after
     // conversion must not turn the opponent's previously concealed object
@@ -2987,9 +2993,18 @@ pub(crate) fn execute_large_piece_move(
         destination,
         privacy_before_observation,
         threat_probe,
-        giant,
-        rook,
+        if giant {
+            LargeMoveKind::Colossus
+        } else {
+            LargeMoveKind::BigRook
+        },
     )
+}
+
+#[derive(Clone, Copy)]
+enum LargeMoveKind {
+    Colossus,
+    BigRook,
 }
 
 fn execute_large_piece_move_at(
@@ -2999,9 +3014,10 @@ fn execute_large_piece_move_at(
     destination: Square,
     privacy: &Value,
     threat_probe: bool,
-    giant: bool,
-    rook: bool,
+    kind: LargeMoveKind,
 ) -> Result<Option<StationaryMoveOutcome>> {
+    let giant = matches!(kind, LargeMoveKind::Colossus);
+    let rook = matches!(kind, LargeMoveKind::BigRook);
     let mut next = state.clone();
     let mut moving = require_origin(&next, from)?;
     let actor = moving.color.owner().ok_or(EngineError::WrongActor)?;
@@ -3024,18 +3040,18 @@ fn execute_large_piece_move_at(
     };
     if cells.iter().any(|cell| {
         crate::movement::v7_scarecrow_reserved_square(&next, *cell)
-            && !next
+            && next
                 .at(*cell)
-                .is_some_and(|occupant| occupant.id == moving.id)
+                .is_none_or(|occupant| occupant.id != moving.id)
     }) {
         cancel_selection(&mut next)?;
         *state = next;
         return Ok(Some(StationaryMoveOutcome::returned()));
     }
     for cell in &cells {
-        if !next
+        if next
             .at(*cell)
-            .is_some_and(|occupant| occupant.id == moving.id)
+            .is_none_or(|occupant| occupant.id != moving.id)
         {
             crate::v7_quantum_state::observe_quantum_at_in_place(&mut next, *cell, Some(actor))?;
             refresh_alias(&next, &mut moving);
@@ -3153,9 +3169,11 @@ fn execute_large_piece_move_at(
         source,
         destination,
         target,
-        privacy,
-        capture,
-        &capture_known_squares(&entries),
+        crate::replay::MoveNotationVisibility {
+            privacy,
+            capture,
+            capture_known_squares: &capture_known_squares(&entries),
+        },
         game_end,
     )?;
     let log = swap_move_log(&next, &moving, source, destination, privacy)?;
@@ -3808,9 +3826,11 @@ pub(crate) fn execute_colossus_sector(
             "{} 거신병 {direction} 섹터 공격, 제거 {count}개",
             crate::replay::label(actor)
         ),
-        &privacy,
-        count > 0,
-        &capture_known_squares(&entries),
+        crate::replay::MoveNotationVisibility {
+            privacy: &privacy,
+            capture: count > 0,
+            capture_known_squares: &capture_known_squares(&entries),
+        },
     )?;
     crate::replay::add_piece_action_log(
         &mut next,
@@ -4452,13 +4472,15 @@ mod tests {
                             }
                             "lastmove" => crate::card_effects::set_last_move_with_medium_memory(
                                 &mut state,
-                                square("from"),
-                                square("to"),
-                                "move",
-                                Color::White,
-                                "",
-                                None,
-                                medium_move_snapshot(&context),
+                                crate::card_effects::LastMoveContext {
+                                    from: square("from"),
+                                    to: square("to"),
+                                    sound_name: "move",
+                                    sound_color: Color::White,
+                                    hidden_from: "",
+                                    moved_override: None,
+                                    original_medium: medium_move_snapshot(&context),
+                                },
                             )
                             .expect(name),
                             unknown => panic!("unrecognized source context operation {unknown}"),

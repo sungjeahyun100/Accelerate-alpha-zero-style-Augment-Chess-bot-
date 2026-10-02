@@ -30,6 +30,7 @@ impl QuantumMoveObservation {
             || self.destination == QuantumObservation::Illusion
     }
 
+    #[cfg(test)]
     pub(crate) fn observed(self) -> bool {
         self.portal_entry != QuantumObservation::NoQuantum
             || self.destination != QuantumObservation::NoQuantum
@@ -45,8 +46,11 @@ pub(crate) struct QuantumPiece {
 
 #[derive(Clone, Debug)]
 pub(crate) struct QuantumShadowPlacement {
+    #[cfg(test)]
     pub(crate) square: Square,
+    #[cfg(test)]
     shadow_id: String,
+    #[cfg(test)]
     source_id: String,
 }
 
@@ -234,8 +238,7 @@ pub(crate) fn quantum_destination_available(
     for at in cells {
         let occupant = state.at(at);
         let same = occupant.is_some_and(|other| other.id == piece.id);
-        if scarecrow_reserved(state, at) && (!allow_item_occupancy || !same)
-            || occupant.is_some() && (!allow_item_occupancy || !same)
+        if (scarecrow_reserved(state, at) || occupant.is_some()) && (!allow_item_occupancy || !same)
         {
             return Ok(false);
         }
@@ -282,7 +285,7 @@ pub(crate) fn place_quantum_resolved_item(
         if truth(state.extra.get("monochromeChess")) && !truth(piece.extra.get("monoShade")) {
             piece.extra.insert(
                 "monoShade".into(),
-                json!(if (to.row + to.col) % 2 == 0 {
+                json!(if (to.row + to.col).is_multiple_of(2) {
                     "light"
                 } else {
                     "dark"
@@ -555,8 +558,11 @@ pub(crate) fn materialize_quantum_shadows(
         for square in quantum_cells_for_item_at(&piece, ghost) {
             state.board[usize::from(square.row)][usize::from(square.col)] = Some(piece.clone());
             inserted.push(QuantumShadowPlacement {
+                #[cfg(test)]
                 square,
+                #[cfg(test)]
                 shadow_id: piece.id.clone(),
+                #[cfg(test)]
                 source_id: source_id.clone(),
             });
         }
@@ -564,6 +570,7 @@ pub(crate) fn materialize_quantum_shadows(
     Ok(inserted)
 }
 
+#[cfg(test)]
 pub(crate) fn cleanup_quantum_shadows(
     state: &mut GameState,
     inserted: &[QuantumShadowPlacement],
@@ -597,10 +604,10 @@ fn move_landing_cells(target: &MoveTarget) -> Result<Vec<Square>> {
     }
     if target.flag("castle") {
         let mut cells = vec![target.square()];
-        if let Some(rook) = descriptor_square(target.flags.get("rookTo")) {
-            if !cells.contains(&rook) {
-                cells.push(rook);
-            }
+        if let Some(rook) = descriptor_square(target.flags.get("rookTo"))
+            && !cells.contains(&rook)
+        {
+            cells.push(rook);
         }
         return Ok(cells
             .into_iter()
@@ -813,6 +820,7 @@ fn candidate_anchor(target: &MoveTarget) -> Option<Square> {
 /// main90848. Source chooses safe ghost destinations when any exist and then
 /// samples one ordered candidate. Capture lock and first-observation failure
 /// are set even when no counterpart can be installed.
+#[cfg(test)]
 pub(crate) fn apply_after_move(
     state: &mut GameState,
     piece: &mut Piece,
@@ -1644,10 +1652,10 @@ mod tests {
                     serde_json::from_value::<MoveTarget>(source_action["move"].clone())
                         .map_err(EngineError::serialization)?;
                 if source_after.position_id() == before.position_id()
-                    || !source_after
+                    || source_after
                         .state()
                         .at(source_target.square())
-                        .is_some_and(|piece| piece.id == selected.piece.id)
+                        .is_none_or(|piece| piece.id != selected.piece.id)
                 {
                     return Err(invalid(
                         "source public UI move did not reach its declared destination",

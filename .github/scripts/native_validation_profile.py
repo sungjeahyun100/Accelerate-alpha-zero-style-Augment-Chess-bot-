@@ -23,6 +23,31 @@ EXECUTION_SOURCE_PATHS = (
     f"{CATALOG_ROOT}/tools/runtime-contract.js",
 )
 PROFILE_VERSION = "accelerate-headless-semantic-v7-faithful-init-v1"
+RUST_CORE_PACKAGES = (
+    "augment-chess-engine", "augment-chess-contracts", "adapter-runtime", "augment-chess-v6-migration",
+)
+RUST_REQUIRED_TESTS = (
+    "geometry_maps_rectangles_and_signed_extents_without_relabeling_coordinates",
+    "synthetic_resize_requires_new_cells_and_an_explicit_clipping_policy",
+    "child_search_uses_parent_square_but_preserves_original_origin_and_board",
+    "shift_checks_third_party_collision_mutual_overlap_and_stops_on_first_piece",
+    "explicit_stack_matches_independent_recursive_oracle_for_singletons",
+    "ledger_transaction_commits_only_after_validation",
+    "ledger_failures_preserve_original_state_and_revision",
+    "registry_fails_closed_on_duplicate_version_schema_and_capability",
+    "exact_initial_template_converts_to_a_v7_data_envelope",
+    "converter_rejects_consumed_rng_even_when_state_is_identical",
+    "reader_rejects_ambiguous_and_malformed_transport_without_rule_execution",
+)
+
+
+def rust_test_command(scope: str) -> list[str]:
+    if scope == "rust":
+        return ["cargo", "test", "--workspace", "--locked"]
+    if scope == "core":
+        return ["cargo", "test", *(argument for package in RUST_CORE_PACKAGES
+                                  for argument in ("-p", package)), "--locked"]
+    raise RuntimeError(f"unknown Rust validation scope: {scope}")
 
 
 def require_execution_identity(observed, expected: dict[str, str], label: str) -> None:

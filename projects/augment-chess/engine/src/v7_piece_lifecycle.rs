@@ -110,7 +110,9 @@ pub(crate) fn queue_recurrence(
 #[derive(Clone, Debug)]
 pub(crate) struct RecurrenceRevival {
     pub(crate) piece: Piece,
+    #[cfg(test)]
     pub(crate) origin: Square,
+    #[cfg(test)]
     pub(crate) cells: Vec<Square>,
 }
 
@@ -261,7 +263,9 @@ pub(crate) fn resolve_recurrences(state: &mut GameState) -> Result<Vec<Recurrenc
         )?;
         revived.push(RecurrenceRevival {
             piece,
+            #[cfg(test)]
             origin,
+            #[cfg(test)]
             cells,
         });
     }

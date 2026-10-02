@@ -1608,13 +1608,12 @@ fn apply_exile(state: &mut GameState, card: &CardSlot, action: &Action) -> Resul
     piece.moved = true;
     state.board[origin.row as usize][origin.col as usize] = Some(piece.clone());
     write_piece(state, &piece);
-    if returns_to_collapsed_square {
-        if let Some(removed) = crate::transition::force_remove_piece_at(state, origin, state.turn)?
-        {
-            crate::v7_piece_lifecycle::schedule_undead_resurrection(
-                state, &removed, state.turn, false,
-            )?;
-        }
+    if returns_to_collapsed_square
+        && let Some(removed) = crate::transition::force_remove_piece_at(state, origin, state.turn)?
+    {
+        crate::v7_piece_lifecycle::schedule_undead_resurrection(
+            state, &removed, state.turn, false,
+        )?;
     }
     Ok(Vec::new())
 }

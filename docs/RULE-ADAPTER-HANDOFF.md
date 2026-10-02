@@ -1,14 +1,31 @@
 # 프로젝트 독립 객체형 어댑터 계약과 Accelerate 이관
 
-이 문서는 [D-017](DECISIONS.md#d-017-모노레포를-위한-프로젝트-독립-객체형-어댑터-계약)의 계약·이관 현황이다. 사용자 결정은 **언어 독립 계약 + Rust 첫 구현체**, **공통 인터페이스 + 기능별 규칙 객체**다. 기물 이동과 카드 효과는 첫 소비 사례이지 공유 어댑터의 도메인 정의가 아니다. 현재 작업 브랜치에서는 모노레포 경로 이전과 v7 규칙 이관이 진행 중이며, 부분 구현·국소 검사 성공을 전체 v7 실행 완료로 취급하지 않는다.
+이 문서는 [D-017](DECISIONS.md#d-017-모노레포를-위한-프로젝트-독립-객체형-어댑터-계약)의 계약·이관 현황이다. 사용자 결정은 **언어 독립 계약 + Rust 첫 구현체**, **공통 인터페이스 + 기능별 규칙 객체**다. 기물 이동과 카드 효과는 첫 소비 사례이지 공유 어댑터의 도메인 정의가 아니다. 현재 작업 브랜치에는 모노레포 경로 이전과 v7 규칙 이관을 저장했으며, 후속 통합·검증을 진행한다. 부분 구현·국소 검사 성공을 전체 v7 실행 완료로 취급하지 않는다.
 
 ## 이번 PR #32 전달 범위
 
-사용자는 봇 연동·성능 측정을 진행하지 않고 PR #32에 push한 뒤 이번 전달 목표를
-완료하도록 범위를 조정했다. 구현·bounded 규칙/공통 계약 검증·구조 검사·커밋/push와
-원격 SHA 확인이 현재 범위다. 설치 wheel·실제 Python 봇 연동·성능 측정은 사용자 범위
-조정으로 미실행·미검증이며 후속 검증이 필요하다. 기존 검사 코드는 보존하되 실행
-성공으로 기록하지 않는다. CI dispatch와 관측한 CI 상태도 구분하며 범위를 늘리지 않는다.
+2026-10-01 사용자는 봇 연동·성능 측정을 진행하지 않고 PR #32에 push한 뒤 전달 목표를
+완료하도록 조정했다. 2026-10-02 후속 요청의 범위는 core/common/JS/source 회귀,
+strict lint·구조 검사, PR #28 base 통합, Windows/Linux `core_only` CI와 원격 공유다.
+실제 봇 연동·sdist/wheel 빌드와 설치·성능 측정은 제외하며 기존 소스·검사 코드의 존재를
+실행 성공으로 기록하지 않는다. 전체 프로젝트 GO는 이번 검증 완료와 구분한다.
+
+메인이 관측한 Rust 1.96의 fmt와 core 4개 crate의 `--all-targets --locked -- -D warnings`
+strict Clippy는 PASS다. Node 6개 파일의 검사 62개(skip 0), CI helper 17개, 저장소 구조
+검사 테스트 14개, 변경 Python 8개 파일의 AST 검사, Actionlint 1.7.12의 workflow 2개도
+PASS다. AST 검사는 Python 소비자 실행이나 설치본 검증이 아니다.
+
+최종 계획 `reports/root-pr32-finish-final105-jobs.json`의 105개 작업은 모두 PASS다.
+engine all-targets는 단위 713개·통합 20개 PASS, source-input 53개 ignored이며
+추가 104개 작업에서 입력을 결속한 차분·회귀를 수행했다. 공통 registry 9개와 v6 변환
+6개도 PASS다. 모든 작업의 source digest는 `5638d6c8…` 전후 동일하고 컴파일 경고는 0건이다.
+원문 21국면은 42개 apply 표본의 bounded 내부 비교를 통과했다. 최초 부모 회귀 2건의
+실패와 원문 조사·수정 뒤 결과는 [인수 장부](V7-ACCEPTANCE-CLOSURE.md)를 따른다.
+PR #28 base `45edfe1`을 통합한 검증 checkpoint를 merge commit으로 공유한다.
+원격 SHA와 같은 commit의 Windows/Linux `core_only` CI 관측 근거는
+[PR #32](https://github.com/sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-/pull/32)에
+별도로 기록한다. 자동 PR 검사에 포함된 봇·wheel을 실행하지 않도록 `[skip ci]`와
+수동 `core_only=true, adapter_only=false` 실행을 사용하며 전체 CI 성공으로 확대하지 않는다.
 
 ## 공유 계약
 
@@ -55,7 +72,7 @@ trait AdapterObject<S, P, R>: Send + Sync {
 | 이동 후보 | `projects/augment-chess/engine/src/{movement,movement_objects,variant_movement}.rs` | 기물별 객체는 기본 후보·flag를 맡는다. 전역 modifier·강제 기물·순서/예산은 별도 조정층이 맡는다. |
 | 조합형 이동 | 게임 엔진의 `move_program.rs`가 가진 `MoveBoard`, `MoveProgramSet`, raw provenance·bounded cursor | 현재 별도 spatial 경로다. 모든 v7 이동을 자동 대체하거나 내부 `piece_id`를 공개 의도로 내보내지 않는다. |
 | 카드 | 게임 엔진의 `card_registry.rs` 정의/instance/정책과 `card_effects.rs`의 객체별 후보·검증·직접 효과 | 정의와 손패 instance, UI 선택과 효과 수용, 수동/강제/패시브 실행을 구별한다. 직접 효과 객체가 사용 비용·턴 정산을 임의 결정하지 않는다. |
-| 행동 입력 | `projects/augment-chess/engine/src/{v7_action_surface,v7_action_admission,v7_adapter_actions,adapter}.rs` | 내부 source envelope의 정확한 Position/action identity와 공개 intent의 필드·순서를 검사한다. draft/play 후보의 source 순서 cursor, 선택 family의 scalar 수용, eager 목록과 `legal-actions-page`를 구현 중이다. 공개 목록·봇 IR에는 host의 전체 상태 기반 action ID와 Position ID를 넣지 않는다. 새 경로의 빌드·전체 원문 대조·설치 소비자 검증은 별도 인수한다. |
+| 행동 입력 | `projects/augment-chess/engine/src/{v7_action_surface,v7_action_admission,v7_adapter_actions,adapter}.rs` | 내부 source envelope의 정확한 Position/action identity와 공개 intent의 필드·순서를 검사한다. draft/play 후보의 source 순서 cursor, 선택 family의 scalar 수용, eager 목록과 `legal-actions-page` 구현을 저장했다. 공개 목록·봇 IR에는 host의 전체 상태 기반 action ID와 Position ID를 넣지 않는다. 변경 후 core/source 회귀는 후속 실행 결과로 인수하며 설치 소비자 검증은 이번 범위에서 제외한다. |
 | 실행·투영 | 게임 엔진의 `transition.rs`, `v7_replay.rs`, `v7_threat.rs`, `v7_turn_flow.rs`, `v7_end_move_reactions.rs`, `v7_piece_lifecycle.rs`, `v7_board_automata.rs`, `v7_queued_effects.rs`, `v7_turn_entry.rs`, `observation.rs` | actor·stale·원자성·RNG·history·result는 게임 host의 실행 흐름 책임이다. source turn callback을 끼어 있는 단계마다 연결하고 미지원 활성 분기는 구체적인 오류로 멈춘다. 위협용 `AiNoCards`와 public legal/hints를 합치지 않는다. |
 
 고정된 공식 클라이언트는 공개 카드 256개와 보조 정의 1개, 선택 가능한 RULE 27개를 가진다. PR #29 시점의 JS oracle은 원문 최상위 초기화를 생략해 RULE 26개와 일부 phase·stars·weight·openingWeight를 잘못 기록했다. 이후 23문장을 보존해 카탈로그를 교정했으나 기물 이름 등의 다른 초기화는 여전히 생략했다. 이전 seed 19 카드/드래프트 영수증과 768-cell 감사는 **당시 로더 범위의 역사적 증거**로 남긴다.
@@ -66,9 +83,9 @@ trait AdapterObject<S, P, R>: Send + Sync {
 
 1. **공유 계약**: `packages/adapter-contract/`의 schema ID/hash와 `packages/adapter-runtime/`의 sealed registry, exact 버전/schema 선택, 읽기·transaction 분리, 취소·한도·rollback은 구현됐다. 서로 다른 두 가짜 프로젝트로 wire 왕복과 오류 경계를 검사했다. 게임 타입을 공유 패키지로 옮기지 않는다.
 2. **게임 host와 형식**: `V7HostPosition`은 source envelope/JCS identity와 staged state·RNG·history의 원자성을 담당한다. 게임 전용 계약 자료는 `projects/augment-chess/contracts/`, v6 읽기·검증된 부분 변환은 `projects/augment-chess/tools/v6-migration/`에 둔다. 실제 원문 Position 왕복은 국소 증거이며 전이 정답은 별도로 검증한다.
-3. **규칙 객체**: 이동·카드의 정적 객체 registry, 특수 기물/RULE 직접 효과와 턴 중간 callback은 기능 유형별 단일 담당으로 이관 중이다. raw 후보, UI 힌트, AI 공개 의도, `AiNoCards` 위협 후보를 서로 바꾸어 사용하지 않는다. 미지원 활성 분기는 정확한 오류를 유지한다.
-4. **통합**: 공통 `GameAdapterSession`에는 source-versioned `public-observation/observe`와 `public-actions`의 `legal-actions`·`legal-actions-page`·`bind-public-intent`·`apply-public-intent`가 등록됐다. draft 외 play의 원문 순서 후보·선택 family 검증과 transaction 실행을 연결 중이며 실패·취소·한도 초과 시 state/RNG/history를 버린다. 공개 page는 발급된 불투명 cursor, page 1..4096, examined 1..65536과 snapshot identity를 결속한다. 이 통합의 bounded source comparator는 전달105에서 통과했으며 그 경계 밖의 모든 조합을 증명하지 않는다. 단일 RULE 시작 상태 324개와 source internal 21사례·43표본, normal/chaos 실제 첫 이동 2개의 faithful scoped PASS를 관측했다. 이전 복합 설정 7개·draft 국소 근거와 현재 실행을 혼용하지 않는다. 관측 기반 `public_transition_compatible`·`apply_weighted_conditioned_public`의 play 분기는 저장됐다. 한 번의 source-prior-v1 실행·실제 carried draw trace·전체 공개 projection 동등성과 opaque identity 결속의 source chance9/source prior3 및 전달105 bounded 회귀가 PASS다. 경로 질량은 IID 연속 난수 해석이며 유한 LCG seed 전체의 정확한 posterior나 모든 조합의 확률 완전성은 증명하지 않는다. Python 소비자 검사 코드는 저장됐으나 설치 wheel·실제 봇 연동은 사용자 범위 조정으로 미실행·미검증 후속 항목이다. 객체 등록을 전체 play 지원의 증거로 취급하지 않는다.
-5. **이번 전달 gate**: 수정된 source loader의 legal/reject/full state/RNG/history/result와 source-reachable 분기 장부, 최종 engine/common/source 회귀·lint·구조 검사 및 PR #32 커밋/push·원격 SHA를 확인한다. 설치 wheel·실제 봇 연동·성능 측정과 미관측 CI를 포함한 전체 프로젝트 GO는 별도다. v6 내부 회귀 검사는 v7 실행 근거가 아니며 공개 v6 규칙 실행은 열지 않는다.
+3. **규칙 객체**: 이동·카드의 정적 객체 registry, 특수 기물/RULE 직접 효과와 턴 중간 callback의 이관 구현을 기능 유형별 단일 담당으로 저장했다. raw 후보, UI 힌트, AI 공개 의도, `AiNoCards` 위협 후보를 서로 바꾸어 사용하지 않는다. 미지원 활성 분기는 정확한 오류를 유지하며 저장 사실을 전체 규칙 실행 완료로 취급하지 않는다.
+4. **통합**: 공통 `GameAdapterSession`에는 source-versioned `public-observation/observe`와 `public-actions`의 `legal-actions`·`legal-actions-page`·`bind-public-intent`·`apply-public-intent`가 등록됐다. draft 외 play의 원문 순서 후보·선택 family 검증과 transaction 실행을 연결했으며 실패·취소·한도 초과 시 state/RNG/history를 버린다. 공개 page는 발급된 불투명 cursor, page 1..4096, examined 1..65536과 snapshot identity를 결속한다. 이 통합의 bounded source comparator는 2026-10-01 전달105에서 통과했으며 변경 후 새105의 결과는 진행 중이다. 단일 RULE 시작 상태 324개와 source internal 21사례·43표본, normal/chaos 실제 첫 이동 2개의 faithful scoped PASS도 당시 실행에 한정한다. 이전 복합 설정 7개·draft 국소 근거와 현재 실행을 혼용하지 않는다. 관측 기반 `public_transition_compatible`·`apply_weighted_conditioned_public`의 play 분기는 저장됐다. 한 번의 source-prior-v1 실행·실제 carried draw trace·전체 공개 projection 동등성과 opaque identity 결속의 source chance9/source prior3 및 전달105 bounded 회귀가 당시 PASS였다. 경로 질량은 IID 연속 난수 해석이며 유한 LCG seed 전체의 정확한 posterior나 모든 조합의 확률 완전성은 증명하지 않는다. Python 소비자 검사 코드는 저장됐으나 설치 wheel·실제 봇 연동은 사용자 범위 조정으로 미실행·미검증 후속 항목이다. 객체 등록을 전체 play 지원의 증거로 취급하지 않는다.
+5. **이번 후속 gate**: source loader의 legal/reject/full state/RNG/history/result와 source-reachable 분기 장부, core/common/JS/source 회귀·strict lint·구조 검사, PR #28 base 통합과 Windows/Linux `core_only` CI, PR #32 커밋/push·원격 SHA를 확인한다. 설치 wheel·실제 봇 연동·성능 측정과 전체 프로젝트 GO는 별도다. v6 내부 회귀 검사는 v7 실행 근거가 아니며 공개 v6 규칙 실행은 열지 않는다.
 
 같은 유형의 작업에 두 구현자를 동시에 배치하지 않는다. 파일 하나마다 담당자를 나누지 않고 기능·변경 이유·API 책임으로 유형을 정한다. `lib.rs`·`transition.rs`처럼 공통 호출 순서를 바꾸는 파일은 인터페이스가 안정된 뒤 통합 담당자가 순차적으로 수정한다. N-version과 동결 JS oracle은 검증용이고 운영 fallback이 아니다. 카드별 거대 snapshot fixture를 쌓지 않고 기존 작은 사례와 저장소 밖 보고서를 이용한다.
 
@@ -83,7 +100,8 @@ trait AdapterObject<S, P, R>: Send + Sync {
   미지원·한도 초과·admission 오류는 차분 실패로 유지한다. 이 source21의
   유한 입력 성공도 임의 규칙 조합이나 전체 v7 완료의 증거는 아니다.
 - 전체 v7 범위·유형별 소유권·실제 활성 guard·source receipt와 메인 검증 명령은 [전체 규칙 인수 장부](V7-ACCEPTANCE-CLOSURE.md)에 둔다. 코드 작성, source 자료 생성, native 국소 비교와 최종 같은 SHA 통합 결과를 구분한다.
-- 이전 국소 결과와 실제 84개 job(54 PASS·30 FAIL), 후속 43개(23 PASS·20 FAIL), stable50(49 PASS·1 FAIL)을 각각 보존한다. stable50은 모든 `sourceDigestBefore`/`sourceDigestAfter`가 동일한 closure이고 warnings 0이며 continuation 22개 묶음의 승급 후 `moveReplay.white` 차이만 실패했다. 실행 항목과 raw callback·whole 전이·입력 없는 단위 검사가 겹치므로 성공 수를 합산하지 않는다. provenance13의 source 생성은 실제 recipe·loader/frozen closure·계획·Node 해시를 기록했고 8개 특수 이동 recipe의 162개 자료 bytes/JCS 근거를 연결했다. Guard/campaign도 현행 identity로 새로 생성해 scoped native PASS를 관측했으며 과거 입력의 metadata를 승격하지 않았다. recheck3은 schema2 raw81·Transcendence 실제 AI/probe4·Judgment milestone2의 source 생성 exit0과 source closure 불변을 기록했다. 새 세 comparator는 checkpoint105와 전달105에서 각각 PASS였고 Otherworld는 두 depth를 명시한 새 source26으로 focus4·전달105 PASS를 관측했다. 이전 검사·입력 SHA·실행 경계는 저장된 `reports/root-v7-validation-map.json` revision 10에 보존한다. 저장하지 않은 revision 11을 근거로 인용하지 않는다. 최종 전달의 source closure와 실제 결과는 `reports/root-pr32-delivery105-jobs.json` 및 `reports/root-native-root-pr32-delivery105-jobs-summary.json`과 개별 로그를 따른다. 최종 전달105는 모두 PASS·동일 source digest이며 engine all-targets unit711/integration20과 추가104 gate를 구분한다. 104는 독립 규칙·시나리오 개수가 아니다. production dead_code11 경고를 보존한다. 뒤이은 fmt/common registry9/v6migration6은 PASS, 엄격 Clippy는 53진단·exit101이다. 진단은 인수 장부에 정확히 보존하며 lint 리팩터링을 확대하지 않는다. 실제 로컬 Rust는1.97.0이고 CIpin1.96.0 성공은 미관측이다. staged index의 구조 검사는 PASS였으며 커밋/push·원격 SHA는 메인이 확인한다. 제외한 설치 wheel·실제 봇 연동·성능과 미관측 CI까지 포함한 전체 프로젝트 GO는 선언하지 않는다.
+- 2026-10-01 전달 이전의 국소 결과와 실제 84개 job(54 PASS·30 FAIL), 후속 43개(23 PASS·20 FAIL), stable50(49 PASS·1 FAIL)을 각각 보존한다. stable50은 모든 `sourceDigestBefore`/`sourceDigestAfter`가 동일한 closure이고 warnings 0이며 continuation 22개 묶음의 승급 후 `moveReplay.white` 차이만 실패했다. 실행 항목과 raw callback·whole 전이·입력 없는 단위 검사가 겹치므로 성공 수를 합산하지 않는다. provenance13의 source 생성은 실제 recipe·loader/frozen closure·계획·Node 해시를 기록했고 8개 특수 이동 recipe의 162개 자료 bytes/JCS 근거를 연결했다. Guard/campaign도 당시 identity로 새로 생성해 scoped native PASS를 관측했으며 과거 입력의 metadata를 승격하지 않았다. recheck3은 schema2 raw81·Transcendence 실제 AI/probe4·Judgment milestone2의 source 생성 exit0과 source closure 불변을 기록했다. 새 세 comparator는 checkpoint105와 전달105에서 각각 PASS였고 Otherworld는 두 depth를 명시한 새 source26으로 focus4·전달105 PASS를 관측했다. 이전 검사·입력 SHA·실행 경계는 저장된 `reports/root-v7-validation-map.json` revision 10에 보존한다. 저장하지 않은 revision 11을 근거로 인용하지 않는다. 2026-10-01 전달의 source closure와 실제 결과는 `reports/root-pr32-delivery105-jobs.json` 및 `reports/root-native-root-pr32-delivery105-jobs-summary.json`과 개별 로그를 따른다. 당시 전달105는 모두 PASS·동일 source digest이며 engine all-targets unit711/integration20과 추가104 gate를 구분한다. 104는 독립 규칙·시나리오 개수가 아니다. 당시 production dead_code11 경고와 fmt/common registry9/v6migration6 PASS, Rust1.97.0 strict Clippy 53진단·exit101을 역사적 근거로 보존한다.
+- 2026-10-02 후속 요청에 따라 lint를 정리했으며 실제 Rust1.96 strict Clippy·fmt는 메인 관측으로 PASS다. 새105·base 통합 merge commit·원격 SHA·두 OS `core_only` CI의 완료는 상단 진행 상태와 [인수 장부](V7-ACCEPTANCE-CLOSURE.md)를 따른다. 이전 성공과 실패를 새 결과로 재표기하지 않으며 제외한 설치 wheel·실제 봇 연동·성능까지 포함한 전체 프로젝트 GO는 선언하지 않는다.
 - [IMPLEMENTATION-DIRECTIVES](IMPLEMENTATION-DIRECTIVES.md)의 P0/P2/P3/P8 계약과 [ENGINEERING-STANDARDS](ENGINEERING-STANDARDS.md)를 먼저 읽는다. 동결 v7 client SHA-256은 `e5ed84fcf8e72a24e6a8cfeb9050787387a616c55184e6501fca2077e302c45c`다.
 - 첫 수 전후 상태·RNG, 왕실 위협 후보 순서와 미완료 경계는 Git 밖 `%APPDATA%/Accelerate/reports/v7-plain-move/`, 첫 이동 뒤 양측 공개 관측은 `%APPDATA%/Accelerate/reports/v7-postmove-observation/`, flow 국소 비교는 `%APPDATA%/Accelerate/reports/v7-delta-ledger/first-move-flow-direct.json`, Grappler 국소 원문은 `%APPDATA%/Accelerate/reports/v7-variant-grappler/`에 있다. 이 호스트의 보고서는 다른 작업자에게 따로 전달해야 한다.
 - 공유 schema ID와 canonical hash는 `packages/adapter-contract/manifest.json`에 고정됐다. 게임·봇은 모노레포의 별도 프로젝트이지만 두 번째 독립 도메인 소비 사례와 별도 배포·ABI 안정성은 아직 검증되지 않았다. 현재 저장소의 게임 전용 `contracts/`를 공유 코어로 선언하지 않는다.

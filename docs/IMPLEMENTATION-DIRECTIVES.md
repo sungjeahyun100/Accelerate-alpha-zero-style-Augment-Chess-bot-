@@ -6,11 +6,25 @@
 ## 이번 PR #32 전달 범위
 
 2026-10-01 사용자는 봇 연동·성능 측정을 진행하지 않고 PR #32에 push한 뒤 이번
-전달 목표를 완료하도록 조정했다. 현재 완료 조건은 구현·bounded 규칙/공통 계약
-검증·구조 검사·커밋/push와 원격 SHA 확인이다. 설치 wheel·실제 Python 봇 연동·성능
-측정은 사용자 범위 조정으로 미실행·미검증이며 후속 검증이 필요하다. 아래 모델·배포·
+전달 목표를 완료하도록 조정했다. 2026-10-02 후속 요청의 완료 조건은 core/common/JS/source
+회귀·strict lint·구조 검사, PR #28 base 통합, Windows/Linux `core_only` CI와
+커밋/push·원격 SHA 확인이다. 실제 Python 봇 연동·sdist/wheel 빌드와 설치·성능
+측정은 현재 범위에서 제외한다. 아래 모델·배포·
 탐색 계획과 전체 프로젝트 GO gate는 이 후속 범위를 보존하며 현재 PR 완료를 막는
-추가 실행 지시로 사용하지 않는다. CI dispatch와 관측 결과를 구분하고 범위를 늘리지 않는다.
+추가 실행 지시로 사용하지 않는다. CI dispatch와 관측 결과를 구분한다.
+
+메인 관측으로 Rust 1.96 fmt·core 4개 crate all-targets strict Clippy PASS,
+Node 6개 파일의 62개 검사(skip 0)·CI helper 17개·구조 검사 테스트 14개 PASS,
+변경 Python 8개 파일 AST PASS, Actionlint 1.7.12의 workflow 2개 PASS를 확인했다.
+Python AST는 실제 소비자 실행 근거가 아니다. 최종 native105 계획
+`reports/root-pr32-finish-final105-jobs.json`과 요약
+`reports/root-native-root-pr32-finish-final105-jobs-summary.json`은 전체 105개 PASS다.
+engine 단위 713개·통합 20개, 공통 registry 9개·v6 변환 6개도 PASS이며,
+전 job source digest `5638d6c8…`는 불변이고 컴파일 경고는 0건이다. 최초 all-targets의
+부모 회귀 2건은 동결 원문 조사에 따라 기대 계약을 갱신한 뒤 전체 계획을 다시 실행했다.
+base `45edfe1`을 통합한 checkpoint의 merge commit·원격 SHA와 같은 commit의 두 OS
+`core_only` CI 관측은 PR #32에 별도로 기록한다. 세부 입력 hash·역사적 실패는
+[인수 장부](V7-ACCEPTANCE-CLOSURE.md)를 따른다.
 
 ## 목표 버전과 증거 경계
 
@@ -135,12 +149,14 @@ activeTrolley 선택 대기·잘못된 identity·비8×8·정해진 한도 오�
 
 검증에는 세 층이 있다. 첫째, unit/property/contract 검사는 geometry·registry·IR·모델·FFI의 국소 불변식을 본다. 둘째, 독립 N-version은 geometry·점유·행마의 작은 참조 구현을 **테스트 전용**으로 만들어 Rust 운영판과 비교한다. 셋째, source-pinned JS oracle은 v7 실제 규칙의 legal/reject/apply/full state/history/result/RNG 정답이다. 두 참조 결과가 충돌하면 다수결 대신 동결 source와 계약을 추적한다. 운영 추론·탐색 경로에는 참조판을 연결하지 않는다.
 
-최종 전달105에서는 engine all-targets unit711·integration20과 추가104 gate가 모두 PASS였고
+2026-10-01 전달105에서는 engine all-targets unit711·integration20과 추가104 gate가 모두 PASS였고
 각 job의 source digest가 불변이었다. 추가104에는 원문 comparator와 기존 등록·회귀 단위가
 섞이므로 독립 규칙 수로 사용하지 않는다. production dead_code11 경고는 정확한 요약으로
-남긴다. 뒤이은 fmt/common registry9/v6migration6은 PASS였지만 엄격 Clippy는53진단·exit101이다.
-사용자 범위에 따라 lint 리팩터링을 확대하지 않고 이 실패를 PR에 기록한다. 로컬Rust1.97.0을
-CIpin1.96.0의 성공으로 표기하지 않는다. 메인이 구조 검사·커밋/push를 확인하며 세부 근거는 인수 장부를 따른다.
+남긴다. 당시 fmt/common registry9/v6migration6은 PASS였지만 Rust1.97.0의 엄격 Clippy는
+53진단·exit101이었다. 이 실패를 역사적 근거로 보존하고 CIpin1.96.0의 성공으로 표기하지
+않는다. 2026-10-02 후속 요청에 따라 lint를 정리한 실제 Rust1.96 fmt·strict Clippy는
+메인 관측으로 PASS다. 최종105도 base `45edfe1`을 통합한 source에서 모두 PASS이며,
+두 OS `core_only` CI·원격 SHA는 PR #32의 같은 commit 관측 근거를 따른다.
 
 아래 표는 전체 프로젝트 GO의 후속 gate다. 사용자 범위 조정으로 제외한 wheel·봇 연동·
 성능 항목을 이번 PR #32 전달의 추가 완료 조건으로 적용하지 않는다.

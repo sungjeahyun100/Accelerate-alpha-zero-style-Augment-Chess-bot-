@@ -20,6 +20,9 @@ const MAX_BATCH_BYTES = 16 * 1024 * 1024;
 const MAX_BATCH_CASES = 8;
 const MAX_PLAYOUT_DECISIONS = 128;
 const STYLES = ["normal", "chaos", "grand"];
+const NO_CASE_FAILURE_STATUSES = new Set([
+  "native-timeout", "native-unavailable", "native-unsupported", "probe-error", "version-mismatch",
+]);
 // Three small assertions regenerated from the fully initialized pinned client.
 // The complete source positions stay outside Git and are regenerated.
 const ACTIVE_SEED19 = Object.freeze({
@@ -100,6 +103,15 @@ function buildCase(adapter, contract, name, position, requiredSampleId = null) {
       throw new Error(`${name}: source sample failed full-history apply`);
     contract.validatePosition(step.position);
     contract.validateResult(step.result);
+    if (step.position.positionId === action.positionId)
+      throw new Error(`${name}: source sample retained the old Position identity`);
+    let staleRejected = false;
+    try { adapter.apply(step.position, action); }
+    catch (error) {
+      if (!(error instanceof TypeError) || !/Stale or incompatible action/.test(error.message)) throw error;
+      staleRejected = true;
+    }
+    if (!staleRejected) throw new Error(`${name}: source accepted a stale action`);
     const nextObservations = Object.fromEntries(["white", "black"].map(viewer => {
       const observation = adapter.observe(step.position, viewer);
       contract.validateObservation(observation);
@@ -114,7 +126,8 @@ function buildCase(adapter, contract, name, position, requiredSampleId = null) {
     input: { name, position, result, observations, actions, rejectPayload, samples },
     summary: { name, mode: position.state.mode, positionDigest: contract.digest(position), legalCount: actions.length,
       sourceExamined: examined, actionTypes, sampleTypes: samples.map(sample => sample.action.payload.type),
-      sampleCount: samples.length, rejectCount: rejectPayload ? 1 : 0, observationViewers: Object.keys(observations),
+      sampleCount: samples.length, rejectCount: rejectPayload ? 1 : 0, staleRejectCount: samples.length,
+      observationViewers: Object.keys(observations),
       resultStatus: result.status },
   };
 }
@@ -313,6 +326,38 @@ function nativeProbe(python, request) {
   catch { return { status: "probe-error", reason: "native worker did not return one JSON response" }; }
 }
 
+// 개수·순서·집계 결과를 검사하면서 실행 전 오류의 원래 종류와 메시지를 보존한다.
+function inspectNativeComparison(response, expectedCases) {
+  const comparison = response && typeof response === "object" && !Array.isArray(response) ? response :
+    { status: "probe-error", reason: "native worker returned a non-object response" };
+  const cases = Array.isArray(comparison.cases) ? comparison.cases : [];
+  const reportedNoCases = !Array.isArray(comparison.cases) && NO_CASE_FAILURE_STATUSES.has(comparison.status) &&
+    typeof comparison.reason === "string" && comparison.reason.trim().length > 0;
+  const incomplete = !reportedNoCases && cases.length !== expectedCases.length;
+  const outOfOrder = !incomplete && cases.some((item, index) => item?.name !== expectedCases[index].name);
+  const invalidCase = cases.some(item => typeof item?.status !== "string" || !item.status.trim());
+  const perCaseFailed = cases.some(item => item?.status !== "pass");
+  const invalidStatus = !reportedNoCases && !["pass", "fail"].includes(comparison.status);
+  const inconsistentStatus = !reportedNoCases && !incomplete && !outOfOrder &&
+    ((comparison.status === "pass" && perCaseFailed) || (comparison.status === "fail" && !perCaseFailed));
+  if (!reportedNoCases && !incomplete && !outOfOrder && !invalidCase && !invalidStatus && !inconsistentStatus &&
+      comparison.status === "pass") return { cases, failure: null };
+  const malformed = incomplete || outOfOrder || invalidCase || invalidStatus || inconsistentStatus;
+  const shapeReason = incomplete ? `native worker returned ${cases.length}/${expectedCases.length} cases` :
+    outOfOrder ? "native worker changed case names or order" :
+      invalidCase ? "native worker returned a missing or invalid case status" :
+        invalidStatus ? "native worker returned an invalid aggregate status" :
+          inconsistentStatus ? "native worker aggregate status contradicts case statuses" : null;
+  return { cases, failure: {
+    status: malformed ? "probe-error" : comparison.status,
+    firstCase: expectedCases[0]?.name,
+    expectedCases: expectedCases.length,
+    observedCases: cases.length,
+    reason: [shapeReason, comparison.reason || cases.find(item => item?.status !== "pass")?.reason]
+      .filter(Boolean).join("; ") || "native batch failed",
+  } };
+}
+
 function compareCases(python, identity, items, report, oracleOnly, exportCase = null) {
   const nativeCases = [];
   let batch = [];
@@ -321,25 +366,10 @@ function compareCases(python, identity, items, report, oracleOnly, exportCase = 
   const flush = () => {
     if (!batch.length || oracleOnly) { batch = []; return; }
     const response = nativeProbe(python, { phase: "compare", ...identity, cases: batch });
-    const comparison = response && typeof response === "object" && !Array.isArray(response) ? response :
-      { status: "probe-error", reason: "native worker returned a non-object response" };
-    const observedCases = Array.isArray(comparison.cases) ? comparison.cases : [];
+    const { cases: observedCases, failure } = inspectNativeComparison(response, batch);
     nativeCases.push(...observedCases);
-    const incomplete = observedCases.length !== batch.length;
-    const outOfOrder = !incomplete && observedCases.some((item, index) => item?.name !== batch[index].name);
-    const perCaseFailed = observedCases.some(item => item?.status !== "pass");
-    const inconsistentStatus = !incomplete && !outOfOrder &&
-      ((comparison.status === "pass" && perCaseFailed) || (comparison.status === "fail" && !perCaseFailed));
-    if (comparison.status !== "pass" || incomplete || outOfOrder || inconsistentStatus) {
-      const failureStatus = incomplete || outOfOrder || inconsistentStatus ? "probe-error" : comparison.status || "probe-error";
-      const shapeReason = incomplete ? `native worker returned ${observedCases.length}/${batch.length} cases` :
-        outOfOrder ? "native worker changed case names or order" :
-          inconsistentStatus ? "native worker aggregate status contradicts case statuses" : null;
-      const failure = { status: failureStatus, firstCase: batch[0].name, expectedCases: batch.length,
-        observedCases: observedCases.length,
-        reason: [shapeReason, comparison.reason || observedCases.find(item => item?.status !== "pass")?.reason]
-          .filter(Boolean).join("; ") || "native batch failed" };
-      if (status === "pass") { status = failureStatus; report.nativeFailure = failure; }
+    if (failure) {
+      if (status === "pass") { status = failure.status; report.nativeFailure = failure; }
       (report.nativeFailures ??= []).push(failure);
     }
     batch = [];
@@ -438,5 +468,5 @@ function main() {
 
 module.exports = Object.freeze({ SOURCE_SHA256, PROFILE, ACTIVE_SEED19, STYLES,
   sourceActions, buildCase, firstActiveDraftAction, advanceInitialDraft, sourceCases,
-  syntheticTerminalCases, syntheticTimedStatusCases });
+  syntheticTerminalCases, syntheticTimedStatusCases, inspectNativeComparison });
 if (require.main === module) main();

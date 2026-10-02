@@ -414,20 +414,20 @@ impl PublicActionObject {
         };
         // Budget/cancellation failures preserve every retained stream position.
         meter.checkpoint()?;
-        if let Some(token) = &next_cursor {
-            if !store.entries.contains_key(token) {
-                while store.entries.len() >= 64 {
-                    let oldest = store.insertion_order.pop_front().ok_or_else(|| {
-                        AdapterError::execution_failed(
-                            "invalid_action_cursor_store",
-                            "cursor retention order is inconsistent",
-                        )
-                    })?;
-                    store.entries.remove(&oldest);
-                }
-                store.insertion_order.push_back(token.clone());
-                store.entries.insert(token.clone(), staged);
+        if let Some(token) = &next_cursor
+            && !store.entries.contains_key(token)
+        {
+            while store.entries.len() >= 64 {
+                let oldest = store.insertion_order.pop_front().ok_or_else(|| {
+                    AdapterError::execution_failed(
+                        "invalid_action_cursor_store",
+                        "cursor retention order is inconsistent",
+                    )
+                })?;
+                store.entries.remove(&oldest);
             }
+            store.insertion_order.push_back(token.clone());
+            store.entries.insert(token.clone(), staged);
         }
         let mut output = AdapterOutput::value(GameAdapterValue::LegalActionsPage {
             intents: page.intents,

@@ -22,11 +22,35 @@ reuse = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(reuse)
 NODE_VERSION_FUNCTION = reuse.node_version
 PROFILE_INPUTS = (".github/scripts/native_validation_profile.py", *reuse.EXECUTION_SOURCE_PATHS)
+CHECK_SOURCE = SOURCE.with_name("native-bot-check.py")
+check_spec = importlib.util.spec_from_file_location("native_bot_check", CHECK_SOURCE)
+assert check_spec and check_spec.loader
+check = importlib.util.module_from_spec(check_spec)
+check_spec.loader.exec_module(check)
 
 
 def records(paths: dict[str, str]) -> bytes:
     return b"".join(f"100644 {oid} 0\t{path}\0".encode()
                     for path, oid in paths.items())
+
+
+def rust_receipt(scope: str, **overrides) -> dict:
+    return {
+        "crate": "augment-chess-engine", "listed": True, "executed": True, "exitCode": 0,
+        "required_tests": list(reuse.RUST_REQUIRED_TESTS),
+        "required_engine_tests": list(reuse.RUST_REQUIRED_TESTS[:5]), "validationScope": scope,
+        "packages": list(reuse.RUST_CORE_PACKAGES) if scope == "core" else ["--workspace"],
+        "command": reuse.rust_test_command(scope), **overrides,
+    }
+
+
+def write_rust_receipt(directory: Path, scope: str, **overrides) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{scope}-scope.json").write_text(json.dumps(rust_receipt(scope, **overrides)), encoding="utf-8")
+    (directory / f"{scope}-test-list.txt").write_text(
+        "".join(f"tests::{name}: test\n" for name in reuse.RUST_REQUIRED_TESTS[:5]), encoding="utf-8")
+    (directory / f"{scope}-test-output.txt").write_text(
+        "".join(f"test tests::{name} ... ok\n" for name in reuse.RUST_REQUIRED_TESTS), encoding="utf-8")
 
 
 class SuccessCacheTests(unittest.TestCase):
@@ -80,7 +104,9 @@ class SuccessCacheTests(unittest.TestCase):
             ".github/scripts/native-bot-check.py", "package.json",
             "projects/augment-chess/contracts/catalog/site-20260928.json",
             "projects/augment-chess/oracle/game-adapter/src/index.js",
-            "projects/augment-chess/tests/site-adapter/parity/latest-client.test.cjs", *PROFILE_INPUTS)}
+            "projects/augment-chess/tests/site-adapter/parity/latest-client.test.cjs",
+            "projects/augment-chess/tests/differential/v7-native-differential.cjs",
+            "projects/augment-chess/tests/differential/v7-native-response.test.cjs", *PROFILE_INPUTS)}
         with (patch.object(reuse.subprocess, "run", return_value=SimpleNamespace(stdout=records(paths))),
               patch.object(reuse.platform, "system", return_value="TestOS"),
               patch.object(reuse.platform, "machine", return_value="x86_64"),
@@ -122,6 +148,8 @@ class SuccessCacheTests(unittest.TestCase):
             "projects/augment-chess/contracts/catalog/site-20260928.json",
             "projects/augment-chess/oracle/game-adapter/src/index.js",
             "projects/augment-chess/tests/site-adapter/parity/latest-client.test.cjs",
+            "projects/augment-chess/tests/differential/v7-native-differential.cjs",
+            "projects/augment-chess/tests/differential/v7-native-response.test.cjs",
             *PROFILE_INPUTS,
         )
         with tempfile.TemporaryDirectory() as directory:
@@ -138,7 +166,8 @@ class SuccessCacheTests(unittest.TestCase):
                              ".github/scripts/native-bot-check.py", "package.json",
                              "projects/accelerate/native/Cargo.toml",
                              "projects/augment-chess/contracts/catalog/execution-profile-20260928.json",
-                             "projects/augment-chess/contracts/catalog/site-20260928.json"):
+                             "projects/augment-chess/contracts/catalog/site-20260928.json",
+                             "projects/augment-chess/tests/differential/v7-native-response.test.cjs"):
                     target = repository / name
                     target.write_text("changed\n", encoding="utf-8")
                     subprocess.run(["git", "add", "--", name], cwd=repository,
@@ -146,7 +175,8 @@ class SuccessCacheTests(unittest.TestCase):
                     changed = {scope: reuse.identity(scope)["key"] for scope in reuse.SCOPES}
                     affected = ({"native", "adapter"} if name == "package.json" else
                                 {"rust", "native"} if name == "projects/accelerate/native/Cargo.toml" else
-                                {"rust", "native", "adapter"})
+                                {"native", "adapter"} if name == "projects/augment-chess/tests/differential/v7-native-response.test.cjs" else
+                                {"rust", "core", "native", "adapter"})
                     for scope in reuse.SCOPES:
                         self.assertEqual(first[scope] != changed[scope], scope in affected,
                                          f"{scope} omitted an input change from {name}")
@@ -190,7 +220,8 @@ class SuccessCacheTests(unittest.TestCase):
             expected = ("if: ${{ success() && steps.verified.outputs.cache-hit != 'true' "
                         f"&& steps.{final_step}.outcome == 'success' }}}}")
             self.assertIn(expected, step(name))
-            self.assertIn(f"record {scope}", step(name))
+            command = 'record "$ACCELERATE_RUST_SCOPE"' if scope == "rust" else f"record {scope}"
+            self.assertIn(command, step(name))
             self.assertIn(f"id: {final_step}", source)
         self.assertNotIn("continue-on-error: true", source)
         native_job = source.split("  native-bot:\n", 1)[1].split("  game-adapter:\n", 1)[0]
@@ -205,26 +236,132 @@ class SuccessCacheTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "Rust test scope report"):
                     reuse.main()
                 self.assertFalse(marker.exists())
-                marker.parent.mkdir(parents=True)
-                (marker.parent / "rust-scope.json").write_text(json.dumps({
-                    "crate": "augment-chess-engine", "listed": False,
-                    "required_tests": ["required_test"]}), encoding="utf-8")
-                (marker.parent / "rust-test-list.txt").write_text("required_test: test\n", encoding="utf-8")
+                write_rust_receipt(marker.parent, "rust", listed=False)
                 with self.assertRaisesRegex(RuntimeError, "lacks executed required tests"):
                     reuse.main()
                 self.assertFalse(marker.exists())
-                (marker.parent / "rust-scope.json").write_text(json.dumps({
-                    "crate": "augment-chess-engine", "listed": True,
-                    "required_tests": ["required_test"]}), encoding="utf-8")
+                write_rust_receipt(marker.parent, "rust")
                 reuse.main()
                 self.assertTrue(marker.is_file())
                 with patch.object(sys, "argv", [str(SOURCE), "verify", "rust"]):
                     reuse.main()
-                    (marker.parent / "rust-scope.json").write_text(json.dumps({
-                        "crate": "augment-chess-engine", "listed": False,
-                        "required_tests": ["required_test"]}), encoding="utf-8")
+                    write_rust_receipt(marker.parent, "rust", listed=False)
                     with self.assertRaisesRegex(RuntimeError, "lacks executed required tests"):
                         reuse.main()
+
+    def test_core_and_workspace_have_distinct_keys_markers_and_source_closures(self):
+        paths = {path: "a" * 40 for path in (
+            "Cargo.toml", "Cargo.lock", ".github/workflows/native-bot.yml",
+            ".github/scripts/native-ci-reuse.py", *PROFILE_INPUTS)}
+        # Windows platform.system()도 subprocess를 쓰므로 Git index mock과 분리한다.
+        with (patch.object(reuse.subprocess, "run", return_value=SimpleNamespace(stdout=records(paths))),
+              patch.object(reuse.platform, "system", return_value="TestOS"),
+              patch.object(reuse.platform, "machine", return_value="x86_64"),
+              patch.object(reuse.platform, "python_version", return_value="3.12.0")):
+            self.assertNotEqual(reuse.identity("core")["key"], reuse.identity("rust")["key"])
+        for path in ("projects/accelerate/native/", "projects/accelerate/runtime/"):
+            self.assertNotIn(path, reuse.SCOPES["core"])
+            self.assertIn(path, reuse.SCOPES["rust"])
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"RUNNER_TEMP": directory}):
+            self.assertNotEqual(reuse.marker_path("core"), reuse.marker_path("rust"))
+
+    def test_core_success_cannot_be_verified_as_workspace_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "rust-success.json"
+            marker.write_text(json.dumps({"scope": "core", "key": "core-key"}), encoding="utf-8")
+            with (patch.object(reuse, "identity", return_value={"scope": "rust", "key": "rust-key"}),
+                  patch.object(reuse, "marker_path", return_value=marker),
+                  patch.object(sys, "argv", [str(SOURCE), "verify", "rust"])):
+                with self.assertRaisesRegex(RuntimeError, "identity differs"):
+                    reuse.main()
+
+    def test_rust_receipts_bind_scope_package_command_and_executed_tests(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "reports" / "native-bot" / "TestOS"
+            marker = root / "core-success.json"
+            write_rust_receipt(root, "core")
+            reuse.validate_evidence("core", marker)
+            for field, changed in (("validationScope", "rust"), ("packages", ["--workspace"]),
+                                   ("command", reuse.rust_test_command("rust"))):
+                write_rust_receipt(root, "core", **{field: changed})
+                with self.assertRaisesRegex(RuntimeError, "requested validation scope or command"):
+                    reuse.validate_evidence("core", marker)
+            for field, changed in (("executed", False), ("exitCode", 1), ("exitCode", False),
+                                   ("required_tests", list(reuse.RUST_REQUIRED_TESTS[:-1]))):
+                write_rust_receipt(root, "core", **{field: changed})
+                with self.assertRaisesRegex(RuntimeError, "lacks executed required tests"):
+                    reuse.validate_evidence("core", marker)
+            write_rust_receipt(root, "core")
+            output = root / "core-test-output.txt"
+            # 목록 존재·exit 0만으로 필수 검사를 실행한 것으로 인정하지 않는다.
+            output.write_text("test tests::one_unrelated_test ... ok\n", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "executed output lacks passed required tests"):
+                reuse.validate_evidence("core", marker)
+            write_rust_receipt(root, "core")
+            output.write_text(output.read_text(encoding="utf-8").replace(" ... ok", " ... ignored", 1), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "executed output lacks passed required tests"):
+                reuse.validate_evidence("core", marker)
+
+    def test_core_and_workspace_reports_are_not_interchangeable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "reports" / "native-bot" / "TestOS"
+            write_rust_receipt(root, "rust")
+            with self.assertRaisesRegex(RuntimeError, "Rust test scope report"):
+                reuse.validate_evidence("core", root / "core-success.json")
+
+    def test_requested_scope_rejects_conflicting_and_invalid_booleans(self):
+        for core_only, adapter_only, expected in (("false", "false", "rust"), ("true", "false", "core"),
+                                                  ("false", "true", "adapter")):
+            with patch.dict(os.environ, {"ACCELERATE_CI_CORE_ONLY": core_only,
+                                         "ACCELERATE_CI_ADAPTER_ONLY": adapter_only}):
+                self.assertEqual(check.validation_scope(), expected)
+        with patch.dict(os.environ, {"ACCELERATE_CI_CORE_ONLY": "true", "ACCELERATE_CI_ADAPTER_ONLY": "true"}):
+            with self.assertRaisesRegex(RuntimeError, "cannot both be true"):
+                check.validation_scope()
+        with patch.dict(os.environ, {"ACCELERATE_CI_CORE_ONLY": "1", "ACCELERATE_CI_ADAPTER_ONLY": "false"}):
+            with self.assertRaisesRegex(RuntimeError, "requires true or false"):
+                check.validation_scope()
+
+    def test_rust_runner_preserves_failure_and_rejects_list_only_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            reports = Path(directory) / "reports"
+            locations = (Path(directory), "TestOS", Path(directory), reports, Path(directory) / "python")
+            failed = subprocess.CompletedProcess(reuse.rust_test_command("core"), 101,
+                                                 stdout="test failures\n", stderr="exact compiler error\n")
+            with (patch.object(check, "locations", return_value=locations),
+                  patch.object(check.subprocess, "run", return_value=failed)):
+                with self.assertRaises(subprocess.CalledProcessError) as error:
+                    check.rust_scope("core")
+                self.assertEqual(error.exception.returncode, 101)
+                self.assertIn("exact compiler error", (reports / "core-test-output.txt").read_text(encoding="utf-8"))
+                self.assertFalse((reports / "core-scope.json").exists())
+            list_only = subprocess.CompletedProcess(reuse.rust_test_command("core"), 0,
+                                                    stdout="a_test: test\n", stderr="")
+            with (patch.object(check, "locations", return_value=locations),
+                  patch.object(check.subprocess, "run", return_value=list_only)):
+                with self.assertRaisesRegex(RuntimeError, "did not execute required tests successfully"):
+                    check.rust_scope("core")
+                self.assertFalse((reports / "core-scope.json").exists())
+
+    def test_rust_runner_executes_exact_core_command_and_reports_observed_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            reports = Path(directory) / "reports"
+            locations = (Path(directory), "TestOS", Path(directory), reports, Path(directory) / "python")
+            executed = subprocess.CompletedProcess(reuse.rust_test_command("core"), 0,
+                stdout="".join(f"test tests::{name} ... ok\n" for name in reuse.RUST_REQUIRED_TESTS),
+                stderr="one precise development warning\n")
+            listed = subprocess.CompletedProcess(["cargo", "test", "--list"], 0,
+                stdout="".join(f"tests::{name}: test\n" for name in reuse.RUST_REQUIRED_TESTS[:5]), stderr="")
+            with (patch.object(check, "locations", return_value=locations),
+                  patch.object(check.subprocess, "run", side_effect=[executed, listed]) as command):
+                check.rust_scope("core")
+                self.assertEqual(command.call_args_list[0].args[0], reuse.rust_test_command("core"))
+                self.assertNotIn("--workspace", command.call_args_list[0].args[0])
+            report = json.loads((reports / "core-scope.json").read_text(encoding="utf-8"))
+            self.assertEqual(report["validationScope"], "core")
+            self.assertEqual(report["exitCode"], 0)
+            self.assertEqual(report["required_tests"], list(reuse.RUST_REQUIRED_TESTS))
+            self.assertIn("one precise development warning", (reports / "core-test-output.txt").read_text(encoding="utf-8"))
 
     def test_native_receipt_requires_passed_installed_differential(self):
         with tempfile.TemporaryDirectory() as directory:

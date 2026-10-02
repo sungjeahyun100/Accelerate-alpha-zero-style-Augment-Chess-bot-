@@ -192,9 +192,11 @@ fn probe_ordered_candidates(
             defender,
             &refs,
             actions,
-            "check",
-            "",
-            0,
+            CaptureEntryContext {
+                kind: "check",
+                card_id: "",
+                depth: 0,
+            },
             &mut source_rng,
         )?;
         let check = !result.entries.is_empty();
@@ -286,16 +288,26 @@ fn royal_ref_alive(state: &GameState, royal: &SourceRoyalRef) -> bool {
         .any(|piece| piece.id == royal.id && piece.color == royal.color)
 }
 
+#[derive(Clone, Copy)]
+struct CaptureEntryContext<'a> {
+    kind: &'a str,
+    card_id: &'a str,
+    depth: u8,
+}
+
 fn collect_capture_entry_keys(
     window: &GameState,
     defender: Color,
     royals: &[SourceRoyalRef],
     actions: &[Action],
-    kind: &str,
-    card_id: &str,
-    depth: u8,
+    context: CaptureEntryContext<'_>,
     source_rng: &mut crate::RngState,
 ) -> Result<CaptureEntryKeys> {
+    let CaptureEntryContext {
+        kind,
+        card_id,
+        depth,
+    } = context;
     if window.mode != "play" || depth > 12 {
         return Ok(CaptureEntryKeys::default());
     }
@@ -429,9 +441,11 @@ fn collect_capture_entry_keys(
                 defender,
                 royals,
                 &next,
-                kind,
-                card_id,
-                depth + 1,
+                CaptureEntryContext {
+                    kind,
+                    card_id,
+                    depth: depth + 1,
+                },
                 source_rng,
             )?;
             // Source appends the recursive list directly; local duplicate
@@ -483,15 +497,20 @@ fn collect_danger_entry_keys(
             })
             .or_else(|| {
                 cards.iter().find(|card| {
-                    !card.vacant
-                        && !card.used
-                        && !card.recovering
-                        && action.card_id.as_deref() == Some(card.id.as_str())
-                        && !(matches!(
-                            card.extra.get("phase").and_then(Value::as_str),
-                            Some("MIDDLE" | "END")
-                        ) && crate::observation::truth(card.extra.get("nextTurnPending"))
-                            && !crate::observation::truth(card.extra.get("devCard")))
+                    if card.vacant
+                        || card.used
+                        || card.recovering
+                        || action.card_id.as_deref() != Some(card.id.as_str())
+                    {
+                        return false;
+                    }
+                    let pending_phase = matches!(
+                        card.extra.get("phase").and_then(Value::as_str),
+                        Some("MIDDLE" | "END")
+                    ) && crate::observation::truth(
+                        card.extra.get("nextTurnPending"),
+                    ) && !crate::observation::truth(card.extra.get("devCard"));
+                    !pending_phase
                 })
             })
             .cloned();
@@ -543,7 +562,16 @@ fn collect_danger_entry_keys(
         validate_automatic_reaction_schema(&child)?;
         let moves = crate::movement::v7_ai_no_cards_move_candidates(&child, attacker)?;
         let captured = collect_capture_entry_keys(
-            &child, defender, royals, &moves, "danger", &card.id, 0, source_rng,
+            &child,
+            defender,
+            royals,
+            &moves,
+            CaptureEntryContext {
+                kind: "danger",
+                card_id: &card.id,
+                depth: 0,
+            },
+            source_rng,
         )?;
         result.entries.extend(captured.entries);
         result.simulated |= captured.simulated;
@@ -1037,10 +1065,7 @@ pub(crate) fn check_racing_kings_v7(state: &mut GameState) -> Result<bool> {
         }
         let goal = if crate::observation::truth(state.extra.get("collapsed")) {
             let raw = crate::observation::number(state.extra.get("collapseDepth")).unwrap_or(0.0);
-            let depth = (if raw == 0.0 { 1.0 } else { raw })
-                .floor()
-                .max(0.0)
-                .min(4.0) as usize;
+            let depth = (if raw == 0.0 { 1.0 } else { raw }).floor().clamp(0.0, 4.0) as usize;
             if actor == Color::White {
                 depth
             } else {
@@ -1873,10 +1898,11 @@ fn piece_attacks_square_inner(
     }
     // The source applies Basic Training's full capture policy only on its
     // extra pawn capture, rather than on every ordinary geometric attack.
-    if basic && let Some(victim) = victim {
-        if !crate::movement::v7_can_capture_target(state, piece, victim, false, true)? {
-            return Ok(false);
-        }
+    if basic
+        && let Some(victim) = victim
+        && !crate::movement::v7_can_capture_target(state, piece, victim, false, true)?
+    {
+        return Ok(false);
     }
     if state
         .extra
@@ -1922,15 +1948,15 @@ fn piece_attacks_square_inner(
             .get("imperialMoves")
             .and_then(Value::as_array)
             .is_some_and(|moves| !moves.is_empty())
+        && imperial_study_attacks_square(state, piece, from, target, override_piece)?
     {
-        if imperial_study_attacks_square(state, piece, from, target, override_piece)? {
-            return Ok(true);
-        }
+        return Ok(true);
     }
-    if is_royal_identity_v7(state, piece) && source_side_truth(state, "killerKing", piece) {
-        if killer_king_attacks_square(state, piece, from, target)? {
-            return Ok(true);
-        }
+    if is_royal_identity_v7(state, piece)
+        && source_side_truth(state, "killerKing", piece)
+        && killer_king_attacks_square(state, piece, from, target)?
+    {
+        return Ok(true);
     }
     let knight = || {
         crate::variant_movement::knight_deltas_for_move(state, piece, from).map(|deltas| {

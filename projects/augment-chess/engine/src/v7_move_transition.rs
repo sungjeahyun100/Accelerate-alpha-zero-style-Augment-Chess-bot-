@@ -152,12 +152,14 @@ fn finish_removed_mover(
     if !crate::v7_move_continuations::retain_backward_knight_turn_v7(
         state,
         moving,
-        actor,
-        &start.moved_as_type,
-        from,
-        to,
-        captured,
-        start.had_queued_backward_knight_turn,
+        crate::v7_move_continuations::V7BackwardKnightMove {
+            color: actor,
+            moved_as_type: &start.moved_as_type,
+            from,
+            to,
+            captured,
+            queued: start.had_queued_backward_knight_turn,
+        },
     )? {
         crate::transition::end_move_for_decision(state, actor, true, Some("move"))?;
     }
@@ -406,10 +408,10 @@ pub(crate) fn execute(
     let previous_saturation = std::mem::replace(&mut state.active_v7_saturation_attack, saturation);
     let mut result = execute_core(state, &effective_action, threat_probe);
     state.active_v7_saturation_attack = previous_saturation;
-    if result.is_ok() {
-        if let Err(error) = sync_active_metal(state) {
-            result = Err(error);
-        }
+    if result.is_ok()
+        && let Err(error) = sync_active_metal(state)
+    {
+        result = Err(error);
     }
     let cleanup = finish_active_roller(state);
     state.active_v7_move_context = previous;
@@ -495,16 +497,16 @@ fn execute_core(state: &mut GameState, action: &Action, threat_probe: bool) -> R
     {
         return crate::transition::finish_stationary_move(state, outcome);
     }
-    if target.flag("dragonSwap") {
-        if let Some(outcome) = crate::v7_move_execution::execute_position_swap_with_privacy(
+    if target.flag("dragonSwap")
+        && let Some(outcome) = crate::v7_move_execution::execute_position_swap_with_privacy(
             state,
             from,
             target,
             threat_probe,
             Some(&prelude.privacy),
-        )? {
-            return crate::transition::finish_stationary_move(state, outcome);
-        }
+        )?
+    {
+        return crate::transition::finish_stationary_move(state, outcome);
     }
     if let Some(outcome) =
         crate::v7_move_execution::execute_shotgun(state, from, target, threat_probe)?
@@ -519,16 +521,16 @@ fn execute_core(state: &mut GameState, action: &Action, threat_probe: bool) -> R
     {
         return crate::transition::finish_stationary_move(state, outcome);
     }
-    if !target.flag("dragonSwap") {
-        if let Some(outcome) = crate::v7_move_execution::execute_position_swap_with_privacy(
+    if !target.flag("dragonSwap")
+        && let Some(outcome) = crate::v7_move_execution::execute_position_swap_with_privacy(
             state,
             from,
             target,
             threat_probe,
             Some(&prelude.privacy),
-        )? {
-            return crate::transition::finish_stationary_move(state, outcome);
-        }
+        )?
+    {
+        return crate::transition::finish_stationary_move(state, outcome);
     }
     let mut siege_replay = None;
     let mut siege_captures = Vec::new();
@@ -573,11 +575,13 @@ fn execute_core(state: &mut GameState, action: &Action, threat_probe: bool) -> R
         &moving,
         from,
         target,
-        prelude.destination,
-        prelude.landing_target.as_ref(),
-        prelude.portal_entry_target.as_ref(),
-        prelude.mad_horse_entry_capture,
-        prelude.mad_horse_exit_capture,
+        crate::movement::V7CaptureLanding {
+            actual_destination: prelude.destination,
+            landing_target: prelude.landing_target.as_ref(),
+            portal_entry_target: prelude.portal_entry_target.as_ref(),
+            mad_horse_entry: prelude.mad_horse_entry_capture,
+            mad_horse_exit: prelude.mad_horse_exit_capture,
+        },
     )? {
         return Ok(Vec::new());
     }
@@ -886,13 +890,15 @@ fn execute_core(state: &mut GameState, action: &Action, threat_probe: bool) -> R
         crate::v7_move_execution::hidden_from_for_move(state, &moving, to, &prelude.privacy)?;
     crate::card_effects::set_last_move_with_medium_memory(
         state,
-        from,
-        to,
-        sound,
-        actor,
-        highlight_hidden,
-        Some(&moving),
-        medium.as_ref().map(|(id, memory)| (id.as_str(), memory)),
+        crate::card_effects::LastMoveContext {
+            from,
+            to,
+            sound_name: sound,
+            sound_color: actor,
+            hidden_from: highlight_hidden,
+            moved_override: Some(&moving),
+            original_medium: medium.as_ref().map(|(id, memory)| (id.as_str(), memory)),
+        },
     )?;
     if !target.flag("mistakeReverse") {
         let game_end = state.mode == "gameover"
