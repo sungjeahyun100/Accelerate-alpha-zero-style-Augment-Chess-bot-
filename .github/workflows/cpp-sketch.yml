@@ -1,11 +1,14 @@
-name: C++ sketch compile check
+name: C++ sketch compile and self-test
 
-# projects/augment-chess/reference/pre_cpp_engine_code/engine.cpp is a hand-written sketch meant to be handed
-# to an AI for Rust porting (see projects/augment-chess/reference/pre_cpp_engine_code/README.md). It isn't
-# part of the build and ci.yml's reference infra path filter never sees it, so a
-# broken sketch could sit unnoticed for a long time before porting day. This
-# just checks it still compiles -- no test, no artifact, no working code
-# required beyond that.
+# projects/augment-chess/reference/pre_cpp_engine_code/engine.cpp is a hand-written
+# Rust porting sketch (see projects/augment-chess/reference/pre_cpp_engine_code/README.md).
+# It is outside the main build, so this workflow checks it independently.
+#
+# The sketch's main() runs ~85 self-tests and returns non-zero on failure
+# (README: "빌드와 자체 검사 실행"). This workflow compiles it, RUNS those
+# tests, and does the same for the variant with every commented-out
+# JUDGMENT block switched on (uncomment_judgment.sh). The two variants are
+# separate jobs so a failure in one is never hidden behind the other.
 on:
   push:
     branches: [main, develop]
@@ -22,12 +25,48 @@ permissions:
   contents: read
 
 jobs:
-  compile:
+  # 기본본: 판단 블록이 주석 처리된 engine.cpp 그대로.
+  compile-and-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
-      - name: Compile engine.cpp
+      - name: Compile engine.cpp (compile-only check, kept from the old workflow)
         working-directory: projects/augment-chess/reference/pre_cpp_engine_code
         run: g++ -std=c++20 -Wall -Wextra -c engine.cpp -o /dev/null
+
+      - name: Build engine.cpp with its self-tests
+        working-directory: projects/augment-chess/reference/pre_cpp_engine_code
+        run: g++ -std=c++20 -Wall -Wextra engine.cpp -o engine_test
+
+      - name: Run self-tests (non-zero exit on any failed check)
+        working-directory: projects/augment-chess/reference/pre_cpp_engine_code
+        run: ./engine_test
+
+  # 변형본: 남아 있는 모든 판단 블록(C-shift, F-castle-attack-check,
+  # F-promo-choice, G-forced-consume)을 uncomment_judgment.sh로 살린 것.
+  # README가 "변형본도 같은 방식으로 빌드한다"고 약속한 경로다.
+  all-judgments:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: List remaining judgment blocks
+        working-directory: projects/augment-chess/reference/pre_cpp_engine_code
+        run: |
+          sh ./uncomment_judgment.sh --list engine.cpp | tee blocks.txt
+          test -s blocks.txt
+
+      - name: Generate the all-judgments-enabled variant
+        working-directory: projects/augment-chess/reference/pre_cpp_engine_code
+        run: sh ./uncomment_judgment.sh engine.cpp > engine_all.cpp
+
+      - name: Build the variant
+        working-directory: projects/augment-chess/reference/pre_cpp_engine_code
+        run: g++ -std=c++20 -Wall -Wextra engine_all.cpp -o engine_all_test
+
+      - name: Run the variant's self-tests (non-zero exit on any failed check)
+        working-directory: projects/augment-chess/reference/pre_cpp_engine_code
+        run: ./engine_all_test

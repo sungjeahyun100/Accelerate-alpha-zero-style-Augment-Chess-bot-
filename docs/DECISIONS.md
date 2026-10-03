@@ -19,7 +19,7 @@ D-001~D-003은 기존 결정입니다. D-004~D-006과 D-003 보완은 2026-09-27
 | D-016 | 추가 | 엔진 상태와 AI 표현을 분리하고, 보드 크기 상수를 geometry로 옮기며, 검증용 N-version과 운영 오류 전파의 경계를 확정한다. |
 | D-017 | 추가 | 향후 모노레포의 다른 프로젝트에서도 쓸 수 있는 객체형 어댑터 계약을 정의한다. Accelerate의 기물 이동·카드 효과는 프로젝트별 구현이며, 공유 계약에 보드·카드·게임 상태 타입을 박아 넣지 않는다. |
 
-PR #29에는 `rust-engine/` 변경이 없다. 어댑터의 완료·검증 범위를 Rust의 v7 규칙 이관이나
+PR #29에는 `projects/augment-chess/engine/` 변경이 없다. 어댑터의 완료·검증 범위를 Rust의 v7 규칙 이관이나
 전체 카드 조합의 동등성 완료로 확대하지 않는다. 범위별 실제 근거는
 [ADAPTER-VERIFICATION](ADAPTER-VERIFICATION.md)과 [IMPLEMENTATION](IMPLEMENTATION.md)에 둔다.
 
@@ -31,8 +31,8 @@ PR #29에는 `rust-engine/` 변경이 없다. 어댑터의 완료·검증 범위
   - 기존 JavaScript 엔진은 oracle/reference implementation으로 유지한다.
   - 실제 봇 탐색과 self-play에 사용할 규칙 환경은 Rust 엔진으로 포팅한다.
   - AlphaZero, MCTS, policy/value network, NNUE 및 학습 코드는 Python 계층에서 관리한다.
-  - JavaScript, Rust, Python은 `bridge/`에 정의한 공통 상태·행동·호출 계약을 사용한다.
-  - JS oracle과 Rust 엔진은 `tests/differential/`의 differential test로 동등성을 검증한다.
+  - JavaScript, Rust, Python은 `packages/adapter-contract/`와 `projects/augment-chess/contracts/`에 정의한 공통·게임 전용 상태·행동·호출 계약을 사용한다.
+  - JS oracle과 Rust 엔진은 `projects/augment-chess/tests/`의 differential test로 동등성을 검증한다.
 - **이유**:
   - Rust로 실제 탐색과 self-play 성능을 확보할 수 있다.
   - 검증된 기존 JS 동작을 버리지 않고 correctness 기준으로 활용할 수 있다.
@@ -98,7 +98,8 @@ PR #29에는 `rust-engine/` 변경이 없다. 어댑터의 완료·검증 범위
 - **이유**: 언어 연동과 모델 배포의 책임을 분리하고 탐색의 반복 문자열 직렬화를 피한다.
 - **대안과 제외 이유**: JSON 호출을 유일한 hot path로 유지하는 대신 검증 형식과 직접
   호출을 구분한다. 규칙 엔진에 ML runtime을 넣으면 의존성이 섞이므로 제외한다.
-- **영향**: bridge/native의 독립 바인딩 crate와 bridge/runtime의 독립 추론 adapter를 둔다.
+- **영향**: `projects/accelerate/native/`의 독립 바인딩 crate와
+  `projects/accelerate/runtime/`의 독립 추론 adapter를 둔다.
   오류·수명·배열 소유권·GIL·직접 호출/JSON 동등성을 설치 wheel에서 검사한다.
   API와 batch 한도는 runtime-v1 및 모델 metadata에 명시한다. zero-copy와 성능 향상은
   실측 전 보장하지 않는다. 기존 bridge-draft-0은 역사적 제안으로 보존하며 v1 실행 계약과
@@ -145,8 +146,6 @@ PR #29에는 `rust-engine/` 변경이 없다. 어댑터의 완료·검증 범위
 - **영향**: [AGENTS](../AGENTS.md), [개발 기준](ENGINEERING-STANDARDS.md), 구조 정책과 CI가
   기준이다. 생성기 경로 전환은 해당 코드 수정 시 적용한다. 구조 검사는 모든 쓰기를
   통제하거나 모든 개발 규약의 준수를 증명하지 않는다.
-
----
 
 ## D-007: Python에서 관측·행동 encoding을 먼저 구현
 
@@ -379,6 +378,37 @@ PR #29에는 `rust-engine/` 변경이 없다. 어댑터의 완료·검증 범위
   `EntityTransformer`와 배포 artifact의 버전·API는 유지한다. 새 버전의 spec·projection·
   모델은 추가 경로이며, 훈련 checkpoint와 ONNX manifest는 기존 것을 새 모델로
   해석하지 않는다. 자세한 현황·미완료 경계는 [MODEL-ARCHITECTURE](MODEL-ARCHITECTURE.md)에 둔다.
+
+## D-019: 확률적 전이를 지원하는 AlphaZero 스타일 탐색
+
+- **날짜**: 2026-10-01
+- **상태**: 설계 채택, chance 경계와 전체 게임 통합 검증 진행
+- **결정**: 실제 Rust 규칙 엔진 + policy/value network + MCTS 방향을 유지하고,
+  MCTS를 **chance-aware AlphaZero-style MCTS**로 설계한다. 괴물의 무작위 이동이나
+  랜덤 카드 드로우처럼 같은 `(state, action)`에서도 여러 후속 상태가 가능하므로 전이는
+  `P(next_state | state, action)`으로 본다. 플레이어가 고르는 action의 decision node와
+  엔진 규칙이 정하는 chance outcome의 chance node를 구분한다. 개념적 흐름은
+  `decision state → player action → afterstate → chance event → next decision state`다.
+  `afterstate`는 설명용이며 필수 저장 타입으로 확정하지 않는다.
+  하나의 player action이 0개, 1개 또는 여러 개의 chance event를 연쇄적으로 발생시킬 수 있으며, 위 흐름은 개념적 모델이지 chance node 개수를 하나로 제한하지 않는다.
+- **이유**: 순수 결정론적 `state + action → next_state`와 action마다 단일 child를
+  가정하면 환경의 무작위 결과를 플레이어 선택으로 잘못 취급할 수 있다. Decision node에는
+  policy prior·visit count·Q-value·PUCT를 적용할 수 있지만 chance node는 유리한
+  outcome을 골라서는 안 된다. 확률은 엔진의 실제 게임 규칙을 따른다. 개념적 기대값은
+  `Q(s,a) = Σ_o P(o | s,a) V(s'_o)`다.
+- **엔진·AI 경계**: Rust 엔진이 합법 행동, 플레이어 행동 적용, 확률 사건의 가능한
+  결과·확률 또는 규칙에 따른 샘플링, 결과 적용의 의미를 소유한다. AI는 규칙이나
+  확률을 재구현하지 않는다. 실제 API 이름·타입은 Phase 1/3/5에서 기존
+  `apply_action` 초안과 연결해 정한다. 엔진의 authoritative game state와 AI observation은
+  구분한다. 내부 RNG 상태·셔플된 미래 덱 순서 등 플레이어에게 알려지지 않은 정보는
+  신경망 입력이나 해당 플레이어의 관측에 노출하지 않는다.
+- **대안과 제외 이유**: 결정론적 단일 후속 상태 탐색은 위 규칙을 표현하지 못한다.
+  Stochastic MuZero로의 전환이나 NNUE를 확률 처리 수단으로 쓰는 방향은 채택하지 않는다.
+  NNUE는 향후 축적한 대국·탐색 데이터로 별도 학습할 수 있는 평가 모델 후보다.
+- **영향·미결정**: explicit chance expansion과 simulation마다 실제 분포를 따르는
+  sampled chance outcomes를 모두 구현 후보로 둔다. 확률 열거·샘플링·RNG 재현 및 게임 계약/PyO3 표현은
+  구현 단계에서 결정한다. 숨은 정보의 실제 범위와 불완전정보 탐색 도입 여부도 별도
+  검토한다. 기존 JS oracle의 검증 역할과 D-001~D-005의 책임·모델 결정은 유지한다.
 
 ## 열린 질문
 

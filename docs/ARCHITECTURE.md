@@ -91,6 +91,16 @@ Rust는 독립적으로 GameState/Position/Action, legal 조회·직접 검증·
 해석한다. positionId·private RNG·실제 환경의 전체 상태는 탐색 특징으로 전달하지 않는다.
 기존 draft 스키마와 운영 runtime-v1을 자동 호환으로 취급하지 않는다.
 
+## 확률 전이와 탐색 경계
+
+D-019에 따라 단일 `next_state`를 전제하지 않는다. 엔진은 플레이어 행동과 그 뒤의
+확률 사건을 구분하고, 가능한 chance outcome과 실제 규칙상 확률을 제공하거나 같은
+분포에서 샘플링한다. 결과 적용의 책임도 엔진에 있다. Rust API 이름·타입과
+JSON/PyO3 표현은 B-Q9 등에서 구체화한다. Python MCTS는 decision node에서
+플레이어 행동을 선택하고 chance node에서는 엔진 분포를 따른다. 전체 outcome 전개와
+simulation별 샘플링은 모두 후보이며 Phase 7에서 결정한다. 다음 decision node의
+행동자는 엔진 결과로 확인하고 공개 Observation 경계를 유지한다.
+
 ## 두 policy/value 모델·LoRA·FiLM·Hypernetwork
 
 현재 구현된 모델은 고정 8×8 ResNet이다. D-002의 다음 비교는 같은 `ObservationIR`과
@@ -108,8 +118,8 @@ EntityTokenTransformer / Fixed8x8ResNet → 공통 CandidateScorer`다. 기존
 검증되지 않은 운영 연결은 [모델 아키텍처 현황](MODEL-ARCHITECTURE.md)에 적는다.
 
 FiLM은 카드·RULE·게임 상태의 공개 조건으로 각 모델의 특징을 조절한다. 조건은
-**명시적인 ONNX 입력**이고 FiLM 연산은 그래프 안에 유지한다. 조건 벡터의 의미·순서·
-dtype·shape와 인코딩 버전을 모델 메타데이터에 연결한다.
+**명시적인 ONNX 입력**이고 FiLM 연산은 그래프 안에 유지한다.
+조건 벡터의 의미·순서·dtype·shape와 인코딩 버전을 모델 메타데이터에 연결한다.
 
 LoRA는 학습된 공통 모델의 모드·규칙 변화 적응용이다. 학습 중 기본 가중치와 별도
 어댑터를 보존한다. 성능 검증 시 선택한 정적 어댑터를 기본 모델 **복사본**에 병합하고
@@ -158,12 +168,16 @@ PR #29의 별도 고정 v7 게임 어댑터는 구현·검증 완료된 JS 실�
 geometry·점유·행마의 독립 N-version은 추가 correctness 검사이며 운영 다중 실행이나
 다수결 판정이 아니다.
 
-목표 학습 흐름은 `(state/observation, legal actions, visit policy, result, seed,
-model/encoder/rules versions)`를 보존하는 self-play → Python 학습 → 후보 모델의
+목표 학습 흐름은 `(position/observation, player to move, chosen action, legal actions,
+MCTS visit policy, MCTS estimated value, 필요한 경우 chance outcome, final result,
+seed, model/encoder/rules versions)`를 보존할 수 있는 self-play → Python 학습 → 후보 모델의
 정확성·독립 대전 평가 → 승격이다. 중단 결과를 실제 무승부로 취급하지 않는다.
 실제 학습·대전 성능 캠페인·모델 승격은 이번 코드 구현에서 실행하지 않는다. 공개 trace와
 독립 future RNG의 particle posterior, 실제 decision actor의 value 관점, bounded PUCT와
 leaf batch를 사용한다. 완료한 코드 경로의 검증을 전체 규칙 의미 coverage와 구분한다.
+실제 기록 형식은 미정이다. 보존한 대국·탐색 데이터는 향후 별도 NNUE 평가 모델의
+학습에도 재활용할 수 있다. 추가 행동·확률·은신에 필요한 상태와 관측 의미는
+Phase 1/6/7에서 명시한다.
 
 ## 근거
 

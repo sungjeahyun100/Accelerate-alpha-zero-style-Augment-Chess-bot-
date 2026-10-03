@@ -94,6 +94,9 @@
 ```
 
 - 응답 상태는 fixture의 `stateDelta`를 입력 상태에 적용해 재구성한 예시입니다(`apply_action.*.response.json`). 별도의 엔진이 반환한 전체 응답을 직접 채집한 기록은 아닙니다.
+- 이 응답은 **한 번 실현된 결과**의 예시입니다. 같은 `(state, action)`에서 무작위
+  괴물 이동·카드 드로우 등으로 다른 상태가 나올 수 있습니다. 이 초안은 chance
+  outcome의 열거·확률·샘플링·적용 인터페이스를 정의하지 않습니다(B-Q9).
 - 카드 행동은 `target`이 있을 수도 없을 수도 있습니다(`apply_action.card-no-target.*`, `apply_action.card-cell-target.*`).
 - 게임을 끝내는 행동을 적용하면 `state.mode`가 `"gameover"`, `state.winner`가 승자가 됩니다(`apply_action.ends-game.*`).
 - 엔진이 합법 목록에 낸 행동인데도 적용이 실패한 경우가 fixture에 37개 있어서, 실패 응답을 규약에 넣었습니다.
@@ -119,6 +122,10 @@
 - `winner`: 아직 안 정해졌으면 `null`(사이트 내부 표현은 빈 문자열). 무승부 `"draw"`는 GAME-RULES.md에 근거한 값이며 fixture에는 나오지 않았습니다.
 - 이 정보는 `apply_action` 응답의 `state.mode`, `state.winner`에도 이미 들어 있습니다. 별도 메시지로 둘지는 open-questions에 적었습니다.
 
-## 5. 선택 확장: encoded (O-001)
+## 5. 과거 초안의 encoded 확장 (O-001 → D-007)
 
-인코딩 위치(Rust vs Python)가 미결정이라 기본은 **원문 상태만** 주고받습니다. Rust가 인코딩하기로 정해지면, 요청의 `"encode": "<형식 이름>"`에 응답의 `"encoded": {format, size, indices, values}`를 붙이는 식으로 확장할 수 있게만 열어 두었습니다(`../schemas/encoded.schema.json`, 예시 `../examples/encoded.sparse-example.json`). 이 필드의 이름과 sparse 모양은 예시이지 결정이 아닙니다. Python이 인코딩하기로 정해지면 쓰지 않습니다.
+이 초안은 요청의 `"encode": "<형식 이름>"`와 응답의
+`"encoded": {format, size, indices, values}`를 예시 확장으로 열어 두었습니다
+(`../schemas/encoded.schema.json`, `../examples/encoded.sparse-example.json`).
+이후 O-001은 D-007의 Python-first 관측 encoding으로 해결됐으며 현재 실행 계약은
+`runtime-v1.md`입니다. 이 필드의 이름과 sparse 모양은 현재 결정이 아닙니다.

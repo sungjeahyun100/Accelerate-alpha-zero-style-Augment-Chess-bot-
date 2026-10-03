@@ -15,7 +15,7 @@
 |---|---|
 | [messages.md](messages.md) | 메시지 5종(new_game, get_legal_actions, apply_action, get_result, error)과 JSON 예시 |
 | [state-and-actions.md](state-and-actions.md) | `GameState`, `Action`, 카드 정의의 필드 설명과 근거, 사이트 내부 상태와의 대응 |
-| [open-questions.md](open-questions.md) | 아직 정해지지 않은 것, 확신 없는 필드 목록, O-001 확장 지점 |
+| [open-questions.md](open-questions.md) | 아직 정해지지 않은 chance 계약과 확신 없는 필드 목록 |
 | `../schemas/*.json` | JSON Schema(draft 2020-12) |
 | `../examples/` | 스키마를 통과하는 예시(대부분 실제 fixture에서 뽑음)와 일부러 틀린 예시 |
 | `../tools/validate.js` | 예시가 스키마에 맞는지 검사하는 의존성 없는 Node 스크립트 |
@@ -29,12 +29,20 @@ Python AI ──(요청 JSON)──> 엔진 ──(응답 JSON)──> Python AI
             get_legal_actions / apply_action / get_result   매 턴 GameState를 함께 보냄
 ```
 
-- **엔진은 위치 단위로 상태가 없습니다(stateless).** 매 요청에 `state`가 들어 있고, 서버가 대국을 기억하지 않아도 됩니다. 이렇게 하면 MCTS에서 임의의 위치로 되돌아가도 새 요청 하나면 되고, differential test의 fixture(상태 -> 합법 행동, 상태+행동 -> 결과 상태)와 모양이 같습니다. 대신 `gameId`는 등록해 둔 카드 정의를 가리키는 손잡이입니다.
+- 위치 단위 **stateless는 초안의 제안**입니다(B-Q1). 매 요청에 `state`를 넣어
+  MCTS의 위치 재방문과 differential fixture를 표현합니다. fixture의 `상태+행동 →
+  관측된 결과 상태`는 한 번의 실행 기록이며 동일한 `(state, action)`의 후속 상태가
+  하나뿐이라는 뜻이 아닙니다. `gameId`는 등록된 카드 정의의 손잡이입니다.
 - **카드 정의는 `new_game`에서 한 번만** 보냅니다(D-003). 이후 요청은 `gameId`만 붙입니다.
 - **실제 반복 호출은 PyO3 타입·배열**로 설계합니다(D-004, 해당 변경의 develop 병합 시 적용).
   maturin은 바인딩의 빌드·패키징 도구입니다. 위 그림은 JSON 기록·검증 경로이며 모든
   탐색 노드에서 문자열을 전달하는 실행 요구가 아닙니다. 스키마·예시 버전은 그대로입니다.
 - 이 초안의 encoding 확장 제안은 D-007의 Python-first 관측 encoding과 v1 계약으로 대체됐다.
+- 원문 `GameState`는 엔진 기록이며 AI observation을 그대로 정의하지 않는다(B-Q12).
+- [D-019](../../../../docs/DECISIONS.md#d-019-확률적-전이를-지원하는-alphazero-스타일-탐색)은
+  플레이어 행동과 chance outcome을 구분한다. 현재 `apply_action` JSON은 한 번 실현된
+  결과만 나타낸다. 동일 `(state, action)`에서도 결과가 달라질 수 있으며 outcome의
+  열거·확률·샘플링·적용 계약은 별도 경계로 B-Q9에서 다룬다.
 
 ## 근거로 삼은 자료
 

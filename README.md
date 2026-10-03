@@ -76,7 +76,9 @@ node tools/ci/golden-eval.js   # 평가 함수 회귀 검사
 - [docs/DECISIONS.md](docs/DECISIONS.md): 합의된 결정과 이유
 - [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md): 코드 완료 조건·실제 checkpoint·남은 구현
 - [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md): 실험 기록
+- [docs/research/TEMPLATE.md](docs/research/TEMPLATE.md): 공동 연구 영수증의 범용 Markdown 템플릿
 - [docs/GAME-RULES.md](docs/GAME-RULES.md): 게임 규칙 요약
+- [docs/CPP-ENGINE-GAPS.md](docs/CPP-ENGINE-GAPS.md): C++ 엔진(`projects/augment-chess/reference/pre_cpp_engine_code/`)에서 비어 있는 것과 다음 단계 제안
 
 ## 프로젝트 목표와 팀
 

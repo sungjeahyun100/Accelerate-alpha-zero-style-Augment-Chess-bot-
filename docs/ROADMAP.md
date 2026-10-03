@@ -14,7 +14,7 @@
 | 4 | JS ↔ Rust 비교 | 실제 Rust 후보로 legal/reject/full state/result/RNG 비교 | 과거349 fixture drift 조사, 전체 client parity 미완료 |
 | 5 | PyO3/maturin 연결 | 직접 호출·JSON 동등성, 소유권·오류·GIL·패키지 | Windows/Linux CI의 sdist→설치 wheel 검증 통과, 최종 규칙 통합 진행 |
 | 6 | state/action/FiLM 조건 encoding | 관측/history/belief와 후보 행동·조건 의미/version/shape | D-007 Python-first 채택, 구현 및 최종 관측 통합 진행 |
-| 7 | MCTS | 공개 trace/belief, 실제 다음 행동자, 확률·숨은 정보·종료·실행 한도 검증 | tracker/availability PUCT/B4 native 실행 통과, 세 default mode의 전체 draft→play 통합 진행 |
+| 7 | MCTS | D-019: decision node의 플레이어 행동과 chance node의 환경 결과 분리, 실제 엔진 확률 준수, 공개 정보 경계, 실제 다음 행동자·종료·bounded search 및 전개/샘플링 전략 검증 | tracker/availability PUCT/B4 native 실행 통과, 세 default mode의 전체 draft→play 및 chance 계약 통합 진행 |
 | 8 | ResNet·FiLM·LoRA·ONNX | 조건 입력 유지, 정적 LoRA 복사 병합 수치·실제 ort/tract 비교 | Windows/Linux 두 backend 각각 48-case checkpoint 통과, 최종 공개 관측/규칙 통합 진행 |
 | 9 | Self-play 코드 | 공개 관측·후보 의도·방문 분포·결과·버전/seed 보존과 유한 종료 | 설치 wheel의 유한 replay/CLI·취소/전체 deadline 검사 통과, 실제 campaign 제외 |
 | 10 | Training / Evaluation 코드 | 유한 명령·optimizer/RNG 복원·평가/activation 분리·산출물 관리 | synthetic optimizer/RNG/shuffle 재개·실제 평가/명시 activation 검사 통과, 실제 학습·실력 평가·승격 제외 |
@@ -27,5 +27,8 @@ Hypernetwork는 생성·적용·병합 가능 여부의 확장 경계만 준비�
 모델 정확성·export 호환성 검사와 대전 성능·승격은 별도로 기록한다.
 
 O-001은 D-007(Python-first encoding), O-002는 D-008(최초 동결 client 정답)로 해결했다.
-이번 GO/NO-GO는 코드·계약 완성 기준이며 실제 학습은 제외한다. 기존 infra의 과거 NNUE
+이번 GO/NO-GO는 코드·계약 완성 기준이며 실제 학습은 제외한다. 기존 참고 도구의 과거 NNUE
 실험은 새 AlphaZero 완료나 성능 증거가 아니다.
+D-019의 chance-aware MCTS는 설계 결정이며 chance 계약·데이터 형식의 완료가 아니다.
+숨은 정보 범위와 불완전정보 탐색 도입 여부는 별도 검토한다. NNUE는 축적 데이터를
+활용할 후속 평가 모델 후보이며 확률적 탐색의 대체재가 아니다.

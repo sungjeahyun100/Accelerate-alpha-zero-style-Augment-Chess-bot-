@@ -8,9 +8,10 @@
 
 | 항목 | 이 초안의 처리 |
 |---|---|
-| **O-001** encoding을 Rust와 Python 중 어디서 하나 | 결정하지 않음. 기본 메시지는 원문 상태만 다룹니다. 확장 지점으로 요청의 선택 필드 `encode`, 응답의 선택 필드 `encoded`(`schemas/encoded.schema.json`)만 열어 두었습니다. Python이 인코딩하기로 하면 이 두 필드는 쓰지 않으면 됩니다. sparse(인덱스+값) 모양은 `docs/ENCODING-EVIDENCE.md`(별도 PR)의 제안을 예시로 따랐을 뿐입니다. |
+| **O-001 → D-007** Python-first encoding | O-001은 해결됐습니다. 초안의 선택 필드 `encode`/`encoded`와 sparse 예시는 현재 v1 실행 계약이 아닙니다. Python이 공개 Observation을 인코딩합니다. |
 | **D-003/D-004** 카드 정의 1회 + 위치별 상태 | JSON 기록·검증의 논리 의미를 유지. 반복 호출은 PyO3 타입·배열, 패키징은 maturin. |
 | **D-001** 책임 분리 | 영향 없음. bridge에는 규칙 로직을 넣지 않았습니다. |
+| **D-019** 확률적 전이 | decision node의 플레이어 행동과 chance node의 환경 결과를 구분합니다. 엔진이 실제 확률 규칙의 출처이며 AI observation에는 알려지지 않은 미래 정보를 넣지 않습니다. 초안 스키마는 그대로이고 세부 표현은 B-Q9에서 결정합니다. |
 
 ## B. 프로토콜 설계에서 열어 둔 질문
 
@@ -24,9 +25,10 @@
 | B-Q6 | `apply_action` 응답에 종료 정보(`terminal`, `winner`)를 별도로 넣을지, `get_result`를 따로 둘지 | 둘 다 가능(상태에 `mode`/`winner`가 있고 `get_result`도 있음) | MCTS에선 호출 횟수를 줄이려면 합치는 편이 유리할 수 있음 |
 | B-Q7 | 합법 목록의 정렬과 중복 제거를 엔진이 보장할지 | 보장하지 않음 | fixture는 정렬, 중복 제거본 |
 | B-Q8 | 호출 방식과 직렬화 최적화 | D-004: PyO3 직접 타입·배열 호출 + maturin 패키징, JSON 기록·검증 | 방식은 결정. 구체 API·수명/소유권·GIL·batch·zero-copy·JSON 동등성은 Phase 5 구현/검증 사항 |
-| B-Q9 | 확률 요소가 있는 행동(예: brutus의 룩 선택, randomRoulette)의 난수/시드 처리 | `new_game.seed` 선택 필드만 둠 | fixture는 난수 결과가 갈리는 경우를 별도로 다룸(`nondeterministic`)하며 이 초안은 다루지 않음 |
+| B-Q9 | 플레이어 행동 적용과 chance outcome의 열거·확률 또는 규칙에 따른 샘플링·결과 적용·RNG/seed 재현을 어떻게 표현하나 | `new_game.seed` 선택 필드만 둠. `apply_action`은 실현된 결과 하나의 예시 | 괴물 이동·랜덤 카드 드로우 등은 같은 `(state, action)`에서 결과가 갈릴 수 있음. 엔진 규칙을 AI가 추측하지 않도록 JSON/PyO3 의미와 fixture 비교 방식을 Phase 1/3/5에서 결정. 기존 `nondeterministic` fixture 취급도 함께 검토 |
 | B-Q10 | 프로토콜 버전 표기 | 문자열 `"bridge-draft-0"` | 확정 시 변경 |
 | B-Q11 | 정책 출력(행동 인덱스) 연결 | 다루지 않음 | Phase 6 |
+| B-Q12 | authoritative game state에서 플레이어별 AI observation을 어떻게 만들고 비공개 RNG·미래 덱 정보를 어떻게 차단하나 | 미정 | 관측 필드와 불완전정보 탐색 필요성은 Phase 1/6/7에서 별도 검토. `encoded`가 내부 미래 정보를 노출해서는 안 됨 |
 
 ## C. 확신이 없는 필드 (모아 보기)
 
