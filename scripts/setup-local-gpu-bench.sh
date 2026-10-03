@@ -25,6 +25,22 @@ TORCH_INDEX="${TORCH_INDEX:-https://download.pytorch.org/whl/cu130}"
 CLEAN="${CLEAN:-0}"
 PURGE_PIP_CACHE="${PURGE_PIP_CACHE:-0}"
 
+TMP_ROOT="${TMP_ROOT:-/var/tmp/accelerate-pip-$USER}"
+mkdir -p "$TMP_ROOT"
+
+export TMPDIR="$TMP_ROOT"
+export TMP="$TMP_ROOT"
+export TEMP="$TMP_ROOT"
+
+export PIP_NO_CACHE_DIR=1
+export PIP_DISABLE_PIP_VERSION_CHECK=1
+
+cleanup() {
+    rm -rf "$TMP_ROOT"
+}
+
+trap cleanup EXIT
+
 # ------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------
