@@ -36,7 +36,7 @@ _checkpoint_commit_locks = WeakValueDictionary()
 
 def _checkpoint_commit_lock(path: Path):
     # Keep the registry short-lived while callers retain their lock through commit.
-    destination = os.path.normcase(os.fspath(path.resolve()))
+    destination = os.path.normcase(os.fspath(path.parent.resolve() / path.name))
     with _checkpoint_commit_locks_guard:
         lock = _checkpoint_commit_locks.get(destination)
         if lock is None:
