@@ -6,6 +6,47 @@
 WSL에서 호스트 APPDATA를 찾지 못하면 `--artifact-root`로 저장소 밖의 경로를 명시한다.
 같은 run ID는 덮어쓰지 않는다. 원시 보고서의 hostname과 경로는 공유 전에 제거한다.
 
+## 측정 결과 보고서 만들기
+
+1. 아래 벤치마크 명령에 `--run-id`를 붙여 실행한다.
+2. 원시 JSON은 기존 외부 artifact root의 `reports/<run-id>/<kind>.json`에 축적된다.
+3. 같은 Python 환경에 `matplotlib`을 설치하고 보고서 생성기를 실행한다. 저장소
+   내부 패키지를 PyPI에서 설치하지 말고 현재 checkout에서 빌드한 패키지를 사용한다.
+4. 저장소의 `projects/accelerate/bench/results/<report-id>/`를 확인한다.
+5. `summary.md`와 실제 생성된 PNG를 성능 보고서의 측정 근거로 사용한다.
+
+`matplotlib`은 보고서 렌더링 때만 필요하다. 벤치마크 자체와 CPU 검증 환경의
+기존 의존성에는 추가하지 않는다. 현재 잠금 파일에는 포함되지 않았으므로 보고서
+환경에서 별도 설치한다. 예를 들어 CUDA 벤치마크용 가상환경을 활성화한 뒤
+`python -m pip install 'matplotlib==3.10.7'`을 실행한다.
+
+```bash
+# 현재 checkout에서 빌드한 accelerate_chess 패키지가 설치된 환경에서 실행
+python -m accelerate_chess.bench.report --report-id local-baseline-001 \
+  --runs engine-w1 engine-w2 inference-resnet-s-fp32 inference-resnet-s-bf16
+
+# WSL에서 호스트 APPDATA 탐지가 불가능한 경우에만 외부 루트를 명시
+python -m accelerate_chess.bench.report \
+  --artifact-root /external/Accelerate --report-id local-baseline-002
+```
+
+`--runs`가 없으면 외부 artifact root의 `reports/` 바로 아래에 있는 안전한 run ID
+디렉터리 전체에서 `*.json`을 사전순으로 읽는다. 지원 버전은
+`local-performance-v1`, 종류는 engine/inference/training/pipeline이다. 잘못된
+JSON과 다른 버전은 오류로 중단한다. CPU/GPU 구성이 다른 run도 한 보고서로
+합치지 않으며 `--runs`로 분리해야 한다. Git SHA가 섞이면 보고서에 경고한다.
+`unsupported`/`oom`/실패는 숫자 0 대신 이유와 함께 불완전 측정 표에 남긴다.
+현재 pipeline은 모두 `unsupported`이므로 pipeline 그래프는 생성되지 않는다.
+
+보고서에는 `summary.md`, 정규화된 `summary.json`, 모든 source run의 상대 경로와
+설정을 담은 `metadata.json`을 쓴다. 성공한 종류에 대해서만 engine operation 및
+worker scaling, inference 처리량·지연·VRAM, synthetic training 처리량·단계
+시간·VRAM PNG를 만든다. `results/`는 Git에서 무시되며 같은 report ID는 덮어쓰지
+않는다. 원시 JSON은 읽기만 한다. Markdown에는 hostname, artifact root의 절대
+경로, 체크포인트 경로를 담지 않는다. `metadata.json`의 source JSON 경로도 외부
+artifact root 기준 상대 경로다. 공유 전에는 보고서의 환경 정보와 실패 이유에
+민감한 문자열이 남지 않았는지 확인한다.
+
 ## 환경
 
 CPU correctness/CI는 기존 `uv.lock`과 `pytorch-cpu` index를 그대로 사용한다.

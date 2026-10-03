@@ -10,8 +10,8 @@ import subprocess
 import sys
 
 from accelerate_chess.replay import artifact_root, reserve_slot, atomic_json
+from . import VERSION
 
-VERSION = "local-performance-v1"
 
 
 def positive(value: str) -> int:

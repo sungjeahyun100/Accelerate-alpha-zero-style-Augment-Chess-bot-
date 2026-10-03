@@ -20,6 +20,7 @@ npm-debug.log*
 *.onnx
 projects/accelerate/python/**/checkpoints/
 projects/accelerate/python/**/runs/
+projects/accelerate/bench/results/
 
 # OS / editor
 .DS_Store
