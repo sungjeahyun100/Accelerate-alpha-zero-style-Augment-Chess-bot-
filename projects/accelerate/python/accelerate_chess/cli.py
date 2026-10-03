@@ -28,7 +28,7 @@ from .network.model import ModelConfig, PolicyValueNetwork
 from .replay import EpisodeRecorder, ReplayEpisode, artifact_root, atomic_json, read_json, reserve_slot, slot, writer_claim
 from .search import (BeliefLimits, InformationSetSearch, NativeSourceFactory, ParticleBelief,
                      PublicTracker, SearchBudgetError, SearchLimits, TypedInformationSetSearch)
-from .training import DatasetCursor, ReplayDataset, TrainingLimits, create_optimizer, load_training_checkpoint, optimize, save_training_checkpoint
+from .training import TRAINING_DTYPES, DatasetCursor, ReplayDataset, TrainingLimits, create_optimizer, load_training_checkpoint, optimize, save_training_checkpoint, validate_training_dtype
 
 
 class _ExplicitBlocks(argparse.Action):
@@ -342,6 +342,7 @@ def selfplay(args, root, spec, cancelled):
 
 
 def train(args, root, spec, cancelled):
+    validate_training_dtype(args.dtype, args.device)
     if (root / "runs" / args.run_id).is_symlink():
         raise ValueError("training run slot is a symlink; choose a new --run-id")
     directory = slot(root, "runs", args.run_id)
@@ -369,7 +370,7 @@ def train(args, root, spec, cancelled):
         optimizer = create_optimizer(model, mode=args.mode, learning_rate=args.learning_rate)
         dataset = ReplayDataset(args.replay, spec, architecture_family=args.model_family if typed else None)
         cursor = DatasetCursor(dataset, args.seed)
-        previous = load_training_checkpoint(model, optimizer, spec, cursor, args.resume) if args.resume else 0
+        previous = load_training_checkpoint(model, optimizer, spec, cursor, args.resume, dtype=args.dtype) if args.resume else 0
         limits = TrainingLimits(steps=args.steps, batch_size=args.batch_size, elapsed_ms=args.elapsed_ms,
                       max_parameter_state_bytes=args.memory_mib * 1024 * 1024)
         if not 1 <= args.checkpoint_every <= 1_000_000:
@@ -378,7 +379,7 @@ def train(args, root, spec, cancelled):
         def checkpoint_progress(completed):
             nonlocal last_saved
             if completed % args.checkpoint_every == 0:
-                save_training_checkpoint(model, optimizer, spec, cursor, checkpoint, completed_steps=previous + completed)
+                save_training_checkpoint(model, optimizer, spec, cursor, checkpoint, completed_steps=previous + completed, dtype=args.dtype)
                 last_saved = previous + completed
         try:
             if typed:
@@ -387,8 +388,8 @@ def train(args, root, spec, cancelled):
                 encoder = TypedEncoder(spec)
             else:
                 encoder = PublicEncoder(spec)
-            report = optimize(model, optimizer, encoder, cursor, limits=limits, cancelled=cancelled, on_step=checkpoint_progress)
-            save_training_checkpoint(model, optimizer, spec, cursor, checkpoint, completed_steps=previous + report["steps"])
+            report = optimize(model, optimizer, encoder, cursor, limits=limits, dtype=args.dtype, cancelled=cancelled, on_step=checkpoint_progress)
+            save_training_checkpoint(model, optimizer, spec, cursor, checkpoint, completed_steps=previous + report["steps"], dtype=args.dtype)
         except (Exception, KeyboardInterrupt) as error:
             # Do not retry, lower resources or relabel data. A prior valid checkpoint
             # remains intact; a non-finite failed state cannot overwrite it.
@@ -603,6 +604,7 @@ def parser():
     command.add_argument("--memory-mib", type=int, default=1024)
     command.add_argument("--learning-rate", type=float, default=3e-4)
     command.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    command.add_argument("--dtype", choices=TRAINING_DTYPES, default="fp32")
     command = commands.add_parser("export")
     command.add_argument("--base", required=True)
     command.add_argument("--adapter")

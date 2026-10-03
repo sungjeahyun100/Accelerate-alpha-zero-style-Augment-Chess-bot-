@@ -1,5 +1,6 @@
 """Public replay and one synthetic optimizer step with deterministic resume."""
 from copy import deepcopy
+from contextlib import nullcontext
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import hashlib
@@ -19,6 +20,7 @@ import pytest
 import torch
 
 from accelerate_chess import cli
+from accelerate_chess import training as training_module
 from accelerate_chess.encoding import PublicEncoder, batch_positions, canonical_json
 from accelerate_chess.ir import ObservationIR, TypedEncoder, TypedEncoderSpec, batch_typed_positions
 from accelerate_chess.network.entity_transformer import EntityTransformer, EntityTransformerConfig
@@ -274,6 +276,16 @@ def test_typed_synthetic_optimizer_checkpoint_resume(session_directory, family, 
     resumed_cursor = DatasetCursor(dataset, seed=19)
     assert load_training_checkpoint(resumed, resumed_optimizer, contract, resumed_cursor,
                                     checkpoint) == 1
+    saved = torch.load(checkpoint, weights_only=True)
+    assert saved["dtype"] == "fp32"
+    assert saved["version"] == training_module.TYPED_DTYPE_TRAINING_VERSION
+    saved.pop("dtype")
+    saved["version"] = training_module.TYPED_TRAINING_VERSION
+    saved["checkpoint_hash"] = _tree_hash({key: value for key, value in saved.items() if key != "checkpoint_hash"})
+    old_checkpoint = session_directory / f"{family}-old-resume.pt"
+    torch.save(saved, old_checkpoint)
+    assert load_training_checkpoint(resumed, resumed_optimizer, contract, resumed_cursor,
+                                    old_checkpoint) == 1
     assert saved_hash and resumed_cursor.snapshot() == cursor.snapshot()
     for name, value in model.state_dict().items():
         torch.testing.assert_close(resumed.state_dict()[name], value, rtol=0, atol=0)
@@ -456,6 +468,8 @@ def test_synthetic_optimizer_and_rng_cursor_resume_preserve_failure_state(sessio
     assert report["steps"] == 1 and np.isfinite(report["metrics"][0]["value_mse"])
     checkpoint = session_directory / "training.pt"
     save_training_checkpoint(model, optimizer, spec(), cursor, checkpoint, completed_steps=1)
+    saved = torch.load(checkpoint, weights_only=True)
+    assert (saved["version"], saved["dtype"]) == (training_module.DTYPE_TRAINING_VERSION, "fp32")
     expected_rng = (random.random(), np.random.random(), torch.rand(3))
     expected_examples = cursor.next_batch(3)
     expected_indices = [example.observation["informationStateKey"] for example in expected_examples]
@@ -506,6 +520,104 @@ def test_synthetic_optimizer_and_rng_cursor_resume_preserve_failure_state(sessio
     with pytest.raises(ValueError, match="compatibility"):
         wrong_spec = replace(spec(), rules_version="wrong-site")
         load_training_checkpoint(restored, restored_optimizer, wrong_spec, restored_cursor, checkpoint)
+
+
+def test_training_dtype_validation_and_fp32_forward(monkeypatch, tmp_path):
+    command = ["--model-family", "legacy-resnet", "train", "--base", "base.pt", "--replay", "episode.json"]
+    assert cli.parser().parse_args(command).dtype == "fp32"
+    assert cli.parser().parse_args(command + ["--dtype", "fp32"]).dtype == "fp32"
+    assert cli.parser().parse_args(command + ["--dtype", "bf16"]).dtype == "bf16"
+    with pytest.raises(ValueError, match="requires CUDA"):
+        cli.train(cli.parser().parse_args(command + ["--dtype", "bf16"]), tmp_path, spec(), lambda: False)
+    training_module.validate_training_dtype("fp32", "cpu")
+    with pytest.raises(ValueError, match="requires CUDA"):
+        training_module.validate_training_dtype("bf16", "cpu")
+    with pytest.raises(ValueError, match="unsupported training dtype"):
+        training_module.validate_training_dtype("fp16", "cuda")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    with pytest.raises(RuntimeError, match="unavailable"):
+        training_module.validate_training_dtype("bf16", "cuda")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: False)
+    with pytest.raises(RuntimeError, match="unsupported"):
+        training_module.validate_training_dtype("bf16", "cuda")
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: True)
+    training_module.validate_training_dtype("bf16", "cuda")
+
+    calls = []
+    def autocast(*, device_type, dtype):
+        calls.append((device_type, dtype))
+        return nullcontext()
+    monkeypatch.setattr(torch, "autocast", autocast)
+    class Forward:
+        def __call__(self, tensor):
+            return tensor.to(torch.bfloat16), tensor.to(torch.bfloat16)
+    source = torch.tensor([[1., 2.]], requires_grad=True)
+    logits, value = training_module.training_forward(Forward(), (source,), dtype="bf16")
+    assert calls == [("cuda", torch.bfloat16)]
+    assert logits.dtype == value.dtype == torch.float32
+    loss = -torch.log_softmax(logits, 1).mean() + torch.nn.functional.mse_loss(value, torch.zeros_like(value))
+    assert loss.dtype == torch.float32
+    loss.backward()
+    assert source.grad is not None
+    calls.clear()
+    training_module.training_forward(Forward(), (source,), dtype="fp32")
+    assert calls == []
+
+
+def test_training_checkpoint_dtype_schema_and_resume_mismatch(session_directory, monkeypatch):
+    synthetic_episode().save(session_directory / "episode.json")
+    dataset = ReplayDataset([session_directory / "episode.json"], spec())
+    model = PolicyValueNetwork(ModelConfig(spec().board_channels, spec().condition_dim,
+        spec().action_dim, channels=4, residual_blocks=1, lora_rank=2, lora_alpha=2.))
+    optimizer = create_optimizer(model, mode="base")
+    cursor = DatasetCursor(dataset, 19)
+    fp32 = session_directory / "fp32.pt"
+    save_training_checkpoint(model, optimizer, spec(), cursor, fp32, completed_steps=0)
+    saved = torch.load(fp32, weights_only=True)
+    assert saved["dtype"] == "fp32"
+    prior = (tensor_state_hash(model.state_dict()), cursor.snapshot())
+    monkeypatch.setattr(training_module, "validate_training_dtype", lambda dtype, device: None)
+    with pytest.raises(ValueError, match="dtype mismatch"):
+        load_training_checkpoint(model, optimizer, spec(), cursor, fp32, dtype="bf16")
+    bf16 = session_directory / "bf16.pt"
+    save_training_checkpoint(model, optimizer, spec(), cursor, bf16, completed_steps=0, dtype="bf16")
+    assert torch.load(bf16, weights_only=True)["dtype"] == "bf16"
+    with pytest.raises(ValueError, match="dtype mismatch"):
+        load_training_checkpoint(model, optimizer, spec(), cursor, bf16, dtype="fp32")
+    assert prior == (tensor_state_hash(model.state_dict()), cursor.snapshot())
+    old = torch.load(fp32, weights_only=True)
+    old.pop("dtype")
+    old["version"] = training_module.TRAINING_VERSION
+    old["checkpoint_hash"] = _tree_hash({key: value for key, value in old.items() if key != "checkpoint_hash"})
+    old_path = session_directory / "old.pt"
+    torch.save(old, old_path)
+    assert load_training_checkpoint(model, optimizer, spec(), cursor, old_path, dtype="fp32") == 0
+    with pytest.raises(ValueError, match="dtype mismatch"):
+        load_training_checkpoint(model, optimizer, spec(), cursor, old_path, dtype="bf16")
+    malformed = torch.load(fp32, weights_only=True)
+    malformed.pop("dtype")
+    torch.save(malformed, session_directory / "malformed.pt")
+    with pytest.raises(ValueError, match="format mismatch"):
+        load_training_checkpoint(model, optimizer, spec(), cursor, session_directory / "malformed.pt")
+
+
+@pytest.mark.skipif(not torch.cuda.is_available() or not torch.cuda.is_bf16_supported(),
+                    reason="CUDA BF16 hardware is optional")
+def test_cuda_bf16_training_keeps_fp32_master_and_adamw_state(session_directory):
+    synthetic_episode().save(session_directory / "episode.json")
+    dataset = ReplayDataset([session_directory / "episode.json"], spec())
+    model = PolicyValueNetwork(ModelConfig(spec().board_channels, spec().condition_dim,
+        spec().action_dim, channels=4, residual_blocks=1, lora_rank=2, lora_alpha=2.)).to("cuda")
+    optimizer = create_optimizer(model, mode="base")
+    cursor = DatasetCursor(dataset, 19)
+    result = optimize(model, optimizer, PublicEncoder(spec()), cursor,
+                      limits=TrainingLimits(steps=1, batch_size=1), dtype="bf16")
+    assert result["steps"] == 1 and result["dtype"] == "bf16"
+    training_module.validate_fp32_training_state(model, optimizer)
+    checkpoint = session_directory / "bf16-cuda.pt"
+    save_training_checkpoint(model, optimizer, spec(), cursor, checkpoint, completed_steps=1, dtype="bf16")
+    assert torch.load(checkpoint, weights_only=True)["dtype"] == "bf16"
 
 
 def test_optimizer_cancellation_is_classified_from_one_signal_read(session_directory):

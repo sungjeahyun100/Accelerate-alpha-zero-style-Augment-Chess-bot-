@@ -62,4 +62,37 @@ def test_training_smoke_finishes_one_cpu_step(capsys):
     assert payload["results"]["status"] == "ok"
     assert payload["results"]["steps"] == 1
     assert payload["results"]["peak_vram_bytes"] == 0
+    assert payload["results"]["dtype"] == "fp32"
+    assert payload["config"]["dtype"] == "fp32"
     assert json.loads(capsys.readouterr().out)["kind"] == "training"
+
+
+def test_training_benchmark_dtype_cli_and_cpu_rejection(monkeypatch):
+    from accelerate_chess.bench import training
+
+    args = Namespace(model="resnet-s", profile="small", steps=1, batch_size=1,
+                     device="cpu", dtype="bf16", seed=37, artifact_root=None, run_id=None)
+    with pytest.raises(ValueError, match="requires CUDA"):
+        training.run(args)
+    captured = []
+    monkeypatch.setattr(training, "run", lambda args: captured.append(args.dtype))
+    monkeypatch.setattr("sys.argv", ["training", "--dtype", "bf16"])
+    training.main()
+    assert captured == ["bf16"]
+
+
+@pytest.mark.skipif(not torch.cuda.is_available() or not torch.cuda.is_bf16_supported(),
+                    reason="CUDA BF16 hardware is optional")
+def test_training_benchmark_bf16_report_and_checkpoint(tmp_path, capsys):
+    from accelerate_chess.bench.training import run
+
+    payload = run(Namespace(model="resnet-s", profile="small", steps=1, batch_size=1,
+                            device="cuda", dtype="bf16", seed=37,
+                            artifact_root=str(tmp_path), run_id="bf16-test"))
+    assert payload["results"]["dtype"] == payload["config"]["dtype"] == "bf16"
+    saved = torch.load(payload["results"]["checkpoint"], weights_only=True)
+    assert saved["dtype"] == "bf16"
+    assert all(tensor.dtype == torch.float32 for tensor in saved["model"].values()
+               if tensor.is_floating_point())
+    assert all(tensor.dtype == torch.float32 for state in saved["optimizer"]["state"].values()
+               for tensor in state.values())
