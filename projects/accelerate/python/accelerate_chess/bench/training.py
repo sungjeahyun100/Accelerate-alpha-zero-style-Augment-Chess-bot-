@@ -56,11 +56,11 @@ def run(args):
         timings["backward_ms"].append((time.perf_counter() - backward_start) * 1000)
         optimizer_start = time.perf_counter()
         optimizer.step()
-        validate_fp32_training_state(model, optimizer)
         sync()
         timings["optimizer_ms"].append((time.perf_counter() - optimizer_start) * 1000)
         timings["step_ms"].append((time.perf_counter() - step_start) * 1000)
     elapsed = time.perf_counter() - started
+    validate_fp32_training_state(model, optimizer)
     checkpoint = None
     if args.run_id:
         checkpoint = reserve_slot(artifact_root(args.artifact_root), "models", args.run_id) / "smoke.pt"

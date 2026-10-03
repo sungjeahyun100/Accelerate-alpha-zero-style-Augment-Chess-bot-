@@ -319,13 +319,13 @@ def optimize(model, optimizer, encoder: PublicEncoder, cursor: DatasetCursor, *,
         loss.backward()
         torch.nn.utils.clip_grad_norm_([parameter for parameter in model.parameters() if parameter.requires_grad], limits.gradient_norm, error_if_nonfinite=True)
         optimizer.step()
-        validate_fp32_training_state(model, optimizer)
         completed += 1
         metrics.append({"policy_ce": float(policy_loss.detach()), "value_mse": float(value_loss.detach())})
         if len(metrics) > 128:
             metrics.pop(0)
         if on_step is not None:
             on_step(completed)
+    validate_fp32_training_state(model, optimizer)
     return {"steps": completed, "stop_reason": reason, "metrics": metrics, "metrics_scope": "last-128-steps", "dtype": dtype}
 
 

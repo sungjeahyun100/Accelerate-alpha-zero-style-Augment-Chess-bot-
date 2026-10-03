@@ -457,6 +457,72 @@ def test_pending_public_decision_rejects_conflicting_transition_without_mutation
     ReplayEpisode(recorder.snapshot(), contract)
 
 
+def test_optimize_validates_full_state_only_at_boundaries(session_directory, monkeypatch):
+    synthetic_episode().save(session_directory / "episode.json")
+    dataset = ReplayDataset([session_directory / "episode.json"], spec())
+    model = PolicyValueNetwork(ModelConfig(spec().board_channels, spec().condition_dim,
+        spec().action_dim, channels=4, residual_blocks=1, lora_rank=2, lora_alpha=2.))
+    optimizer = create_optimizer(model, mode="base")
+    checked_steps = []
+    original = training_module.validate_fp32_training_state
+
+    def validate(model, optimizer):
+        checked_steps.append(max((int(state["step"]) for state in optimizer.state.values()), default=0))
+        original(model, optimizer)
+
+    monkeypatch.setattr(training_module, "validate_fp32_training_state", validate)
+    result = optimize(model, optimizer, PublicEncoder(spec()), DatasetCursor(dataset, 19),
+                      limits=TrainingLimits(steps=3, batch_size=1))
+    assert result["steps"] == 3
+    assert checked_steps == [0, 3]
+
+
+def test_optimize_rejects_nonfinite_parameter_after_last_step(session_directory, monkeypatch):
+    synthetic_episode().save(session_directory / "episode.json")
+    dataset = ReplayDataset([session_directory / "episode.json"], spec())
+    model = PolicyValueNetwork(ModelConfig(spec().board_channels, spec().condition_dim,
+        spec().action_dim, channels=4, residual_blocks=1, lora_rank=2, lora_alpha=2.))
+    optimizer = create_optimizer(model, mode="base")
+    original_step = optimizer.step
+
+    def corrupt_after_step(*args, **kwargs):
+        result = original_step(*args, **kwargs)
+        with torch.no_grad():
+            next(model.parameters()).fill_(float("inf"))
+        return result
+
+    monkeypatch.setattr(optimizer, "step", corrupt_after_step)
+    with pytest.raises(ValueError, match="finite FP32"):
+        optimize(model, optimizer, PublicEncoder(spec()), DatasetCursor(dataset, 19),
+                 limits=TrainingLimits(steps=1, batch_size=1))
+
+
+def test_checkpoint_validates_live_state_before_writing(session_directory, monkeypatch):
+    synthetic_episode().save(session_directory / "episode.json")
+    dataset = ReplayDataset([session_directory / "episode.json"], spec())
+    model = PolicyValueNetwork(ModelConfig(spec().board_channels, spec().condition_dim,
+        spec().action_dim, channels=4, residual_blocks=1, lora_rank=2, lora_alpha=2.))
+    optimizer = create_optimizer(model, mode="base")
+    cursor = DatasetCursor(dataset, 19)
+    checks = []
+    original = training_module.validate_fp32_training_state
+
+    def validate(model, optimizer):
+        checks.append(True)
+        original(model, optimizer)
+
+    monkeypatch.setattr(training_module, "validate_fp32_training_state", validate)
+    path = session_directory / "checkpoint.pt"
+    save_training_checkpoint(model, optimizer, spec(), cursor, path, completed_steps=0)
+    assert checks == [True] and path.exists()
+    with torch.no_grad():
+        next(model.parameters()).fill_(float("inf"))
+    with pytest.raises(ValueError, match="finite FP32"):
+        save_training_checkpoint(model, optimizer, spec(), cursor, path, completed_steps=0)
+    assert checks == [True, True]
+    assert torch.load(path, weights_only=True)["completed_steps"] == 0
+
+
 def test_synthetic_optimizer_and_rng_cursor_resume_preserve_failure_state(session_directory):
     synthetic_episode().save(session_directory / "episode.json")
     dataset = ReplayDataset([session_directory / "episode.json"], spec())

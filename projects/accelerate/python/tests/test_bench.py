@@ -1,6 +1,7 @@
 """Contract checks for opt-in probes; no CUDA device required."""
 from argparse import ArgumentTypeError, Namespace
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -65,6 +66,36 @@ def test_training_smoke_finishes_one_cpu_step(capsys):
     assert payload["results"]["dtype"] == "fp32"
     assert payload["config"]["dtype"] == "fp32"
     assert json.loads(capsys.readouterr().out)["kind"] == "training"
+
+
+def test_training_benchmark_validation_stays_outside_measurements(monkeypatch, capsys):
+    from accelerate_chess.bench import training
+
+    checked_steps = []
+    original = training.validate_fp32_training_state
+    ticks = [0]
+
+    def clock():
+        value = ticks[0]
+        ticks[0] += 1
+        return value
+
+    def validate(model, optimizer):
+        checked_steps.append(max((int(state["step"]) for state in optimizer.state.values()), default=0))
+        ticks[0] += 1000
+        original(model, optimizer)
+
+    monkeypatch.setattr(training, "time", SimpleNamespace(perf_counter=clock))
+    monkeypatch.setattr(training, "validate_fp32_training_state", validate)
+    args = Namespace(model="resnet-s", profile="small", steps=3, batch_size=1,
+                     device="cpu", dtype="fp32", seed=37, artifact_root=None, run_id=None)
+    results = training.run(args)["results"]
+    capsys.readouterr()
+    assert checked_steps == [0, 3]
+    assert results["steps_per_second"] == pytest.approx(3 / 28)
+    assert results["samples_per_second"] == pytest.approx(3 / 28)
+    assert results["optimizer_ms"] == pytest.approx(1000)
+    assert results["mean_step_ms"] == pytest.approx(8000)
 
 
 def test_training_benchmark_dtype_cli_and_cpu_rejection(monkeypatch):
