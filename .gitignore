@@ -30,3 +30,4 @@ Thumbs.db
 # cpp_compile
 projects/augment-chess/reference/pre_cpp_engine_code/engine_test
 projects/augment-chess/reference/pre_cpp_engine_code/engine_test_human
+projects/accelerate/python/accelerate_chess/_native*.so
