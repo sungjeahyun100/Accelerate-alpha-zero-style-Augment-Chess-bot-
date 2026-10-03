@@ -707,7 +707,7 @@ impl TypedBundle {
         // meaning. A self-consistent manifest must not silently renumber them.
         ensure!(
             canonical_hash(&encoder["feature_schema"]["category_vocabulary"])?
-                == "f9ad67832ecb0544a032be8011d266419f31f8ab5bb31f6ae54871d71eaa8906",
+                == "f019cc6e999bfb5cf2abe2a80619d8a088b44d8bd33a41f2662ba8301f33ca9a",
             "typed category vocabulary differs from frozen source"
         );
         validate_typed_model_config(

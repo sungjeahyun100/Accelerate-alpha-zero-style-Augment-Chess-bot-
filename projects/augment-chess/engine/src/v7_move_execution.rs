@@ -3960,6 +3960,130 @@ mod tests {
     }
 
     #[test]
+    fn large_public_move_accepts_overlapping_own_footprint() {
+        let mut state = crate::v7_new_game::new_game(
+            GameConfig {
+                draft_delete: true,
+                ..GameConfig::default()
+            },
+            19,
+        )
+        .unwrap();
+        state.board = vec![vec![None; 8]; 8];
+        state.board[7][4] = Some(Piece::new("king", Color::White, "test-white-king"));
+        state.board[0][4] = Some(Piece::new("king", Color::Black, "test-black-king"));
+        state.turn = Color::White;
+        state.deck_slots.white.clear();
+        state.deck_slots.black.clear();
+        state.extra.insert("middleDraftDone".into(), json!(true));
+        state.extra.insert("endDraftDone".into(), json!(false));
+        let from = Square { row: 3, col: 1 };
+        let to = Square { row: 2, col: 1 };
+        let mut piece = Piece::new("bigRook", Color::White, "test-large-rook");
+        piece.extra.insert("anchorRow".into(), json!(3));
+        piece.extra.insert("anchorCol".into(), json!(1));
+        for row in 3..=4 {
+            for col in 1..=2 {
+                state.board[row][col] = Some(piece.clone());
+            }
+        }
+        let initial = state.clone();
+        let target = crate::movement::v7_large_moves(&state, &piece, from)
+            .unwrap()
+            .into_iter()
+            .find(|target| target.square() == to)
+            .unwrap();
+        let action = crate::Action::movement(Color::White, from, target);
+        let position = crate::V7HostPosition::from_state(initial.clone()).unwrap();
+        let intent = crate::movement::v7_public_move_intents(&state, &action)
+            .unwrap()
+            .remove(0);
+        let admitted = crate::v7_adapter_actions::bind_public_intent(&position, intent).unwrap();
+        let applied = crate::v7_adapter_actions::apply_admitted(&position, &admitted).unwrap();
+        assert_eq!(applied.position.revision(), 1);
+        assert_eq!(applied.position.spatial().pieces().len(), 3);
+        assert_eq!(
+            applied.position.export_envelope().unwrap()["state"]["board"][2][1]["id"],
+            "test-large-rook"
+        );
+        crate::transition::apply_without_public_event(&mut state, &action).unwrap();
+        state.validate_v7_snapshot_shape_and_identify().unwrap();
+        crate::spatial_state::SpatialState::from_v7_source(&state).unwrap();
+        for row in 2..=3 {
+            for col in 1..=2 {
+                let moved = state.board[row][col].as_ref().unwrap();
+                assert_eq!(moved.id, "test-large-rook");
+                assert_eq!(moved.extra["anchorRow"], json!(2));
+                assert_eq!(moved.extra["anchorCol"], json!(1));
+            }
+        }
+        assert!(state.board[4][1].is_none());
+        assert!(state.board[4][2].is_none());
+
+        let far = Square { row: 1, col: 1 };
+        let target = crate::movement::v7_large_moves(&initial, &piece, from)
+            .unwrap()
+            .into_iter()
+            .find(|target| target.square() == far)
+            .unwrap();
+        let far_action = crate::Action::movement(Color::White, from, target);
+        let far_intent = crate::movement::v7_public_move_intents(&initial, &far_action)
+            .unwrap()
+            .remove(0);
+        let admitted =
+            crate::v7_adapter_actions::bind_public_intent(&position, far_intent).unwrap();
+        let moved_far = crate::v7_adapter_actions::apply_admitted(&position, &admitted).unwrap();
+        assert_eq!(moved_far.position.revision(), 1);
+        for row in 1..=2 {
+            for col in 1..=2 {
+                assert_eq!(
+                    moved_far.position.state().board[row][col]
+                        .as_ref()
+                        .unwrap()
+                        .id,
+                    "test-large-rook"
+                );
+            }
+        }
+
+        let mut blocked = initial.clone();
+        let mut blocker = Piece::new("pawn", Color::Black, "other-piece");
+        blocker.extra.insert("metalized".into(), json!(true));
+        blocked.board[2][2] = Some(blocker);
+        assert!(
+            !crate::movement::v7_large_moves(&blocked, &piece, from)
+                .unwrap()
+                .iter()
+                .any(|target| target.square() == to)
+        );
+        assert!(
+            !crate::movement::v7_large_moves(&initial, &piece, from)
+                .unwrap()
+                .iter()
+                .any(|target| target.square() == Square { row: 7, col: 1 })
+        );
+
+        let mut anonymous = position.export_envelope().unwrap()["state"].clone();
+        for row in 3..=4 {
+            for col in 1..=2 {
+                anonymous["board"][row][col]
+                    .as_object_mut()
+                    .unwrap()
+                    .shift_remove("id");
+            }
+        }
+        let anonymous =
+            crate::V7HostPosition::from_parts(anonymous, position.state().rng.clone(), Vec::new())
+                .unwrap();
+        let intent = crate::movement::v7_public_move_intents(&initial, &action)
+            .unwrap()
+            .remove(0);
+        let admitted = crate::v7_adapter_actions::bind_public_intent(&anonymous, intent).unwrap();
+        let moved = crate::v7_adapter_actions::apply_admitted(&anonymous, &admitted).unwrap();
+        assert_eq!(moved.position.spatial().pieces().len(), 3);
+    }
+
+    #[test]
     fn malformed_direction_reports_exact_boundary_without_mutation() {
         let mut state = state("log");
         let before = state.clone();

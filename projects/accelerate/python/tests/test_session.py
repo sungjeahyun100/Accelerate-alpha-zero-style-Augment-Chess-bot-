@@ -945,7 +945,8 @@ def test_actual_native_cli_choose_bounded_episode_evaluate_and_explicit_activati
     prefix = ["--artifact-root", str(session_directory), "--threads", "1", "--model-family", "mask-resnet"]
     activation = session_directory / "models" / "active" / "activation.json"
     previous_activation = activation.read_bytes() if activation.exists() else None
-    arguments = ["--manifest", str(manifest), "--config", str(config_path), "--iterations", "4", "--depth", "1", "--particles", "2", "--proposals", "4"]
+    arguments = ["--manifest", str(manifest), "--config", str(config_path), "--iterations", "4", "--depth", "1",
+                 "--particles", "2", "--proposals", "4", "--search-ms", "10000"]
     assert cli.main(prefix + ["choose", "--trace", str(trace_path)] + arguments) == 0
     chosen = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert chosen["iterations"] == 4 and chosen["max_inference_batch"] == 4 and chosen["inference_batches"] == 2
@@ -959,7 +960,8 @@ def test_actual_native_cli_choose_bounded_episode_evaluate_and_explicit_activati
     assert cli.main(prefix + ["evaluate", "--manifest", str(manifest), "--backend", "tract", "--replay", str(episode_path), "--max-samples", "1"]) == 0
     capsys.readouterr()
     assert (activation.read_bytes() if activation.exists() else None) == previous_activation
-    assert cli.main(["--artifact-root", str(session_directory), "--threads", "2", "evaluate", "--manifest", str(manifest), "--backend", "tract", "--replay", str(episode_path)]) == 2
+    assert cli.main(["--artifact-root", str(session_directory), "--threads", "2", "--model-family", "mask-resnet",
+                     "evaluate", "--manifest", str(manifest), "--backend", "tract", "--replay", str(episode_path)]) == 2
     assert "requires threads=1" in capsys.readouterr().err
     assert (activation.read_bytes() if activation.exists() else None) == previous_activation
     assert cli.main(prefix + ["activate", "--manifest", str(manifest), "--sample-replay", str(episode_path),

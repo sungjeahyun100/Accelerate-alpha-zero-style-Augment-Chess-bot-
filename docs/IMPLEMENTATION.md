@@ -1,5 +1,11 @@
 # 전체 구현 계획과 실행 checkpoint
 
+2026-10-02 D-018에서 현재 모델 v1의 ResNet 범위를 고정 8×8로 좁혔다. 이 문서 아래의
+가변 mask-aware ResNet 목표와 과거 검증 기록은 당시 D-002의 설계·실행 상태로
+보존한다. 새 `fixed8-spatial-v1` / `entity-token-v1` Python 투영·모델과 기존
+`typed-input-v1` 운영 경로의 구분, 새 경로의 미완료 ONNX·MCTS 연결은
+[MODEL-ARCHITECTURE](MODEL-ARCHITECTURE.md)를 따른다.
+
 현재 전체 판정은 **NO-GO**다. 이는 코드 완성·정답 동등성에 대한 판정이며 실제 학습 또는
 봇 실력의 판정이 아니다. 사용자 채택 요구는 [DECISIONS](DECISIONS.md), 상세 작업·경계·
 단계별 검증 지시는 [IMPLEMENTATION-DIRECTIVES](IMPLEMENTATION-DIRECTIVES.md)에 있다.

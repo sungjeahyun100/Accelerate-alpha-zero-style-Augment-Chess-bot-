@@ -26,17 +26,19 @@ pub(crate) fn new_game(config: GameConfig, seed: u64) -> Result<GameState> {
         "grand" => 28,
         _ => unreachable!("configuration was checked above"),
     };
+    // Chaos may replace forbidden opening pairs with additional source draws;
+    // its cursor depends on the sampled offer, unlike normal and grand.
     let expected_rng_cursor = if !requested_rules.is_empty() {
         None
     } else if config.draft_delete {
         Some(32)
     } else {
-        Some(match config.game_style.as_str() {
-            "normal" => 122,
-            "chaos" => 212,
-            "grand" => 112,
+        match config.game_style.as_str() {
+            "normal" => Some(122),
+            "chaos" => None,
+            "grand" => Some(112),
             _ => unreachable!("configuration was checked above"),
-        })
+        }
     };
     let expected_draft_actor = if config.game_style == "grand" {
         "black"

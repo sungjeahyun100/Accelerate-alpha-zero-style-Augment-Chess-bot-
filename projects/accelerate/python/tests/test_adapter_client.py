@@ -185,7 +185,7 @@ def test_v7_draft_public_intents_are_exact_and_branches_are_isolated(style):
     assert step.position.snapshot_revision != revision
     assert not hasattr(step, "event")
     assert step.position.observe("white") != initial
-    assert step.position.observe("white")["history"][-1]["actor"] == "white"
+    assert step.position.observe("white")["history"][-1]["actor"] == intent["color"]
     ObservationIR.from_public(step.position.observe("white"), spec)
     with pytest.raises(ValueError, match="another game adapter revision"):
         step.position.apply(first["actions"][0])
