@@ -427,7 +427,8 @@ impl V7HostPosition {
                 .expect("validated source state")
                 .contains_key("rulesetId"),
         )?;
-        let state = restore_source_shape(&self.original_state, &self.baseline_state, &typed);
+        let mut state = restore_source_shape(&self.original_state, &self.baseline_state, &typed);
+        restore_large_piece_aliases(&mut state, &self.baseline_state, &self.state);
         validate_json_value(&state, 0)?;
         let content = json!({
             "protocolVersion": V7_POSITION_PROTOCOL,
@@ -518,6 +519,56 @@ fn restore_source_shape(original: &Value, baseline: &Value, current: &Value) -> 
             )
         }
         _ => current.clone(),
+    }
+}
+
+/// A large piece is one source object repeated across its board cells. The
+/// per-cell source overlay may otherwise retain omitted fields on overlapping
+/// old cells while giving newly occupied cells the full typed representation.
+fn restore_large_piece_aliases(state: &mut Value, baseline: &Value, current: &GameState) {
+    let Some(board) = state.get_mut("board").and_then(Value::as_array_mut) else {
+        return;
+    };
+    let mut aliases = std::collections::BTreeMap::<String, (bool, Value)>::new();
+    for (row, cells) in current.board.iter().enumerate() {
+        for (col, piece) in cells.iter().enumerate() {
+            let Some(piece) = piece.as_ref().filter(|piece| piece.is_large()) else {
+                continue;
+            };
+            let Some(alias) = board.get(row).and_then(|line| line.get(col)) else {
+                continue;
+            };
+            let retained = baseline["board"][row][col]["id"] == piece.id;
+            let entry = aliases
+                .entry(piece.id.clone())
+                .or_insert_with(|| (retained, alias.clone()));
+            if retained && !entry.0 {
+                *entry = (true, alias.clone());
+            }
+        }
+    }
+    for (row, cells) in current.board.iter().enumerate() {
+        for (col, piece) in cells.iter().enumerate() {
+            let Some(piece) = piece.as_ref().filter(|piece| piece.is_large()) else {
+                continue;
+            };
+            if let Some((_, alias)) = aliases.get(&piece.id) {
+                let mut alias = alias.clone();
+                if alias.get("id").is_none()
+                    && let (Some(anchor_row), Some(anchor_col)) = (
+                        piece.extra.get("anchorRow").and_then(Value::as_u64),
+                        piece.extra.get("anchorCol").and_then(Value::as_u64),
+                    )
+                    && piece.id != format!("{}-{anchor_row}-{anchor_col}", piece.color.as_str())
+                {
+                    alias
+                        .as_object_mut()
+                        .expect("source piece is an object")
+                        .insert("id".into(), Value::String(piece.id.clone()));
+                }
+                board[row][col] = alias;
+            }
+        }
     }
 }
 

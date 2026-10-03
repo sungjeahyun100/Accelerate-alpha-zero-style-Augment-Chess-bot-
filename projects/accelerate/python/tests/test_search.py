@@ -808,7 +808,11 @@ def _native_mode_flow(mode, draft_delete, encoder, GameAdapterClient):
     trackers = {viewer: PublicTracker(actual.observe(viewer), typed_spec=contract)
                 for viewer in ("white", "black")}
     recorded = {viewer: [tracker.initial] for viewer, tracker in trackers.items()}
-    limits = BeliefLimits(particles=2, proposals=16, actions_per_transition=4096, elapsed_ms=None)
+    # A chaos opening can reveal an Otherworld origin on the first play move.
+    # Reconstructing that public chance result needs more than sixteen bounded
+    # independent source proposals for this fixed seed and trace.
+    limits = BeliefLimits(particles=2, proposals=64 if mode == "chaos" else 16,
+                          actions_per_transition=4096, elapsed_ms=None)
     beliefs = {viewer: ParticleBelief(tracker, NativeSourceFactory(config, typed_spec=contract), seed=71 + index,
         limits=limits)
         for index, (viewer, tracker) in enumerate(trackers.items())}

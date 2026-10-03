@@ -100,6 +100,13 @@ value를 출력한다. 한 모델에만 추가 공개 정보를 주지 않으며
 아직 주장하지 않는다. B의 기물 token만으로 빈칸·비가시 영역·지형·연결을 잃지 않도록
 geometry와 관계 정보를 보존한다.
 
+D-018은 위 D-002의 과거 가변 ResNet 비교 범위를 현재 모델 v1에서 **고정 8×8**로
+좁힌다. 엔진과 `ObservationIR`의 가변 geometry는 유지한다. 새 입력 경로는
+`ObservationIR → EntityTokenEncoder / Fixed8x8SpatialEncoder →
+EntityTokenTransformer / Fixed8x8ResNet → 공통 CandidateScorer`다. 기존
+`typed-input-v1`과 배포 artifact는 이전 버전 그대로 유지한다. 새 경로의 구현 범위와
+검증되지 않은 운영 연결은 [모델 아키텍처 현황](MODEL-ARCHITECTURE.md)에 적는다.
+
 FiLM은 카드·RULE·게임 상태의 공개 조건으로 각 모델의 특징을 조절한다. 조건은
 **명시적인 ONNX 입력**이고 FiLM 연산은 그래프 안에 유지한다. 조건 벡터의 의미·순서·
 dtype·shape와 인코딩 버전을 모델 메타데이터에 연결한다.
