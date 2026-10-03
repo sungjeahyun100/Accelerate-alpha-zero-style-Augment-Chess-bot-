@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:augment-chess:adapter:observe-response:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "observation"],
+  "properties": {
+    "kind": { "const": "observation" },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "viewer", "turn", "board", "ownCards", "opponentHandCount", "publicState", "history", "informationStateKey"],
+      "properties": {
+        "protocolVersion": { "type": "string", "minLength": 1 },
+        "viewer": { "enum": ["white", "black"] },
+        "turn": { "enum": ["white", "black"] },
+        "board": { "type": "array", "items": { "type": "array", "items": {} } },
+        "ownCards": { "type": "array", "items": {} },
+        "opponentHandCount": { "type": "integer", "minimum": 0 },
+        "publicState": { "type": "object" },
+        "history": { "type": "array", "items": {} },
+        "informationStateKey": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

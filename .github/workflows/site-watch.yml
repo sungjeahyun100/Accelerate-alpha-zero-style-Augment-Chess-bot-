@@ -18,61 +18,101 @@ jobs:
           node-version: 22
       - name: Check live site
         id: check
-        working-directory: infra/tools/site-parity
+        env:
+          SITE_WATCH_REPORT_DIR: ${{ runner.temp }}/Accelerate/reports/site-watch
+        working-directory: projects/augment-chess/oracle/tools/site-parity
         run: |
+          mkdir -p "$SITE_WATCH_REPORT_DIR"
           set +e
-          node check-site-update.js > "$RUNNER_TEMP/check.txt" 2>&1
+          node check-site-update.js > "$SITE_WATCH_REPORT_DIR/check.txt" 2>&1
           rc=$?
-          cat "$RUNNER_TEMP/check.txt"
+          cat "$SITE_WATCH_REPORT_DIR/check.txt"
+          set -e
           if [ $rc -eq 2 ]; then
             echo "status=neterr" >> "$GITHUB_OUTPUT"
-            echo "::warning::site-watch: network/parse error while checking the live site (not a failure)"
-          elif grep -q '^CHANGED' "$RUNNER_TEMP/check.txt"; then
+            echo "::warning::site-watch: check-site-update.js exited 2 (network/parse error); exact diagnostic is in check.txt and the step log"
+          elif [ $rc -ne 0 ]; then
+            echo "status=error" >> "$GITHUB_OUTPUT"
+            echo "::error::site-watch: check-site-update.js exited $rc; exact diagnostic is in check.txt and the step log"
+            exit "$rc"
+          elif grep -q '^CHANGED' "$SITE_WATCH_REPORT_DIR/check.txt"; then
             echo "status=changed" >> "$GITHUB_OUTPUT"
-          else
+          elif grep -q '^UNCHANGED' "$SITE_WATCH_REPORT_DIR/check.txt"; then
             echo "status=unchanged" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=error" >> "$GITHUB_OUTPUT"
+            echo "::error::site-watch: check-site-update.js exited 0 without CHANGED or UNCHANGED output"
+            exit 1
           fi
           exit 0
       - name: Quiet summary (nothing to do)
         if: steps.check.outputs.status != 'changed'
+        env:
+          SITE_WATCH_REPORT_DIR: ${{ runner.temp }}/Accelerate/reports/site-watch
         run: |
-          echo "site-watch: ${{ steps.check.outputs.status }} - $(head -n1 "$RUNNER_TEMP/check.txt")" | tee -a "$GITHUB_STEP_SUMMARY"
+          {
+            echo "site-watch: ${{ steps.check.outputs.status }}"
+            echo '```text'
+            cat "$SITE_WATCH_REPORT_DIR/check.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Fetch real worker and run parity tests
         if: steps.check.outputs.status == 'changed'
-        working-directory: infra/tools/site-parity
+        env:
+          SITE_WATCH_REPORT_DIR: ${{ runner.temp }}/Accelerate/reports/site-watch
+        working-directory: projects/augment-chess/oracle/tools/site-parity
         run: |
           set +e
-          R="$RUNNER_TEMP/site-watch-report.md"
+          R="$SITE_WATCH_REPORT_DIR/report.md"
           {
             echo "# Site update detected"
             echo
-            echo '```'; cat "$RUNNER_TEMP/check.txt"; echo '```'
+            echo '```text'
+            cat "$SITE_WATCH_REPORT_DIR/check.txt"
+            echo '```'
           } > "$R"
-          node fetch-real-worker.js --force > "$RUNNER_TEMP/fetch.txt" 2>&1
+          node fetch-real-worker.js --force > "$SITE_WATCH_REPORT_DIR/fetch.txt" 2>&1
           frc=$?
-          { echo; echo "## fetch-real-worker (exit $frc)"; echo '```'; tail -n 20 "$RUNNER_TEMP/fetch.txt"; echo '```'; } >> "$R"
+          cat "$SITE_WATCH_REPORT_DIR/fetch.txt"
+          {
+            echo
+            echo "## fetch-real-worker (exit $frc)"
+            echo '```text'
+            cat "$SITE_WATCH_REPORT_DIR/fetch.txt"
+            echo '```'
+          } >> "$R"
           if [ $frc -ne 0 ]; then
-            echo "::warning::fetch-real-worker failed; parity tests skipped"
+            echo "::warning::fetch-real-worker.js exited $frc; parity tests skipped; exact diagnostic is in fetch.txt and the step log"
           else
             for t in "parity-actions.js - 200" "parity-apply.js - 150" "parity-playout.js - 15"; do
               set -- $t
-              timeout 600 node "$1" "$2" "$3" > "$RUNNER_TEMP/t.txt" 2>&1
+              log="$SITE_WATCH_REPORT_DIR/${1%.js}.txt"
+              timeout 600 node "$1" "$2" "$3" > "$log" 2>&1
               rc=$?
-              { echo; echo "## $1 (exit $rc)"; echo '```'; tail -n 40 "$RUNNER_TEMP/t.txt"; echo '```'; } >> "$R"
-              [ $rc -ne 0 ] && echo "::warning::$1 exited $rc"
+              cat "$log"
+              {
+                echo
+                echo "## $1 (exit $rc)"
+                echo '```text'
+                cat "$log"
+                echo '```'
+              } >> "$R"
+              if [ $rc -ne 0 ]; then
+                echo "::warning::$1 exited $rc; exact diagnostic is in ${1%.js}.txt and the step log"
+              fi
             done
           fi
           echo
           {
             echo
-            echo "Next (manual): review, then run \`node infra/tools/site-parity/check-site-update.js --save\` locally and commit last-seen.json."
+            echo "Next (manual): review, then run \`node projects/augment-chess/oracle/tools/site-parity/check-site-update.js --save\` locally and commit last-seen.json."
           } >> "$R"
           cat "$R" >> "$GITHUB_STEP_SUMMARY"
-          cp "$R" "$GITHUB_WORKSPACE/site-watch-report.md"
       - name: Upload report
-        if: steps.check.outputs.status == 'changed'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: site-watch-report
-          path: site-watch-report.md
+          path: ${{ runner.temp }}/Accelerate/reports/site-watch
+          if-no-files-found: warn
           retention-days: 30

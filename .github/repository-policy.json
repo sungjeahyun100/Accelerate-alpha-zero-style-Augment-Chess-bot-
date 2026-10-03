@@ -1,10 +1,11 @@
 {
   "schemaVersion": 1,
   "allowedRootFiles": [
-    ".gitignore", "AGENTS.md", "CHANGELOG.md", "CONTRIBUTING.md", "NOTICE.md", "README.md"
+    ".gitignore", "AGENTS.md", "CHANGELOG.md", "CONTRIBUTING.md", "NOTICE.md", "README.md",
+    "Cargo.toml", "Cargo.lock", "pyproject.toml", "uv.lock", "package.json"
   ],
   "allowedRootDirectories": [
-    ".github", "bridge", "docs", "infra", "pre_cpp_engine_code", "python", "rust-engine", "tests"
+    ".github", "docs", "packages", "projects"
   ],
   "forbiddenDirectoryNames": [
     ".cache", ".venv", "__pycache__", "build", "checkpoints", "coverage", "dist",

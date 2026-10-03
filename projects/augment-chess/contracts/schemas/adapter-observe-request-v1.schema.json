@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:augment-chess:adapter:observe-request:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "viewer"],
+  "properties": {
+    "kind": { "const": "observe" },
+    "viewer": { "enum": ["white", "black"] }
+  }
+}

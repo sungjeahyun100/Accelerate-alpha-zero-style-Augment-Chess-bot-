@@ -1,0 +1,2505 @@
+{
+  "schemaVersion": 1,
+  "rulesVersion": "augment-site-20260928-e5ed84fcf8e72a24",
+  "constants": {
+    "NORMAL_DECK_SLOT_COUNT": 3,
+    "CHAOS_DECK_SLOT_COUNT": 6,
+    "CHAOS_DRAFT_BUNDLE_COUNT": 3,
+    "CHAOS_DRAFT_BUNDLE_SIZE": 2,
+    "GRAND_DRAFT_POOL_SIZE": 28,
+    "GRAND_DRAFT_PICK_COUNT": 12,
+    "GRAND_DECK_SLOT_COUNT": 6,
+    "GRAND_DRAFT_CATEGORIES": [
+      "OPENING",
+      "MIDDLE",
+      "PIECE",
+      "END"
+    ],
+    "GRAND_DRAFT_CATEGORY_SIZES": {
+      "OPENING": 4,
+      "MIDDLE": 10,
+      "PIECE": 7,
+      "END": 7
+    },
+    "FIRST_DRAFT_OPENING_WEIGHT_MULTIPLIER": 1.3,
+    "FREE_MOVE_MAX_PLANS": 3,
+    "CARD_CATEGORY_GROUPS": {
+      "OPENING": [
+        "king-of-the-hill",
+        "loyalist",
+        "geneva-convention",
+        "summon-colossus",
+        "big-rook",
+        "merchant-guild",
+        "london-system",
+        "last-stand",
+        "fast-growth",
+        "horde",
+        "queen-cavalry",
+        "knightmate",
+        "early-promotion",
+        "holdout",
+        "sprint",
+        "fianchetto",
+        "dutch",
+        "pawn-conversion",
+        "elephant-escape",
+        "iron-monarch",
+        "martyrdom",
+        "apprentice-knights",
+        "checker",
+        "initiative",
+        "queens-gambit",
+        "guard",
+        "otherworld",
+        "calling-card",
+        "qxe1",
+        "democracy",
+        "field-promotion",
+        "princess",
+        "vanguard",
+        "big-bishop",
+        "thief",
+        "false-start",
+        "locust-swarm",
+        "d4"
+      ],
+      "MIDDLE": [
+        "parry",
+        "mongolian-gambit",
+        "chameleon-mutation",
+        "alekhine-machine-gun",
+        "suicide-bomber",
+        "radical-charge",
+        "switcheroo",
+        "royal-shield",
+        "stealth",
+        "retreat",
+        "encouragement",
+        "socialism",
+        "horse-riding",
+        "dice",
+        "feudal-contract",
+        "imperial-studies",
+        "religious-victory",
+        "overwhelm",
+        "castling",
+        "snipe",
+        "disarm",
+        "quantum-mechanics",
+        "schrodinger-pawns",
+        "en-passant-bang",
+        "basic-training",
+        "taunt",
+        "panic",
+        "pawn-storm",
+        "rule-ticket",
+        "insight",
+        "queen-afterimage",
+        "white-box",
+        "black-box",
+        "trolley",
+        "reposition",
+        "emergency-evacuation",
+        "vortex",
+        "backward-knight",
+        "file-surge",
+        "rook-lift",
+        "inertia",
+        "ice-sheet",
+        "chimera",
+        "fanatical-ritual",
+        "evasion",
+        "random-roulette",
+        "premove",
+        "trojan-horse",
+        "mad-horse",
+        "freeze",
+        "sacrifice",
+        "promotion-rush",
+        "ghost",
+        "corner-kick",
+        "conversion",
+        "submerge",
+        "twins",
+        "armistice",
+        "poisoned-pawn",
+        "exhaustion",
+        "mistake-card",
+        "frontline-response",
+        "relay",
+        "suspicious-potion",
+        "cleanup",
+        "majesty",
+        "infiltration",
+        "killer-king",
+        "outpost",
+        "nullification",
+        "miracle",
+        "overtake",
+        "disassembly",
+        "proficiency",
+        "long-en-passant",
+        "symmetry",
+        "metal",
+        "e4",
+        "bishop-infiltration",
+        "greek-gift",
+        "solidarity",
+        "wanted",
+        "assembly",
+        "vigilance",
+        "roller"
+      ],
+      "END": [
+        "black-magic",
+        "fleeting-dream",
+        "empty-lunchbox",
+        "underground-bunker",
+        "baby-bear",
+        "pegasus",
+        "reverse-pawns",
+        "hallucination",
+        "blue-jeans",
+        "conscription",
+        "barricade",
+        "bribe",
+        "racing-king",
+        "collapse",
+        "canceling",
+        "ultimatum",
+        "prophecy",
+        "coronation",
+        "underpromotion",
+        "final-weapon",
+        "charge",
+        "stake",
+        "palace",
+        "exile",
+        "spy",
+        "traitor",
+        "othello",
+        "necromancy",
+        "death-squad",
+        "desperado",
+        "icbm",
+        "moving",
+        "substitution",
+        "chain",
+        "bina-mate",
+        "clone",
+        "joker",
+        "vanish",
+        "homecoming",
+        "judgment",
+        "lobster",
+        "portal-gun",
+        "frenzy",
+        "zugzwang",
+        "vip",
+        "replay",
+        "hypocrisy",
+        "gomoku",
+        "recurrence",
+        "reversal",
+        "highlander",
+        "extinction",
+        "brutus",
+        "mutation",
+        "taboo",
+        "brainwash",
+        "synchronization",
+        "resolve",
+        "gale",
+        "leap",
+        "witch-trial"
+      ],
+      "PIECE": [
+        "hook",
+        "assassin",
+        "grasshopper",
+        "dragon",
+        "constitutional-monarchy",
+        "jester",
+        "eagle",
+        "herald",
+        "eastern-policy",
+        "amazon",
+        "wizard",
+        "log",
+        "local-conscription",
+        "windmill",
+        "knightmaster",
+        "standard-bearer",
+        "reaper",
+        "ordination",
+        "reformation",
+        "idol",
+        "missionary",
+        "siege-ram",
+        "magic-girl",
+        "berserker",
+        "slime",
+        "siren",
+        "trickster",
+        "undead",
+        "campfire",
+        "hedgehog",
+        "clockwork",
+        "parrot",
+        "paladin",
+        "octopus",
+        "grappler",
+        "revolving-door",
+        "don-quixote",
+        "medium"
+      ],
+      "RULE": [
+        "platform",
+        "acceleration",
+        "winter-kingdom",
+        "high-ground",
+        "highway",
+        "monochrome-chess",
+        "macho-chess",
+        "cool-guy",
+        "black-hole",
+        "rule-bombs",
+        "periodic-collapse",
+        "portal",
+        "mistake",
+        "saturation",
+        "transcendence",
+        "diagonal-chess",
+        "chess-n-pow-30",
+        "camouflage-color",
+        "recycling",
+        "chess-344200",
+        "chess-960",
+        "football",
+        "monster",
+        "crown",
+        "conveyor",
+        "revelation",
+        "capture-the-flag"
+      ],
+      "GUN": [
+        "shotgun-king"
+      ]
+    },
+    "DRAFT_BALANCE_MAX_SCORE_GAP": 2,
+    "DRAFT_BALANCE_EXTRA_ATTEMPTS": 2,
+    "GRAND_DRAFT_VERSION": 1,
+    "TURN_EXCLUSIVE_CARD_KEYS": [
+      "trolley",
+      "premove",
+      "freeMove",
+      "brainwash"
+    ],
+    "LATEST_MERCHANT_GUILD_EXCLUSIVE_CARD_IDS": [
+      "king-of-the-hill",
+      "iron-monarch",
+      "horse-riding",
+      "racing-king",
+      "switcheroo",
+      "imperial-studies",
+      "underground-bunker",
+      "last-resistance",
+      "black-magic",
+      "knightmate",
+      "qxe1",
+      "castling",
+      "encouragement"
+    ],
+    "LATEST_MUTUALLY_EXCLUSIVE_DRAFT_CARD_GROUPS": [
+      [
+        "summon-colossus",
+        "false-start"
+      ],
+      [
+        "summon-colossus",
+        "london-system"
+      ],
+      [
+        "summon-colossus",
+        "chess-344200"
+      ],
+      [
+        "summon-colossus",
+        "chess-n-pow-30"
+      ],
+      [
+        "summon-colossus",
+        "chess-45-pow-30"
+      ],
+      [
+        "big-rook",
+        "big-bishop",
+        "london-system",
+        "horde"
+      ],
+      [
+        "pawn-conversion",
+        "en-passant-bang"
+      ],
+      [
+        "democracy",
+        "mongolian-gambit"
+      ],
+      [
+        "democracy",
+        "black-magic"
+      ],
+      [
+        "democracy",
+        "last-stand"
+      ],
+      [
+        "merchant-guild",
+        "king-of-the-hill"
+      ],
+      [
+        "merchant-guild",
+        "iron-monarch"
+      ],
+      [
+        "merchant-guild",
+        "horse-riding"
+      ],
+      [
+        "merchant-guild",
+        "racing-king"
+      ],
+      [
+        "merchant-guild",
+        "switcheroo"
+      ],
+      [
+        "merchant-guild",
+        "imperial-studies"
+      ],
+      [
+        "merchant-guild",
+        "underground-bunker"
+      ],
+      [
+        "merchant-guild",
+        "last-resistance"
+      ],
+      [
+        "merchant-guild",
+        "black-magic"
+      ],
+      [
+        "merchant-guild",
+        "knightmate"
+      ],
+      [
+        "merchant-guild",
+        "qxe1"
+      ],
+      [
+        "merchant-guild",
+        "castling"
+      ],
+      [
+        "merchant-guild",
+        "encouragement"
+      ]
+    ],
+    "LATEST_WHITE_BOX_RESULT_EXCLUSIVE_CARD_IDS": [
+      "democracy",
+      "queens-gambit"
+    ],
+    "EXCLUSIVE_OPENING_CARD_IDS": [
+      "big-rook",
+      "london-system",
+      "horde"
+    ],
+    "DELETED_CARD_IDS": [],
+    "COLOSSUS_FALSE_START_GROUP": [
+      "summon-colossus",
+      "false-start"
+    ],
+    "COLOSSUS_EXCLUSIVE_GROUPS": [
+      [
+        "summon-colossus",
+        "false-start"
+      ],
+      [
+        "summon-colossus",
+        "london-system"
+      ],
+      [
+        "summon-colossus",
+        "chess-344200"
+      ],
+      [
+        "summon-colossus",
+        "chess-n-pow-30"
+      ],
+      [
+        "summon-colossus",
+        "chess-45-pow-30"
+      ]
+    ]
+  },
+  "weights": [
+    {
+      "id": "d4",
+      "effect": "d4",
+      "phase": "OPENING",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1.3
+    },
+    {
+      "id": "e4",
+      "effect": "e4",
+      "phase": "MIDDLE",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "bishop-infiltration",
+      "effect": "bishopInfiltration",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "greek-gift",
+      "effect": "greekGift",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "solidarity",
+      "effect": "solidarity",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "grappler",
+      "effect": "grappler",
+      "phase": "PIECE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "revolving-door",
+      "effect": "revolvingDoor",
+      "phase": "PIECE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "don-quixote",
+      "effect": "donQuixote",
+      "phase": "PIECE",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "taboo",
+      "effect": "taboo",
+      "phase": "END",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "brainwash",
+      "effect": "brainwash",
+      "phase": "END",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "wanted",
+      "effect": "wanted",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "synchronization",
+      "effect": "synchronization",
+      "phase": "END",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "assembly",
+      "effect": "assembly",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "vigilance",
+      "effect": "vigilance",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "medium",
+      "effect": "medium",
+      "phase": "PIECE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "roller",
+      "effect": "roller",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "majesty",
+      "effect": "majesty",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "infiltration",
+      "effect": "infiltration",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "killer-king",
+      "effect": "killerKing",
+      "phase": "MIDDLE",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "campfire",
+      "effect": "campfire",
+      "phase": "PIECE",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "outpost",
+      "effect": "outpost",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "hedgehog",
+      "effect": "hedgehog",
+      "phase": "PIECE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "nullification",
+      "effect": "nullification",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "recurrence",
+      "effect": "recurrence",
+      "phase": "END",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "princess",
+      "effect": "princess",
+      "phase": "OPENING",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 1.1375
+    },
+    {
+      "id": "resolve",
+      "effect": "resolve",
+      "phase": "END",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "vanguard",
+      "effect": "vanguard",
+      "phase": "OPENING",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1.3
+    },
+    {
+      "id": "reversal",
+      "effect": "reversal",
+      "phase": "END",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "miracle",
+      "effect": "miracle",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "big-bishop",
+      "effect": "bigBishop",
+      "phase": "OPENING",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.9750000000000001
+    },
+    {
+      "id": "overtake",
+      "effect": "overtake",
+      "phase": "MIDDLE",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "capture-the-flag",
+      "effect": "captureTheFlag",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "highlander",
+      "effect": "highlander",
+      "phase": "END",
+      "stars": 5,
+      "weight": 0.5,
+      "openingWeight": 0.5
+    },
+    {
+      "id": "thief",
+      "effect": "thief",
+      "phase": "OPENING",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1.3
+    },
+    {
+      "id": "disassembly",
+      "effect": "disassembly",
+      "phase": "MIDDLE",
+      "stars": 2,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "false-start",
+      "effect": "falseStart",
+      "phase": "OPENING",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1.3
+    },
+    {
+      "id": "proficiency",
+      "effect": "proficiency",
+      "phase": "MIDDLE",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "locust-swarm",
+      "effect": "locustSwarm",
+      "phase": "OPENING",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1.3
+    },
+    {
+      "id": "long-en-passant",
+      "effect": "longEnPassant",
+      "phase": "MIDDLE",
+      "stars": 2,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "extinction",
+      "effect": "extinction",
+      "phase": "END",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "symmetry",
+      "effect": "symmetry",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "brutus",
+      "effect": "brutus",
+      "phase": "END",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "clockwork",
+      "effect": "clockwork",
+      "phase": "PIECE",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "mutation",
+      "effect": "mutation",
+      "phase": "END",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "parrot",
+      "effect": "parrot",
+      "phase": "PIECE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "paladin",
+      "effect": "paladin",
+      "phase": "PIECE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "octopus",
+      "effect": "octopus",
+      "phase": "PIECE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "metal",
+      "effect": "metal",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "siege-ram",
+      "effect": "siegeRam",
+      "phase": "PIECE",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "replay",
+      "effect": "replayMove",
+      "phase": "END",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "frontline-response",
+      "effect": "frontlineResponse",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "hypocrisy",
+      "effect": "hypocrisy",
+      "phase": "END",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "relay",
+      "effect": "relay",
+      "phase": "MIDDLE",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "suspicious-potion",
+      "effect": "suspiciousPotion",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "field-promotion",
+      "effect": "fieldPromotion",
+      "phase": "OPENING",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 1.1375
+    },
+    {
+      "id": "cleanup",
+      "effect": "cleanupPieces",
+      "phase": "MIDDLE",
+      "stars": 2,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "magic-girl",
+      "effect": "magicGirl",
+      "phase": "PIECE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "berserker",
+      "effect": "berserker",
+      "phase": "PIECE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "slime",
+      "effect": "slime",
+      "phase": "PIECE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "siren",
+      "effect": "siren",
+      "phase": "PIECE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "trickster",
+      "effect": "trickster",
+      "phase": "PIECE",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "gomoku",
+      "effect": "gomoku",
+      "phase": "END",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "undead",
+      "effect": "undead",
+      "phase": "PIECE",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "king-of-the-hill",
+      "effect": "kingOfTheHill",
+      "phase": "OPENING",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.4625000000000001
+    },
+    {
+      "id": "loyalist",
+      "effect": "loyalist",
+      "phase": "OPENING",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1.3
+    },
+    {
+      "id": "black-magic",
+      "effect": "blackMagic",
+      "phase": "END",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "parry",
+      "effect": "parry",
+      "phase": "MIDDLE",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "fleeting-dream",
+      "effect": "fleetingDream",
+      "phase": "END",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "empty-lunchbox",
+      "effect": "emptyLunchbox",
+      "phase": "END",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "geneva-convention",
+      "effect": "genevaConvention",
+      "phase": "OPENING",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1.3
+    },
+    {
+      "id": "platform",
+      "effect": "platformRule",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "armistice",
+      "effect": "armistice",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "poisoned-pawn",
+      "effect": "poisonedPawn",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "portal-gun",
+      "effect": "portalGun",
+      "phase": "END",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "exhaustion",
+      "effect": "exhaustion",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "missionary",
+      "effect": "missionary",
+      "phase": "PIECE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "mistake-card",
+      "effect": "mistakeCard",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "democracy",
+      "effect": "democracy",
+      "phase": "OPENING",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.9750000000000001
+    },
+    {
+      "id": "summon-colossus",
+      "effect": "summonColossus",
+      "phase": "OPENING",
+      "stars": 5,
+      "weight": 0.5,
+      "openingWeight": 0.65
+    },
+    {
+      "id": "big-rook",
+      "effect": "bigRook",
+      "phase": "OPENING",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.9750000000000001
+    },
+    {
+      "id": "chess-960",
+      "effect": "chess960",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "monochrome-chess",
+      "effect": "monochromeChess",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "chess-344200",
+      "effect": "chess344200",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "cool-guy",
+      "effect": "coolGuy",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "merchant-guild",
+      "effect": "merchantGuild",
+      "phase": "OPENING",
+      "stars": 5,
+      "weight": 0.5,
+      "openingWeight": 0.65
+    },
+    {
+      "id": "mongolian-gambit",
+      "effect": "mongolianGambit",
+      "phase": "MIDDLE",
+      "stars": 5,
+      "weight": 0.5,
+      "openingWeight": 0.5
+    },
+    {
+      "id": "reformation",
+      "effect": "reformation",
+      "phase": "PIECE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "london-system",
+      "effect": "londonSystem",
+      "phase": "OPENING",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.4625000000000001
+    },
+    {
+      "id": "qxe1",
+      "effect": "qxe1",
+      "phase": "OPENING",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1.3
+    },
+    {
+      "id": "last-stand",
+      "effect": "lastStand",
+      "phase": "OPENING",
+      "stars": 2,
+      "weight": 1.125,
+      "openingWeight": 1.4625000000000001
+    },
+    {
+      "id": "early-promotion",
+      "effect": "earlyPromotion",
+      "phase": "OPENING",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 1.1375
+    },
+    {
+      "id": "holdout",
+      "effect": "holdout",
+      "phase": "OPENING",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1.3
+    },
+    {
+      "id": "fast-growth",
+      "effect": "fastGrowth",
+      "phase": "OPENING",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 1.1375
+    },
+    {
+      "id": "constitutional-monarchy",
+      "effect": "constitutionalMonarchy",
+      "phase": "PIECE",
+      "stars": 2,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "shotgun-king",
+      "effect": "shotgunKing",
+      "phase": "GUN",
+      "stars": 5,
+      "weight": 0.5,
+      "openingWeight": 0.5
+    },
+    {
+      "id": "retreat",
+      "effect": "retreat",
+      "phase": "MIDDLE",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "sprint",
+      "effect": "pawnSprint",
+      "phase": "OPENING",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1.3
+    },
+    {
+      "id": "fianchetto",
+      "effect": "fianchetto",
+      "phase": "OPENING",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 1.1375
+    },
+    {
+      "id": "dutch",
+      "effect": "dutch",
+      "phase": "OPENING",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.9750000000000001
+    },
+    {
+      "id": "pawn-conversion",
+      "effect": "pawnConversion",
+      "phase": "OPENING",
+      "stars": 2,
+      "weight": 1.125,
+      "openingWeight": 1.4625000000000001
+    },
+    {
+      "id": "leap",
+      "effect": "pawnLeap",
+      "phase": "END",
+      "stars": 4.5,
+      "weight": 0.625,
+      "openingWeight": 0.625
+    },
+    {
+      "id": "horde",
+      "effect": "horde",
+      "phase": "OPENING",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.9750000000000001
+    },
+    {
+      "id": "jester",
+      "effect": "jester",
+      "phase": "PIECE",
+      "stars": 2,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "initiative",
+      "effect": "initiative",
+      "phase": "OPENING",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1.3
+    },
+    {
+      "id": "en-passant-bang",
+      "effect": "enPassantBang",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "evasion",
+      "effect": "evasion",
+      "phase": "MIDDLE",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "random-roulette",
+      "effect": "randomRoulette",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "premove",
+      "effect": "freeMove",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "icbm",
+      "effect": "icbm",
+      "phase": "END",
+      "stars": 2,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "guard",
+      "effect": "guard",
+      "phase": "OPENING",
+      "stars": 2,
+      "weight": 1.125,
+      "openingWeight": 1.4625000000000001
+    },
+    {
+      "id": "reaper",
+      "effect": "reaper",
+      "phase": "PIECE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "trojan-horse",
+      "effect": "trojanHorse",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "mad-horse",
+      "effect": "madHorse",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "freeze",
+      "effect": "freeze",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "sacrifice",
+      "effect": "sacrifice",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "clone",
+      "effect": "clonePassive",
+      "phase": "END",
+      "stars": 5,
+      "weight": 0.5,
+      "openingWeight": 0.5
+    },
+    {
+      "id": "joker",
+      "effect": "joker",
+      "phase": "END",
+      "stars": 4.5,
+      "weight": 0.625,
+      "openingWeight": 0.625
+    },
+    {
+      "id": "vanish",
+      "effect": "vanish",
+      "phase": "END",
+      "stars": 4.5,
+      "weight": 0.625,
+      "openingWeight": 0.625
+    },
+    {
+      "id": "promotion-rush",
+      "effect": "promotionRush",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "substitution",
+      "effect": "substitution",
+      "phase": "END",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "chain",
+      "effect": "chain",
+      "phase": "END",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "ghost",
+      "effect": "ghost",
+      "phase": "MIDDLE",
+      "stars": 4.5,
+      "weight": 0.625,
+      "openingWeight": 0.625
+    },
+    {
+      "id": "corner-kick",
+      "effect": "cornerKick",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "conversion",
+      "effect": "conversion",
+      "phase": "MIDDLE",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "basic-training",
+      "effect": "basicTraining",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "taunt",
+      "effect": "taunt",
+      "phase": "MIDDLE",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "reverse-pawns",
+      "effect": "reversePawns",
+      "phase": "END",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "hallucination",
+      "effect": "hallucination",
+      "phase": "END",
+      "stars": 2,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "blue-jeans",
+      "effect": "blueJeans",
+      "phase": "END",
+      "stars": 5,
+      "weight": 0.5,
+      "openingWeight": 0.5
+    },
+    {
+      "id": "spy",
+      "effect": "spy",
+      "phase": "END",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "conscription",
+      "effect": "conscription",
+      "phase": "END",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "local-conscription",
+      "effect": "localConscription",
+      "phase": "PIECE",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "barricade",
+      "effect": "barricade",
+      "phase": "END",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "queen-cavalry",
+      "effect": "queenCavalry",
+      "phase": "OPENING",
+      "stars": 2,
+      "weight": 1.125,
+      "openingWeight": 1.4625000000000001
+    },
+    {
+      "id": "chameleon-mutation",
+      "effect": "chameleonMutation",
+      "phase": "MIDDLE",
+      "stars": 1.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "chimera",
+      "effect": "chimera",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "alekhine-machine-gun",
+      "effect": "alekhineMachineGun",
+      "phase": "MIDDLE",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "eastern-policy",
+      "effect": "easternPolicy",
+      "phase": "PIECE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "suicide-bomber",
+      "effect": "suicideBomber",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "bribe",
+      "effect": "bribe",
+      "phase": "END",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "horse-riding",
+      "effect": "horseRiding",
+      "phase": "MIDDLE",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "eagle",
+      "effect": "eagle",
+      "phase": "PIECE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "log",
+      "effect": "log",
+      "phase": "PIECE",
+      "stars": 2,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "encouragement",
+      "effect": "encouragement",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "queens-gambit",
+      "effect": "queensGambit",
+      "phase": "OPENING",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 1.1375
+    },
+    {
+      "id": "martyrdom",
+      "effect": "martyrdom",
+      "phase": "OPENING",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1.3
+    },
+    {
+      "id": "amazon",
+      "effect": "amazon",
+      "phase": "PIECE",
+      "stars": 4.5,
+      "weight": 0.625,
+      "openingWeight": 0.625
+    },
+    {
+      "id": "ordination",
+      "effect": "ordination",
+      "phase": "PIECE",
+      "stars": 2,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "pegasus",
+      "effect": "pegasus",
+      "phase": "END",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "racing-king",
+      "effect": "racingKing",
+      "phase": "END",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "radical-charge",
+      "effect": "radicalCharge",
+      "phase": "MIDDLE",
+      "stars": 4.5,
+      "weight": 0.625,
+      "openingWeight": 0.625
+    },
+    {
+      "id": "hook",
+      "effect": "hook",
+      "phase": "PIECE",
+      "stars": 4.5,
+      "weight": 0.625,
+      "openingWeight": 0.625
+    },
+    {
+      "id": "switcheroo",
+      "effect": "switcheroo",
+      "phase": "MIDDLE",
+      "stars": 1.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "herald",
+      "effect": "herald",
+      "phase": "PIECE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "stealth",
+      "effect": "stealth",
+      "phase": "MIDDLE",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "acceleration",
+      "effect": "acceleration",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "grasshopper",
+      "effect": "grasshopper",
+      "phase": "PIECE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "dragon",
+      "effect": "dragon",
+      "phase": "PIECE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "palace",
+      "effect": "palace",
+      "phase": "END",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "knightmate",
+      "effect": "knightmate",
+      "phase": "OPENING",
+      "stars": 2,
+      "weight": 1.125,
+      "openingWeight": 1.4625000000000001
+    },
+    {
+      "id": "socialism",
+      "effect": "socialism",
+      "phase": "MIDDLE",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "collapse",
+      "effect": "collapse",
+      "phase": "END",
+      "stars": 4.5,
+      "weight": 0.625,
+      "openingWeight": 0.625
+    },
+    {
+      "id": "ultimatum",
+      "effect": "ultimatum",
+      "phase": "END",
+      "stars": 4.5,
+      "weight": 0.625,
+      "openingWeight": 0.625
+    },
+    {
+      "id": "prophecy",
+      "effect": "prophecy",
+      "phase": "END",
+      "stars": 4.5,
+      "weight": 0.625,
+      "openingWeight": 0.625
+    },
+    {
+      "id": "assassin",
+      "effect": "assassin",
+      "phase": "PIECE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "wizard",
+      "effect": "wizard",
+      "phase": "PIECE",
+      "stars": 5,
+      "weight": 0.5,
+      "openingWeight": 0.5
+    },
+    {
+      "id": "dice",
+      "effect": "dice",
+      "phase": "MIDDLE",
+      "stars": 2,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "revelation",
+      "effect": "revelation",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "football",
+      "effect": "football",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "monster",
+      "effect": "monsterRule",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "crown",
+      "effect": "crownRule",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "conveyor",
+      "effect": "conveyorRule",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "black-hole",
+      "effect": "blackHole",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "winter-kingdom",
+      "effect": "winterKingdom",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "macho-chess",
+      "effect": "machoChess",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "recycling",
+      "effect": "recycling",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "rule-bombs",
+      "effect": "ruleBombs",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "periodic-collapse",
+      "effect": "periodicCollapse",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "portal",
+      "effect": "portal",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "mistake",
+      "effect": "mistake",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "saturation",
+      "effect": "saturation",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "transcendence",
+      "effect": "transcendence",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "diagonal-chess",
+      "effect": "diagonalChess",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "chess-n-pow-30",
+      "effect": "chessNPow30",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "camouflage-color",
+      "effect": "camouflageRule",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "elephant-escape",
+      "effect": "elephantEscape",
+      "phase": "OPENING",
+      "stars": 2,
+      "weight": 1.125,
+      "openingWeight": 1.4625000000000001
+    },
+    {
+      "id": "feudal-contract",
+      "effect": "feudalContract",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "imperial-studies",
+      "effect": "imperialStudies",
+      "phase": "MIDDLE",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "religious-victory",
+      "effect": "religiousVictory",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "overwhelm",
+      "effect": "overwhelm",
+      "phase": "MIDDLE",
+      "stars": 4.5,
+      "weight": 0.625,
+      "openingWeight": 0.625
+    },
+    {
+      "id": "bina-mate",
+      "effect": "binaMate",
+      "phase": "END",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "iron-monarch",
+      "effect": "ironMonarch",
+      "phase": "OPENING",
+      "stars": 4.5,
+      "weight": 0.625,
+      "openingWeight": 0.8125
+    },
+    {
+      "id": "exile",
+      "effect": "exile",
+      "phase": "END",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "royal-shield",
+      "effect": "royalShield",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "underground-bunker",
+      "effect": "undergroundBunker",
+      "phase": "END",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "castling",
+      "effect": "freeCastling",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "canceling",
+      "effect": "canceling",
+      "phase": "END",
+      "stars": 5,
+      "weight": 0.5,
+      "openingWeight": 0.5
+    },
+    {
+      "id": "snipe",
+      "effect": "bishopSnipe",
+      "phase": "MIDDLE",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "witch-trial",
+      "effect": "witchTrial",
+      "phase": "END",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "windmill",
+      "effect": "windmill",
+      "phase": "PIECE",
+      "stars": 1.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "backward-knight",
+      "effect": "backwardKnight",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "file-surge",
+      "effect": "fileSurge",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "rook-lift",
+      "effect": "rookLift",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "fanatical-ritual",
+      "effect": "fanaticalRitual",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "knightmaster",
+      "effect": "knightmaster",
+      "phase": "PIECE",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "standard-bearer",
+      "effect": "standardBearer",
+      "phase": "PIECE",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "apprentice-knights",
+      "effect": "apprenticeKnights",
+      "phase": "OPENING",
+      "stars": 1.5,
+      "weight": 1.125,
+      "openingWeight": 1.4625000000000001
+    },
+    {
+      "id": "checker",
+      "effect": "checker",
+      "phase": "OPENING",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.4625000000000001
+    },
+    {
+      "id": "disarm",
+      "effect": "disarm",
+      "phase": "MIDDLE",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "last-resistance",
+      "effect": "lastResistance",
+      "phase": "END",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "coronation",
+      "effect": "coronation",
+      "phase": "END",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "underpromotion",
+      "effect": "underpromotion",
+      "phase": "END",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "stake",
+      "effect": "stake",
+      "phase": "END",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "final-weapon",
+      "effect": "finalWeapon",
+      "phase": "END",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "charge",
+      "effect": "charge",
+      "phase": "END",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "royal-command",
+      "effect": "royalCommand",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "severance",
+      "effect": "severance",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "inertia",
+      "effect": "inertia",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "ice-sheet",
+      "effect": "iceSheet",
+      "phase": "MIDDLE",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "injury",
+      "effect": "injury",
+      "phase": "MIDDLE",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "breakthrough-order",
+      "effect": "breakthroughOrder",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "panic",
+      "effect": "panic",
+      "phase": "MIDDLE",
+      "stars": 2,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "scarecrow",
+      "effect": "scarecrow",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "rule-ticket",
+      "effect": "ruleTicket",
+      "phase": "MIDDLE",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "insight",
+      "effect": "insight",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "pawn-storm",
+      "effect": "pawnStorm",
+      "phase": "MIDDLE",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "queen-afterimage",
+      "effect": "queenAfterimage",
+      "phase": "MIDDLE",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "white-box",
+      "effect": "whiteBox",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "black-box",
+      "effect": "blackBox",
+      "phase": "MIDDLE",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "trolley",
+      "effect": "trolley",
+      "phase": "MIDDLE",
+      "stars": 5,
+      "weight": 0.5,
+      "openingWeight": 0.5
+    },
+    {
+      "id": "quantum-mechanics",
+      "effect": "quantumMechanics",
+      "phase": "MIDDLE",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "schrodinger-pawns",
+      "effect": "schrodingerPawns",
+      "phase": "MIDDLE",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "reposition",
+      "effect": "reposition",
+      "phase": "MIDDLE",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "emergency-evacuation",
+      "effect": "emergencyEvacuation",
+      "phase": "MIDDLE",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "traitor",
+      "effect": "traitor",
+      "phase": "END",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "othello",
+      "effect": "othello",
+      "phase": "END",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "necromancy",
+      "effect": "necromancy",
+      "phase": "END",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "death-squad",
+      "effect": "deathSquad",
+      "phase": "END",
+      "stars": 2.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "desperado",
+      "effect": "desperado",
+      "phase": "END",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "moving",
+      "effect": "moving",
+      "phase": "END",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "cleanup-sacrifice",
+      "effect": "cleanupSacrifice",
+      "phase": "END",
+      "stars": 1.5,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "submerge",
+      "effect": "submerge",
+      "phase": "MIDDLE",
+      "stars": 2,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "gale",
+      "effect": "gale",
+      "phase": "END",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 0.875
+    },
+    {
+      "id": "idol",
+      "effect": "idol",
+      "phase": "PIECE",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "homecoming",
+      "effect": "homecoming",
+      "phase": "END",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "otherworld",
+      "effect": "otherworld",
+      "phase": "OPENING",
+      "stars": 3.5,
+      "weight": 0.875,
+      "openingWeight": 1.1375
+    },
+    {
+      "id": "twins",
+      "effect": "twins",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "judgment",
+      "effect": "judgment",
+      "phase": "END",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "lobster",
+      "effect": "lobster",
+      "phase": "END",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "calling-card",
+      "effect": "callingCard",
+      "phase": "OPENING",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1.3
+    },
+    {
+      "id": "frenzy",
+      "effect": "frenzy",
+      "phase": "END",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "zugzwang",
+      "effect": "zugzwang",
+      "phase": "END",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "vip",
+      "effect": "vip",
+      "phase": "END",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    },
+    {
+      "id": "baby-bear",
+      "effect": "babyBear",
+      "phase": "END",
+      "stars": 4,
+      "weight": 0.75,
+      "openingWeight": 0.75
+    },
+    {
+      "id": "high-ground",
+      "effect": "highGround",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "highway",
+      "effect": "highway",
+      "phase": "RULE",
+      "stars": null,
+      "weight": 1.125,
+      "openingWeight": 1.125
+    },
+    {
+      "id": "vortex",
+      "effect": "vortex",
+      "phase": "MIDDLE",
+      "stars": 3,
+      "weight": 1,
+      "openingWeight": 1
+    }
+  ]
+}

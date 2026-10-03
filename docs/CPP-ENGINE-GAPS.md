@@ -1,6 +1,6 @@
 # C++ 엔진에서 비어 있는 것과 다음 단계 제안
 
-> 상태: 조사 결과와 제안을 모은 설명 문서입니다. 팀이 확정한 결정이 아닙니다(확정은 [DECISIONS.md](DECISIONS.md)에서 합니다). `pre_cpp_engine_code/engine.cpp`는 이 문서를 쓰면서 한 줄도 바꾸지 않았습니다.
+> 상태: 조사 결과와 제안을 모은 설명 문서입니다. 팀이 확정한 결정이 아닙니다(확정은 [DECISIONS.md](DECISIONS.md)에서 합니다). `projects/augment-chess/reference/pre_cpp_engine_code/engine.cpp`는 이 문서를 쓰면서 한 줄도 바꾸지 않았습니다.
 >
 > 근거 원칙: 정답 기준은 사이트가 실제로 쓰는 규칙 코드입니다([ORACLE-BASELINE.md](ORACLE-BASELINE.md)). 사이트 코드는 이 저장소에 넣지 않으므로(운영자 동의 증빙이 `NOTICE.md`에 없음) 이 문서에는 코드나 코드 발췌가 없고, **관측한 동작과 숫자**만 있습니다. 관측은 Twist 저장소 쪽에서 사이트 규칙 코드를 로컬 Node로 돌려 했습니다.
 

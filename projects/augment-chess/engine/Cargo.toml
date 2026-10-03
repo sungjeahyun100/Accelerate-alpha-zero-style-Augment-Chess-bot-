@@ -1,0 +1,18 @@
+[package]
+name = "augment-chess-engine"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+description = "Independent immutable Augment Chess rules engine"
+
+[dependencies]
+adapter-runtime = { path = "../../../packages/adapter-runtime" }
+augment-chess-contracts = { path = "../contracts" }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+serde_jcs = "0.2"
+sha2 = "0.10"
+
+[[bin]]
+name = "augment-chess-engine-json"
+path = "src/bin/augment-chess-engine-json.rs"

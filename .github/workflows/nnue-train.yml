@@ -1,7 +1,7 @@
 name: NNUE train (encode if needed + train)
 
 # One workflow for every NNUE training run.
-# Team repo version: runs inside infra/. The original project could also auto-commit the trained
+# Team repo version: runs inside projects/augment-chess/reference/infra/. The original project could also auto-commit the trained
 # weights to its main branch (promote=true); that step was removed here on purpose -- copy the
 # artifact or use save_model (stores models/<name>.json on the data branch) and commit by hand.
 #
@@ -54,7 +54,7 @@ permissions:
 
 defaults:
   run:
-    working-directory: infra
+    working-directory: projects/augment-chess/reference/infra
 
 concurrency:
   # Every run is independent (nothing is promoted automatically in the team repo version).
@@ -75,7 +75,7 @@ jobs:
           node-version: "22"
 
       - name: Install dependencies
-        run: npm install
+        run: npm install --workspaces=false
 
       - name: Read pipeline config
         id: cfg
@@ -170,7 +170,7 @@ jobs:
         shell: bash --noprofile --norc -o pipefail {0}
         run: |
           source train-env.sh
-          if [ -f "$GITHUB_WORKSPACE/infra/selfplay-val.jsonl" ]; then export VAL_DATA_FILE="$GITHUB_WORKSPACE/infra/selfplay-val.jsonl"; fi
+          if [ -f "$GITHUB_WORKSPACE/projects/augment-chess/reference/infra/selfplay-val.jsonl" ]; then export VAL_DATA_FILE="$GITHUB_WORKSPACE/projects/augment-chess/reference/infra/selfplay-val.jsonl"; fi
           cd nnue
           node train.js 2>&1 | tee ../train.log
 
@@ -199,7 +199,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: nnue-trained-weights
-          path: infra/nnue/model/
+          path: projects/augment-chess/reference/infra/nnue/model/
           retention-days: 14
 
       - name: Push new encode cache to gha-segments-16cards

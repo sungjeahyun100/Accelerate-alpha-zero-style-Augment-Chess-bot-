@@ -1,16 +1,15 @@
-# Rust (Cargo.lock is intentionally NOT ignored -- rust-engine is an application, not a
-# library, so it should be committed for reproducible builds)
-rust-engine/target/
+# Rust (Cargo.lock is intentionally tracked for reproducible application builds)
+target/
 **/*.rs.bk
 
 # Python
-python/**/__pycache__/
-python/**/*.pyc
-python/.venv/
-python/venv/
+**/__pycache__/
+**/*.pyc
+.venv/
+projects/accelerate/python/venv/
 *.egg-info/
 
-# Node (infra/, tooling)
+# Node (reference infra, oracle, tooling)
 node_modules/
 npm-debug.log*
 
@@ -19,8 +18,8 @@ npm-debug.log*
 *.pth
 *.ckpt
 *.onnx
-python/**/checkpoints/
-python/**/runs/
+projects/accelerate/python/**/checkpoints/
+projects/accelerate/python/**/runs/
 
 # OS / editor
 .DS_Store
@@ -29,5 +28,5 @@ Thumbs.db
 .idea/
 
 # cpp_compile
-pre_cpp_engine_code/engine_test
-pre_cpp_engine_code/engine_test_human
+projects/augment-chess/reference/pre_cpp_engine_code/engine_test
+projects/augment-chess/reference/pre_cpp_engine_code/engine_test_human

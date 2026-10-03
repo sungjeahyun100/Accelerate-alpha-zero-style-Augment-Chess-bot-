@@ -1,0 +1,23 @@
+[package]
+name = "augment-chess-browser"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Bounded browser transport for the native Augment Chess adapter"
+readme = "README.md"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+browser-test-fixtures = []
+
+[dependencies]
+adapter-runtime = { path = "../../../packages/adapter-runtime" }
+augment-chess-engine = { path = "../engine" }
+serde_json = "1"
+serde_jcs = "0.2"
+sha2 = "0.10"
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+wasm-bindgen = "=0.2.126"

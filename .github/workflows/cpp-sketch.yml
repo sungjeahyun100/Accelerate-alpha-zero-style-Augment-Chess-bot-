@@ -1,9 +1,8 @@
 name: C++ sketch compile and self-test
 
-# pre_cpp_engine_code/engine.cpp is a hand-written sketch meant to be handed
-# to an AI for Rust porting (see pre_cpp_engine_code/README.md). It isn't
-# part of the build and ci.yml's path filter (infra/**) never sees it, so a
-# broken sketch could sit unnoticed for a long time before porting day.
+# projects/augment-chess/reference/pre_cpp_engine_code/engine.cpp is a hand-written
+# Rust porting sketch (see projects/augment-chess/reference/pre_cpp_engine_code/README.md).
+# It is outside the main build, so this workflow checks it independently.
 #
 # The sketch's main() runs ~85 self-tests and returns non-zero on failure
 # (README: "빌드와 자체 검사 실행"). This workflow compiles it, RUNS those
@@ -14,11 +13,11 @@ on:
   push:
     branches: [main, develop]
     paths:
-      - "pre_cpp_engine_code/**"
+      - "projects/augment-chess/reference/pre_cpp_engine_code/**"
       - ".github/workflows/cpp-sketch.yml"
   pull_request:
     paths:
-      - "pre_cpp_engine_code/**"
+      - "projects/augment-chess/reference/pre_cpp_engine_code/**"
       - ".github/workflows/cpp-sketch.yml"
   workflow_dispatch: {}
 
@@ -34,15 +33,15 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Compile engine.cpp (compile-only check, kept from the old workflow)
-        working-directory: pre_cpp_engine_code
+        working-directory: projects/augment-chess/reference/pre_cpp_engine_code
         run: g++ -std=c++20 -Wall -Wextra -c engine.cpp -o /dev/null
 
       - name: Build engine.cpp with its self-tests
-        working-directory: pre_cpp_engine_code
+        working-directory: projects/augment-chess/reference/pre_cpp_engine_code
         run: g++ -std=c++20 -Wall -Wextra engine.cpp -o engine_test
 
       - name: Run self-tests (non-zero exit on any failed check)
-        working-directory: pre_cpp_engine_code
+        working-directory: projects/augment-chess/reference/pre_cpp_engine_code
         run: ./engine_test
 
   # 변형본: 남아 있는 모든 판단 블록(C-shift, F-castle-attack-check,
@@ -55,19 +54,19 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: List remaining judgment blocks
-        working-directory: pre_cpp_engine_code
+        working-directory: projects/augment-chess/reference/pre_cpp_engine_code
         run: |
           sh ./uncomment_judgment.sh --list engine.cpp | tee blocks.txt
           test -s blocks.txt
 
       - name: Generate the all-judgments-enabled variant
-        working-directory: pre_cpp_engine_code
+        working-directory: projects/augment-chess/reference/pre_cpp_engine_code
         run: sh ./uncomment_judgment.sh engine.cpp > engine_all.cpp
 
       - name: Build the variant
-        working-directory: pre_cpp_engine_code
+        working-directory: projects/augment-chess/reference/pre_cpp_engine_code
         run: g++ -std=c++20 -Wall -Wextra engine_all.cpp -o engine_all_test
 
       - name: Run the variant's self-tests (non-zero exit on any failed check)
-        working-directory: pre_cpp_engine_code
+        working-directory: projects/augment-chess/reference/pre_cpp_engine_code
         run: ./engine_all_test

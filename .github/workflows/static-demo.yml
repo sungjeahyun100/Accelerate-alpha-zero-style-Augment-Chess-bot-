@@ -1,0 +1,210 @@
+name: Static browser demo validation
+
+on:
+  pull_request:
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'package.json'
+      - '.gitignore'
+      - 'NOTICE.md'
+      - '.github/repository-policy.json'
+      - '.github/workflows/static-demo.yml'
+      - 'packages/adapter-contract/**'
+      - 'packages/adapter-runtime/**'
+      - 'projects/augment-chess/engine/**'
+      - 'projects/augment-chess/contracts/**'
+      - 'projects/augment-chess/browser/**'
+      - 'projects/accelerate/demo/**'
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: bindings는 native/WASM 계약, all은 Svelte·실제 브라우저·HF 묶음까지 검증합니다.
+        type: choice
+        options: [bindings, all]
+        default: all
+        required: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: static-demo-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  bindings:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: '1.96.0'
+          targets: wasm32-unknown-unknown
+      - name: Configure external fixed slots
+        run: node projects/accelerate/demo/scripts/ci-evidence.mjs configure
+      - name: Identify complete validation inputs
+        id: identity
+        run: node projects/accelerate/demo/scripts/ci-evidence.mjs key bindings
+      - name: Restore successful native/WASM evidence and compiled files
+        id: verified
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.identity.outputs.key }}
+          path: |
+            ${{ env.ACCELERATE_DEMO_WASM }}
+            ${{ env.ACCELERATE_DEMO_WASM_TEST }}
+            ${{ env.ACCELERATE_DEMO_REPORTS }}/bindings-success.json
+            ${{ env.ACCELERATE_DEMO_REPORTS }}/native-tests.log
+            ${{ env.ACCELERATE_DEMO_REPORTS }}/wasm-build.log
+            ${{ env.ACCELERATE_DEMO_REPORTS }}/wasm-test-build.log
+            ${{ env.ACCELERATE_DEMO_REPORTS }}/wasm-roundtrip.log
+            ${{ env.ACCELERATE_DEMO_REPORTS }}/native-fixtures.json
+      - name: Verify reused successful evidence
+        if: steps.verified.outputs.cache-hit == 'true'
+        run: node projects/accelerate/demo/scripts/ci-evidence.mjs verify bindings
+      - name: Install isolated frontend test dependencies and matching binding CLI
+        if: steps.verified.outputs.cache-hit != 'true'
+        run: |
+          export npm_config_cache="$ACCELERATE_OUTPUT_ROOT/cache/hf-static-demo/npm"
+          (cd projects/accelerate/demo && npm ci --workspaces=false)
+          cargo install wasm-bindgen-cli --version 0.2.126 --locked --root "$ACCELERATE_OUTPUT_ROOT/cache/hf-static-demo/tools"
+          echo "$ACCELERATE_OUTPUT_ROOT/cache/hf-static-demo/tools/bin" >> "$GITHUB_PATH"
+      - name: Validate native binding and compile WASM
+        if: steps.verified.outputs.cache-hit != 'true'
+        run: |
+          npm --prefix projects/accelerate/demo --workspaces=false run test:native 2>&1 | tee "$ACCELERATE_DEMO_REPORTS/native-tests.log"
+          npm --prefix projects/accelerate/demo --workspaces=false run wasm 2>&1 | tee "$ACCELERATE_DEMO_REPORTS/wasm-build.log"
+          npm --prefix projects/accelerate/demo --workspaces=false run wasm-test 2>&1 | tee "$ACCELERATE_DEMO_REPORTS/wasm-test-build.log"
+          npm --prefix projects/accelerate/demo --workspaces=false run test:wasm 2>&1 | tee "$ACCELERATE_DEMO_REPORTS/wasm-roundtrip.log"
+      - name: Record only completed successful validation
+        if: success() && steps.verified.outputs.cache-hit != 'true'
+        run: node projects/accelerate/demo/scripts/ci-evidence.mjs record bindings native-tests.log wasm-build.log wasm-test-build.log wasm-roundtrip.log native-fixtures.json
+      - name: Share compiled binding with dependent browser job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: static-demo-wasm
+          path: ${{ env.ACCELERATE_DEMO_WASM }}
+          if-no-files-found: error
+          retention-days: 14
+      - name: Preserve exact binding diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: static-demo-binding-reports
+          path: ${{ env.ACCELERATE_DEMO_REPORTS }}
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Preserve advanced test binding separately from production
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: static-demo-wasm-test
+          path: ${{ env.ACCELERATE_DEMO_WASM_TEST }}
+          if-no-files-found: error
+          retention-days: 14
+
+  frontend:
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: '1.96.0'
+      - name: Configure external fixed slots
+        run: node projects/accelerate/demo/scripts/ci-evidence.mjs configure
+      - name: Identify complete frontend validation inputs
+        id: identity
+        run: node projects/accelerate/demo/scripts/ci-evidence.mjs key frontend
+      - name: Restore successful frontend validation
+        id: verified
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.identity.outputs.key }}
+          path: |
+            ${{ env.ACCELERATE_DEMO_REPORTS }}/frontend-success.json
+            ${{ env.ACCELERATE_DEMO_REPORTS }}/frontend-check.log
+            ${{ env.ACCELERATE_DEMO_REPORTS }}/frontend-tests.log
+      - name: Verify reused successful frontend evidence
+        if: steps.verified.outputs.cache-hit == 'true'
+        run: node projects/accelerate/demo/scripts/ci-evidence.mjs verify frontend
+      - name: Check Svelte and Worker contracts independently of binding compilation
+        if: steps.verified.outputs.cache-hit != 'true'
+        run: |
+          export npm_config_cache="$ACCELERATE_OUTPUT_ROOT/cache/hf-static-demo/npm"
+          (cd projects/accelerate/demo && npm ci --workspaces=false)
+          npm --prefix projects/accelerate/demo --workspaces=false run check 2>&1 | tee "$ACCELERATE_DEMO_REPORTS/frontend-check.log"
+          npm --prefix projects/accelerate/demo --workspaces=false test 2>&1 | tee "$ACCELERATE_DEMO_REPORTS/frontend-tests.log"
+          node projects/accelerate/demo/scripts/ci-evidence.mjs record frontend frontend-check.log frontend-tests.log
+      - name: Preserve frontend diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: static-demo-frontend-reports
+          path: ${{ env.ACCELERATE_DEMO_REPORTS }}
+          if-no-files-found: warn
+          retention-days: 14
+
+  browser:
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all'
+    needs: [bindings, frontend]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - name: Configure external fixed slots
+        run: node projects/accelerate/demo/scripts/ci-evidence.mjs configure
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: static-demo-wasm
+          path: ${{ env.ACCELERATE_DEMO_WASM }}
+      - name: Install isolated test dependencies and Chromium
+        run: |
+          export npm_config_cache="$ACCELERATE_OUTPUT_ROOT/cache/hf-static-demo/npm"
+          export PLAYWRIGHT_BROWSERS_PATH="$ACCELERATE_OUTPUT_ROOT/cache/hf-static-demo/playwright"
+          echo "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH" >> "$GITHUB_ENV"
+          (cd projects/accelerate/demo && npm ci --workspaces=false)
+          npm --prefix projects/accelerate/demo --workspaces=false exec -- playwright install --with-deps chromium
+      - name: Build and test the actual static site
+        run: |
+          npm --prefix projects/accelerate/demo --workspaces=false run build 2>&1 | tee "$ACCELERATE_DEMO_REPORTS/frontend-build.log"
+          npm --prefix projects/accelerate/demo --workspaces=false run test:browser 2>&1 | tee "$ACCELERATE_DEMO_REPORTS/browser-tests.log"
+          npm --prefix projects/accelerate/demo --workspaces=false run bundle 2>&1 | tee "$ACCELERATE_DEMO_REPORTS/bundle.log"
+          npm --prefix projects/accelerate/demo --workspaces=false run verify-bundle
+          npm --prefix projects/accelerate/demo --workspaces=false run test:bundle 2>&1 | tee "$ACCELERATE_DEMO_REPORTS/bundled-browser-tests.log"
+      - name: Preserve verified HF Static bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hf-static-demo-${{ github.sha }}
+          path: ${{ env.ACCELERATE_DEMO_BUNDLE }}
+          if-no-files-found: error
+          retention-days: 14
+      - name: Preserve browser/build diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: static-demo-browser-reports
+          path: ${{ env.ACCELERATE_DEMO_REPORTS }}
+          if-no-files-found: warn
+          retention-days: 14

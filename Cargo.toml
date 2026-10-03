@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = [
+  "packages/adapter-runtime",
+  "projects/accelerate/native",
+  "projects/accelerate/runtime",
+  "projects/augment-chess/contracts",
+  "projects/augment-chess/browser",
+  "projects/augment-chess/engine",
+  "projects/augment-chess/tools/v6-migration",
+]
+
+[workspace.package]
+rust-version = "1.96"
+edition = "2024"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

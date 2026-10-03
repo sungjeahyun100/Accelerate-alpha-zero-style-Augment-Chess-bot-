@@ -3,8 +3,8 @@
 # contributors, 2026-09-23) -- add the rest as they start committing under their own
 # GitHub accounts (Discord nickname != GitHub username, don't guess).
 
-/infra/         @Vamp-pire
-/rust-engine/   @sungjeahyun100
+/projects/augment-chess/reference/infra/ @Vamp-pire
+/projects/augment-chess/engine/          @sungjeahyun100
 
-# python/, bridge/, tests/ have no committer with a confirmed GitHub account yet --
+# projects/accelerate/, game contracts and tests have no committer with a confirmed GitHub account yet --
 # add an owner here once someone starts pushing to those paths.

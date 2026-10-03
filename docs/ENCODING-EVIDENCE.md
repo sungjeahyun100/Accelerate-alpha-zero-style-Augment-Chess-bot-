@@ -1,6 +1,6 @@
 # O-001 근거 자료: encoding을 Rust와 Python 중 어디서 할까
 
-> 상태: 참고 자료입니다. [DECISIONS.md의 O-001](DECISIONS.md)은 **여전히 미결정**이며, 이 문서는 결정하지 않습니다. 결정은 팀이 합니다.
+> 상태: 과거 NNUE 실험의 참고 자료입니다. O-001은 [DECISIONS.md의 D-007](DECISIONS.md#d-007-python에서-관측행동-encoding을-먼저-구현)에서 Python-first로 채택했습니다. 아래 수치는 현재 encoder의 성능 실측이나 채택 근거의 추가 검증을 뜻하지 않습니다.
 
 ## 1. 한 줄 요약
 
@@ -58,4 +58,4 @@ Twist 프로젝트(NNUE 평가 모델)에서 상태를 신경망 입력으로 �
 - 위 표 7번의 러너 사양(4 vCPU)은 로그에 적혀 있지 않습니다.
 - 7, 8번은 GitHub Actions 러너 한 번의 실행 기록이라 다른 환경(로컬, 다른 코어 수)에서는 달라집니다.
 - 이 문서는 Rust 또는 Python encoder를 실제로 만들어 비교한 결과가 아닙니다. Python vs Rust 속도 비교 실측은 없습니다.
-- 결정은 팀이 합니다. O-001의 상태는 그대로 미결정입니다.
+- 현재 encoding 결정은 D-007이며, 아래 NNUE 실험과 새 Python encoder의 구현·검증 상태는 구분합니다.

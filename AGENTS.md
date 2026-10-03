@@ -16,15 +16,18 @@
   추가하고 다른 작업이 사용하는 checkout·브랜치를 정리하지 않는다.
 - 같은 목표의 후속 수정은 기존 작업 브랜치를 재사용한다. 파일별 수정, 반복 검사,
   연구 영수증 작성마다 브랜치를 늘리지 않는다. 독립 목표나 격리가 필요할 때 분기한다.
-- `rust-engine/`: 독립 규칙 엔진. Python·PyO3·신경망·ONNX runtime을 의존하지 않는다.
-- `bridge/`: 공통 계약과 얇은 언어 연동. PyO3 바인딩은 향후 이 영역의 독립 crate에
-  두며, 게임 규칙·MCTS·학습 로직을 넣지 않는다.
-- `python/`: 인코딩·MCTS·ResNet·LoRA·FiLM·self-play·학습·평가. 규칙을 중복 구현하지 않는다.
-- `infra/`: JS oracle과 기존 실험 도구. 상대 경로와 기존 동작을 보존한다.
-- `pre_cpp_engine_code/`: Rust 포팅 참고용 C++ 초안. 완성된 엔진으로 간주하지 않는다.
-- `tests/differential/`: oracle 비교 데이터와 검증. 운영 데이터셋을 저장하지 않는다.
+- `packages/adapter-contract/`, `packages/adapter-runtime/`: 게임 비종속 schema·호출·등록 계약.
+- `projects/augment-chess/engine/`, `projects/augment-chess/contracts/`: 독립 규칙 엔진과 게임 전용 계약·catalog.
+  Python·PyO3·신경망·ONNX runtime을 의존하지 않는다.
+- `projects/augment-chess/oracle/`, `projects/augment-chess/tests/`: 동결 사이트 기준 실행과 차분 검증.
+  운영 데이터셋을 저장하지 않는다.
+- `projects/augment-chess/reference/`: 기존 JS 실험 도구와 C++ 초안. JS 내부 상대
+  경로와 동작을 보존하고 초안을 완성된 엔진으로 간주하지 않는다.
+- `projects/accelerate/`: PyO3 바인딩·ONNX runtime·Python 인코딩·탐색·학습·평가.
+  게임 규칙을 중복 구현하지 않는다.
 - `docs/`와 `.github/`: 설계·규약과 저장소 CI. 책임이 드러나지 않는 새 최상위
   폴더나 실험별 복제 구현을 만들지 않는다.
+- 문서는 기본적으로 한국어로 작성한다.
 
 ## 커밋과 원격 공유
 
@@ -120,7 +123,7 @@
   PID·GUID·타임스탬프만으로 무제한 누적하지 않는다. 보존할 실험에는 ID와 재현 정보를 둔다.
 - 정리 전 최종 절대 경로와 link/junction 경계를 확인한다. 소유한 비활성 캐시만
   정리하며, 모델·데이터·보고서·다른 checkout의 작업을 일반 캐시처럼 지우지 않는다.
-- 기존 infra/CI 출력 경로는 일괄 이전하지 않는다. 해당 생성기를 수정할 때
+- 기존 JS 참고 도구/CI 출력 경로는 일괄 이전하지 않는다. 해당 생성기를 수정할 때
   새 루트로 전환하고 남은 예외를 설명한다.
 
 ## 공유 연구 영수증
@@ -172,6 +175,14 @@
   영향·미검증 범위를 남긴다. 복구 후 성공과 실패한 하위 단계를 구분하며 필수 실패를
   성공으로 바꾸지 않는다. 제품 사용자 메시지와 개발 상세 진단은
   [오류 전달 기준](docs/ENGINEERING-STANDARDS.md#경고와-오류-전달)을 따른다.
+- 독립 CI 검사는 병렬로 실행하고 빌드·성공한 테스트·검증 근거를 재사용한다.
+  SHA가 달라도 결과에 영향을 주는 전이 의존성·환경이 동일하고 성공 근거가 유효할 때만
+  재사용하며, 판정 기준과 무효화 조건은 ENGINEERING-STANDARDS를 따른다.
+- 동결 실행 profile manifest·composite catalog·source ABI·플랫폼이 바뀌면 이전 CI 성공과
+  wheel을 무효화한다. 원문 공개 catalog hash와 실행 프로필 식별자를 혼동하지 않는다.
+- 일회성 workflow는 동일 목표당 하나를 재사용하며 작성자·저장소 고정 개수 상한은
+  두지 않는다. 최근 run 5개·임시 artifact 14일을 기본으로 하되 열린 근거·미해결 실패는
+  보존한다. 다른 공동작업자의 workflow·기록과 실행 중인 작업은 정리하지 않는다.
 - 버그 수정·문서 변경마다 회귀 테스트나 fixture를 자동으로 추가하지 않는다.
   반복 가능성·영향·기존 검사 누락을 보고 장기 유지할 검사가 필요한지 판단한다.
   필요하면 기존 검사에 최소 재현 입력을 보태고, 중복 snapshot·대국 로그·전체

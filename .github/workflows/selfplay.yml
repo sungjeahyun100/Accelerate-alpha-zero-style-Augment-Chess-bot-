@@ -11,7 +11,7 @@ permissions:
 
 defaults:
   run:
-    working-directory: infra
+    working-directory: projects/augment-chess/reference/infra
 
 # One self-play run at a time: a manual dispatch while the 6-hourly cron run is
 # active waits instead of doubling the load on the data branch.

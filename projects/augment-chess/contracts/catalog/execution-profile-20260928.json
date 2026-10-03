@@ -1,0 +1,4293 @@
+{
+  "schemaVersion": 1,
+  "manifestVersion": "augment-v7-execution-profile-v1",
+  "profileVersion": "accelerate-headless-semantic-v7-faithful-init-v1",
+  "baseline": "site-20260928",
+  "rulesVersion": "augment-site-20260928-e5ed84fcf8e72a24",
+  "sourceMainSha256": "e5ed84fcf8e72a24e6a8cfeb9050787387a616c55184e6501fca2077e302c45c",
+  "parserSha256": "fdb08546776ec6228b03e8d02b40d4ab3255bae5f401adba7ff5dad927ac5c9c",
+  "sourcePublicCatalogHash": "yt63f_Lcq4xUPu4GbbdwAyv5IUTuC079nNxvF3IFrj4",
+  "sourcePolicy": {
+    "ast": "acorn-8.15.0/module/latest",
+    "offsetUnit": "UTF-16",
+    "statementOrder": "original-source-order",
+    "declarations": "all-original-function-variable-class-declarations",
+    "importBindings": "empty-string-stubs; imported modules are not executed",
+    "importMetaUrl": "original-frozen-main-url",
+    "dependencyValidation": "all-source-top-level-declarations-retained; node-sha256-and-binding-digest-checked",
+    "browserFutureRngEquality": false
+  },
+  "declarations": {
+    "count": 7260,
+    "bindingCount": 7262,
+    "nodesSha256": "98eb1ec5a007271786453341098ccdaade638fea89736731b204833103fea806",
+    "bindingsSha256": "75240848849af263b8bb599c20e3297da5c19a7b85fa30d54513d6457d08e92f"
+  },
+  "imports": [
+    {
+      "type": "ImportDeclaration",
+      "start": 0,
+      "end": 46,
+      "sha256": "abba7bc8717c9255471795730a07455b4afba80bdd2052d282adb6abeab8cab4",
+      "module": "./modulepreload-polyfill-COaX8i6R.js",
+      "bindings": []
+    },
+    {
+      "type": "ImportDeclaration",
+      "start": 47,
+      "end": 5450,
+      "sha256": "ee22e7626956d2a93184b1bec5193ff4b3430823f9cb4d3598856fff11da927f",
+      "module": "./zugzwang-BFV_Nlv2.js",
+      "bindings": [
+        "__vite_glob_0_171",
+        "__vite_glob_0_170",
+        "__vite_glob_0_169",
+        "__vite_glob_0_167",
+        "__vite_glob_0_166",
+        "__vite_glob_0_165",
+        "__vite_glob_0_163",
+        "__vite_glob_0_162",
+        "__vite_glob_0_161",
+        "__vite_glob_0_160",
+        "__vite_glob_0_159",
+        "__vite_glob_0_158",
+        "__vite_glob_0_153",
+        "__vite_glob_0_142",
+        "__vite_glob_0_140",
+        "__vite_glob_0_137",
+        "__vite_glob_0_131",
+        "__vite_glob_0_124",
+        "__vite_glob_0_118",
+        "__vite_glob_0_117",
+        "__vite_glob_0_114$1",
+        "__vite_glob_0_113$1",
+        "__vite_glob_0_108$1",
+        "__vite_glob_0_106$1",
+        "__vite_glob_0_105$1",
+        "__vite_glob_0_104$1",
+        "__vite_glob_0_103$1",
+        "__vite_glob_0_98$1",
+        "__vite_glob_0_97$1",
+        "__vite_glob_0_79$1",
+        "__vite_glob_0_76$1",
+        "__vite_glob_0_72$1",
+        "__vite_glob_0_71$1",
+        "__vite_glob_0_70$1",
+        "__vite_glob_0_68$1",
+        "__vite_glob_0_67$1",
+        "__vite_glob_0_66$1",
+        "__vite_glob_0_64$1",
+        "__vite_glob_0_63$1",
+        "__vite_glob_0_62$1",
+        "__vite_glob_0_61$1",
+        "__vite_glob_0_60$1",
+        "__vite_glob_0_59$1",
+        "__vite_glob_0_54$1",
+        "__vite_glob_0_43$1",
+        "__vite_glob_0_41$1",
+        "__vite_glob_0_38$1",
+        "__vite_glob_0_32$1",
+        "__vite_glob_0_25$1",
+        "__vite_glob_0_19$1",
+        "__vite_glob_0_18$1",
+        "__vite_glob_0_15$1",
+        "__vite_glob_0_14$1",
+        "__vite_glob_0_9$1",
+        "__vite_glob_0_7$1",
+        "__vite_glob_0_6$1",
+        "__vite_glob_0_5$1",
+        "__vite_glob_0_4$1",
+        "__vite_glob_1_301",
+        "__vite_glob_1_300",
+        "__vite_glob_1_297",
+        "__vite_glob_1_295",
+        "__vite_glob_1_294",
+        "__vite_glob_1_293",
+        "__vite_glob_1_291",
+        "__vite_glob_1_290",
+        "__vite_glob_1_289",
+        "__vite_glob_1_288",
+        "__vite_glob_1_284",
+        "__vite_glob_1_282",
+        "__vite_glob_1_281",
+        "__vite_glob_1_280",
+        "__vite_glob_1_279",
+        "__vite_glob_1_277",
+        "__vite_glob_1_276",
+        "__vite_glob_1_274",
+        "__vite_glob_1_273",
+        "__vite_glob_1_272",
+        "__vite_glob_1_269",
+        "__vite_glob_1_264",
+        "__vite_glob_1_263",
+        "__vite_glob_1_262",
+        "__vite_glob_1_261",
+        "__vite_glob_1_259",
+        "__vite_glob_1_258",
+        "__vite_glob_1_255",
+        "__vite_glob_1_254",
+        "__vite_glob_1_251",
+        "__vite_glob_1_248",
+        "__vite_glob_1_247",
+        "__vite_glob_1_244",
+        "__vite_glob_1_243",
+        "__vite_glob_1_240",
+        "__vite_glob_1_235",
+        "__vite_glob_1_234",
+        "__vite_glob_1_233",
+        "__vite_glob_1_232",
+        "__vite_glob_1_229",
+        "__vite_glob_1_228",
+        "__vite_glob_1_225",
+        "__vite_glob_1_222",
+        "__vite_glob_1_220",
+        "__vite_glob_1_219",
+        "__vite_glob_1_218",
+        "__vite_glob_1_217",
+        "__vite_glob_1_215",
+        "__vite_glob_1_214",
+        "__vite_glob_1_213",
+        "__vite_glob_1_210",
+        "__vite_glob_1_209",
+        "__vite_glob_1_208",
+        "__vite_glob_1_207",
+        "__vite_glob_1_206",
+        "__vite_glob_1_202",
+        "__vite_glob_1_201",
+        "__vite_glob_1_199",
+        "__vite_glob_1_198",
+        "__vite_glob_1_197",
+        "__vite_glob_1_196",
+        "__vite_glob_1_195",
+        "__vite_glob_1_194",
+        "__vite_glob_1_191",
+        "__vite_glob_1_186",
+        "__vite_glob_1_185",
+        "__vite_glob_1_184",
+        "__vite_glob_1_183",
+        "__vite_glob_1_180",
+        "__vite_glob_1_179",
+        "__vite_glob_1_176",
+        "__vite_glob_1_173",
+        "__vite_glob_1_172",
+        "__vite_glob_1_165",
+        "__vite_glob_1_164",
+        "__vite_glob_1_163",
+        "__vite_glob_1_161",
+        "__vite_glob_1_160",
+        "__vite_glob_1_158",
+        "__vite_glob_1_157",
+        "__vite_glob_1_156",
+        "__vite_glob_1_154",
+        "__vite_glob_1_153",
+        "__vite_glob_1_152",
+        "__vite_glob_1_151",
+        "__vite_glob_1_150",
+        "__vite_glob_1_148",
+        "__vite_glob_1_146",
+        "__vite_glob_1_142",
+        "__vite_glob_1_140",
+        "__vite_glob_1_137",
+        "__vite_glob_1_136",
+        "__vite_glob_1_135",
+        "__vite_glob_1_133",
+        "__vite_glob_1_132",
+        "__vite_glob_1_129",
+        "__vite_glob_1_128",
+        "__vite_glob_1_127",
+        "__vite_glob_1_123",
+        "__vite_glob_1_122",
+        "__vite_glob_1_120",
+        "__vite_glob_1_118",
+        "__vite_glob_1_116",
+        "__vite_glob_1_114",
+        "__vite_glob_1_110",
+        "__vite_glob_1_109",
+        "__vite_glob_1_108",
+        "__vite_glob_1_105",
+        "__vite_glob_1_104",
+        "__vite_glob_1_103",
+        "__vite_glob_1_102",
+        "__vite_glob_1_101",
+        "__vite_glob_1_100",
+        "__vite_glob_1_99",
+        "__vite_glob_1_95",
+        "__vite_glob_1_94",
+        "__vite_glob_1_91",
+        "__vite_glob_1_88",
+        "__vite_glob_1_87",
+        "__vite_glob_1_83",
+        "__vite_glob_1_82",
+        "__vite_glob_1_80",
+        "__vite_glob_1_79",
+        "__vite_glob_1_75",
+        "__vite_glob_1_70",
+        "__vite_glob_1_69",
+        "__vite_glob_1_67",
+        "__vite_glob_1_65",
+        "__vite_glob_1_62",
+        "__vite_glob_1_60",
+        "__vite_glob_1_57",
+        "__vite_glob_1_56",
+        "__vite_glob_1_54",
+        "__vite_glob_1_52",
+        "__vite_glob_1_51",
+        "__vite_glob_1_47",
+        "__vite_glob_1_45",
+        "__vite_glob_1_42",
+        "__vite_glob_1_41",
+        "__vite_glob_1_39",
+        "__vite_glob_1_37",
+        "__vite_glob_1_35",
+        "__vite_glob_1_31",
+        "__vite_glob_1_30",
+        "__vite_glob_1_29",
+        "__vite_glob_1_27",
+        "__vite_glob_1_25",
+        "__vite_glob_1_24",
+        "__vite_glob_1_21",
+        "__vite_glob_1_20",
+        "__vite_glob_1_19",
+        "__vite_glob_1_18",
+        "__vite_glob_1_17",
+        "__vite_glob_1_16",
+        "__vite_glob_1_15",
+        "__vite_glob_1_14",
+        "__vite_glob_1_13",
+        "__vite_glob_1_7",
+        "__vite_glob_1_5"
+      ]
+    },
+    {
+      "type": "ImportDeclaration",
+      "start": 5451,
+      "end": 5661,
+      "sha256": "d4e3de24ad100c80c32ca52d9f0613f8c6c1fe7871c94fe3c1ef4f60f3fc2489",
+      "module": "./betaSupabaseAuth-BM9hgzr_.js",
+      "bindings": [
+        "linkBetaAccountSession",
+        "betaAccountLinkErrorMessage",
+        "getBetaAuthClient",
+        "unlinkBetaAccountSession",
+        "linkCurrentBetaAccountToPlayerSession"
+      ]
+    }
+  ],
+  "initializerCounts": {
+    "immutable-metadata-initialization": 80,
+    "source-catalog-invariant": 28,
+    "piece-label-initialization": 42,
+    "campaign-definition-initialization": 2,
+    "card-runtime-initialization": 23
+  },
+  "initializers": [
+    {
+      "type": "ExpressionStatement",
+      "start": 5460450,
+      "end": 5460574,
+      "sha256": "09eeb30c7d29bbe1738059d84de1b29d76b15b1ce3897a6dcd32dad0348180b2",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "PRE_INTERNAL_TRICKSTER_MOVEMENT_TYPES"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6383281,
+      "end": 6383486,
+      "sha256": "c970e014be95db0d199cd4527bcf20ba4ddb1ae2ee91c1ef7858a2a1a1a8917a",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "sourceEntries"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6385352,
+      "end": 6385405,
+      "sha256": "8259d01257a3abb1a39ae778812e7c5da918c53f7fcc8414c772f64f99a55118",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CURRENT_AUTHORITATIVE_IDS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6385406,
+      "end": 6385443,
+      "sha256": "feb0277d5977455be9774191dd095846d2d59da22b3a332def58502eee9edb58",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "PILOT_IDS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6385444,
+      "end": 6385492,
+      "sha256": "95a071e5c19b64ac03a403a92c1b97e5f3eb8b2227bbf940a5d52a5522f2adf5",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "V3_AUTHORITATIVE_IDS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6385493,
+      "end": 6385541,
+      "sha256": "594a8ed0d0847c707f322efc6b690f80b49215dcb51143adc3e990cc5fdff833",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "V4_AUTHORITATIVE_IDS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6385542,
+      "end": 6385590,
+      "sha256": "6b0d7ab142a01705828e99d664b82422420734fc2e460df1a581317effe50c52",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "V5_AUTHORITATIVE_IDS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6385591,
+      "end": 6385639,
+      "sha256": "a3f52db9c723872824194be8b78004198b1df2bb513853a18aef1f0d215ffe4b",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "V6_AUTHORITATIVE_IDS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6385640,
+      "end": 6385688,
+      "sha256": "aef2bd466ca95141f00368f827246d635c7d188ef926cf3699c213a522268031",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "V7_AUTHORITATIVE_IDS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6385689,
+      "end": 6385737,
+      "sha256": "b1011294fb21cbf3919284542542362d4c74e6d497880d7f3eff91b2bcc1dd15",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "V8_AUTHORITATIVE_IDS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6385738,
+      "end": 6385786,
+      "sha256": "ea5ad63392a9f73320a265eeb9ef9f13bf2a9bdcff9d28ddff70cb2ba136c3d1",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "V9_AUTHORITATIVE_IDS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6385787,
+      "end": 6385836,
+      "sha256": "ef507d230adb3ecce476638733fc4c19a7b04b68cfc8aaa5351645d22103b104",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "V10_AUTHORITATIVE_IDS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6385837,
+      "end": 6385886,
+      "sha256": "baf8fddf9f15f26d4ac020b5d0106b7d1855a307f4c5d1a15f67a14f8a8b4793",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "V11_AUTHORITATIVE_IDS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6385887,
+      "end": 6385936,
+      "sha256": "cb59a2c9c68593bf3e1aec5dd012ca3e42fa0c561f9ec8db40419c0f5ed55058",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "V12_AUTHORITATIVE_IDS"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6387356,
+      "end": 6387625,
+      "sha256": "926f7e15112c1b685c3bc7603064d291e8b46d70917c3132dc0c83bd0ed8c25a",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "PUBLIC_CARD_AUTHORITY_IDS",
+        "cards$6"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6387706,
+      "end": 6387755,
+      "sha256": "3a43211f25af5b2058235c74b1abc3325a0c60a236032a477d0ed8f03c7a0cb5",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "V13_OVERRIDES"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6390879,
+      "end": 6391172,
+      "sha256": "4f93faadb87634c28187827f54bfb83b8e3357e8380e1c8f5ce6e049f7d715eb",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "PUBLIC_CARD_AUTHORITY_V13_IDS",
+        "cards$5"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6391173,
+      "end": 6391218,
+      "sha256": "66ac21b6ee03b351cc3e8c9038cfa273e79ae744583e05ad895d469909b51cc8",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "V14_CARDS"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6392371,
+      "end": 6392815,
+      "sha256": "52356382117a3843a56243bffcb05f5134560d53a584e313529e5416bdbe24c6",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "PUBLIC_CARD_AUTHORITY_MANIFEST_V14",
+        "PUBLIC_CARD_AUTHORITY_V14_IDS",
+        "cards$4"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6393132,
+      "end": 6393175,
+      "sha256": "a38ad4360a311312134c0920c0eaf5e643cb6f5b7748f6d811427999274f5235",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "cards$4"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6395991,
+      "end": 6396170,
+      "sha256": "5daffee3ad905525f08147c12622dc9ac021319c806b3646adb1cb09fbcf7ddc",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "cards$3"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6396171,
+      "end": 6396216,
+      "sha256": "67686c46916ba3dee4445cb44d1ef15ab8076c2c93bf05b638829ae24d9bcb73",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "V16_CARDS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6396533,
+      "end": 6396576,
+      "sha256": "32e0ee3e357a17fc6a8b4753461f77c6519d9a004d7731b72e37e6d49f42f0c8",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "cards$3"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6399419,
+      "end": 6399598,
+      "sha256": "563c57429d7071f129e9bae6ce4ff6c494f712c601b662c746cb92fec9121efe",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "cards$2"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6399599,
+      "end": 6399644,
+      "sha256": "08ce13f6a7238b03b1591f528b9e26b6dad3d72e741b52f5d46905d3ba29201f",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "V17_CARDS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6399961,
+      "end": 6400004,
+      "sha256": "73506dbc8e88290a7b964a43e0315cd2798b95c8c8737dd5326c37c46f8ec7f0",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "cards$2"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6402847,
+      "end": 6403026,
+      "sha256": "8fe6ee66cd9b466032e27a64b5cafb021cd07ce0c759f24c3bdbc91c73004fa9",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "cards$1"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6403027,
+      "end": 6403072,
+      "sha256": "368e9017ed39008dd24ba409bc91b29f3b8e644ba996cf7a2bc5fdaf90d6c7d5",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "V18_CARDS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6403389,
+      "end": 6403432,
+      "sha256": "f5b16a7338d1b6b249d0c4bc0e37d4b0697e2693dae4232265aec3a049fadf1a",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "cards$1"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6409871,
+      "end": 6410044,
+      "sha256": "bfd109f1399e5a4d9804795e6ba3e669425ce737f375685df474693fe97c73b2",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "cards"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6410045,
+      "end": 6410090,
+      "sha256": "3f45bfe649fd552a6e39db1de31afa3e4e4f0b95645ed89294b02dc035da6ab2",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "V19_CARDS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6410091,
+      "end": 6410354,
+      "sha256": "01ccbee0798581e356af06099868c761b67e4d20d80b35cf8ba8622ad5a0e818",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CARD_AUTHORITY_MANIFEST_V19_SCHEMA_VERSION",
+        "CARD_AUTHORITY_MANIFEST_V19_VERSION",
+        "PUBLIC_CARD_AUTHORITY_MANIFEST_V18",
+        "cards",
+        "freeze$7"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6410355,
+      "end": 6410396,
+      "sha256": "092318568d47976cd7594037358918a202ba6eb905a89b9ed5a193cdcccd7e62",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "cards"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6417250,
+      "end": 6417492,
+      "sha256": "6f95a145dfa0500d6249987df41453b4f7b485193f78494bcfaea7f653e2b72c",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "CARDS$i"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6417671,
+      "end": 6417714,
+      "sha256": "bf68d7a4affd2c590fb4daf5b66dd51ddb445312db7091c3735eee843020a653",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CARDS$i"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6417803,
+      "end": 6418036,
+      "sha256": "881537e75eeef5f54a3e0b35309290f8649445b2a14556d6aa45e2c44061050a",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUTHORITATIVE_CARD_RULESET_V2_VERSION$3",
+        "BETA_PUBLIC_CARD_CATALOG_V2_HASH",
+        "BETA_PUBLIC_CARD_CATALOG_V2_VERSION$1",
+        "CARD_AUTHORITY_ENGINE_V2_VERSION",
+        "deepFreeze$l"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6426743,
+      "end": 6426985,
+      "sha256": "4cb1305125d4a643a010df2521207263c4d9c0f4a61de314e654788520b9e80c",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "CARDS$h"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6427164,
+      "end": 6427207,
+      "sha256": "f6fbbb96ac12c268e3e3c695382b04c56890fbd0686edd23e2cf682933011646",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CARDS$h"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6427296,
+      "end": 6427529,
+      "sha256": "1ba5bf4981bfec73608709c5525916203c4a76f6dd021c4f9e03157e1d91755c",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUTHORITATIVE_CARD_RULESET_V3_VERSION$3",
+        "BETA_PUBLIC_CARD_CATALOG_V3_HASH",
+        "BETA_PUBLIC_CARD_CATALOG_V3_VERSION$1",
+        "CARD_AUTHORITY_ENGINE_V3_VERSION",
+        "deepFreeze$k"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6436001,
+      "end": 6436243,
+      "sha256": "31791a8f6bda96331ad127010a5146afb2c39aeccfd1dc8019a1dbc5ab3528f4",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "CARDS$g"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6436422,
+      "end": 6436465,
+      "sha256": "05fad809c8d92727422d59dee2f79edc0c4f6c7fd8a656745962a1b29bab6d4f",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CARDS$g"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6436554,
+      "end": 6436787,
+      "sha256": "a6160e65f60c1e92c90cabcd011d32b21293740690b0ac956f59623380378867",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUTHORITATIVE_CARD_RULESET_V4_VERSION$3",
+        "BETA_PUBLIC_CARD_CATALOG_V4_HASH",
+        "BETA_PUBLIC_CARD_CATALOG_V4_VERSION$1",
+        "CARD_AUTHORITY_ENGINE_V4_VERSION",
+        "deepFreeze$j"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6445539,
+      "end": 6445689,
+      "sha256": "78c09bf6b950b287dcf49389132bac4a568113c4139511ff998b6b0717a6c6c8",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "CARDS$f"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6445868,
+      "end": 6445911,
+      "sha256": "e23d3309e2bf656836856314be855ab252a17bda02f6ac35ec1d9b5c1d5cceb6",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CARDS$f"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6446000,
+      "end": 6446233,
+      "sha256": "878425aa88db8d7f47c4d9e95764c15168b49a5c3ea74a5ff510c207409a6e72",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUTHORITATIVE_CARD_RULESET_V5_VERSION$3",
+        "BETA_PUBLIC_CARD_CATALOG_V5_HASH",
+        "BETA_PUBLIC_CARD_CATALOG_V5_VERSION$1",
+        "CARD_AUTHORITY_ENGINE_V5_VERSION",
+        "deepFreeze$i"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6452137,
+      "end": 6452281,
+      "sha256": "357e439fa1b3a209432d8f4768d1cab8f25426aee65be68fa310372d2ea0f08a",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "CARDS$e"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6452454,
+      "end": 6452497,
+      "sha256": "e201864a65600be515d6c33900745e61f2c0ef8d05feca7aa9483765d1d6b017",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CARDS$e"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6452586,
+      "end": 6452811,
+      "sha256": "48ccf96bb95111d121fe350b2d7d228adcc489cacb82b5f3678583bf6ef9634f",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUTHORITATIVE_CARD_RULESET_V6_VERSION$3",
+        "BETA_PUBLIC_CARD_CATALOG_V6_HASH",
+        "BETA_PUBLIC_CARD_CATALOG_V6_VERSION$1",
+        "CARD_AUTHORITY_ENGINE_V6_VERSION",
+        "deepFreeze$h"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6458572,
+      "end": 6458716,
+      "sha256": "22057d7900cc088c5ecc750c2233ec1f0597f3075b81c78dedbd447db19f474a",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "CARDS$d"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6458889,
+      "end": 6458932,
+      "sha256": "6d77e992b6d51c9cf5e438890b3d9515fcb2015cc0052b65557c3e9596b48056",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CARDS$d"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6459021,
+      "end": 6459246,
+      "sha256": "223e39e886047151d44b8d53ea9b37a2bca451fd5113e7b134bf77172f69bd0c",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUTHORITATIVE_CARD_RULESET_V7_VERSION$3",
+        "BETA_PUBLIC_CARD_CATALOG_V7_HASH",
+        "BETA_PUBLIC_CARD_CATALOG_V7_VERSION$1",
+        "CARD_AUTHORITY_ENGINE_V7_VERSION",
+        "deepFreeze$g"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6463997,
+      "end": 6464141,
+      "sha256": "8bf64aa763ff050b3b802605d90b017c1551d46a3c343ea13dc7bb55a6c250ec",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "CARDS$c"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6464314,
+      "end": 6464357,
+      "sha256": "1aa1d4e92fb240730bb5b6b80b4286061ff677e4c6c1c61bc0bba5747b2a2952",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CARDS$c"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6464446,
+      "end": 6464671,
+      "sha256": "94dc46bef74ba973d8cbca66b253f7d10ad5e6a5d31974d4ce618cea329ff93c",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUTHORITATIVE_CARD_RULESET_V8_VERSION$3",
+        "BETA_PUBLIC_CARD_CATALOG_V8_HASH",
+        "BETA_PUBLIC_CARD_CATALOG_V8_VERSION$1",
+        "CARD_AUTHORITY_ENGINE_V8_VERSION",
+        "deepFreeze$f"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6469252,
+      "end": 6469396,
+      "sha256": "fad3356ba57114b484b6bd71c2e2e4b20335c1a2733eca2c6351365570342909",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "CARDS$b"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6469569,
+      "end": 6469612,
+      "sha256": "07677cafdf5fd771440f9a9d38667f88e25526ba9cc5527a92531793e98911c7",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CARDS$b"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6469701,
+      "end": 6469926,
+      "sha256": "5072e099e0422b95796d5d602b226b2d917918a101083a35003a2632e1705ff4",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUTHORITATIVE_CARD_RULESET_V9_VERSION$3",
+        "BETA_PUBLIC_CARD_CATALOG_V9_HASH",
+        "BETA_PUBLIC_CARD_CATALOG_V9_VERSION$1",
+        "CARD_AUTHORITY_ENGINE_V9_VERSION",
+        "deepFreeze$e"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6474362,
+      "end": 6474507,
+      "sha256": "8c2b653ae511cec7b55f82a612291a58e7a097320d5dbee50042474b52fdc4c9",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "CARDS$a"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6474683,
+      "end": 6474726,
+      "sha256": "41e9d0815c9cacb6fc44a13ed88e81680621b6a8cb9a397642fe514dcb691ed9",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CARDS$a"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6474816,
+      "end": 6475045,
+      "sha256": "09f554efe50cdfca5a6088004e6d033d3e6c9e740790346db753837ac8076b6c",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUTHORITATIVE_CARD_RULESET_V10_VERSION$3",
+        "BETA_PUBLIC_CARD_CATALOG_V10_HASH",
+        "BETA_PUBLIC_CARD_CATALOG_V10_VERSION$1",
+        "CARD_AUTHORITY_ENGINE_V10_VERSION",
+        "deepFreeze$d"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6478926,
+      "end": 6479071,
+      "sha256": "323f0f6a1ae7eebf2288f5fcc26bc205782dbb9e893750dcda84604c7cb8794c",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "CARDS$9"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6479247,
+      "end": 6479290,
+      "sha256": "18bccdfa38f9f3aa5e4547c7ec7a442695b0c35d135224d03cd59fd43eaa624c",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CARDS$9"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6479380,
+      "end": 6479609,
+      "sha256": "36d4975f6af8a14dd575e5cca932b7c0e644b6dc9eb7beae466c1c2bff69ff50",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUTHORITATIVE_CARD_RULESET_V11_VERSION$3",
+        "BETA_PUBLIC_CARD_CATALOG_V11_HASH",
+        "BETA_PUBLIC_CARD_CATALOG_V11_VERSION$1",
+        "CARD_AUTHORITY_ENGINE_V11_VERSION",
+        "deepFreeze$c"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6484860,
+      "end": 6485041,
+      "sha256": "dfa858637ae63b01fb59573f6ae36559f17ea11d50019a0d5876541cec413fea",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "CARDS$8"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6485223,
+      "end": 6485266,
+      "sha256": "93c479faf4e3f8e7d6d81aa559980f48900ea8ce092079b091bf407e21996e26",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CARDS$8"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6485356,
+      "end": 6485593,
+      "sha256": "347de7435be423dd5967ae0b38f8e01589e651a0ed536defb101f358b8d02c8f",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUTHORITATIVE_CARD_RULESET_V12_VERSION$3",
+        "BETA_PUBLIC_CARD_CATALOG_V12_HASH",
+        "BETA_PUBLIC_CARD_CATALOG_V12_VERSION$1",
+        "CARD_AUTHORITY_ENGINE_V12_VERSION",
+        "deepFreeze$b"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6488950,
+      "end": 6489014,
+      "sha256": "3fd54a95a5f1daa81292e630c56f0e6b888bf6295c024bf727a9211f498214d3",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "V13_DEFINITION_OVERRIDES"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6491175,
+      "end": 6491450,
+      "sha256": "ff29052903dc61c733bf49b14dfa97e4b067b376b3746484632ecc372b14dbb2",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "BETA_PUBLIC_CARD_CATALOG_V12",
+        "CARDS$7"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6491632,
+      "end": 6491675,
+      "sha256": "63aea4bf20e247744de7e14df84aed709caea0c90d8a6fbb2eea4ae056a4c309",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CARDS$7"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6491765,
+      "end": 6492002,
+      "sha256": "f6e41ca9db5a3bbebcfa0639227318b68364d683905f063fd50f63c00508b195",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUTHORITATIVE_CARD_RULESET_V13_VERSION$3",
+        "BETA_PUBLIC_CARD_CATALOG_V13_HASH",
+        "BETA_PUBLIC_CARD_CATALOG_V13_VERSION$1",
+        "CARD_AUTHORITY_ENGINE_V13_VERSION",
+        "deepFreeze$a"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6495752,
+      "end": 6495925,
+      "sha256": "f1cef00f26ffdfd26badd0bafcfa87c10e57c04b557bdf1bb73bcd5b52ad1c43",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "CARDS$6"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6496097,
+      "end": 6496140,
+      "sha256": "231ec4300d8be12cfdc1743b270f8e71a1451b13adca435f85d4b9d7f6238b2d",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CARDS$6"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6496230,
+      "end": 6496455,
+      "sha256": "f839101d68d0ce76bf808720315f34f5b262d70f60bda2653b444c35064477d6",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUTHORITATIVE_CARD_RULESET_V14_VERSION$3",
+        "BETA_PUBLIC_CARD_CATALOG_V14_HASH",
+        "BETA_PUBLIC_CARD_CATALOG_V14_VERSION$1",
+        "CARD_AUTHORITY_ENGINE_V14_VERSION",
+        "freeze$6"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6498937,
+      "end": 6499110,
+      "sha256": "b8a7ba13dda6530615cf2e54036946a399b5b919089fc313baa785cce77184b5",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "CARDS$5"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6499288,
+      "end": 6499331,
+      "sha256": "8ac572c0d60896cd50293fa3eefc6fb0dd79895984477c65c96be01e9918524a",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CARDS$5"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6499421,
+      "end": 6499654,
+      "sha256": "90a3984754ed1f58a66596264097ed8299047404092ea3a4a7f121899f30b949",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUTHORITATIVE_CARD_RULESET_V15_VERSION$3",
+        "BETA_PUBLIC_CARD_CATALOG_V15_HASH",
+        "BETA_PUBLIC_CARD_CATALOG_V15_VERSION$1",
+        "CARD_AUTHORITY_ENGINE_V15_VERSION",
+        "freeze$5"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6502889,
+      "end": 6503062,
+      "sha256": "03b286c85c6c3301376365869b8550b27ec65f53745fbe6bf24a3b0aba331557",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "CARDS$4"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6503240,
+      "end": 6503283,
+      "sha256": "d59cbe3a05ad8d49a977107b7853a57caf79363b9bae1b34a160ae151473fa8f",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CARDS$4"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6503373,
+      "end": 6503606,
+      "sha256": "165e50de50c6d90f86d54da58c8c3f20b0ac015a5968861749713d5e518a5aa6",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUTHORITATIVE_CARD_RULESET_V16_VERSION$3",
+        "BETA_PUBLIC_CARD_CATALOG_V16_HASH",
+        "BETA_PUBLIC_CARD_CATALOG_V16_VERSION$1",
+        "CARD_AUTHORITY_ENGINE_V16_VERSION",
+        "freeze$4"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6506788,
+      "end": 6506961,
+      "sha256": "355c205d02fd61e25203051eff0aaae3ba2500b8e28de5be612d5fbac0fa22f2",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "CARDS$3"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6507139,
+      "end": 6507182,
+      "sha256": "e5cee254b2816190e79668ebc53516deb19db2da7e489b41318d044931423c4c",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CARDS$3"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6507272,
+      "end": 6507505,
+      "sha256": "88fdcc716f2db4cbe63e47d9bdacbbb85dd67a85a8ac228b6b06fcf292470a64",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUTHORITATIVE_CARD_RULESET_V17_VERSION$3",
+        "BETA_PUBLIC_CARD_CATALOG_V17_HASH",
+        "BETA_PUBLIC_CARD_CATALOG_V17_VERSION$1",
+        "CARD_AUTHORITY_ENGINE_V17_VERSION",
+        "freeze$3"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6510607,
+      "end": 6510780,
+      "sha256": "8edd8d069616406413cf38918511de6ff53eff1f4b4002dfab15be5a8e7487ff",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "CARDS$2"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6510958,
+      "end": 6511001,
+      "sha256": "2367c777cd9bde666bb82b53f8e6ec4c0beccb559144b3b4953e63cd3522d195",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CARDS$2"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6511091,
+      "end": 6511324,
+      "sha256": "ad5e958c595af30f8f912e6f391921c633a8514fb8e00abc9439c8d52898bef5",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUTHORITATIVE_CARD_RULESET_V18_VERSION$3",
+        "BETA_PUBLIC_CARD_CATALOG_V18_HASH",
+        "BETA_PUBLIC_CARD_CATALOG_V18_VERSION$1",
+        "CARD_AUTHORITY_ENGINE_V18_VERSION",
+        "freeze$2"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6520087,
+      "end": 6520260,
+      "sha256": "525ae8388ad5d09a4f2885634f590ed586185617ae45c64c93fc0725f0ce924c",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "CARDS$1"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6520261,
+      "end": 6520636,
+      "sha256": "6b568176957140bd0c214fbcd3f70c86aa4421610ca2e2f07895aee7cb8135c9",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "BETA_PUBLIC_CARD_CATALOG_V19_VERSION$1",
+        "CARDS$1",
+        "CARD_CATALOG_V19_SCHEMA_VERSION",
+        "freeze$1"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6520637,
+      "end": 6520680,
+      "sha256": "2ee6540901e5743a937d42920b9f7fe2fa47839b40864eb17f2175921badeef2",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CARDS$1"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6527754,
+      "end": 6527987,
+      "sha256": "e4707e9ad4126aa3ac3480876027ccf838bd442dc0ec9204e7e00b46ac6d29ea",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUTHORITATIVE_CARD_RULESET_V19_VERSION$3",
+        "BETA_PUBLIC_CARD_CATALOG_V19_HASH",
+        "BETA_PUBLIC_CARD_CATALOG_V19_VERSION$1",
+        "CARD_AUTHORITY_ENGINE_V19_VERSION",
+        "freeze$1"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6765455,
+      "end": 6765849,
+      "sha256": "90027fdb4823b8c46287a412981affb231dbd1ac946604b2f76e3afc43591646",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "deepFreeze$7"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6770739,
+      "end": 6770848,
+      "sha256": "4d70a25e1a11951715aa6075f44d90348d0daec275adbf1c80cab0a015f85ea3",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "CARDS",
+        "CARD_BY_ID$1"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 6770849,
+      "end": 6771023,
+      "sha256": "27cc0ddaeed9cb430385f7f77cd8ccca56a761f84f42fc9c0482f55438257608",
+      "category": "source-catalog-invariant",
+      "dependencies": [
+        "CARDS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6771024,
+      "end": 6771157,
+      "sha256": "f018f057f8c8e5945303c55c6a3a1e5a0ef20870c2251d745927ec46b536a3e0",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "BETA_PUBLIC_CARD_CATALOG_VERSION$1",
+        "CARDS",
+        "CARD_CATALOG_SCHEMA_VERSION",
+        "deepFreeze$6"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6771158,
+      "end": 6771199,
+      "sha256": "f39b83dd2847a21e45252c76fd5989e2541cfcbabb93f26b483bf4c1edade160",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "CARDS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6773288,
+      "end": 6773424,
+      "sha256": "d052928493f66d19f5b01f4fc9578e3366e2b9f53354b30ed5eb086c41129c9f",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUGMENT_BASE_RULESET_VERSION",
+        "NO_CARD_CATALOG_VERSION",
+        "deepFreeze$5"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6773425,
+      "end": 6773576,
+      "sha256": "0c5651163e62b6ef7e3f8dd85ce90e9dfa9dabe17018aade16b72b5231b63ca7",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "LEGACY_CAMPAIGN_CATALOG_VERSION$1",
+        "LEGACY_CAMPAIGN_RULESET_VERSION$1",
+        "deepFreeze$5"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6773577,
+      "end": 6773731,
+      "sha256": "66818d3f1c66217442e5606ecf7d92563e0f106618ccc3331a24da27d566df69",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUTHORITATIVE_CARD_RULESET_VERSION$2",
+        "BETA_PUBLIC_CARD_CATALOG_VERSION$1",
+        "deepFreeze$5"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6773732,
+      "end": 6773892,
+      "sha256": "38e47b1824041c3e93710624b97806702d93a16eea1cba3d1d03d550aaa0acd2",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "AUTHORITATIVE_CARD_RULESET_V2_VERSION$2",
+        "BETA_PUBLIC_CARD_CATALOG_V2_VERSION$1",
+        "deepFreeze$5"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6793805,
+      "end": 6793856,
+      "sha256": "802a251048fbcac7f516e529e1bc880bdb0203e48445a7250770c113c10e72b0",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "OVERRIDES$5"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6796371,
+      "end": 6796422,
+      "sha256": "dfec8d1826723332f253c4cfa00263496db104b5a177ad818458ef9d3c88280d",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "OVERRIDES$4"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6798937,
+      "end": 6798988,
+      "sha256": "60f666fac86fe5566045a344ad189396e7720dbe80b7e4eda0543d5ae2c02f63",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "OVERRIDES$3"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6801503,
+      "end": 6801554,
+      "sha256": "8a2f9e813f14520a403e182f9149462c768697c15bd4d3ab582827f0ce1a4fb5",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "OVERRIDES$2"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6804069,
+      "end": 6804120,
+      "sha256": "12b874ba6d19c15d21026359fb9c3884415605cca2981e9f9c2ecf3ff230e1e3",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "OVERRIDES$1"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6806800,
+      "end": 6806849,
+      "sha256": "a015a6cf08e8885130dc14bdfd72f93ce181bc58af93a8dbf0f4fafeb0dea5eb",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "OVERRIDES"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6819522,
+      "end": 6819591,
+      "sha256": "49c8030896760f42c14a6cd62f4a7b5727396f052011f7daf01aa58516539c93",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "MESSAGE_KEYS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6819592,
+      "end": 6819637,
+      "sha256": "8254e5ed9319b1c44f9e689576b3310573095e6610606db8e1f4e4652a0d12b0",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "MESSAGE_KEYS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 6848044,
+      "end": 6848554,
+      "sha256": "f891d16107fd09e723b4414d3d347ce4dc11303029db3b4d4ccfe951b789a607",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "BETA_CARD_STAR_HALF_UNITS_V18",
+        "INTERNAL_EIGHT_CARDS",
+        "INTERNAL_FIVE_CARDS",
+        "INTERNAL_THREE_CARDS",
+        "SEPTEMBER26_CONFIRMED_CARDS",
+        "SEPTEMBER_ALL_DEFINITIONS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9480122,
+      "end": 9480168,
+      "sha256": "0dac42c6524b3991d002429a13e4ddb6df5d79f2ea347437127076e1d540d71d",
+      "category": "immutable-metadata-initialization",
+      "dependencies": [
+        "ROUTE_DEFINITIONS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664390,
+      "end": 9664421,
+      "sha256": "1773a9fa9925645a6bd223ef730d60b778516d697dbbc2ce468d92edb07d1070",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664422,
+      "end": 9664447,
+      "sha256": "6a2a436510abd791d37d017b2cec865c7696dd183ce2cac52df368cb511a25ad",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664448,
+      "end": 9664476,
+      "sha256": "6d4fe61843b7cd88d36d4d4a09afa7f2148020aa33c4773923bfd96c97c39a2e",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664477,
+      "end": 9664511,
+      "sha256": "05ebec69b53fdf73f6ee11f2b4f199ad207891d18a3529f318039800f8849264",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664512,
+      "end": 9664544,
+      "sha256": "783de29ecab0bd042330e3321eb65405ad37db3e9eb721faf182cc107aa1d07e",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664545,
+      "end": 9664579,
+      "sha256": "058a1ac95074147af32258170f69e201ba98b34d4f298242821a96519cbad8fa",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664580,
+      "end": 9664614,
+      "sha256": "ea32033818d1c993b4f7d6c9659689bce98f1afd039489f52e24454e21d3ac94",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664615,
+      "end": 9664645,
+      "sha256": "c932081cc2ff0a6b6348f0d61bb16242e6ee32566f7872ada3f2ddbf422a6367",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664646,
+      "end": 9664672,
+      "sha256": "4646606377a9e05f1bcf58419000b320d441035052e94120baf8df374d2d9ae0",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664673,
+      "end": 9664700,
+      "sha256": "a09a20084d7566a9b3e8b205f9322bd7732bebe44a938f8a0af8a74119729fca",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664701,
+      "end": 9664734,
+      "sha256": "08c59388e8feab7bc3629770400843da58d9dbac0876c396d054f406725c3a6b",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664735,
+      "end": 9664762,
+      "sha256": "3923110ecea3d19e2cbe6be2eba946882527006628027c80cf401969c7f86157",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664763,
+      "end": 9664792,
+      "sha256": "f8391baa1ea5dc7316716551d26932e671a005e409af05ea185c604f86a9be46",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664793,
+      "end": 9664818,
+      "sha256": "db938c1f402f5df53ce3ff3a72dc7de61ed2b5c495621cc7a3b289af99ea5b1d",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664819,
+      "end": 9664847,
+      "sha256": "a80226892af1fdb513c09b882ffbae4454540c41fb98a379b9dcee63a84bb200",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664848,
+      "end": 9664877,
+      "sha256": "3bfcab114bc2288ac4ed707c326c6d08d7bb0c42e8b8fc862105cd638e16d6a5",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664878,
+      "end": 9664901,
+      "sha256": "92595b251de97cf1034200a13604861d28e25d11a3ea5e0e1aa4d14826e73278",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664902,
+      "end": 9664925,
+      "sha256": "6e9291634d7d0dcfc053a02b27e811b3fbc7011599eaa611ae0f3d2fb91cc736",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664926,
+      "end": 9664951,
+      "sha256": "f37df59b0a2d3fe77ccdf3d8c92747c2b087a5912c41f949549462a671c53c51",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664952,
+      "end": 9664983,
+      "sha256": "877a6c21a15cfca28d305d9aca79e33e6ffdca961d3d368fc76b196e839621db",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9664984,
+      "end": 9665013,
+      "sha256": "1c42dc539fbecd1677bf5c2ff94557ac7f96061432f04162dc6e90e99ffc7eda",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665014,
+      "end": 9665045,
+      "sha256": "ab07a8336fed7824cb6585266167f6038fe373c4c2f05e37e216e79e138ca110",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665046,
+      "end": 9665076,
+      "sha256": "f26975eedc89ba1c070b77d43fd24ad54cf5bc9c025139606f03fa0ce8b63c4a",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665077,
+      "end": 9665103,
+      "sha256": "74ad3048910072c8503d9fc2831e94f027b36431d935590511a851b7489f5795",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665104,
+      "end": 9665130,
+      "sha256": "0baab54f49dc559f8c26f0460ad4ea5c8dda9c5812ccb45fb2fc4cd584294763",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665131,
+      "end": 9665162,
+      "sha256": "e3e21f31eb34f62de1751d20fe8f677747627de1a364e7f9f84ad0c8003e3ef5",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665163,
+      "end": 9665190,
+      "sha256": "bdd2de250eddc645dbbb5b7ae968bb5418e1aeae8ff19ed02eab4268d1fcd192",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665191,
+      "end": 9665216,
+      "sha256": "d12f17a4659953af279e4694777d2a781054c0cbf0cb0088bc18f1d73db03306",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665217,
+      "end": 9665329,
+      "sha256": "6e0f386c18bc69b5ac569e257a80e996ebd2ee705db7894fe59dc4ee8a30caa6",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665330,
+      "end": 9665436,
+      "sha256": "a80f8522d12c1f8aeaec905833f0a191764f7f7ba235f251ad0949fb134951f2",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665437,
+      "end": 9665468,
+      "sha256": "fef70de018276199b799cc877eff37073bec1337053ddc8c2cef4759e61a790d",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665469,
+      "end": 9665499,
+      "sha256": "b8768b5b22e654651cf28f4ad4de6107c6aceb44b5b47ae7f2e8328af802404e",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665500,
+      "end": 9665530,
+      "sha256": "d77cd0bc4c6b24aab10270e882ea9a753b532a62a1c41c2f3e6008a128f81685",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665531,
+      "end": 9665560,
+      "sha256": "c10b5f47f7bc1e4ca44469ef1588a77206bd7b792f25fd8ce6ac37d687f763fa",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665561,
+      "end": 9665588,
+      "sha256": "08a3cbea5cd6f1d33625fbda459084939b47e7ddda9cd8870e2fa4a169f04a62",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665589,
+      "end": 9665619,
+      "sha256": "3dff413f53f9a54d550af884efda72b1a119ad37e87c5ca3b769c888c5fd3444",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665620,
+      "end": 9665652,
+      "sha256": "e44db0576a0706f1cecd6d8528cbdf427f038edda8f0d04a04995d1783a0b645",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665653,
+      "end": 9665678,
+      "sha256": "1f5488bfcb27f9b76d728460037647f84913add8badddbe70f35ec1035e0bd17",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665679,
+      "end": 9665715,
+      "sha256": "6d3fa562b515836c445711aa55a33e8fed4ca21d350dad5cd7e1ccdf38c97121",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665716,
+      "end": 9665752,
+      "sha256": "15aee8bf30f8155d3ab893bc5124e0aca6953ee6a13db8f33327141812d11ba6",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665753,
+      "end": 9665776,
+      "sha256": "dfbf240c4ba49c7651a06915a060669227bf9948c0afab5d6d781421204d9eea",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9665777,
+      "end": 9665806,
+      "sha256": "4e1317eb0d12251a2a0fe09972c43417b030422d7393be1a491055be2236c5c1",
+      "category": "piece-label-initialization",
+      "dependencies": [
+        "TYPE_LABELS"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 9716965,
+      "end": 9717296,
+      "sha256": "e332b85d6d9f7e5ba035f3962f51a22713fe0fd30059d07b67231c5bbb1c6a0d",
+      "category": "campaign-definition-initialization",
+      "dependencies": [
+        "CAMPAIGN_DEFS",
+        "madKnightCampaignIndex"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 9717409,
+      "end": 9717850,
+      "sha256": "abb7f856b90b1f86a96d9198bcd1f0a5398925ee2543cf9a8f8942649f29f57c",
+      "category": "campaign-definition-initialization",
+      "dependencies": [
+        "CAMPAIGN_DEFS",
+        "resolvedMadKnightCampaignIndex"
+      ]
+    },
+    {
+      "type": "ForOfStatement",
+      "start": 9788208,
+      "end": 9788408,
+      "sha256": "c5555b68805b54499e86b8324eeacd58b454d65f7647ea6930331b7ee827a63a",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "CARD_CATEGORY_GROUPS",
+        "INTERNAL_EIGHT_CARDS",
+        "INTERNAL_FIVE_CARDS",
+        "INTERNAL_THREE_CARDS",
+        "SEPTEMBER_ALL_DEFINITIONS",
+        "internalBalanceCard"
+      ]
+    },
+    {
+      "type": "ForOfStatement",
+      "start": 9788409,
+      "end": 9788507,
+      "sha256": "a697685a557173ac6254e50571a7a3a1f6a2b06c8379889b362098f330917799",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "CARD_CATEGORY_GROUPS",
+        "SEPTEMBER26_CONFIRMED_CARDS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9809572,
+      "end": 9809756,
+      "sha256": "6b1248b0bcd355a33eaa90d0399aed4017286a2baffc595e413c4d157c44dbd7",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "CARD_BY_ID",
+        "CARD_PRESENTATION_NAME_OVERRIDES_V19",
+        "betaPublicCardPresentationNameV19"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9809757,
+      "end": 9809925,
+      "sha256": "350dde75da07b13fcc8b8d4a5cc8aa9c5cd12d887654c900c09eff562ff5f2e5",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "CARD_BY_ID",
+        "LEGACY_CARD_ID_ALIASES"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9811076,
+      "end": 9811175,
+      "sha256": "ce4f524c6f9722c291170b1e5aec51f52fd2c4e3a587a47a7e27a24a481ae48c",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "CARD_HELP"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9811176,
+      "end": 9811241,
+      "sha256": "ade9c96269b8495e2842888145a089d7a315aafd9bb2991b6b99e63677b9a452",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "CARD_HELP_ITEMS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9811242,
+      "end": 9811355,
+      "sha256": "8a6b6c3ca6927a595a8568555b5b6ab18bec2dc52e483b575024c8f09d9426d0",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "CARD_HELP",
+        "CARD_HELP_ICONS",
+        "CARD_HELP_ITEMS"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 9811356,
+      "end": 9811484,
+      "sha256": "249c47ffb3dd1bdfb7535a60ccc9458896394cd0cab57896d3b3a5904e43a2e8",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "CARD_HELP",
+        "CARD_HELP_ITEMS"
+      ]
+    },
+    {
+      "type": "BlockStatement",
+      "start": 9813532,
+      "end": 9813792,
+      "sha256": "bf5e5d2526b99acf7117df2e455ae5633a649f45174b8a64c61908931668a138",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "CARD_BY_ID"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 9814268,
+      "end": 9814323,
+      "sha256": "3041ee26637268951f92302152fce85c5f14c3fb0c68935906ac077b133d3a9c",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "ironMonarchCard"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 9814372,
+      "end": 9814493,
+      "sha256": "ac4bc50570186f67b18d5c0fa906ad3f1edd3fc982d48f189733c9a331c0e7ca",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "coolGuyCard"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 9814535,
+      "end": 9814614,
+      "sha256": "5b56600929775d56bd69a89293af27796bdff11a0cabe6603c9907c95448efbe",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "hookCard"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 9814672,
+      "end": 9814766,
+      "sha256": "405dcfac4aa5e2cd6dfcc8b7f8c4f7a42adb732cee81d99afc0dcbe66e12b673",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "accelerationCard"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9814767,
+      "end": 9814889,
+      "sha256": "2425d6d2c2ff84fcdbe395bb64adf4a6b093f5755af87e6779e5b717b8bda4d1",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "CARD_HELP_ITEMS"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9814890,
+      "end": 9815934,
+      "sha256": "ed65353a3e5e58b1ea7646920eb12fd6e10e915aa9375b181a9a69ac65ff2f1e",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "CARD_CATEGORY_BY_ID",
+        "CARD_DEFS",
+        "CARD_HELP",
+        "CARD_HELP_ICONS",
+        "CARD_HELP_ITEMS",
+        "DIRECT_ACQUISITION_ONLY_CARD_HELP",
+        "DIRECT_ACQUISITION_ONLY_CARD_IDS",
+        "PIECE_CARD_ADDED_MOVE_FRESH_HELP",
+        "PIECE_CARD_FRESH_HELP"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9818329,
+      "end": 9818508,
+      "sha256": "f3cbccd57d88c4fc031d0c791c9a89924df74f58aa7c58773f7df0214c6dbff6",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "CAMPAIGN_DEFS",
+        "CAMPAIGN_HELP_ITEMS"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 9818569,
+      "end": 9818672,
+      "sha256": "47545dac0158e8481cc211f2308e3d2f4fd7a80a6ef1c916f96f60f7f6b83df4",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "merchantGuildCard"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9818673,
+      "end": 9818817,
+      "sha256": "8d5fe0e2902bb25a71932580bdd889ce7da160c9925f1b38fceec9acfc34892f",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "CARD_BY_ID",
+        "CARD_DISPLAY_STAR_OVERRIDES"
+      ]
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9819228,
+      "end": 9820476,
+      "sha256": "ef3c49d899a17dae119f781d634439692b22428f616e5a9bd85db25ef6bbd3e8",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "CARD_CATEGORY_BY_ID",
+        "CARD_CATEGORY_GROUPS",
+        "CARD_DEFS",
+        "DURATION_CARD_DISPLAY_TEXT",
+        "PIECE_CREATION_TEXT",
+        "SEPTEMBER18_CARD_UPDATES",
+        "internalBalanceCard"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 9820539,
+      "end": 9820769,
+      "sha256": "9330af5190425e584d23f11064f1d1e5c636091c04f28e6c3df9e2d2cd6e28a0",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "elephantEscapeCard"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 9820811,
+      "end": 9821160,
+      "sha256": "76f13f82f0537ed3602d86c444ef3e29facc5c598beb1cafadbe51a93f198644",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "CARD_CATEGORY_BY_ID",
+        "CARD_CATEGORY_GROUPS",
+        "leapCard"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 9821206,
+      "end": 9821245,
+      "sha256": "959b64ae57681bf83688811d904a8712926c6cc950590dd259fdba637c2f5805",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "brutusCard"
+      ]
+    },
+    {
+      "type": "IfStatement",
+      "start": 9821300,
+      "end": 9821600,
+      "sha256": "3f8fd4ab6b14aa7dae994d171ec165cee3aeef83111495511fc90e74d446201d",
+      "category": "card-runtime-initialization",
+      "dependencies": [
+        "CARD_CATEGORY_BY_ID",
+        "CARD_CATEGORY_GROUPS",
+        "witchTrialCard"
+      ]
+    }
+  ],
+  "initializersSha256": "986681ecff70f959bb94e27a6c9ae15b372e0a27856e28694f1a9f80df705824",
+  "pureHelperDeclarations": [
+    {
+      "name": "betaPublicCardPresentationNameV19",
+      "type": "FunctionDeclaration",
+      "start": 6630140,
+      "end": 6630353,
+      "sha256": "0e9f280134620742535f4acee5521954ddeac2b609d8c66d483174bac7adcf0c"
+    },
+    {
+      "name": "deepFreeze$5",
+      "type": "FunctionDeclaration",
+      "start": 6773076,
+      "end": 6773287,
+      "sha256": "ace790cafd369b12870c3466513ea668bdf146876fc94a6aa85d5e4b50eaf7fc"
+    },
+    {
+      "name": "deepFreeze$6",
+      "type": "FunctionDeclaration",
+      "start": 6766414,
+      "end": 6766625,
+      "sha256": "e56865843daa2b1eab388eed50ccdaf957f1110e85af51ca6ba808da3fc924da"
+    },
+    {
+      "name": "deepFreeze$7",
+      "type": "FunctionDeclaration",
+      "start": 6765243,
+      "end": 6765454,
+      "sha256": "07d7ae96fde36dca7b5e9be29fd02ccf8bbd414d6675d8478ccbec0933fad58f"
+    },
+    {
+      "name": "deepFreeze$a",
+      "type": "FunctionDeclaration",
+      "start": 6486469,
+      "end": 6486680,
+      "sha256": "325f2f9ad6b939396ced7e6cd46f9322676d3a81bef326044516ba6843438e75"
+    },
+    {
+      "name": "deepFreeze$b",
+      "type": "FunctionDeclaration",
+      "start": 6480495,
+      "end": 6480706,
+      "sha256": "5be38a11b59f78f818a0ef115a46e7ca77a3bb68a03dcdc4c6ce694752466d16"
+    },
+    {
+      "name": "deepFreeze$c",
+      "type": "FunctionDeclaration",
+      "start": 6475605,
+      "end": 6475816,
+      "sha256": "5d47fe0ce56a71aa83a64dae20c16377d9587ab4815f6de46d7cfabbd5cc47d8"
+    },
+    {
+      "name": "deepFreeze$d",
+      "type": "FunctionDeclaration",
+      "start": 6470485,
+      "end": 6470696,
+      "sha256": "e3ef584fe138516001f45f11ab30ca5ac574a19256a6c1d53789318534df7558"
+    },
+    {
+      "name": "deepFreeze$e",
+      "type": "FunctionDeclaration",
+      "start": 6465222,
+      "end": 6465433,
+      "sha256": "614b10656ab47072d2ae445aa252dabd58e649caf97e1ea8b02899cdcc7a75f5"
+    },
+    {
+      "name": "deepFreeze$f",
+      "type": "FunctionDeclaration",
+      "start": 6459797,
+      "end": 6460008,
+      "sha256": "ec14109394e8597b8aa02029d789c24ef2e9ca811a8e515402860528b1f907a5"
+    },
+    {
+      "name": "deepFreeze$g",
+      "type": "FunctionDeclaration",
+      "start": 6453362,
+      "end": 6453573,
+      "sha256": "8b07a5b8044dc1b94430ddb6b42ef65c491c5d50769d5a6d1c1712881bf7dd1a"
+    },
+    {
+      "name": "deepFreeze$h",
+      "type": "FunctionDeclaration",
+      "start": 6446784,
+      "end": 6446995,
+      "sha256": "e9244589b7629d670d3289211b239d091eae1f031cef12c427f06b9e825f9007"
+    },
+    {
+      "name": "deepFreeze$i",
+      "type": "FunctionDeclaration",
+      "start": 6437338,
+      "end": 6437549,
+      "sha256": "e01bd9e52181c8cc338bf52920600c19e0e6abd0d4683e48318d40bde58730a7"
+    },
+    {
+      "name": "deepFreeze$j",
+      "type": "FunctionDeclaration",
+      "start": 6428416,
+      "end": 6428627,
+      "sha256": "a85df4f26d4358368cdfa8960ec1f2100e2623bbef620358ae113a6b0edad124"
+    },
+    {
+      "name": "deepFreeze$k",
+      "type": "FunctionDeclaration",
+      "start": 6418923,
+      "end": 6419134,
+      "sha256": "e7f0837d8a011c6a276caf671c8ace8c7ef633b52e624f4aa4f7a1f3dc4db3d1"
+    },
+    {
+      "name": "deepFreeze$l",
+      "type": "FunctionDeclaration",
+      "start": 6411277,
+      "end": 6411488,
+      "sha256": "8fea7dfcfb886e17cb689bab05b6e03b7402cec24181363ebad1f5726fb81ed3"
+    },
+    {
+      "name": "freeze$1",
+      "type": "FunctionDeclaration",
+      "start": 6511781,
+      "end": 6511984,
+      "sha256": "5c922fdcd5aca9ae75601ee15f676d80fb7a4111783e58c619de24cb064dac26"
+    },
+    {
+      "name": "freeze$2",
+      "type": "FunctionDeclaration",
+      "start": 6507962,
+      "end": 6508165,
+      "sha256": "977109a977a1392daf83d2e50c1ec87538bbfe68247e2ff2e04926277471c925"
+    },
+    {
+      "name": "freeze$3",
+      "type": "FunctionDeclaration",
+      "start": 6504063,
+      "end": 6504266,
+      "sha256": "b180e9688778aa73385e14389e59df477ad38c99bfcc7499709fa9536e299f1b"
+    },
+    {
+      "name": "freeze$4",
+      "type": "FunctionDeclaration",
+      "start": 6500111,
+      "end": 6500314,
+      "sha256": "95158635808b02a7ebed9c99bafa66a39cfd5cc20861a833431c5c791b930ef0"
+    },
+    {
+      "name": "freeze$5",
+      "type": "FunctionDeclaration",
+      "start": 6496912,
+      "end": 6497115,
+      "sha256": "dae0d2eed52ed4e67d8da03fcdc5f6159b3d549d6c440d46461bf81a4fc8c16d"
+    },
+    {
+      "name": "freeze$6",
+      "type": "FunctionDeclaration",
+      "start": 6492469,
+      "end": 6492672,
+      "sha256": "fedf601c790c2bd9c7d7e1bd2adfd1403286576ec39ecd66a412d654dd0f4792"
+    },
+    {
+      "name": "freeze$7",
+      "type": "FunctionDeclaration",
+      "start": 6403755,
+      "end": 6403958,
+      "sha256": "72ca1320b7e070ffd84b45332e5ccd6e0be0d3f6673928906655a745d4105dc7"
+    },
+    {
+      "name": "internalBalanceCard",
+      "type": "FunctionDeclaration",
+      "start": 5632290,
+      "end": 5632391,
+      "sha256": "d73731fbe8c9a12cbe26e3dafd3288db11cd39385e49ca3f68eb892c7aabd625"
+    }
+  ],
+  "excludedInitializers": [
+    {
+      "type": "IfStatement",
+      "start": 6610752,
+      "end": 6610855,
+      "sha256": "4170b71451ff8f9359b13d76784d2719760ec89ae837ca75c87757e6ce63722d",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 7185481,
+      "end": 7231296,
+      "sha256": "cbf383fd9e8e6813445924c087d215439970ed2648211e97f58fe3d08359ed42",
+      "category": "audio-assets"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 7231297,
+      "end": 8070315,
+      "sha256": "09b2f52ca3772aec8cb633bde5c94c2156d9c793cfb5a3ac9a18321c020e106a",
+      "category": "audio-assets"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 8070316,
+      "end": 8181858,
+      "sha256": "7980f50a6d76951b3c600a5af8b8afcab7b0cb4672faff9dd3e4623deef59ab4",
+      "category": "audio-assets"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 8181859,
+      "end": 8810000,
+      "sha256": "244a8530deb24b80b4c5a63144b1df1315bd00c73b7b7a5dd4d5e6bfd6252d2a",
+      "category": "audio-assets"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9423162,
+      "end": 9423202,
+      "sha256": "934afa551c42d628762fa71544bcf08b0884baa91921a1cf507ab9dfa22a2c85",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9602626,
+      "end": 9602677,
+      "sha256": "fc9792e12e24fbbc2ff75f3b95c097c9ad199cea8bde2cd0214f1e1ce3226601",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9602741,
+      "end": 9603202,
+      "sha256": "11af1fc555e92e1d47315e2be19b4ed3c5aba61c3dee40beeb88c7ad55f41388",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9850646,
+      "end": 9850669,
+      "sha256": "d39867d3430bc081a03f89c780e94b6fde4bfefee0b0e29959913aa52ec747ed",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 9859020,
+      "end": 9859049,
+      "sha256": "a0dbaf2c9e322a67934017d0a80247d8bac2b2891a3dfd3a3245500af25c19fd",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "IfStatement",
+      "start": 10435795,
+      "end": 10436411,
+      "sha256": "474d81f4fde3bbb6c0e19781d890ebe9ec137749479f40f9dee96cd0bc5160e2",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "IfStatement",
+      "start": 10436412,
+      "end": 10436517,
+      "sha256": "070d2144e49ba97a38cbd0618000187d837883e1ab58051486d2b8e9df1843d3",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 10809347,
+      "end": 10809608,
+      "sha256": "671d88cf12ea9fda23820b33d8bd35fa7a79c774abd161fc38cdffb024dd537b",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12423557,
+      "end": 12424003,
+      "sha256": "51367a6c833b8e2864b6bf2cea79febd569c235c051b3732d52987dd5f95810a",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12424004,
+      "end": 12424090,
+      "sha256": "7d95b4f1af216fa3d3d19846ad4b0a4d3d3b8ea5932c5b6e302590d4ea665063",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12474452,
+      "end": 12476671,
+      "sha256": "6319ea02238de775f61937a568f4de0fec5501932c7a1f81f45c490fd6441840",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12477134,
+      "end": 12480726,
+      "sha256": "0792cdc163675b71e531482fec656c2b60583ef0cd93bb70547b6c49f57afbb9",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12480727,
+      "end": 12480795,
+      "sha256": "dc7e7f9fa7d8372d1ea16b80036a4d9ba5c644888a694645761e89d2fc521eb0",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12480796,
+      "end": 12480871,
+      "sha256": "e757f3be58c50d2375c3596d885254293eec5148c2abd4631b9262d336c573f4",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12480872,
+      "end": 12481000,
+      "sha256": "15d02d5fb0769a6d382c1942fcd1fb7546be827411b0b75e7ff277a7a006755f",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12481001,
+      "end": 12481071,
+      "sha256": "ad7edf4ea2dea374614d3a47cacd9eaa6df6156a1dcce69d5ffca63fa738f62a",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12481072,
+      "end": 12481309,
+      "sha256": "e0537a9233e0c1a385e045f49ea8e09124f646bb892fbf3280eb74dba62f40bf",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12481310,
+      "end": 12481381,
+      "sha256": "c0e61d8b15d6debdeee150e6d4956230c9305c4d85d5cf7fc40b2468a0844bc3",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12481382,
+      "end": 12481507,
+      "sha256": "3b9c2a2262589592eca4ae452abf3799cab9d94c49f7d21e4b3057d5b05b6820",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12481508,
+      "end": 12481585,
+      "sha256": "37abe8ba009ad56071c287a6eee2c9cafd16dcc07ce7cbb3dd526cc1698b97ce",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12481586,
+      "end": 12481892,
+      "sha256": "ef32788d5b8ce54404ee8b54ea7556801593197655ee13dbf2d6897bb264111f",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12481893,
+      "end": 12482040,
+      "sha256": "e25cc6aecbbe7ab6c6b2c4905d0d3550fe2286d42e537510a712ae6d2258f0f6",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12482041,
+      "end": 12482574,
+      "sha256": "408184c78b3308e371f5ca2674377f929b503e4ed4e30fec1b70d4bd9814c6c0",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12482575,
+      "end": 12483233,
+      "sha256": "e1a8cdf3f419b0504e513a47db46bb8ea65227d2d891c9bf73dfa3b582702a26",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12483234,
+      "end": 12483301,
+      "sha256": "b5c43ab5a5ded05c6329e0a1b983937da791224d0727f26c3ddab17fa7524a3c",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12483302,
+      "end": 12483374,
+      "sha256": "ab2c0eef1bec20bdde9e3bf0d2dcc5429f161a36e6d8c05fe5c263ccbdce040e",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "BlockStatement",
+      "start": 12483375,
+      "end": 12483722,
+      "sha256": "e45706f394b90bc7960d1f6521a1962888e97b827f75d8cb156208c400bb12e2",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12483723,
+      "end": 12483796,
+      "sha256": "7ed0cf5078640bd824ea58a2e96bbbea31fb43d8d750732f78a8a661cc65f2ae",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12483797,
+      "end": 12483952,
+      "sha256": "44df808ff3a50163ba52d9993a22ab8d530faa739ede3cb492fc8e580fbcde66",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12483953,
+      "end": 12484026,
+      "sha256": "1672ee020b302d0191d2d3370dc12a67d0bb5d48c25d2b794ee2afac0f0efccb",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "BlockStatement",
+      "start": 12484027,
+      "end": 12484894,
+      "sha256": "3d0cf4ae78b656ab95ffb16a4369a63824cbe99b7c0915c801f01952d621cb6c",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12484895,
+      "end": 12484972,
+      "sha256": "16a0e58c6c1194d04319d034be8540bb124d00426ec2a5880ced0bfcfe775821",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12484973,
+      "end": 12485050,
+      "sha256": "b2b9bc3f3a6bf6ee76c3eded163521a06519592a36e0c2828f0e3ec1620d9d1c",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12485051,
+      "end": 12485223,
+      "sha256": "d88b0ebfb5098ec80a0b7c8f2231fed7f06d6c7fca1800002edc91dac6cb6fb5",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12485224,
+      "end": 12485317,
+      "sha256": "919ca5f4d981fb2a2b9b3690b6abd465fcc8a4dc0069785befb31dbafb79130d",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12485318,
+      "end": 12485540,
+      "sha256": "1c581abae011534ef7c619e0f354a2c8c0fba5d4f9842834f44475e6d2b081b9",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12485541,
+      "end": 12485681,
+      "sha256": "d66a79ad1e64a985035c280ee403617a0db572c314af2f9f75adc4358b5b04e0",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "BlockStatement",
+      "start": 12485682,
+      "end": 12487870,
+      "sha256": "f8a56b3dbb192f9619d50cc4a7884b4d2e1ec107ad9e32a92860cc707d2d26fe",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12487871,
+      "end": 12487936,
+      "sha256": "e639c98434884cc4e6a23df25deb5521f34435d937c70b643f03f1299548cc27",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12487937,
+      "end": 12488015,
+      "sha256": "2b33806a457c81ca11fac8ffa6e8f58e213f54fd2ea9a12a1623c6906d33a2a0",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12488016,
+      "end": 12488077,
+      "sha256": "53d91c590f22e44b5432c0037cc6f4ffbf936aa11b2c8e6757c507773a6994bf",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12488078,
+      "end": 12488150,
+      "sha256": "36db3043d6106b1591a28c996d03a57088dda08b08d9caffd2166afea551f210",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12488151,
+      "end": 12488223,
+      "sha256": "fc0afc4a9872b2a4fe94df6e95835620c7757b060668e702a261ee31215e6412",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12488224,
+      "end": 12488289,
+      "sha256": "8cb01b6dd38aab0b95435bf2f515c31d78eb257492aa5d61584f496fd6e905e1",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12488290,
+      "end": 12488359,
+      "sha256": "d1de15fe14ce3b78b7b8868d912d315affec4d66789caf2d17d1da0fc64bff1e",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12488360,
+      "end": 12488562,
+      "sha256": "77f2f59a5218f899617fbc92784bfa728dd9d41ec2e6d55fd5067f887dbd9c52",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12488563,
+      "end": 12488765,
+      "sha256": "8d2c7899f9cd4c98c747cf6b3ef578424a9ca1d5a5b0d3a3cac8ce1d0b5cbc7b",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12488766,
+      "end": 12488959,
+      "sha256": "1283d92b17c0468af17e4153ca80e30b5632e43750feed262003704a3f7ba971",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12488960,
+      "end": 12489161,
+      "sha256": "933063f8983605cb9a62d0ce7462c5834494ee119ff5e9005f0b8b61297cdb82",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12489162,
+      "end": 12489371,
+      "sha256": "d06340975b643ea820393d9733179b4a69012ce81fa21a2431d94ce5c4add97c",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12489372,
+      "end": 12489431,
+      "sha256": "228b79b14c2aaa050f82e6325893cb47aee7ac57d5425f2703875f975da66f42",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12490295,
+      "end": 12490370,
+      "sha256": "ad2b11faabe74e0c5c61961bd6ac91c71d4cd1a4c85647f487b18aa398a4dc7b",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12490371,
+      "end": 12490452,
+      "sha256": "4c5a58c6c54c8295837241de4f8d2bd6fd9e895e1a8397f0dc7991f06f82d7b7",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12490453,
+      "end": 12490531,
+      "sha256": "b153d10445c47bbfd9367a346217cd887b790863b58c46508fd5aea3fbff59b0",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12490532,
+      "end": 12490603,
+      "sha256": "bc527a6de57bc5be75f5ec6000857fbb00168072fa94193ddbcb6a0fc55404fa",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12490604,
+      "end": 12490681,
+      "sha256": "6a438506d253fe3c76167b11f5348a3a8cbc32560090d192d098a826a601fa1f",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12490682,
+      "end": 12490756,
+      "sha256": "8185111b751eb0e94f44b1184841f741e3217d1f28232dee1fbbb9f447f91b09",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12490757,
+      "end": 12491383,
+      "sha256": "05280a4fd12f5e1697ae9a24f2ab33456e335d87ee63c3566155a0dec7f72cbe",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12491384,
+      "end": 12491467,
+      "sha256": "b1ece7968fd910bf429ba67cc5790fa08fabf2fde3925938404db4f3b7b3eba7",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12491468,
+      "end": 12491600,
+      "sha256": "1923a698da267ceae9161d871b0eeb27ba2538c8179e59641df38da8f701353c",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12491601,
+      "end": 12491688,
+      "sha256": "260bc0c01469e37fac65711cb62b30a8ed99da24dce6b606c4223f678d5aa9ad",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12491689,
+      "end": 12491827,
+      "sha256": "82468bd47019910011ba221d6aa0dd357379ef2646165371bc4bec253fa7a4df",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12491828,
+      "end": 12491902,
+      "sha256": "ce3976b7ee4db821f7f1f521e47b0dfbf9bf9c18c0ba58621a2dae764f16bf0f",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12491903,
+      "end": 12492035,
+      "sha256": "e8749493c14fefa1ef0e2335bf57fa403d823e553f97f625e785db184ba37ba7",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12492036,
+      "end": 12492174,
+      "sha256": "a30e69dce944be17e8d74bbfb8998ec00e0a62d61976075db533e2a2afbe3d27",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12492175,
+      "end": 12492338,
+      "sha256": "1a0824fd0c9226b841f128c7ef934435ce75ae1a6e0b68d848ec884a6a450a19",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12492339,
+      "end": 12492383,
+      "sha256": "ed8026dda38180f55340342c0751a99060a1bf8d2447cdefc3febaebdc06b1ed",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12492384,
+      "end": 12492433,
+      "sha256": "e99fb0908e14f82ba6fe4c91b30d9a75b61020f1e63851cf8313f75597a20c61",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12492434,
+      "end": 12492600,
+      "sha256": "597509756a972654153b36f824d915cf4f9649c2ca6fce72074c6736d43bcc76",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12492601,
+      "end": 12492691,
+      "sha256": "319ad9a7e20599944f51f06f55b32951306b586e01ff8050272707e5ab330a2b",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12492692,
+      "end": 12494306,
+      "sha256": "e2d6a74a7a3133097a9be5855e4f36878afc2274f27ae57ff88e23a419836ff5",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12494307,
+      "end": 12494685,
+      "sha256": "768d266dbc353c21f9ae0c544a1c965a92f427708e9b828fef21534fed2ea83e",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12494686,
+      "end": 12494864,
+      "sha256": "0d86dd9544d35cc53da3d3acf4bdf924c71d0383815e35f95821eca95088aeb9",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12494865,
+      "end": 12495102,
+      "sha256": "85e9fd98045a1785edc0088b176a925fa4cf3517b34a197b72d433803409395b",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12495103,
+      "end": 12495556,
+      "sha256": "7e3c81280961762e6f001102293b1d8c2c6d17efe96fe1028a89636d5706cf3b",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12495557,
+      "end": 12495860,
+      "sha256": "bd0737eff2271e173d2b4af78d9140618606ff024ba4cc61f271a3ef6588c5c7",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12495861,
+      "end": 12495938,
+      "sha256": "c607fc911e2ff9d65e3b88c7fd2e7f053fbf8d6e1894910b4d868a4dfd976b5c",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12495939,
+      "end": 12496024,
+      "sha256": "954d1aede8802279e14701cf7549679a72af5c7f7a8b7efb0da96ba95f8bb307",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12496025,
+      "end": 12496112,
+      "sha256": "8291381922b20f3ffc74b07e9a17d19f492b45a3bc0ceae84cb9f3a062e2e5fe",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12496113,
+      "end": 12496197,
+      "sha256": "b20668fe2160d3094d56768c3ebcf5ca1ba862cc8868a10653a351e1de48a9f7",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12496198,
+      "end": 12496308,
+      "sha256": "c20cbd31e88b3f442304d75fa56edfc231bc94c98a78e07609c7a83bf5f4d931",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12496309,
+      "end": 12496410,
+      "sha256": "0661c3a2c9b70efedc4359ac7cef6d16889e3a4b6fbdae3b9e35bbbd79d5fda3",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12496411,
+      "end": 12496511,
+      "sha256": "29105872276f7f5f055500351ac5c1ec8dbb997224405d259cd59461c005f97a",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12496512,
+      "end": 12496714,
+      "sha256": "2944ae384d6a57616f8e7eec3e94d7c58619e0bfbb5d7b5a13ce9b79b4c44383",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12496715,
+      "end": 12496935,
+      "sha256": "1dc47ea392fe005112c7b542ec8dd266f42d961c2eaf2fe2c8384d31120907a0",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12496936,
+      "end": 12497002,
+      "sha256": "c14860b7f805b3925e9c628c73316ae7a4fe0c7ab4b9b20ed8cc3aa6241f630b",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12497003,
+      "end": 12497070,
+      "sha256": "f87b7ae77df7c6474eeabe4b63726f4484fc68841a55966db18b27ac20966b13",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12497071,
+      "end": 12497169,
+      "sha256": "1abc0170be073590370e5a3d055b8b340c6eed1bd535c18d9c4d8358a6a0f6f2",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12497170,
+      "end": 12497234,
+      "sha256": "8c5d00a0da0350bb57c939de9ff9c9db207067b08e0c7013216474bddf4f6e06",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12497235,
+      "end": 12497600,
+      "sha256": "da45273ac63d8255c04be173874431cb08af183a7bed6f7ade703631f527915d",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12497601,
+      "end": 12497667,
+      "sha256": "c4168526b6d0b54f4e4a4c6cc44e179a390c4e8343c9d99429e362cc91148ae6",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12497828,
+      "end": 12497896,
+      "sha256": "27aef0803ca7a76ebe6f486a7bcba5862027c2aba35489582ff28d0abda8a4b7",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12497897,
+      "end": 12498028,
+      "sha256": "3243a7521907750bfead1b25dcb4770438041e862b5f5d3c4acb37079019eed6",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12498029,
+      "end": 12498106,
+      "sha256": "b17de8a054d93df86f1163b18d560a64d954581da3d65a97ce92f4c80b5d8ced",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12498107,
+      "end": 12498185,
+      "sha256": "49f56f35c9e4a804991f1eb6aaf9cd70d924ad8461685b19a72f183a285e676d",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12498186,
+      "end": 12498262,
+      "sha256": "f26b51db1886fadb5b9d3502d013cee3e91cbc09a0745231c35be4adf190e83c",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12498263,
+      "end": 12498333,
+      "sha256": "83453633043c90a11389c80bd8036ceb63fdde18b3e9b13241b5c1696cd32aa7",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12498334,
+      "end": 12498401,
+      "sha256": "1b9b2e9cb63f93d4eefe6efd22eaa3ec5b92a477214034a3f51b535c58866554",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12498402,
+      "end": 12498576,
+      "sha256": "57f2f79986a35d9c8edfa8dc0329c3cbd5b237ff9514b235195845c128dd562c",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12498577,
+      "end": 12498755,
+      "sha256": "df39fab1bb140c6084fe89a19da259b3eaef84e45753bcea03fe180baafc8932",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12498756,
+      "end": 12498851,
+      "sha256": "b5e62da772c03ee05824ef8bbc4a09b128909ec8d2e863687c4d57bab126d49c",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12498852,
+      "end": 12499053,
+      "sha256": "64a005d8f3e35ca5028c7ca6503c62b2f9cddecb56491a98eec5ca287be0e958",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12499054,
+      "end": 12499220,
+      "sha256": "cf5fa8d38f2cd6dab2f5491c66c072fd950cfb5a6275110941b23206247cceaa",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12499221,
+      "end": 12499844,
+      "sha256": "d8201cb1741124b960278379992f7d8c0e550636a7ea7639377f67260fc1b217",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12499845,
+      "end": 12500671,
+      "sha256": "f3d57514c4511497b765b428237b7b906047af294114fddf422aad0e147cb089",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12500672,
+      "end": 12500851,
+      "sha256": "f4fa2b19a0287e65f7f0bb069d62ba8103b7aa6421473d59268970c0d49a9fb8",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12500852,
+      "end": 12501652,
+      "sha256": "6d06e0ac2d0b3c9a891da4fe71267854363a64aba608ab7a0171d7dcfd405fa0",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12501653,
+      "end": 12502843,
+      "sha256": "a0092654d5ed20b70d2b1a386d8943cddf09cb8a6880122f4a2ff489245d4e0a",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12502844,
+      "end": 12503397,
+      "sha256": "41773d2f9f140c600663c8e3f30c23f8f9b990988edc2cd56fa256e8c33e4d36",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12503398,
+      "end": 12504150,
+      "sha256": "deac528fa1982630b473c60dc4ff81e37b86a52f1cbd4b158578d5bb41784a49",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12504151,
+      "end": 12504850,
+      "sha256": "f641f019b4b482765f53c2d47e9687d2e4a846f60dfcf3599947496a84d1c6c2",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12504851,
+      "end": 12505631,
+      "sha256": "4da7dc1927fe3b130b8a3747c1800df92c01c1c11f00c8afa7950615b4aae0e6",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12505632,
+      "end": 12506764,
+      "sha256": "ca9f205209639715e54e6ddb8e87abf3e580f4498813d13509eab5b69130e35e",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12506765,
+      "end": 12508046,
+      "sha256": "85f4f0bc34d8a10977bc874715618a3f0c59d0f261987d51ff79021497d08742",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12508047,
+      "end": 12509368,
+      "sha256": "a172bea3c03f30b88aab05285f3b86efc071b73add90bccc121b578d0eda346a",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12509369,
+      "end": 12509451,
+      "sha256": "9dbab6e73db93563cce139077f94540a812f2c0df9927ceaef54f9240531442f",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12509452,
+      "end": 12510528,
+      "sha256": "1cc84d67f77ce77286b8a57049324966715e29dd0d54dbeb74585aa135c3b8ed",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12510529,
+      "end": 12511346,
+      "sha256": "e2642c5662a4988af620151ea1ecb627fec4f8dec7b60101c4a49bed41c7f91c",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12511347,
+      "end": 12511465,
+      "sha256": "7673cc612185ed8ffe3e09835ab76b11fb139f8a4c513e5c4f215aa0646c985c",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12511466,
+      "end": 12511524,
+      "sha256": "ed68ac2c78ce1be20405f5d56c4ca19f197249c305de74791d39e3a37b820dea",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12511525,
+      "end": 12511926,
+      "sha256": "6b2a91d20ce8d591ca0ad3e5ffb0507e955e366b48dd7b3fac1dac80f05d3db8",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12511927,
+      "end": 12512075,
+      "sha256": "07db29e052cdf06e7a1e2adfeb21ff017681b01b1b7b985360203c80cab44ee1",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12512076,
+      "end": 12512198,
+      "sha256": "9719c9014bcc989c7672fe00be115bf88c9807abb76c159844ab67d8b5ce958d",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12512199,
+      "end": 12513560,
+      "sha256": "2be16beec49659356d8a924c814a03d1799b833f8913eefbb6fa8704d3560bda",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12513561,
+      "end": 12513653,
+      "sha256": "f8d78c77f49c3e8964f7b386ecdc9cd291b9e68abcb9c3f871e332e6e56fad39",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12513654,
+      "end": 12513803,
+      "sha256": "81b199e838f6fb1383d11bfb34b6b007a38f69002704559a03e6532de4be2917",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12513804,
+      "end": 12513831,
+      "sha256": "9df7822495d72a232969301ce1c94c8b01429067b7b22784289e9561dfe23ee1",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12513832,
+      "end": 12513856,
+      "sha256": "99e08dae21d6b6cbaae297bb479594f03dfa86b8a6feb3097d54666d8fb1bad2",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12513857,
+      "end": 12513880,
+      "sha256": "fb7ad94d4e67dc124e035ea0ef50466d1c06f85de55c768a6f2b1f379a5a5fcf",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12513881,
+      "end": 12513913,
+      "sha256": "75117056ed38cb3aa364a2bee7554548c6801d7611aa7d7f5c38517053f9a81e",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12513914,
+      "end": 12513990,
+      "sha256": "c959d909710e598372b29350c0e0e7014a2e5075c8d0d1d37ed449b15b17dc4e",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12513991,
+      "end": 12514023,
+      "sha256": "8a45d86f9fc4e6c75c123fa041945ff66acb312eeeed1dec75ef6d4e96951fdc",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12514024,
+      "end": 12514054,
+      "sha256": "eb3d92c9742a2654d59729cb658801f82f0b196a35d2390cd4faf686c62edd9d",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12514055,
+      "end": 12514077,
+      "sha256": "878b3f276e8b93f205be6d7f023cf1d071fcda0cbb17116e82c934da0c0022a0",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12514078,
+      "end": 12514276,
+      "sha256": "07862d0e46be9618c415beeb691a51bd78b9d03f2f2e143aa618ca8ae6a44c7c",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12514277,
+      "end": 12514325,
+      "sha256": "d196af109997e5f6a8dc77d65986fd6d0c9706f66410495d05ff22b701c79e3d",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12514326,
+      "end": 12515281,
+      "sha256": "85054b5953110c9cea7ec8e3d65db4c588efa32905b7f4da345b8fd41c1fea59",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12515282,
+      "end": 12515299,
+      "sha256": "4726e9409598ad294d7caf2f1a073bb231d37bce2d97706994802220e6a0d9e4",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12515300,
+      "end": 12515329,
+      "sha256": "99008f1f44af9d6bb20d515ceedb8a3eb68584a48dccedea2f71c0682d0d5b16",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12515330,
+      "end": 12515356,
+      "sha256": "61af545fc23659c5d5126b5123c37e8c4d672aa864043df07477326ec6859727",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12515357,
+      "end": 12515368,
+      "sha256": "96fc2f305be9459ea44e0673cfbbe840eec1d62c9d3eec0c3abf238759b69b31",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "IfStatement",
+      "start": 12515369,
+      "end": 12515590,
+      "sha256": "936dc3cb4732a65854c8633ef1513588cf5420f07d4090e7cac87700f6b6df35",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "IfStatement",
+      "start": 12515591,
+      "end": 12515735,
+      "sha256": "c38884b36b8b19fd3a0ba013fe67121cbe47333333d2cebaaea68ea0161d99d5",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12515736,
+      "end": 12515769,
+      "sha256": "773bb3fb0c07ca399c39876f8ad2c292e7517cea27da4a1b1d1a3221a3233b19",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12515770,
+      "end": 12515787,
+      "sha256": "06d6ea8d1258b7b8555f3fa7a76ea6d03e73f8ecaedd60848db5e5b60e62d3f9",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12515788,
+      "end": 12515825,
+      "sha256": "0f04d40c31ef18a7404ee32605847ea31431c057c0992778c56ab1500ad69d92",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12526451,
+      "end": 12527536,
+      "sha256": "3945f65ee72886036693b33b841729ed14414d1b8734f8a5d37ef084d5bc178f",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12527713,
+      "end": 12527794,
+      "sha256": "6c6b51ce85f8609e417df3b89bb61ee533b1d630977cddeeb603cc866d852d4c",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12527795,
+      "end": 12527858,
+      "sha256": "97e1dfc78604f0017cfdc2bcadf05e0e970d45f04ed7065debe3ec87459c6398",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12527859,
+      "end": 12527994,
+      "sha256": "a38818f9fe17049eff48f705c8ebfaf82c82e3fbd2239cc28094235c41dc1a9c",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12591805,
+      "end": 12591836,
+      "sha256": "3cbb686f06a72ffc821c3e0e3a7fec88649326318c928276d3449187ad76ea47",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12626288,
+      "end": 12627538,
+      "sha256": "bd340d56fa76c3f28964f2690a07d9f97cc4b37901d205c14e0c1fb9fba1e05d",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12627539,
+      "end": 12627600,
+      "sha256": "ce6c9770f894cf8529a780b1f2bf63f6613b403a9133d427bff645c9dfb54feb",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12627601,
+      "end": 12627679,
+      "sha256": "98ffe6ed2f2c965748b2558971375f7ae2105555999c03dd2c3c9b7d26ef6e87",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12627680,
+      "end": 12627740,
+      "sha256": "2d4972ac1cc50d2cd73dae142ccc6d6be1c4cb2d9136409700a3fe2b10fd844e",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12627741,
+      "end": 12627797,
+      "sha256": "043ad5caae4f397426eb7bc09d40ec10d37d2f18857e3f6b34055a6ea8ea02ac",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "IfStatement",
+      "start": 12627798,
+      "end": 12627853,
+      "sha256": "de03eafea98632dab8ca0db55a0c9c81a994104a82eef94f8a6b6fae8c3008d9",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "IfStatement",
+      "start": 12627854,
+      "end": 12627949,
+      "sha256": "0bd582f5e399db8e7e4a3761f3bc6a6032dbe0a714f4c144f5aa7bbc34cfdadd",
+      "category": "browser-startup-or-headless-owned"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12627950,
+      "end": 12628039,
+      "sha256": "f37c6b6e22f07ea083160e87e0b8658c34da0bd0937c248102cb27ad3107bad1",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12628040,
+      "end": 12628119,
+      "sha256": "16b6ef82c33dd84f4f986665ade2177d2d1ce152e5301ed9812008d58851d7a0",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12628120,
+      "end": 12628197,
+      "sha256": "6dec25fd20d36ff0a88cafaaa81dc8c42e28e3948db5074a4f7e488bf7d003d2",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "ExpressionStatement",
+      "start": 12628198,
+      "end": 12628309,
+      "sha256": "e36dd82ed3278671ccb1f0dfad6cee638d93587927ad5ff0a95326943a38b412",
+      "category": "browser-events-and-timers"
+    },
+    {
+      "type": "IfStatement",
+      "start": 12634292,
+      "end": 12634435,
+      "sha256": "3c6fb58e6b8b945f75882fa270ae207f5a34acf2b74adfe43248d3be98a85d1f",
+      "category": "browser-startup-or-headless-owned"
+    }
+  ],
+  "excludedInitializersSha256": "21f4dc50541d90e65addab08aa8fdf35dd17078bb08e57ee099bf2753f5c3c65",
+  "exclusionReasons": {
+    "audio-assets": "음향 데이터와 재생 자산은 게임 규칙 초기화에 필요하지 않으며 headless에서 재생하지 않는다.",
+    "browser-events-and-timers": "DOM 이벤트·관찰자·타이머는 headless에서 등록하거나 실행하지 않는다.",
+    "browser-startup-or-headless-owned": "브라우저 UI·인증·경로·네트워크·저장소 시작과 전역 UI export는 제외한다. 자동 resetGame(false)는 실행하지 않고 RNG·Date를 주입한 OracleRuntime.newGame이 명시적으로 시작한다. structuredClone은 호스트가 제공하므로 source fallback은 제외한다."
+  },
+  "bootstrap": {
+    "sourceFile": "projects/augment-chess/oracle/game-adapter/src/game-adapter.js",
+    "sourceExpression": "BOOTSTRAP",
+    "scriptSha256": "1ae94ede71d44f517e9e0ba3ed9c364a65fb58bc15163ee582d93e41fe93969a",
+    "presentationHooks": [
+      "setStatus",
+      "toast",
+      "playSound",
+      "renderJokerChoicePanel",
+      "renderHistoryControls"
+    ],
+    "rendererContext": "cold-activePieceAnimationUntil-at-admission",
+    "clockContext": "cold-clockDisplayAnchor-at-admission",
+    "viewerContext": "source-turn-view-after-restored-position-admission",
+    "newGameContext": "isolated-source-setup-replay-commit-on-success",
+    "decisionMode": "local-explicit-decisions",
+    "microtaskDefaultLimit": 256,
+    "retained": [
+      "source-transitions",
+      "source-clock-commit",
+      "draft-availability-predicates",
+      "potion-cleanup",
+      "terminal-rule-ticket-cleanup",
+      "queued-replay-settlement",
+      "history-notation-rng"
+    ],
+    "excluded": [
+      "dom-card-animation-rng",
+      "dom-update-log-rng",
+      "dom-render-probes-and-ui-state",
+      "network-persistence",
+      "editor-ui",
+      "timers"
+    ],
+    "rngInjection": "before-explicit-newGame; source clock-and-replay-RNG-retained",
+    "publicEnumeration": "temporary-complete-intent-scopes; original-private-AI-policy-retained"
+  },
+  "replayMetadata": {
+    "frameKeys": [
+      "d4",
+      "e4",
+      "solidarity",
+      "bishopInfiltration",
+      "synchronization",
+      "assembly",
+      "vigilance",
+      "roller",
+      "greekGiftPending",
+      "tabooPending",
+      "mediumMovement",
+      "highwayCells",
+      "mode",
+      "onlineGameStarted",
+      "gameStyle",
+      "completeRandom",
+      "draftDelete",
+      "campaign",
+      "turn",
+      "board",
+      "captures",
+      "winner",
+      "replayStartedAt",
+      "replayEndedAt",
+      "replayEndReason",
+      "fullMove",
+      "moveCount",
+      "appliedRuleCard",
+      "additionalRuleCards",
+      "pendingRuleTickets",
+      "effects",
+      "palaces",
+      "regency",
+      "retreat",
+      "kingDead",
+      "skipTurn",
+      "enPassant",
+      "enPassantFrenzy",
+      "zugzwang",
+      "zugzwangConsumesTurn",
+      "revolvingDoorGuard",
+      "september27CopyPools",
+      "cannonScarecrowScreen",
+      "internalSixFixes",
+      "overtakeTurnOnly",
+      "vanguardDiagonalOnly",
+      "parrotRookTarget",
+      "extinctionMinorTargets",
+      "cannonGhostScreen",
+      "unifiedJumpObstacles",
+      "parrotBasicMovement",
+      "september18Balance",
+      "othelloPending",
+      "miracleSelectsBishop",
+      "thiefQuietJump",
+      "thiefRequiredJump",
+      "thiefRemake",
+      "taunt",
+      "hallucination",
+      "pendingPawnStorm",
+      "pendingPanic",
+      "pendingFreeMoves",
+      "freeMoveCaptureLock",
+      "chaosNoCaptureUntilHalfTurn",
+      "pendingIcbm",
+      "pendingGales",
+      "pendingOtherworld",
+      "pendingTrojanHorse",
+      "pendingBearRetaliations",
+      "pendingTrolley",
+      "pendingScarecrows",
+      "pendingLobsters",
+      "armistice",
+      "pendingPortals",
+      "exhaustion",
+      "mistakeCard",
+      "democracy",
+      "hillKing",
+      "genevaConvention",
+      "platformRule",
+      "activeTrolley",
+      "lastMove",
+      "idolEncoreUsedByPiece",
+      "drawOffer",
+      "drawRejection",
+      "turnsTaken",
+      "cardsUsedThisTurn",
+      "royalCommand",
+      "actionsRemaining",
+      "pendingPromotion",
+      "coronation",
+      "earlyPromotion",
+      "fastGrowth",
+      "pawnSprint",
+      "pawnLeap",
+      "pawnConversion",
+      "racingKing",
+      "radicalCharge",
+      "conscription",
+      "conscriptionUsed",
+      "encouragement",
+      "ironMonarch",
+      "imperialStudies",
+      "religiousVictory",
+      "fianchetto",
+      "majesty",
+      "infiltration",
+      "killerKing",
+      "resolve",
+      "vanguard",
+      "overtake",
+      "highlander",
+      "falseStart",
+      "proficiency",
+      "locustSwarm",
+      "longEnPassant",
+      "disassembly",
+      "symmetry",
+      "mutation",
+      "parrotMovement",
+      "freeCastling",
+      "switcheroo",
+      "substitution",
+      "cornerKick",
+      "chainBonds",
+      "moving",
+      "castlingCanceled",
+      "castled",
+      "bishopSnipe",
+      "backwardKnight",
+      "trojanHorse",
+      "madHorse",
+      "clonePassive",
+      "clonedPassiveCards",
+      "vanishing",
+      "knightInjury",
+      "fileSurge",
+      "rookLift",
+      "underpromotion",
+      "finalWeapon",
+      "afterimageQueen",
+      "recycling",
+      "breakthroughPawns",
+      "quantumPending",
+      "highGround",
+      "highway",
+      "blackHole",
+      "winterKingdom",
+      "initiative",
+      "machoChess",
+      "feudalContracts",
+      "pendingFeudalStrike",
+      "coolGuy",
+      "capturedTypes",
+      "turnCaptures",
+      "lastTurnCaptures",
+      "kingKnight",
+      "royalKnightKing",
+      "knightmate",
+      "monochromeChess",
+      "acceleration",
+      "accelerationPendingFor",
+      "accelerationPendingTurns",
+      "accelerationStartsAfterBlackTurns",
+      "socialism",
+      "ultimatum",
+      "prophecy",
+      "collapsePending",
+      "collapsed",
+      "collapseDepth",
+      "collapsedCells",
+      "periodicCollapse",
+      "ruleBombs",
+      "saturationRule",
+      "portalRule",
+      "mistakeRule",
+      "transcendenceRule",
+      "binaMate",
+      "overwhelm",
+      "camouflageRule",
+      "crownRule",
+      "conveyorRule",
+      "delayedHazards",
+      "ruleOpeningEnabled",
+      "ruleSelectionEnabled",
+      "selectedRuleCardIds",
+      "selectedRuleCardId",
+      "queensGambitFiles",
+      "shotgunDlc",
+      "shotgunOpeningColor",
+      "firstMoveCardsForced",
+      "diceLocks",
+      "starWinLimit",
+      "deathmatchEnabled",
+      "deathmatchLimitTurns",
+      "deathmatch",
+      "middleDraftDone",
+      "endDraftDone",
+      "endPhaseStartMove",
+      "temporaryQueens",
+      "necromancy",
+      "accelerationTrail",
+      "judgmentExiles",
+      "frontlineResponse",
+      "relay",
+      "fieldPromotion",
+      "magicGirlSurge",
+      "magicGirlSurgeRefreshPending",
+      "moveReplay",
+      "gomoku",
+      "gomokuVictoryCells",
+      "sirenExposure",
+      "resolveReady",
+      "resolveSpentTurn",
+      "resolveMoveCredit",
+      "resolveCreditPieceId",
+      "reversal",
+      "captureTheFlag",
+      "pendingRecurrences",
+      "undeadResurrections",
+      "simpleBoardEditor",
+      "captureDisplay"
+    ],
+    "codes": {
+      "king": "K",
+      "queen": "Q",
+      "rook": "R",
+      "bishop": "B",
+      "knight": "N",
+      "pawn": "",
+      "alfil": "A",
+      "camel": "C",
+      "dragon": "D",
+      "fanatic": "F",
+      "grasshopper": "G",
+      "herald": "H",
+      "jester": "J",
+      "log": "L",
+      "logRolling": "L",
+      "merchant": "M",
+      "missionary": "MI",
+      "protestant": "MS",
+      "scarecrow": "S",
+      "timeTraveler": "T",
+      "pegasus": "U",
+      "vampireLord": "V",
+      "windmill": "W",
+      "windmillBishop": "W",
+      "windmillRook": "W",
+      "colossus": "X",
+      "amazon": "Z",
+      "eagle": "AB",
+      "assassin": "AS",
+      "bigRook": "BR",
+      "bigBishop": "BS",
+      "bat": "BT",
+      "cardinal": "CA",
+      "coffin": "CF",
+      "checker": "CH",
+      "checkerKing": "CH",
+      "cannon": "CN",
+      "ferz": "FZ",
+      "guard": "GD",
+      "hook": "HK",
+      "knightmaster": "KM",
+      "man": "MN",
+      "primeMinister": "PM",
+      "recruiter": "RC",
+      "reaper": "RP",
+      "royalKnight": "RN",
+      "standardBearer": "SB",
+      "shotgunKing": "SK",
+      "squire": "SQ",
+      "wizard": "WZ",
+      "darkWizard": "DW",
+      "idol": "ID",
+      "lobster": "LB",
+      "babyBear": "BB",
+      "bear": "BE",
+      "vip": "VP",
+      "crown": "CR",
+      "football": "FB",
+      "siegeRam": "SR",
+      "magicGirl": "MG",
+      "berserker": "BK",
+      "slime": "SL",
+      "siren": "SI",
+      "trickster": "TR",
+      "undead": "UD",
+      "campfire": "CP",
+      "princess": "PR",
+      "hedgehog": "HG",
+      "monster": "MO",
+      "paladin": "PD",
+      "octopus": "OC",
+      "grappler": "GP",
+      "revolvingDoor": "RD",
+      "donQuixote": "DQ",
+      "medium": "GR",
+      "brutus": "BU",
+      "clockwork": "CW",
+      "parrot": "PA",
+      "thief": "TH"
+    },
+    "labels": {
+      "king": "킹",
+      "queen": "퀸",
+      "rook": "룩",
+      "bishop": "비숍",
+      "knight": "나이트",
+      "pawn": "폰",
+      "colossus": "거신병",
+      "protestant": "몬시뇰",
+      "herald": "전령",
+      "cannon": "포",
+      "fanatic": "광신도",
+      "primeMinister": "국무총리",
+      "eagle": "알리바바",
+      "amazon": "아마존",
+      "cardinal": "추기경",
+      "pegasus": "유니콘",
+      "jester": "광대",
+      "camel": "낙타",
+      "log": "통나무",
+      "merchant": "상인",
+      "hook": "구행",
+      "grasshopper": "그래스호퍼",
+      "royalKnight": "로얄 나이트",
+      "man": "만",
+      "assassin": "암살자",
+      "guard": "근위병",
+      "reaper": "사신",
+      "wizard": "마법사",
+      "dragon": "드래곤",
+      "shotgunKing": "샷건 킹",
+      "scarecrow": "허수아비",
+      "alfil": "알필",
+      "windmill": "풍차",
+      "windmillBishop": "풍차",
+      "windmillRook": "풍차",
+      "knightmaster": "기사단장",
+      "standardBearer": "기수",
+      "recruiter": "징집관",
+      "squire": "종자",
+      "checker": "체커",
+      "checkerKing": "킹 체커",
+      "bigRook": "빅룩",
+      "bigBishop": "빅숍",
+      "idol": "아이돌",
+      "lobster": "랍스터",
+      "babyBear": "아기곰",
+      "bear": "곰",
+      "vip": "귀빈",
+      "crown": "왕관",
+      "missionary": "선교사",
+      "siegeRam": "공성추",
+      "magicGirl": "마법소녀",
+      "berserker": "버서커",
+      "slime": "슬라임",
+      "siren": "세이렌",
+      "trickster": "트릭스터",
+      "undead": "언데드",
+      "thief": "도적",
+      "paladin": "팔라딘",
+      "octopus": "문어",
+      "brutus": "브루투스",
+      "clockwork": "태엽인형",
+      "parrot": "앵무새",
+      "grappler": "그래플러",
+      "revolvingDoor": "회전문",
+      "donQuixote": "돈 키호테",
+      "medium": "무덤",
+      "campfire": "캠프파이어",
+      "hedgehog": "고슴도치",
+      "princess": "프린세스",
+      "football": "축구공",
+      "monster": "괴물",
+      "blackHole": "블랙홀",
+      "darkWizard": "흑마법사",
+      "ferz": "페르즈",
+      "timeTraveler": "시간 여행자",
+      "vampireLord": "뱀파이어 군주",
+      "bat": "박쥐",
+      "coffin": "오래된 관"
+    }
+  },
+  "replayMetadataSha256": "a282c659ef9fdbccb6eb4a7fc0300d34c49b841b011db3eb7aabf7c5e09183b5",
+  "replaySourceDeclarations": [
+    {
+      "name": "make",
+      "type": "VariableDeclaration",
+      "start": 5426881,
+      "end": 5427098,
+      "sha256": "27c156c9dbff097079391fb4b992b3df09e1296f99eb7cd1f8b7267b87129e67"
+    },
+    {
+      "name": "SEPTEMBER26_STATE_KEYS",
+      "type": "VariableDeclaration",
+      "start": 5407337,
+      "end": 5407556,
+      "sha256": "e6230a3326433e70536877cca934f3462b712263b3268a247c4f8981e1947f8a"
+    },
+    {
+      "name": "SEPTEMBER_CARD_DEFINITIONS",
+      "type": "VariableDeclaration",
+      "start": 5427099,
+      "end": 5429174,
+      "sha256": "f5fdd92bc5c60ccae193c500e9072b5825beaf5e69aea6603b576c95a9978d36"
+    },
+    {
+      "name": "SEPTEMBER_PASSIVE_EFFECTS",
+      "type": "VariableDeclaration",
+      "start": 5429555,
+      "end": 5429693,
+      "sha256": "7a7b191c0b9988dbf250949306bf82cf4c305cf82c030c440a3ea75673aa8498"
+    },
+    {
+      "name": "INTERNAL_EIGHT_FLAGS",
+      "type": "VariableDeclaration",
+      "start": 6343740,
+      "end": 6343875,
+      "sha256": "99c97b8a63750f1e24b86f91c1a91d7f01b0f3cf639aba8af7102c93a8fa09d4"
+    },
+    {
+      "name": "ONLINE_STATE_KEYS",
+      "type": "VariableDeclaration",
+      "start": 9658571,
+      "end": 9662790,
+      "sha256": "42619dca1941794f6ae00016643f68819ec03887642934c19425d98e56173e60"
+    },
+    {
+      "name": "REPLAY_FRAME_EXCLUDED_KEYS",
+      "type": "VariableDeclaration",
+      "start": 9662791,
+      "end": 9663121,
+      "sha256": "df3127378ad59d59eead188f9e856f99ec687e78f3e6479a0017ce215549986d"
+    },
+    {
+      "name": "REPLAY_FRAME_KEYS",
+      "type": "VariableDeclaration",
+      "start": 9663122,
+      "end": 9663249,
+      "sha256": "66628407ab9b38b43db1feca53af8f4ad06ae64026471f92affefba3fcbe64cb"
+    },
+    {
+      "name": "PIECE_NOTATION_CODES",
+      "type": "VariableDeclaration",
+      "start": 6581389,
+      "end": 6582785,
+      "sha256": "7b286b1e79e361fb32b608143e3d6941d56af7c81b87da0ded46f2dd72d3bf8c"
+    },
+    {
+      "name": "TYPE_LABELS",
+      "type": "VariableDeclaration",
+      "start": 9663761,
+      "end": 9664301,
+      "sha256": "e1a6e5554bbf666db061759d4514a6c5e8acf493bd45e6318655460e56117e24"
+    }
+  ],
+  "replayPolicy": {
+    "labelProfileVersion": "frozen-v7-source-labels-79-v1",
+    "onlineStateKeys": [
+      "d4",
+      "e4",
+      "solidarity",
+      "bishopInfiltration",
+      "synchronization",
+      "assembly",
+      "vigilance",
+      "roller",
+      "greekGiftPending",
+      "tabooPending",
+      "mediumMovement",
+      "highwayCells",
+      "__schema",
+      "mode",
+      "onlineGameStarted",
+      "gameStyle",
+      "completeRandom",
+      "draftDelete",
+      "campaign",
+      "turn",
+      "board",
+      "hands",
+      "deckSlots",
+      "playerCards",
+      "captures",
+      "winner",
+      "replayStartedAt",
+      "replayEndedAt",
+      "replayEndReason",
+      "clock",
+      "draftClock",
+      "fullMove",
+      "moveCount",
+      "draft",
+      "draftResumeTurn",
+      "draftLocked",
+      "appliedRuleCard",
+      "additionalRuleCards",
+      "pendingRuleTickets",
+      "effects",
+      "palaces",
+      "regency",
+      "retreat",
+      "kingDead",
+      "skipTurn",
+      "enPassant",
+      "enPassantFrenzy",
+      "zugzwang",
+      "zugzwangConsumesTurn",
+      "revolvingDoorGuard",
+      "september27CopyPools",
+      "cannonScarecrowScreen",
+      "internalSixFixes",
+      "overtakeTurnOnly",
+      "vanguardDiagonalOnly",
+      "parrotRookTarget",
+      "extinctionMinorTargets",
+      "cannonGhostScreen",
+      "unifiedJumpObstacles",
+      "parrotBasicMovement",
+      "september18Balance",
+      "othelloPending",
+      "miracleSelectsBishop",
+      "thiefQuietJump",
+      "thiefRequiredJump",
+      "thiefRemake",
+      "taunt",
+      "hallucination",
+      "pendingPawnStorm",
+      "pendingPanic",
+      "pendingFreeMoves",
+      "freeMoveCaptureLock",
+      "chaosNoCaptureUntilHalfTurn",
+      "pendingIcbm",
+      "pendingGales",
+      "pendingOtherworld",
+      "pendingTrojanHorse",
+      "pendingBearRetaliations",
+      "pendingTrolley",
+      "pendingScarecrows",
+      "pendingLobsters",
+      "armistice",
+      "pendingPortals",
+      "exhaustion",
+      "mistakeCard",
+      "democracy",
+      "hillKing",
+      "genevaConvention",
+      "platformRule",
+      "activeTrolley",
+      "lastMove",
+      "idolEncoreUsedByPiece",
+      "drawOffer",
+      "drawRejection",
+      "turnsTaken",
+      "cardsUsedThisTurn",
+      "royalCommand",
+      "actionsRemaining",
+      "pendingPromotion",
+      "coronation",
+      "earlyPromotion",
+      "fastGrowth",
+      "pawnSprint",
+      "pawnLeap",
+      "pawnConversion",
+      "racingKing",
+      "radicalCharge",
+      "conscription",
+      "conscriptionUsed",
+      "encouragement",
+      "ironMonarch",
+      "imperialStudies",
+      "religiousVictory",
+      "fianchetto",
+      "majesty",
+      "infiltration",
+      "killerKing",
+      "resolve",
+      "vanguard",
+      "overtake",
+      "highlander",
+      "falseStart",
+      "proficiency",
+      "locustSwarm",
+      "longEnPassant",
+      "disassembly",
+      "symmetry",
+      "mutation",
+      "parrotMovement",
+      "freeCastling",
+      "switcheroo",
+      "substitution",
+      "cornerKick",
+      "chainBonds",
+      "moving",
+      "castlingCanceled",
+      "castled",
+      "bishopSnipe",
+      "backwardKnight",
+      "trojanHorse",
+      "madHorse",
+      "clonePassive",
+      "clonedPassiveCards",
+      "vanishing",
+      "knightInjury",
+      "fileSurge",
+      "rookLift",
+      "underpromotion",
+      "finalWeapon",
+      "afterimageQueen",
+      "recycling",
+      "breakthroughPawns",
+      "quantumPending",
+      "highGround",
+      "highway",
+      "blackHole",
+      "winterKingdom",
+      "initiative",
+      "machoChess",
+      "feudalContracts",
+      "pendingFeudalStrike",
+      "coolGuy",
+      "capturedTypes",
+      "turnCaptures",
+      "lastTurnCaptures",
+      "kingKnight",
+      "royalKnightKing",
+      "knightmate",
+      "monochromeChess",
+      "acceleration",
+      "accelerationPendingFor",
+      "accelerationPendingTurns",
+      "accelerationStartsAfterBlackTurns",
+      "socialism",
+      "ultimatum",
+      "prophecy",
+      "collapsePending",
+      "collapsed",
+      "collapseDepth",
+      "collapsedCells",
+      "periodicCollapse",
+      "ruleBombs",
+      "saturationRule",
+      "portalRule",
+      "mistakeRule",
+      "transcendenceRule",
+      "binaMate",
+      "overwhelm",
+      "camouflageRule",
+      "crownRule",
+      "conveyorRule",
+      "delayedHazards",
+      "ruleOpeningEnabled",
+      "ruleSelectionEnabled",
+      "selectedRuleCardIds",
+      "selectedRuleCardId",
+      "ruleOpeningEvent",
+      "queensGambitFiles",
+      "shotgunDlc",
+      "shotgunOpeningColor",
+      "firstMoveCardsForced",
+      "diceLocks",
+      "starWinLimit",
+      "deathmatchEnabled",
+      "deathmatchLimitTurns",
+      "deathmatch",
+      "checkAlertEnabled",
+      "middleDraftDone",
+      "endDraftDone",
+      "endPhaseStartMove",
+      "temporaryQueens",
+      "necromancy",
+      "accelerationTrail",
+      "logs",
+      "onlineEvents",
+      "onlineEventNonce",
+      "notationEvent",
+      "notationEvents",
+      "judgmentExiles",
+      "frontlineResponse",
+      "relay",
+      "fieldPromotion",
+      "magicGirlSurge",
+      "magicGirlSurgeRefreshPending",
+      "moveReplay",
+      "gomoku",
+      "gomokuVictoryCells",
+      "sirenExposure",
+      "resolveReady",
+      "resolveSpentTurn",
+      "resolveMoveCredit",
+      "resolveCreditPieceId",
+      "reversal",
+      "captureTheFlag",
+      "pendingRecurrences",
+      "undeadResurrections",
+      "simpleBoardEditor"
+    ],
+    "excludedFrameKeys": [
+      "__schema",
+      "hands",
+      "deckSlots",
+      "playerCards",
+      "clock",
+      "draftClock",
+      "draft",
+      "draftResumeTurn",
+      "draftLocked",
+      "ruleOpeningEvent",
+      "checkAlertEnabled",
+      "logs",
+      "onlineEvents",
+      "onlineEventNonce",
+      "notationEvent",
+      "notationEvents"
+    ],
+    "cardState": "captureReplayFrame adds captureReplayCardState separately; raw deckSlots exclusion is source policy",
+    "missingFields": "source own-property semantics; missing differs from null",
+    "serialization": "cloneReplayValue source behavior; property order retained for source deltas"
+  },
+  "legacyCompatibility": {
+    "sourceV6Sha256": "abfe01a035813875772d8eeaf8e300a1df0348888ff48778d4a1789b76ae492f",
+    "v6": "declaration-only profile unchanged",
+    "v7Previous": "accelerate-headless-semantic-v7 / reviewed initializer23 / labels30",
+    "migration": "catalogVersion must distinguish legacy23 from faithful175 before accepting Positions or old receipts; source main baseline is unchanged",
+    "receipts": "label/log/history/Position identities must be regenerated under this explicit profile; previous receipts are not faithful175 evidence"
+  }
+}

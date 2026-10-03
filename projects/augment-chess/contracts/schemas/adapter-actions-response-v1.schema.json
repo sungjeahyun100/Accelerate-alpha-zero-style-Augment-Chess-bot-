@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:augment-chess:adapter:actions-response:v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "intents", "examined", "exhausted", "stop_reason", "cursor"],
+      "properties": {
+        "kind": { "const": "legal_actions_page" },
+        "intents": { "type": "array", "maxItems": 4096, "items": { "type": "object" } },
+        "examined": { "type": "integer", "minimum": 0, "maximum": 65536 },
+        "exhausted": { "type": "boolean" },
+        "stop_reason": { "enum": ["exhausted", "page-limit", "examined-budget"] },
+        "cursor": { "type": ["string", "null"], "pattern": "^v7p-[0-9a-f]{64}$" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "intents"],
+      "properties": {
+        "kind": { "const": "legal_actions" },
+        "intents": { "type": "array", "maxItems": 4096, "items": { "type": "object" } }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "intent"],
+      "properties": {
+        "kind": { "const": "bound_public_intent" },
+        "intent": { "type": "object" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "actor", "turn_changed", "result"],
+      "properties": {
+        "kind": { "const": "applied_public_intent" },
+        "actor": { "enum": ["white", "black"] },
+        "turn_changed": { "type": "boolean" },
+        "result": {}
+      }
+    }
+  ]
+}

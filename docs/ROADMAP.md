@@ -2,30 +2,33 @@
 
 각 Phase는 이전 계약과 검증 기준을 갖춘 뒤 진행한다. 규약·설계 채택과 해당 기능의
 구현 완료는 구분한다. PyO3/maturin·ONNX·LoRA·FiLM 방향은 D-004~D-006의 병합 시 적용하며,
-이번 규약/검사 변경으로 Rust·Python·신경망 구현 단계를 완료 처리하지 않는다.
+현재 구현 checkpoint와 전체 **NO-GO** 범위는 [IMPLEMENTATION](IMPLEMENTATION.md)에 기록한다.
+소스의 존재·작은 단위 검사·규약 채택으로 전체 단계를 완료 처리하지 않는다.
 
 | Phase | 내용 | 완료 기준 | 현재 상태 |
 |---|---|---|---|
 | 0 | 책임·저장소·에이전트 규약 | 문서 간 일치, 구조 검사와 오류 경로, 생성물·WSL 기준 | 구조 확정, 규약·검사 추가 |
-| 1 | Bridge 논리 계약 | GameState·Action·카드·턴·RNG·확률 결과·관측·거절 의미와 JSON 검증 | JSON 초안·예시 검사 존재, 의미 확정 전 |
-| 2 | JS oracle 호출 경계 | 호출 API와 버전이 있는 비교 fixture | JS API·fixture·하네스 존재, 계약 대응 미완료 |
-| 3 | Rust 규칙 포팅 | 독립 규칙 API·기물/카드 지원·단위 검사 | 구현 전, C++ 참고 초안 존재 |
-| 4 | JS ↔ Rust 비교 | 실제 Rust 후보로 legal/apply/full state/result 비교 | 하네스 존재, 현재 JS 자체 회귀, Rust 후보 대기 |
-| 5 | PyO3/maturin 연결 | 직접 호출·JSON 의미 동등성, 타입·배열 소유권·오류·GIL·패키지 검사 | 방식 설계, 구현 전 |
-| 6 | state/action/FiLM 조건 encoding | 상태·관측·행동과 조건의 의미/버전/shape, O-001 결정 | 미구현 |
-| 7 | MCTS | decision/chance node 분리, 엔진 확률 분포 준수, 전개·샘플링 전략, 실제 다음 행동자·종료·실행 한도 검증 | 미구현 |
-| 8 | ResNet·FiLM·LoRA·ONNX | 세부 구조 결정, 별도 LoRA 학습, 조건 입력 유지, 정적 병합 수치·backend 비교 | 방향 설계, 모델·export 없음 |
-| 9 | Self-play | 충분한 위치/관측·행동자·선택 행동·합법 행동·방문 분포·추정 가치·필요한 chance outcome·최종 결과·버전/seed 보존 가능성 검증 | 새 AlphaZero 구현 전 |
-| 10 | Training / Evaluation | 재현 학습, 독립 평가·승격 기준, 자원·모델 산출물 관리 | 새 AlphaZero 구현 전 |
+| 1 | Bridge 논리 계약 | Position·Action·공개 Observation·event·RNG·결과·거절 | v1 구현/검사, 전체 visibility review 진행 |
+| 2 | JS oracle 호출 경계 | 최초 동결 client 초기/draft/legal/apply/result 호출과 의미 정산 보존 | client-only loader/lazy premove 포함 16개 검사 통과, 전체 visibility/행동 의미 검증 진행 |
+| 3 | Rust 규칙 포팅 | 독립 규칙 API·전체 기물/256카드·단위 검사 | 구현 진행, 전체 semantic coverage 미완료 |
+| 4 | JS ↔ Rust 비교 | 실제 Rust 후보로 legal/reject/full state/result/RNG 비교 | 과거349 fixture drift 조사, 전체 client parity 미완료 |
+| 5 | PyO3/maturin 연결 | 직접 호출·JSON 동등성, 소유권·오류·GIL·패키지 | Windows/Linux CI의 sdist→설치 wheel 검증 통과, 최종 규칙 통합 진행 |
+| 6 | state/action/FiLM 조건 encoding | 관측/history/belief와 후보 행동·조건 의미/version/shape | D-007 Python-first 채택, 구현 및 최종 관측 통합 진행 |
+| 7 | MCTS | D-019: decision node의 플레이어 행동과 chance node의 환경 결과 분리, 실제 엔진 확률 준수, 공개 정보 경계, 실제 다음 행동자·종료·bounded search 및 전개/샘플링 전략 검증 | tracker/availability PUCT/B4 native 실행 통과, 세 default mode의 전체 draft→play 및 chance 계약 통합 진행 |
+| 8 | ResNet·FiLM·LoRA·ONNX | 조건 입력 유지, 정적 LoRA 복사 병합 수치·실제 ort/tract 비교 | Windows/Linux 두 backend 각각 48-case checkpoint 통과, 최종 공개 관측/규칙 통합 진행 |
+| 9 | Self-play 코드 | 공개 관측·후보 의도·방문 분포·결과·버전/seed 보존과 유한 종료 | 설치 wheel의 유한 replay/CLI·취소/전체 deadline 검사 통과, 실제 campaign 제외 |
+| 10 | Training / Evaluation 코드 | 유한 명령·optimizer/RNG 복원·평가/activation 분리·산출물 관리 | synthetic optimizer/RNG/shuffle 재개·실제 평가/명시 activation 검사 통과, 실제 학습·실력 평가·승격 제외 |
 
-Phase 8에서 층·채널·LoRA rank/적용 층·FiLM 위치와 backend를 실제 모델로 결정한다.
+Phase 8의 구현 기준은 8 residual block·128 channel, 각 block의 두 convolution에 static
+LoRA rank 8·alpha 8·dropout 0, 두 번째 BN 뒤 FiLM이다. FP32 ONNX opset 18의 명시적
+condition과 동적 batch/action 축을 유지하고 기본 ort 및 명시 선택 tract를 실제 모델로 검사한다.
 Hypernetwork는 생성·적용·병합 가능 여부의 확장 경계만 준비한다. 생성 주기와 동적
 추론은 별도 설계·검증 작업이며 현재 정적 LoRA 경로의 구현 완료 기준에 섞지 않는다.
 모델 정확성·export 호환성 검사와 대전 성능·승격은 별도로 기록한다.
 
-D-007의 chance-aware MCTS는 설계 결정이며 구현·데이터 형식의 완료가 아니다.
+O-001은 D-007(Python-first encoding), O-002는 D-008(최초 동결 client 정답)로 해결했다.
+이번 GO/NO-GO는 코드·계약 완성 기준이며 실제 학습은 제외한다. 기존 참고 도구의 과거 NNUE
+실험은 새 AlphaZero 완료나 성능 증거가 아니다.
+D-019의 chance-aware MCTS는 설계 결정이며 chance 계약·데이터 형식의 완료가 아니다.
 숨은 정보 범위와 불완전정보 탐색 도입 여부는 별도 검토한다. NNUE는 축적 데이터를
 활용할 후속 평가 모델 후보이며 확률적 탐색의 대체재가 아니다.
-
-담당자와 정량 기준은 Phase 착수 시 기록한다. O-002(사이트/JS 불일치 기준)는 여전히
-미결정이다. 기존 infra의 과거 NNUE 실험은 새 AlphaZero 완료나 성능 증거가 아니다.
