@@ -14,8 +14,10 @@ import os
 from pathlib import Path
 import random
 import tempfile
+from threading import Lock
 import time
 from typing import Any, Callable, Sequence
+from weakref import WeakValueDictionary
 
 import numpy as np
 import torch
@@ -27,6 +29,20 @@ from .replay import MAX_REPLAY_BYTES, ReplayEpisode, TrainingExample
 
 TRAINING_VERSION = "accelerate-training-checkpoint-v1"
 TYPED_TRAINING_VERSION = "accelerate-training-checkpoint-v2"
+
+_checkpoint_commit_locks_guard = Lock()
+_checkpoint_commit_locks = WeakValueDictionary()
+
+
+def _checkpoint_commit_lock(path: Path):
+    # Keep the registry short-lived while callers retain their lock through commit.
+    destination = os.path.normcase(os.fspath(path.parent.resolve() / path.name))
+    with _checkpoint_commit_locks_guard:
+        lock = _checkpoint_commit_locks.get(destination)
+        if lock is None:
+            lock = Lock()
+            _checkpoint_commit_locks[destination] = lock
+        return lock
 
 
 def _sha(path):
@@ -422,7 +438,8 @@ def save_training_checkpoint(model, optimizer, spec: EncoderSpec, cursor: Datase
             raise ValueError("training checkpoint exceeds the 512 MiB artifact budget")
         with temporary.open("rb+") as saved:
             os.fsync(saved.fileno())
-        os.replace(temporary, path)
+        with _checkpoint_commit_lock(path):
+            os.replace(temporary, path)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)

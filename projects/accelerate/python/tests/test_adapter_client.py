@@ -157,8 +157,13 @@ def test_v7_draft_public_intents_are_exact_and_branches_are_isolated(style):
         {"gameStyle": style, "draftDelete": False}, 37, spec=spec)
     initial = environment.observe("white")
     ObservationIR.from_public(initial, spec)
+    # Frozen grand draft starts with Black while the board turn is White.
+    # Public events must identify the source decision actor, not the viewer.
+    actor = "black" if style == "grand" else "white"
+    assert environment.decision_actor == actor
     revision = environment.snapshot_revision
     eager = environment.legal_intents()
+    assert eager and all(intent["color"] == actor for intent in eager)
     cursor, paged = None, []
     for _ in range(len(eager) + 2):
         page = environment.legal_intents_page(limit=1, max_examined=1, cursor=cursor)
@@ -183,9 +188,10 @@ def test_v7_draft_public_intents_are_exact_and_branches_are_isolated(style):
     step = environment.apply(first["actions"][0])
     assert environment.snapshot_revision == revision
     assert step.position.snapshot_revision != revision
+    assert step.actor == actor
     assert not hasattr(step, "event")
     assert step.position.observe("white") != initial
-    assert step.position.observe("white")["history"][-1]["actor"] == intent["color"]
+    assert step.position.observe("white")["history"][-1]["actor"] == actor
     ObservationIR.from_public(step.position.observe("white"), spec)
     with pytest.raises(ValueError, match="another game adapter revision"):
         step.position.apply(first["actions"][0])

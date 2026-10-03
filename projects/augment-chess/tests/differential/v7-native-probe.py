@@ -56,42 +56,50 @@ def failure(status: str, reason: str, **details: Any) -> dict[str, Any]:
 
 def collect_actions(position: Any) -> tuple[list[dict[str, Any]], int]:
     stream = position.action_stream()
-    intents: list[dict[str, Any]] = []
+    actions: list[dict[str, Any]] = []
     examined = 0
     for _ in range(MAX_PAGES):
         page = stream.next_page(PAGE_SIZE)
+        if not isinstance(page["examined"], int) or page["examined"] < 0:
+            raise RuntimeError("native action stream returned invalid examined count")
         examined += page["examined"]
-        intents.extend(action.public_intent() for action in page["actions"])
-        if len(intents) > MAX_ACTIONS or examined > MAX_EXAMINED:
-            raise RuntimeError("native public action stream exceeded probe budget")
+        actions.extend(action.public_intent() for action in page["actions"])
+        if len(actions) > MAX_ACTIONS or examined > MAX_EXAMINED:
+            raise RuntimeError("native legal action stream exceeded probe budget")
         if page["exhausted"]:
-            return intents, examined
+            if len({json.dumps(action, sort_keys=True) for action in actions}) != len(actions):
+                raise RuntimeError("native legal action stream emitted duplicate public intents")
+            return actions, examined
         if not page["actions"] and page["examined"] == 0:
-            raise RuntimeError("native public action stream made no progress")
-    raise RuntimeError("native public action stream did not exhaust within page budget")
+            raise RuntimeError("native legal action stream made no progress")
+    raise RuntimeError("native legal action stream did not exhaust within page budget")
 
 
-def public_intent(source_action: dict[str, Any]) -> dict[str, Any]:
-    """The source UI choice for the frozen corpus's ordinary moves and offers."""
-    payload = source_action["payload"]
-    if payload["type"] == "move":
-        target = payload["move"]
-        intent = {"type": "move", "color": payload["color"], "from": payload["from"],
-                  "destination": {"row": target["row"], "col": target["col"]}}
-        for flag, mode in (("shotgunBlast", "shotgun"), ("shotgunSnipe", "snipe"),
-                           ("setLogDirection", "log-direction")):
-            if target.get(flag):
-                intent["selectionMode"] = mode
-        return intent
-    if payload["type"] == "trolleyChoice":
-        return {key: payload[key] for key in ("type", "color", "doomedIndex")}
-    return payload
+def full_result(position: Any, expected_envelope: dict[str, Any]) -> dict[str, Any]:
+    # The host's revision commits the complete JCS state/history/RNG envelope,
+    # including the nonpublic replay reason. Do not restore a private Python
+    # export just to inspect that field: prove the whole digest before reading
+    # its expected value, and compare the native outcome and public winner.
+    if position.snapshot_revision != expected_envelope["positionId"]:
+        raise ValueError("native full position/history/RNG digest differs")
+    state = position.observe("white")["publicState"]
+    terminal = state["mode"] == "gameover"
+    winner = state.get("winner") if terminal and state.get("winner") in ("white", "black") else None
+    return {
+        "protocolVersion": "accelerate-result-v1",
+        "status": "terminal" if terminal else "ongoing",
+        "winner": winner,
+        "outcome": position.result,
+        "reason": (expected_envelope["state"].get("replayEndReason") or "") if terminal else "",
+    }
 
 
-def compare_observations(position: Any, expected: dict[str, Any], stage: str) -> dict[str, Any] | None:
+def compare_observations(position: Any, expected: dict[str, Any], native: Any, stage: str) -> dict[str, Any] | None:
     for viewer in ("white", "black"):
         try:
             actual = position.observe(viewer)
+        except native.UnsupportedFeatureError as exc:
+            return failure("unsupported", f"native {stage} public observation unsupported: {exc}", viewer=viewer)
         except Exception as exc:
             return failure("observation-error", f"native {stage} public observation: {type(exc).__name__}: {exc}", viewer=viewer)
         changed = difference(expected[viewer], actual)
@@ -100,96 +108,171 @@ def compare_observations(position: Any, expected: dict[str, Any], stage: str) ->
     return None
 
 
-def compare_case(case: dict[str, Any], native: Any, spec: Any) -> dict[str, Any]:
-    from accelerate_chess import GameAdapterClient
+def check_rejection(
+    position: Any, payload: dict[str, Any], expected_observations: dict[str, Any], native: Any
+) -> dict[str, Any] | None:
+    before = position.snapshot_revision
+    before_result = position.result
+    try:
+        action = position.bind_public_intent(payload)
+        position.apply(action)
+    except native.UnsupportedFeatureError as exc:
+        return failure("unsupported", f"native rejection path unsupported: {exc}")
+    except (native.NativeError, ValueError) as exc:
+        changed = difference(before, position.snapshot_revision)
+        if changed:
+            return failure("mismatch", "rejected action mutated native position", path=changed)
+        if position.result != before_result:
+            return failure("mismatch", "rejected action changed native result")
+        return compare_observations(position, expected_observations, native, "rejected")
+    return failure("mismatch", "native accepted source-rejected wrong-actor action")
 
+
+def stale_request(position: Any, old_action: Any, capability_id: str) -> dict[str, Any]:
+    session = position._session
+    descriptor = next(item for item in session.descriptors() if item["adapterId"] == "public-actions")
+    capability = next(item for item in descriptor["capabilities"] if item["id"] == capability_id)
+    return {"requestId": "source-differential-stale", "projectId": descriptor["projectId"],
+            "adapterId": descriptor["adapterId"], "contractVersion": descriptor["contractVersion"],
+            "implementationVersion": descriptor["implementationVersion"], "capabilityId": capability_id,
+            "requestSchema": capability["requestSchema"], "responseSchema": capability["responseSchema"],
+            "snapshotRevision": old_action.revision, "limits": descriptor["callLimits"],
+            "payload": {"kind": capability_id.replace("-", "_"), "intent": old_action.public_intent()}}
+
+
+def check_stale(applied_position: Any, old_action: Any, native: Any) -> dict[str, Any] | None:
+    before = applied_position.snapshot_revision
+    before_result = applied_position.result
+    for route in ("bind-public-intent", "apply-public-intent", "client-apply"):
+        try:
+            if route == "client-apply":
+                applied_position.apply(old_action)
+            else:
+                applied_position._session.invoke(stale_request(applied_position, old_action, route))
+        except native.StaleActionError:
+            pass
+        except ValueError as exc:
+            if route != "client-apply" or str(exc) != "public intent action belongs to another game adapter revision":
+                return failure("stale-error", f"native stale {route} path: {type(exc).__name__}: {exc}")
+        except native.UnsupportedFeatureError as exc:
+            return failure("unsupported", f"native stale {route} path unsupported: {exc}")
+        except Exception as exc:
+            return failure("stale-error", f"native stale {route} path: {type(exc).__name__}: {exc}")
+        else:
+            return failure("mismatch", f"native accepted stale action through {route}")
+        changed = difference(before, applied_position.snapshot_revision)
+        if changed:
+            return failure("mismatch", f"stale {route} mutated applied position", path=changed)
+        if applied_position.result != before_result:
+            return failure("mismatch", f"stale {route} changed applied result")
+    return None
+
+
+def compare_case(case: dict[str, Any], native: Any, client_factory: Any) -> dict[str, Any]:
     result: dict[str, Any] = {"name": case["name"], "mode": case["position"]["state"]["mode"]}
     try:
-        position = GameAdapterClient(native.GameAdapterSession.from_envelope(case["position"]), spec)
-    except Exception as exc:
+        position = client_factory(native.GameAdapterSession.from_envelope(case["position"]))
+    except native.UnsupportedFeatureError as exc:
+        return {**result, **failure("unsupported", f"native v7 import unsupported: {exc}")}
+    except Exception as exc:  # Preserve the actual import gate; never call it a skip.
         return {**result, **failure("import-error", f"{type(exc).__name__}: {exc}")}
-    if position.snapshot_revision != case["position"]["positionId"]:
-        return {**result, **failure("mismatch", "imported source revision differs")}
+
+    try:
+        # A bounded read-only host assertion keeps the original complete
+        # private frame and ordered source-action comparisons. Only status and
+        # diagnostics return; no private accessor enters the public client.
+        proof = position._session._verify_frozen_source_probe(case["position"], case["actions"],
+                                                              snapshot_revision=position.snapshot_revision)
+        if proof is not None:
+            return {**result, **failure("probe-error", "native source proof returned an invalid success value")}
+    except native.UnsupportedFeatureError as exc:
+        return {**result, **failure("unsupported", f"native source proof unsupported: {exc}")}
+    except Exception as exc:
+        return {**result, **failure("mismatch", f"native source proof: {type(exc).__name__}: {exc}")}
+
+    changed = difference(case["position"]["positionId"], position.snapshot_revision)
+    if changed:
+        return {**result, **failure("mismatch", "imported full position/history/RNG digest differs", path=changed)}
     if position.result != case["result"]["outcome"]:
-        return {**result, **failure("mismatch", "baseline result differs")}
-    observed = compare_observations(position, case["observations"], "baseline")
+        return {**result, **failure("mismatch", "baseline result differs", expected=case["result"]["outcome"], actual=position.result)}
+    changed = difference(case["result"], full_result(position, case["position"]))
+    if changed:
+        return {**result, **failure("mismatch", "baseline result envelope differs", path=changed)}
+    observed = compare_observations(position, case["observations"], native, "baseline")
     if observed:
         return {**result, **observed}
 
     try:
         actual, examined = collect_actions(position)
-        eager = position.legal_intents()
+    except native.UnsupportedFeatureError as exc:
+        return {**result, **failure("unsupported", f"native v7 legal stream unsupported: {exc}")}
     except Exception as exc:
         return {**result, **failure("legal-error", f"{type(exc).__name__}: {exc}")}
-    expected = case["actions"]
-    if len(actual) != len(expected) or tuple(actual) != eager:
-        return {**result, **failure("mismatch", "ordered public action stream differs from source count or eager native list",
-                                    sourceCount=len(expected), nativeCount=len(actual), nativeExamined=examined)}
-    for index, (source_action, native_intent) in enumerate(zip(expected, actual)):
-        changed = difference(public_intent(source_action), native_intent)
-        if changed:
-            return {**result, **failure("mismatch", "ordered source public intent differs", index=index, path=changed)}
+    expected = case["publicIntents"]
+    changed = difference(expected, actual)
+    if changed:
+        return {**result, **failure("mismatch", "full ordered public intent stream differs", sourceCount=len(expected), nativeCount=len(actual), nativeExamined=examined, path=changed)}
+
+    for index, source_action in enumerate(expected):
         try:
-            bound = position.bind_public_intent(native_intent)
+            bound = position.bind_public_intent(source_action)
+        except native.UnsupportedFeatureError as exc:
+            return {**result, **failure("unsupported", f"native v7 bind unsupported: {exc}", index=index)}
         except Exception as exc:
             return {**result, **failure("bind-error", f"{type(exc).__name__}: {exc}", index=index)}
-        if bound.public_intent() != native_intent:
-            return {**result, **failure("mismatch", "native binding changed public intent", index=index)}
+        changed = difference(source_action, bound.public_intent())
+        if changed or bound.revision != case["position"]["positionId"]:
+            return {**result, **failure("mismatch", "legal public intent bind differs", index=index, path=changed)}
 
-    if case["rejectPayload"] is not None:
-        before = position.snapshot_revision
-        rejected_intent = public_intent({"payload": case["rejectPayload"]})
-        try:
-            position.apply_public_intent(rejected_intent)
-        except native.NativeError as exc:
-            if "wrong_game_actor" not in str(exc):
-                return {**result, **failure("rejection-error", f"unexpected native rejection: {exc}")}
-        except Exception as exc:
-            return {**result, **failure("rejection-error", f"{type(exc).__name__}: {exc}")}
-        else:
-            return {**result, **failure("mismatch", "native accepted source-rejected wrong-actor intent")}
-        if position.snapshot_revision != before or position.result != case["result"]["outcome"]:
-            return {**result, **failure("mismatch", "rejected intent mutated native position")}
-        rejected = compare_observations(position, case["observations"], "rejected")
+    if case["rejectPublicIntent"] is not None:
+        rejected = check_rejection(position, case["rejectPublicIntent"], case["observations"], native)
         if rejected:
             return {**result, **rejected}
 
-    by_id = {source_action["actionId"]: index for index, source_action in enumerate(expected)}
     for index, sample in enumerate(case["samples"]):
-        action_index = by_id.get(sample["action"]["actionId"])
-        if action_index is None:
-            return {**result, **failure("probe-error", "source sample not in complete legal stream", sample=index)}
         try:
-            action = position.bind_public_intent(actual[action_index])
+            action = position.bind_public_intent(sample["publicIntent"])
             step = position.apply(action)
+        except native.UnsupportedFeatureError as exc:
+            return {**result, **failure("unsupported", f"native v7 apply unsupported: {exc}", sample=index)}
         except Exception as exc:
             return {**result, **failure("apply-error", f"{type(exc).__name__}: {exc}", sample=index)}
-        # Position IDs cover the entire state, RNG and public history. Equal
-        # revisions therefore verify private transition parity without exporting it.
-        if step.position.snapshot_revision != sample["position"]["positionId"]:
-            return {**result, **failure("mismatch", "applied full state/history/RNG revision differs", sample=index)}
+        try:
+            proof = step.position._session._verify_frozen_source_probe(sample["position"],
+                snapshot_revision=step.position.snapshot_revision)
+            if proof is not None:
+                return {**result, **failure("probe-error", "native applied source proof returned an invalid success value", sample=index)}
+        except native.UnsupportedFeatureError as exc:
+            return {**result, **failure("unsupported", f"native applied source proof unsupported: {exc}", sample=index)}
+        except Exception as exc:
+            return {**result, **failure("mismatch", f"native applied source proof: {type(exc).__name__}: {exc}", sample=index)}
+        changed = difference(sample["position"]["positionId"], step.position.snapshot_revision)
+        if changed:
+            return {**result, **failure("mismatch", "applied full position/history/RNG digest differs", sample=index, path=changed)}
         expected_event = sample["position"]["history"][-1]
         if step.actor != expected_event["actor"] or step.turn_changed != expected_event["turnChanged"]:
             return {**result, **failure("mismatch", "applied actor/turn change differs", sample=index)}
         if step.result != sample["result"]["outcome"] or step.position.result != sample["result"]["outcome"]:
             return {**result, **failure("mismatch", "applied result differs", sample=index)}
-        observed = compare_observations(step.position, sample["observations"], f"sample {index}")
+        changed = difference(sample["result"], full_result(step.position, sample["position"]))
+        if changed:
+            return {**result, **failure("mismatch", "applied result envelope differs", sample=index, path=changed)}
+        observed = compare_observations(step.position, sample["observations"], native, f"sample {index}")
         if observed:
             return {**result, **observed, "sample": index}
-        try:
-            step.position.apply(action)
-        except ValueError:
-            pass
-        else:
-            return {**result, **failure("mismatch", "native accepted stale public intent", sample=index)}
-        if step.position.snapshot_revision != sample["position"]["positionId"]:
-            return {**result, **failure("mismatch", "stale action mutated native position", sample=index)}
-        if position.snapshot_revision != case["position"]["positionId"]:
+        stale = check_stale(step.position, action, native)
+        if stale:
+            return {**result, **stale, "sample": index}
+        if case["position"]["positionId"] != position.snapshot_revision:
             return {**result, **failure("mismatch", "apply mutated source native position", sample=index)}
-    return {**result, "status": "pass", "legalCount": len(actual), "nativeExamined": examined,
+    return {**result, "status": "pass", "legalCount": len(case["actions"]),
+            "publicIntentCount": len(actual), "nativeExamined": examined,
             "bound": len(expected), "applied": len(case["samples"]),
-            "rejected": 1 if case["rejectPayload"] is not None else 0,
-            "staleApplyRejected": len(case["samples"]), "publicViewers": 2}
+            "rejected": 1 if case["rejectPublicIntent"] is not None else 0,
+            "staleBindRejected": len(case["samples"]), "staleApplyRejected": len(case["samples"]),
+            "staleClientApplyRejected": len(case["samples"]), "publicViewers": 2,
+            "privateStateComparison": "host-only-whole-envelope-jcs",
+            "privateSourceActionComparison": "host-only-full-ordered-envelopes"}
 
 
 def main() -> None:
@@ -214,6 +297,11 @@ def main() -> None:
     if len(main_files) != 1 or main_files[0].get("sha256") != SOURCE_SHA256:
         print(json.dumps(failure("version-mismatch", "native v7 source SHA differs")))
         return
+    native_execution_profile = catalog.get("executionProfile")
+    changed = difference(native_execution_profile, request.get("executionProfile"))
+    if changed or not isinstance(native_execution_profile, dict) or native_execution_profile.get("version") != PROFILE:
+        print(json.dumps(failure("version-mismatch", "native v7 execution profile identity differs", path=changed)))
+        return
     try:
         native_policy = native.site_observation_policy(request["rulesVersion"])
     except Exception as exc:
@@ -230,10 +318,10 @@ def main() -> None:
     if not isinstance(source_cases, list) or not source_cases:
         print(json.dumps(failure("probe-error", "native comparison requires at least one source case")))
         return
+    from accelerate_chess.adapter_client import GameAdapterClient
     from accelerate_chess.ir import TypedEncoderSpec
-
     spec = TypedEncoderSpec.from_catalog(catalog, observation_policy=native_policy)
-    cases = [compare_case(case, native, spec) for case in source_cases]
+    cases = [compare_case(case, native, lambda session: GameAdapterClient(session, spec)) for case in source_cases]
     status = "pass" if all(case["status"] == "pass" for case in cases) else "fail"
     print(json.dumps({"status": status, "cases": cases}, allow_nan=False))
 

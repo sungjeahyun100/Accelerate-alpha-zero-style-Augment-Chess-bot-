@@ -5,7 +5,11 @@
   "scripts": {
     "test:game-adapter": "node --test projects/augment-chess/oracle/tools/site-parity/offline-oracle.test.js",
     "check:adapter-contract": "node packages/adapter-contract/verify.mjs",
-    "check:repository-policy": "node --test .github/scripts/check-repository-policy.test.mjs"
+    "check:repository-policy": "node --test .github/scripts/check-repository-policy.test.mjs",
+    "check:static-demo": "npm --prefix projects/accelerate/demo --workspaces=false run check",
+    "test:static-demo": "npm --prefix projects/accelerate/demo --workspaces=false test",
+    "build:static-demo": "npm --prefix projects/accelerate/demo --workspaces=false run build",
+    "bundle:static-demo": "npm --prefix projects/accelerate/demo --workspaces=false run bundle"
   },
   "engines": { "node": ">=22" }
 }

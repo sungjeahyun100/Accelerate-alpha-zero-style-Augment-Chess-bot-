@@ -462,7 +462,9 @@ fn source_state_value(state: &GameState, retain_ruleset_id: bool) -> Result<Valu
 
 /// Preserve an imported field exactly when its typed value has not changed.
 /// Array slots containing a different identity are replacements, so fields
-/// from the old piece/card cannot leak into the new one.
+/// from the old piece/card cannot leak into the new one. An updated piece
+/// anchor also replaces the slot: an overlapping translated footprint must
+/// not mix the old slot's source ordering with its newly occupied slots.
 fn restore_source_shape(original: &Value, baseline: &Value, current: &Value) -> Value {
     if baseline == current {
         return original.clone();
@@ -474,7 +476,13 @@ fn restore_source_shape(original: &Value, baseline: &Value, current: &Value) -> 
                     && now.get(name).is_some()
                     && base.get(name) != now.get(name)
             });
-            if identity_changed {
+            let anchor_changed = ["type", "color", "id"]
+                .into_iter()
+                .all(|name| base.contains_key(name) && now.contains_key(name))
+                && ["anchorRow", "anchorCol"]
+                    .into_iter()
+                    .any(|name| base.get(name) != now.get(name));
+            if identity_changed || anchor_changed {
                 return current.clone();
             }
             let mut output: Map<String, Value> = old.clone();
@@ -579,6 +587,84 @@ fn digest(value: &Value) -> Result<String> {
 #[cfg(test)]
 mod completion_tests {
     use super::*;
+
+    #[test]
+    fn translated_large_aliases_survive_canonical_source_shape_round_trip() {
+        for (source_large, destination_row) in [(true, 2), (true, 1), (false, 3)] {
+            for explicit_id in [false, true] {
+                let mut piece = json!({
+                    "type":if source_large { "bigRook" } else { "rook" },
+                    "color":"white", "moved":false, "unlistedPieceProperty":{"active":true},
+                });
+                if source_large {
+                    piece["anchorRow"] = json!(3);
+                    piece["anchorCol"] = json!(1);
+                }
+                if explicit_id {
+                    piece["id"] = json!("test-large-rook");
+                }
+                let mut board = vec![vec![Value::Null; 8]; 8];
+                for row in &mut board[3..if source_large { 5 } else { 4 }] {
+                    for cell in &mut row[1..if source_large { 3 } else { 2 }] {
+                        *cell = piece.clone();
+                    }
+                }
+                let original = V7HostPosition::from_parts(
+                    json!({"board":board, "turn":"white", "mode":"play"}),
+                    RngState::seeded(19),
+                    Vec::new(),
+                )
+                .unwrap();
+                let before = original.export_envelope().unwrap();
+                let (next, ()) = original
+                    .transact(original.position_id(), |working| {
+                        let mut moving = working.board[3][1].as_ref().unwrap().clone();
+                        crate::transition::clear_piece(working, &moving.id);
+                        moving.kind = "bigRook".into();
+                        moving.moved = true;
+                        moving
+                            .extra
+                            .insert("anchorRow".into(), json!(destination_row));
+                        moving.extra.insert("anchorCol".into(), json!(1));
+                        moving
+                            .extra
+                            .insert("coolGuyCapturedLast".into(), json!(false));
+                        for row in destination_row..destination_row + 2 {
+                            for col in 1..3 {
+                                working.board[row][col] = Some(moving.clone());
+                            }
+                        }
+                        // The public action host applies this same JCS boundary
+                        // before commit. This isolates overlay/reimport from
+                        // movement rules while retaining its exact key ordering.
+                        crate::replay::canonicalize_position_frames(working)?;
+                        working.validate_v7_snapshot_shape_and_identify()?;
+                        Ok(())
+                    })
+                    .unwrap();
+                assert_eq!(original.export_envelope().unwrap(), before);
+                assert_eq!(next.revision(), 1);
+                assert_eq!(next.spatial().pieces().len(), 1);
+                let envelope = next.export_envelope().unwrap();
+                let reimported = V7HostPosition::from_envelope(envelope).unwrap();
+                let expected = next.state().board[destination_row][1].as_ref().unwrap();
+                assert_eq!(expected.extra["unlistedPieceProperty"]["active"], true);
+                assert_eq!(expected.extra["anchorRow"], json!(destination_row));
+                assert!(expected.moved);
+                for row in 0..8 {
+                    for col in 0..8 {
+                        if (destination_row..destination_row + 2).contains(&row)
+                            && (1..3).contains(&col)
+                        {
+                            assert_eq!(reimported.state().board[row][col].as_ref(), Some(expected));
+                        } else {
+                            assert!(reimported.state().board[row][col].is_none());
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn colossus_callback_ticket_is_issued_once_across_host_clones_and_cannot_be_restored() {

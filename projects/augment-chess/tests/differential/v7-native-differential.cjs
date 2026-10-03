@@ -17,7 +17,10 @@ const MAX_PAGES = 128;
 const MAX_ACTIONS = 4096;
 const MAX_EXAMINED = 65536;
 const MAX_BATCH_BYTES = 16 * 1024 * 1024;
-const MAX_BATCH_CASES = 8;
+// A complete case owns one finite native call. Grouping unrelated cases made
+// the 60-second deadline cumulative and hid which complete proof timed out.
+// Keep every case and its complete legal stream; do not extend the deadline.
+const MAX_BATCH_CASES = 1;
 const MAX_PLAYOUT_DECISIONS = 128;
 const STYLES = ["normal", "chaos", "grand"];
 const NO_CASE_FAILURE_STATUSES = new Set([
@@ -76,10 +79,101 @@ function sourceActions(adapter, position) {
   }
 }
 
-function buildCase(adapter, contract, name, position, requiredSampleId = null) {
+// Evaluated in the pinned client's VM. This projects already verified source
+// descriptors through its UI helpers; it does not generate moves or execute
+// replacement rules. Mode names and the canonical large anchor are wire choices.
+function sourcePublicPayloads(payloads) {
+  const square = cell => {
+    if (!cell || !Number.isInteger(cell.row) || !Number.isInteger(cell.col) || !inBounds(cell.row, cell.col))
+      throw new TypeError("Source public selection has an invalid board coordinate");
+    return { row: cell.row, col: cell.col };
+  };
+  return payloads.map(payload => {
+    if (payload.type === "trolleyChoice")
+      return [{ type: payload.type, color: payload.color, doomedIndex: payload.doomedIndex }];
+    // Cards, drafts and explicit decisions already use their source public
+    // payload. In particular ordered target arrays must not be sorted/deduped.
+    if (payload.type !== "move") return [payload];
+    const move = payload.move;
+    const selectionMode = move.shotgunBlast ? "shotgun" : move.shotgunSnipe ? "snipe" :
+      move.setLogDirection ? "log-direction" : null;
+    let destinations;
+    if (move.bigRookMove || move.colossusMove || move.colossusBody) destinations = [square(move)];
+    else {
+      let keys = moveHighlightKeys(move);
+      // Highlights can omit clickable body/blast/excluded cells. The source
+      // click handler uses moveContainsSquare instead. Its descriptor order
+      // gives the aliases; presentation exclusions never reorder those aliases.
+      const surface = move.bodyCells || move.displayCells || move.highlightCells || move.sectorCells;
+      if (surface) keys = surface.filter(cell => moveContainsSquare(move, cell.row, cell.col)).map(squareKey);
+      else if (!keys.length && moveContainsSquare(move, move.row, move.col)) keys = [squareKey(move)];
+      destinations = keys.map(key => {
+        if (typeof key !== "string" || !/^\d-\d$/.test(key)) throw new TypeError("Source public click key is malformed");
+        const [row, col] = key.split("-").map(Number);
+        return square({ row, col });
+      });
+    }
+    let origins = [square(payload.from)];
+    if (move.quantumFrom) {
+      const physical = square(payload.from);
+      const ghost = square(move.quantumFrom);
+      const piece = state.board[physical.row]?.[physical.col];
+      if (!piece) throw new Error("Source quantum public origin lost its physical piece");
+      origins = quantumCellsForItemAt(piece, ghost.row, ghost.col).filter(cell => {
+        const selection = normalizePieceSquare(cell.row, cell.col);
+        return sameSquare(selection, physical) && sameSquare(selection.quantumFrom, ghost);
+      }).map(square);
+      if (isLargePiece(piece)) origins = origins.slice(0, 1);
+    }
+    return origins.flatMap(from => destinations.map(destination => {
+      const intent = { type: "move", color: payload.color, from, destination };
+      if (selectionMode !== null) intent.selectionMode = selectionMode;
+      return intent;
+    }));
+  });
+}
+
+function sourcePublicIntents(runtime, contract, position, actions) {
+  contract.validatePosition(position);
+  for (const action of actions) contract.validateAction(position, action);
+  runtime.restore(position);
+  let projections;
+  try {
+    runtime.main.context.__nativeProjectionPayloads = actions.map(action => action.payload);
+    projections = JSON.parse(runtime.evaluate(`JSON.stringify((${sourcePublicPayloads.toString()})(__nativeProjectionPayloads))`));
+  } finally {
+    delete runtime.main.context.__nativeProjectionPayloads;
+  }
+  if (!Array.isArray(projections) || projections.length !== actions.length)
+    throw new Error("Source public projection changed the full action count");
+  const publicIntents = [], byActionId = new Map(), seen = new Set();
+  for (let index = 0; index < actions.length; index++) {
+    const aliases = [], aliasKeys = new Set();
+    for (const value of projections[index]) {
+      const key = contract.canonical(value);
+      if (aliasKeys.has(key)) continue;
+      aliasKeys.add(key);
+      const intent = contract.deepFreeze(contract.jsonCopy(value));
+      aliases.push(intent);
+      if (!seen.has(key)) {
+        if (publicIntents.length >= MAX_ACTIONS)
+          throw new Error("Source complete public intent stream exceeded probe budget; no prefix is accepted");
+        seen.add(key);
+        publicIntents.push(intent);
+      }
+    }
+    if (!aliases.length) throw new Error(`Source action ${actions[index].actionId} has no public UI intent`);
+    byActionId.set(actions[index].actionId, aliases);
+  }
+  return { publicIntents, byActionId };
+}
+
+function buildCase(adapter, contract, name, position, requiredSampleId = null, publicRuntime = null) {
   contract.validatePosition(position);
   const { actions, examined } = sourceActions(adapter, position);
   if (!actions.length && position.state.mode !== "gameover") throw new Error(`${name}: nonterminal source has no action for reject/apply probes`);
+  if (!publicRuntime) throw new TypeError(`${name}: pinned public projection runtime is required`);
+  const { publicIntents, byActionId } = sourcePublicIntents(publicRuntime, contract, position, actions);
   const observations = Object.fromEntries(["white", "black"].map(viewer => {
     const observation = adapter.observe(position, viewer);
     contract.validateObservation(observation);
@@ -87,6 +181,7 @@ function buildCase(adapter, contract, name, position, requiredSampleId = null) {
   }));
   const first = actions[0];
   const rejectPayload = first ? contract.jsonCopy({ ...first.payload, color: first.payload.color === "white" ? "black" : "white" }) : null;
+  const rejectPublicIntent = first ? contract.jsonCopy({ ...byActionId.get(first.actionId)[0], color: first.payload.color === "white" ? "black" : "white" }) : null;
   if (rejectPayload) {
     const rejected = adapter.apply(position, contract.action(position, rejectPayload));
     if (rejected.ok || contract.canonical(rejected.position) !== contract.canonical(position) ||
@@ -117,15 +212,17 @@ function buildCase(adapter, contract, name, position, requiredSampleId = null) {
       contract.validateObservation(observation);
       return [viewer, observation];
     }));
-    samples.push({ action, position: step.position, result: step.result, observations: nextObservations });
+    const publicIntentAliases = byActionId.get(action.actionId);
+    samples.push({ action, publicIntent: publicIntentAliases[0], publicIntentAliases,
+      position: step.position, result: step.result, observations: nextObservations });
   }
   const result = adapter.result(position);
   contract.validateResult(result);
   const actionTypes = [...new Set(actions.map(action => action.payload.type))].sort();
   return {
-    input: { name, position, result, observations, actions, rejectPayload, samples },
+    input: { name, position, result, observations, actions, publicIntents, rejectPayload, rejectPublicIntent, samples },
     summary: { name, mode: position.state.mode, positionDigest: contract.digest(position), legalCount: actions.length,
-      sourceExamined: examined, actionTypes, sampleTypes: samples.map(sample => sample.action.payload.type),
+      sourceExamined: examined, publicIntentCount: publicIntents.length, actionTypes, sampleTypes: samples.map(sample => sample.action.payload.type),
       sampleCount: samples.length, rejectCount: rejectPayload ? 1 : 0, staleRejectCount: samples.length,
       observationViewers: Object.keys(observations),
       resultStatus: result.status },
@@ -134,6 +231,7 @@ function buildCase(adapter, contract, name, position, requiredSampleId = null) {
 
 function* sourcePlayoutCases(source, contract, { style, seed, decisions }) {
   const adapter = new GameAdapter({ source, contract });
+  const publicRuntime = new OracleRuntime({ source, contract });
   try {
     let position = adapter.newGame({ gameStyle: style }, seed);
     for (let pick = 0; position.state.mode === "draft" && pick < 64; pick++) {
@@ -145,7 +243,7 @@ function* sourcePlayoutCases(source, contract, { style, seed, decisions }) {
     }
     if (position.state.mode !== "play") throw new Error(`${style} seed ${seed}: source draft did not reach play in 64 picks`);
     for (let decision = 0; decision <= decisions; decision++) {
-      const item = buildCase(adapter, contract, `${style}-seed${seed}-playout-${decision}`, position);
+      const item = buildCase(adapter, contract, `${style}-seed${seed}-playout-${decision}`, position, null, publicRuntime);
       item.summary.playoutDecision = decision;
       item.summary.seed = seed;
       item.summary.style = style;
@@ -200,13 +298,14 @@ function sourceCases(source, contract) {
   const cases = [];
   for (const style of STYLES) {
     const adapter = new GameAdapter({ source, contract });
+    const publicRuntime = new OracleRuntime({ source, contract });
     try {
       for (const { seed, policy } of [{ seed: 37, policy: "first" }, { seed: 19, policy: "first-active" }]) {
         const initial = adapter.newGame({ gameStyle: style }, seed);
-        if (seed === 37) cases.push(buildCase(adapter, contract, `${style}-seed37-draft`, initial));
+        if (seed === 37) cases.push(buildCase(adapter, contract, `${style}-seed37-draft`, initial, null, publicRuntime));
         const { position, picks } = advanceInitialDraft(adapter, contract, initial, { style, seed, policy });
         const name = `${style}-seed${seed}-${policy}-play`;
-        const item = buildCase(adapter, contract, name, position);
+        const item = buildCase(adapter, contract, name, position, null, publicRuntime);
         item.summary.draftChoicesToPlay = picks;
         item.summary.seed = seed;
         item.summary.draftPolicy = policy;
@@ -253,14 +352,14 @@ function syntheticTerminalCases(source, contract) {
           payload.move.col === scenario.to.col;
       });
       if (!action) throw new Error(`${scenario.name}: source terminal move is absent from legal actions`);
-      const before = buildCase(adapter, contract, `${scenario.name}-before`, position, action.actionId);
+      const before = buildCase(adapter, contract, `${scenario.name}-before`, position, action.actionId, fixture);
       before.summary.syntheticSetup = true;
       before.summary.style = "normal";
       cases.push(before);
       const step = adapter.apply(position, action, { recordHistory: true });
       if (!step.ok || step.result.status !== "terminal" || step.result.winner !== "white")
         throw new Error(`${scenario.name}: source move did not produce the expected white terminal result`);
-      const after = buildCase(adapter, contract, `${scenario.name}-after`, step.position);
+      const after = buildCase(adapter, contract, `${scenario.name}-after`, step.position, null, fixture);
       after.summary.syntheticSetup = true;
       after.summary.style = "normal";
       cases.push(after);
@@ -290,7 +389,7 @@ function syntheticTimedStatusCases(source, contract) {
           payload.move.row === 5 && payload.move.col === 0;
       });
       if (!action) throw new Error(`${scenario.name}: source a2-a3 trigger is absent from legal actions`);
-      const before = buildCase(adapter, contract, `${scenario.name}-tick-before`, position, action.actionId);
+      const before = buildCase(adapter, contract, `${scenario.name}-tick-before`, position, action.actionId, fixture);
       before.summary.syntheticSetup = true;
       before.summary.style = "normal";
       before.summary.sourceStatus = scenario.name;
@@ -301,7 +400,7 @@ function syntheticTimedStatusCases(source, contract) {
       if (!piece || (piece[scenario.name]?.remaining ?? null) !== scenario.afterRemaining ||
           (scenario.afterShielded === true && piece.shielded !== true))
         throw new Error(`${scenario.name}: source status did not tick as expected`);
-      const after = buildCase(adapter, contract, `${scenario.name}-tick-after`, step.position);
+      const after = buildCase(adapter, contract, `${scenario.name}-tick-after`, step.position, null, fixture);
       after.summary.syntheticSetup = true;
       after.summary.style = "normal";
       after.summary.sourceStatus = scenario.name;
@@ -415,10 +514,12 @@ function main() {
     if (contract.ORACLE_PROFILE_VERSION !== PROFILE || contract.catalog.source.files.find(file => /^main-/.test(file.name))?.sha256 !== SOURCE_SHA256)
       throw new Error("v7 contract source/profile identity mismatch");
     const source = new FrozenClientSource(sourceRoot, { expectedClientSha256: SOURCE_SHA256 });
+    if (source.executionProfile.profileVersion !== contract.catalog.executionProfile.version ||
+        source.executionProfileSha256 !== contract.catalog.executionProfile.sha256)
+      throw new Error("v7 source execution manifest identity mismatch");
     report.source = { sha256: SOURCE_SHA256, profile: PROFILE, rulesVersion: contract.catalog.rulesVersion,
       catalogVersion: contract.catalog.catalogVersion, sourcePublicCatalogHash: contract.catalog.sourcePublicCatalogHash,
-      executionProfile: { version: source.executionProfile.profileVersion, sha256: source.executionProfileSha256,
-        manifest: "execution-profile-20260928.json" },
+      executionProfile: contract.jsonCopy(contract.catalog.executionProfile),
       observationPolicyHash: contract.digest(contract.observationPolicy) };
     report.sourceCases = [];
     report.playouts = args.playouts;
@@ -426,7 +527,8 @@ function main() {
     if (args.exportCases) fs.writeFileSync(exportPath, "");
     const exportCase = args.exportCases ? input => fs.appendFileSync(exportPath, `${JSON.stringify(input)}\n`) : null;
     const identity = { rulesVersion: contract.catalog.rulesVersion, catalogVersion: contract.catalog.catalogVersion,
-      sourceSha256: SOURCE_SHA256, profile: PROFILE, observationPolicy: contract.observationPolicy };
+      sourceSha256: SOURCE_SHA256, profile: PROFILE, executionProfile: contract.jsonCopy(contract.catalog.executionProfile),
+      observationPolicy: contract.observationPolicy };
     const preflight = args.oracleOnly ? { status: "oracle-only", reason: "native comparison explicitly omitted" } :
       nativeProbe(args.python, { phase: "preflight", ...identity });
     report.nativePreflight = preflight;
@@ -467,6 +569,6 @@ function main() {
 }
 
 module.exports = Object.freeze({ SOURCE_SHA256, PROFILE, ACTIVE_SEED19, STYLES,
-  sourceActions, buildCase, firstActiveDraftAction, advanceInitialDraft, sourceCases,
+  sourceActions, sourcePublicPayloads, sourcePublicIntents, buildCase, firstActiveDraftAction, advanceInitialDraft, sourceCases,
   syntheticTerminalCases, syntheticTimedStatusCases, inspectNativeComparison });
 if (require.main === module) main();

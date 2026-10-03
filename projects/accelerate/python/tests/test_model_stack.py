@@ -715,9 +715,48 @@ def test_parallel_training_checkpoint_saves_use_distinct_temp_files(artifact_dir
             for result in results:
                 result.result(timeout=15)
     assert len(temp_paths) == 2 and temp_paths[0] != temp_paths[1]
+    assert checkpoint.is_file()
+    assert all(not path.exists() for path in temp_paths)
     restored = tiny_model(contract)
     restored_optimizer = create_optimizer(restored, mode="base")
     assert load_training_checkpoint(restored, restored_optimizer, contract, DatasetCursor(dataset, 8), checkpoint) in (1, 2)
+
+
+def test_parallel_training_checkpoint_commits_to_different_paths(artifact_directory, monkeypatch):
+    contract = spec()
+
+    class SingleExampleDataset:
+        spec = contract
+        digest = "synthetic-checkpoint-dataset"
+
+        def __len__(self):
+            return 1
+
+    dataset = SingleExampleDataset()
+    model = tiny_model(contract)
+    optimizer = create_optimizer(model, mode="base")
+    cursor = DatasetCursor(dataset, 7)
+    checkpoints = [artifact_directory / f"training-{step}.pt" for step in (1, 2)]
+    original_replace = os.replace
+    barrier = Barrier(2)
+
+    def concurrent_replace(source, destination):
+        barrier.wait(timeout=10)
+        original_replace(source, destination)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(training_module.os, "replace", concurrent_replace)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = [pool.submit(save_training_checkpoint, model, optimizer, contract, cursor,
+                                   checkpoint, completed_steps=step)
+                       for step, checkpoint in enumerate(checkpoints, start=1)]
+            for result in results:
+                result.result(timeout=15)
+    for step, checkpoint in enumerate(checkpoints, start=1):
+        restored = tiny_model(contract)
+        restored_optimizer = create_optimizer(restored, mode="base")
+        assert load_training_checkpoint(restored, restored_optimizer, contract,
+                                        DatasetCursor(dataset, 8), checkpoint) == step
 
 
 def test_onnx_dynamic_batch_actions_film_merge_and_manifest(artifact_directory, monkeypatch):

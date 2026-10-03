@@ -38,6 +38,42 @@ fn same_content<T: serde::Serialize + ?Sized>(left: &T, right: &T) -> Result<boo
     Ok(bytes(left)? == bytes(right)?)
 }
 
+/// 불일치한 공개 필드의 경로만 반환한다. 원문 오류를 보강하기 위한
+/// 진단이며 실제 상태·RNG·관측 값은 반환하지 않는다. 공개 DTO의 두
+/// object 계층만 검사하므로 별도의 재귀나 무한 순회가 없다.
+fn differing_public_field(left: &Observation, right: &Observation) -> Result<String> {
+    let left = serde_json::to_value(left).map_err(EngineError::serialization)?;
+    let right = serde_json::to_value(right).map_err(EngineError::serialization)?;
+    let differs = |left: Option<&Value>, right: Option<&Value>| -> Result<bool> {
+        match (left, right) {
+            (Some(left), Some(right)) => Ok(!same_content(left, right)?),
+            (None, None) => Ok(false),
+            _ => Ok(true),
+        }
+    };
+    let left_fields = left.as_object().ok_or(EngineError::IllegalAction)?;
+    let right_fields = right.as_object().ok_or(EngineError::IllegalAction)?;
+    for field in left_fields.keys().chain(right_fields.keys()) {
+        if !differs(left.get(field), right.get(field))? {
+            continue;
+        }
+        if field == "publicState"
+            && let (Some(left), Some(right)) = (
+                left.get(field).and_then(Value::as_object),
+                right.get(field).and_then(Value::as_object),
+            )
+        {
+            for nested in left.keys().chain(right.keys()) {
+                if differs(left.get(nested), right.get(nested))? {
+                    return Ok(format!("$.publicState.{nested}"));
+                }
+            }
+        }
+        return Ok(format!("$.{field}"));
+    }
+    Ok("$".into())
+}
+
 fn checked_observation(value: Value) -> Result<Observation> {
     crate::state::validate_json_value(&value, 0)?;
     let object = value.as_object().ok_or_else(|| {
@@ -512,10 +548,12 @@ fn bind_public_identities(
         raw["rng"] = serde_json::to_value(rng).map_err(EngineError::serialization)?;
         *working = serde_json::from_value(raw).map_err(EngineError::serialization)?;
     }
-    if !same_content(&working.try_observe(expected.viewer)?, expected)? {
-        return Err(EngineError::ConditioningMismatch(
-            "v7 public frame differs beyond opaque identities".into(),
-        ));
+    let actual = working.try_observe(expected.viewer)?;
+    if !same_content(&actual, expected)? {
+        let field = differing_public_field(&actual, expected)?;
+        return Err(EngineError::ConditioningMismatch(format!(
+            "v7 public frame differs beyond opaque identities at {field}"
+        )));
     }
     Ok(())
 }
@@ -903,7 +941,9 @@ mod tests {
         let raw = v7_adapter_actions::apply_admitted(&host, &admitted).unwrap();
         let public =
             serde_json::to_value(raw.position.state().try_observe(Color::White).unwrap()).unwrap();
-        let proposal = apply_weighted_conditioned_public(&host, &admitted, public, 71).unwrap();
+        let original = host.export_envelope().unwrap();
+        let proposal =
+            apply_weighted_conditioned_public(&host, &admitted, public.clone(), 71).unwrap();
         assert_eq!(proposal.source_probability, 1.0 / 8.0);
         assert_eq!(proposal.proposal_probability, 1.0 / 8.0);
         assert_eq!(proposal.importance_weight, 1.0);
@@ -911,6 +951,16 @@ mod tests {
             proposal.applied.position.state().rng,
             raw.position.state().rng
         );
+        // default seed 0과 위 독립 seed 71의 첫 LCG draw는 서로 다른
+        // uniform pawn bucket이다. source-prior는 관측을 강제로 맞추지
+        // 않고 다른 결과를 정확히 거절하며 기존 snapshot을 보존한다.
+        assert!(matches!(
+            apply_weighted_conditioned_public(&host, &admitted, public, 0),
+            Err(crate::v7_adapter_actions::V7ActionHostError::Engine(
+                EngineError::ConditioningMismatch(message)
+            )) if message.contains("at $.board")
+        ));
+        assert_eq!(host.export_envelope().unwrap(), original);
     }
 
     fn source_host(style: &str, seed: u64) -> V7HostPosition {
@@ -991,6 +1041,34 @@ mod tests {
                 .unwrap();
                 assert_eq!(particle.state().try_observe(viewer).unwrap(), expected);
                 assert_ne!(particle.state().rng, source.rng);
+            }
+        }
+    }
+
+    #[test]
+    fn chaos_initial_particle_keeps_complete_public_projection_with_independent_search_seeds() {
+        let config = GameConfig {
+            game_style: "chaos".into(),
+            ..GameConfig::default()
+        };
+        let source = crate::v7_new_game::new_game(config.clone(), 37).unwrap();
+        // 실제 ParticleBelief 71/72 stream의 첫 독립 초기화 seed.
+        // source game의 seed/RNG나 private offer를 proposal에 넘기지 않는다.
+        for seed in [4_090_132_643, 1_088_403_456, 4_090_557_808, 3_598_481_373] {
+            let independent =
+                crate::v7_new_game::new_game(config.clone(), u64::from(seed)).unwrap();
+            for viewer in [Color::White, Color::Black] {
+                let expected = source.try_observe(viewer).unwrap();
+                let particle = sample_initial_public(
+                    config.clone(),
+                    serde_json::to_value(&expected).unwrap(),
+                    seed,
+                )
+                .unwrap_or_else(|error| panic!("viewer {viewer:?}, seed {seed}: {error}"));
+                assert_eq!(particle.state().try_observe(viewer).unwrap(), expected);
+                assert_eq!(particle.state().rng, independent.rng);
+                assert_ne!(particle.state().rng, source.rng);
+                assert!(particle.state().history.is_empty());
             }
         }
     }

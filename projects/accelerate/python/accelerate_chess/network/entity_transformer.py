@@ -16,6 +16,7 @@ import torch
 from torch import Tensor, nn
 
 from ..encoding import canonical_json
+from ..ir import MAX_CANDIDATE_NODES
 from .typed_context import CandidateScorer, TypedContextConfig, TypedContextEncoder, masked_mean, validate_typed_inputs
 
 
@@ -231,7 +232,7 @@ class EntityTransformer(nn.Module):
         batch, records = record_category.shape[:2]
         relations = relation_index.shape[1]
         actions, nodes = candidate_category.shape[1:3]
-        if batch > 64 or records > 2048 or relations > 8192 or actions > 4096 or nodes > 256:
+        if batch > 64 or records > 2048 or relations > 8192 or actions > 4096 or nodes > MAX_CANDIDATE_NODES:
             raise ValueError("typed Transformer input exceeds a declared axis limit")
         input_bytes = sum(tensor.numel() * tensor.element_size() for tensor in inputs)
         if input_bytes > 64 * 1024 * 1024:

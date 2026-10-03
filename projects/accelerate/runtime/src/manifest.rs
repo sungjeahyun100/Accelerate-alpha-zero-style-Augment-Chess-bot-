@@ -705,6 +705,8 @@ impl TypedBundle {
         )?;
         // The v7 source-derived category IDs are part of the model input
         // meaning. A self-consistent manifest must not silently renumber them.
+        // 현재 동결 catalog/policy와 typed IR semantic symbol(공개 이동 선택 포함)에서
+        // 파생한 895개 category 순서다. 입력을 바꾸면 Python/native 검증과 함께 갱신한다.
         ensure!(
             canonical_hash(&encoder["feature_schema"]["category_vocabulary"])?
                 == "f019cc6e999bfb5cf2abe2a80619d8a088b44d8bd33a41f2662ba8301f33ca9a",

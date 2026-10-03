@@ -10,7 +10,13 @@ use std::error::Error;
 use std::fmt;
 use std::ops::DerefMut;
 use std::sync::Arc;
-use std::time::Instant;
+
+// Native hosts retain std's exact clock type. Browser hosts use Performance.now
+// through web-time because std::time::Instant is unsupported on unknown WASM.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub use std::time::Instant;
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+pub use web_time::Instant;
 
 use serde::de::Error as DeError;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
