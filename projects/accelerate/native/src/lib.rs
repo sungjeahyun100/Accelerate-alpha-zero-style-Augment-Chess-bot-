@@ -828,6 +828,14 @@ fn site_observation_policy(py: Python<'_>, rules_version: Option<&str>) -> PyRes
 
 #[pymodule]
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add(
+        "BUILD_PROFILE",
+        if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        },
+    )?;
     module.add_function(wrap_pyfunction!(site_catalog, module)?)?;
     module.add_function(wrap_pyfunction!(site_observation_policy, module)?)?;
     module.add_class::<inference::InferenceSession>()?;
