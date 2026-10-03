@@ -29,6 +29,9 @@ from .replay import MAX_REPLAY_BYTES, ReplayEpisode, TrainingExample
 
 TRAINING_VERSION = "accelerate-training-checkpoint-v1"
 TYPED_TRAINING_VERSION = "accelerate-training-checkpoint-v2"
+DTYPE_TRAINING_VERSION = "accelerate-training-checkpoint-v3"
+TYPED_DTYPE_TRAINING_VERSION = "accelerate-training-checkpoint-v4"
+TRAINING_DTYPES = ("fp32", "bf16")
 
 _checkpoint_commit_locks_guard = Lock()
 _checkpoint_commit_locks = WeakValueDictionary()
@@ -206,7 +209,40 @@ def create_optimizer(model: PolicyValueNetwork, *, mode: str, learning_rate: flo
     return torch.optim.AdamW([parameter for parameter in model.parameters() if parameter.requires_grad], lr=learning_rate, weight_decay=weight_decay)
 
 
-def optimize(model, optimizer, encoder: PublicEncoder, cursor: DatasetCursor, *, limits: TrainingLimits = TrainingLimits(), cancelled: Callable[[], bool] | None = None, on_step: Callable[[int], None] | None = None):
+def validate_training_dtype(dtype: str, device: str | torch.device):
+    if dtype not in TRAINING_DTYPES:
+        raise ValueError(f"unsupported training dtype {dtype!r}; expected fp32 or bf16")
+    if dtype == "bf16":
+        if torch.device(device).type != "cuda":
+            raise ValueError("BF16 mixed precision training requires CUDA")
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA is unavailable for BF16 mixed precision training")
+        if not torch.cuda.is_bf16_supported():
+            raise RuntimeError("CUDA BF16 mixed precision training is unsupported on this device")
+
+
+def training_forward(model, tensors, *, dtype: str):
+    """Keep master weights FP32 and restrict autocast to the model forward."""
+    if dtype == "fp32":
+        return model(*tensors)
+    if dtype == "bf16":
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            logits, value = model(*tensors)
+        return logits.float(), value.float()
+    raise ValueError(f"unsupported training dtype {dtype!r}; expected fp32 or bf16")
+
+
+def validate_fp32_training_state(model, optimizer):
+    if any(parameter.dtype != torch.float32 or not bool(torch.isfinite(parameter).all())
+           for parameter in model.parameters()):
+        raise ValueError("training model parameters must remain finite FP32")
+    for values in optimizer.state.values():
+        if any(not isinstance(tensor, torch.Tensor) or tensor.dtype != torch.float32
+               or not bool(torch.isfinite(tensor).all()) for tensor in values.values()):
+            raise ValueError("AdamW optimizer state must remain finite FP32")
+
+
+def optimize(model, optimizer, encoder: PublicEncoder, cursor: DatasetCursor, *, limits: TrainingLimits = TrainingLimits(), dtype: str = "fp32", cancelled: Callable[[], bool] | None = None, on_step: Callable[[int], None] | None = None):
     from .ir import TypedEncoder
     from .network.mask_resnet import MaskResNetPolicyValueNetwork
     from .network.entity_transformer import EntityTransformer
@@ -232,6 +268,8 @@ def optimize(model, optimizer, encoder: PublicEncoder, cursor: DatasetCursor, *,
         raise ValueError("optimizer model feature dimensions differ")
     if {id(parameter) for group in optimizer.param_groups for parameter in group["params"]} != {id(parameter) for parameter in model.parameters() if parameter.requires_grad}:
         raise ValueError("optimizer parameters differ from the base/adapter training mode")
+    validate_training_dtype(dtype, next(model.parameters()).device)
+    validate_fp32_training_state(model, optimizer)
     model_bytes = sum(tensor.numel() * tensor.element_size() for tensor in model.state_dict().values())
     trainable = sum(parameter.numel() * parameter.element_size() for parameter in model.parameters() if parameter.requires_grad)
     if model_bytes + 3 * trainable > limits.max_parameter_state_bytes:
@@ -270,7 +308,7 @@ def optimize(model, optimizer, encoder: PublicEncoder, cursor: DatasetCursor, *,
             policy[row, :len(example.policy)] = torch.tensor(example.policy, device=policy.device)
         targets = torch.tensor([[example.value] for example in examples], device=policy.device)
         optimizer.zero_grad(set_to_none=True)
-        logits, value = model(*tensors)
+        logits, value = training_forward(model, tensors, dtype=dtype)
         mask = torch.from_numpy(action_mask).to(policy.device)
         log_policy = torch.log_softmax(logits.masked_fill(~mask, -torch.inf), dim=1)
         policy_loss = -(policy * log_policy.masked_fill(~mask, 0)).sum(dim=1).mean()
@@ -281,15 +319,14 @@ def optimize(model, optimizer, encoder: PublicEncoder, cursor: DatasetCursor, *,
         loss.backward()
         torch.nn.utils.clip_grad_norm_([parameter for parameter in model.parameters() if parameter.requires_grad], limits.gradient_norm, error_if_nonfinite=True)
         optimizer.step()
-        if any(not bool(torch.isfinite(parameter).all()) for parameter in model.parameters()):
-            raise ValueError("optimizer produced non-finite model parameters")
         completed += 1
         metrics.append({"policy_ce": float(policy_loss.detach()), "value_mse": float(value_loss.detach())})
         if len(metrics) > 128:
             metrics.pop(0)
         if on_step is not None:
             on_step(completed)
-    return {"steps": completed, "stop_reason": reason, "metrics": metrics, "metrics_scope": "last-128-steps"}
+    validate_fp32_training_state(model, optimizer)
+    return {"steps": completed, "stop_reason": reason, "metrics": metrics, "metrics_scope": "last-128-steps", "dtype": dtype}
 
 
 def _tree_hash(value) -> str:
@@ -402,7 +439,7 @@ def _typed_model_family(model):
     raise ValueError("typed checkpoint needs a typed A or B model")
 
 
-def save_training_checkpoint(model, optimizer, spec: EncoderSpec, cursor: DatasetCursor, path, *, completed_steps: int):
+def save_training_checkpoint(model, optimizer, spec: EncoderSpec, cursor: DatasetCursor, path, *, completed_steps: int, dtype: str = "fp32"):
     from .ir import TypedEncoderSpec
 
     if type(completed_steps) is not int or completed_steps < 0 or cursor.dataset.spec.digest != spec.digest or model.merged:
@@ -412,8 +449,11 @@ def save_training_checkpoint(model, optimizer, spec: EncoderSpec, cursor: Datase
         raise TypeError("training checkpoint needs a supported encoder spec")
     if not typed and not isinstance(model, PolicyValueNetwork):
         raise TypeError("legacy training checkpoint needs the legacy ResNet model")
+    validate_training_dtype(dtype, next(model.parameters()).device)
+    validate_fp32_training_state(model, optimizer)
     base, adapter = model.base_state(), model.adapter_state()
-    state = {"version": TYPED_TRAINING_VERSION if typed else TRAINING_VERSION,
+    state = {"version": TYPED_DTYPE_TRAINING_VERSION if typed else DTYPE_TRAINING_VERSION,
+             "dtype": dtype,
              "mode": model.training_mode, "training": model.training,
              "config": asdict(model.config), "encoder": spec.to_dict(), "encoder_hash": spec.digest,
              "base": {name: tensor.detach().cpu().clone() for name, tensor in base.items()},
@@ -446,7 +486,7 @@ def save_training_checkpoint(model, optimizer, spec: EncoderSpec, cursor: Datase
     return state["checkpoint_hash"]
 
 
-def load_training_checkpoint(model, optimizer, spec: EncoderSpec, cursor: DatasetCursor, path) -> int:
+def load_training_checkpoint(model, optimizer, spec: EncoderSpec, cursor: DatasetCursor, path, *, dtype: str = "fp32") -> int:
     from .ir import TypedEncoderSpec
 
     path = Path(path)
@@ -459,10 +499,20 @@ def load_training_checkpoint(model, optimizer, spec: EncoderSpec, cursor: Datase
         raise TypeError("training checkpoint needs a supported encoder spec")
     if not typed and not isinstance(model, PolicyValueNetwork):
         raise TypeError("legacy training checkpoint needs the legacy ResNet model")
+    validate_training_dtype(dtype, next(model.parameters()).device)
     if typed:
         fields.update({"architecture_family", "feature_schema_hash", "model_io_version"})
-    if not isinstance(payload, dict) or set(payload) != fields or payload["version"] != (TYPED_TRAINING_VERSION if typed else TRAINING_VERSION):
+    old_version = TYPED_TRAINING_VERSION if typed else TRAINING_VERSION
+    new_version = TYPED_DTYPE_TRAINING_VERSION if typed else DTYPE_TRAINING_VERSION
+    if not isinstance(payload, dict) or payload.get("version") not in (old_version, new_version):
         raise ValueError("training checkpoint format mismatch")
+    saved_dtype = "fp32" if payload["version"] == old_version else payload.get("dtype")
+    if payload["version"] == new_version:
+        fields.add("dtype")
+    if set(payload) != fields or saved_dtype not in TRAINING_DTYPES:
+        raise ValueError("training checkpoint format mismatch")
+    if saved_dtype != dtype:
+        raise ValueError(f"training checkpoint dtype mismatch: saved {saved_dtype}, requested {dtype}")
     if typed:
         if (payload["encoder"] != spec.to_dict() or payload["architecture_family"] != _typed_model_family(model)
                 or payload["feature_schema_hash"] != spec.feature_schema_hash
