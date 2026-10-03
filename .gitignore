@@ -29,6 +29,8 @@ Thumbs.db
 .idea/
 
 # cpp_compile
+pre_cpp_engine_code/engine_test
+pre_cpp_engine_code/engine_test_human
 projects/augment-chess/reference/pre_cpp_engine_code/engine_test
 projects/augment-chess/reference/pre_cpp_engine_code/engine_test_human
 projects/accelerate/python/accelerate_chess/_native*.so
