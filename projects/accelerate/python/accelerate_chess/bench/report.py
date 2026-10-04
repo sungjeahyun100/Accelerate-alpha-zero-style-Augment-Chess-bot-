@@ -12,7 +12,7 @@ import re
 
 from . import VERSION
 
-KINDS = {"engine", "inference", "training", "pipeline"}
+KINDS = {"engine", "inference", "training", "typed-training", "pipeline"}
 OPERATIONS = ("fork", "legal", "bind", "apply", "observe", "encode", "transition")
 REPORTS = Path(__file__).resolve().parents[3] / "bench" / "results"
 ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
@@ -110,11 +110,12 @@ def _validate(payload, run_id, relative):
             for metric in INFERENCE_METRICS:
                 row[metric] = _number(item.get(metric), location + "." + metric, allow_zero=metric == "peak_vram_bytes")
             rows.append(row)
-    elif kind == "training":
+    elif kind in ("training", "typed-training"):
         if _status(results, where + ".results") != "ok":
             missing("training", results)
         else:
-            row = {"run_id": run_id, "model": _field(config, "model", str, where + ".config"),
+            model_key = "model_family" if kind == "typed-training" else "model"
+            row = {"run_id": run_id, "model": _field(config, model_key, str, where + ".config"),
                    "profile": _field(config, "profile", str, where + ".config"),
                    "dtype": _field(config, "dtype", str, where + ".config"),
                    "device": _field(config, "device", str, where + ".config"),
@@ -124,6 +125,10 @@ def _validate(payload, run_id, relative):
                 raise ValueError(f"{where}.results.synthetic: expected true")
             for metric in TRAINING_METRICS:
                 row[metric] = _number(results.get(metric), where + ".results." + metric, allow_zero=metric == "peak_vram_bytes")
+            if kind == "typed-training":
+                for field in ("parameter_count", "trainable_parameter_count", "parameter_bytes"):
+                    row[field] = _field(results, field, int, where + ".results")
+                _field(results, "workload_shape", dict, where + ".results")
             rows.append(row)
         if isinstance(results.get("replay_loading"), str) and results["replay_loading"].startswith("unsupported"):
             incomplete.append({"run_id": run_id, "kind": kind, "measurement": "replay_loading", "status": "unsupported", "reason": results["replay_loading"]})
@@ -237,6 +242,10 @@ def markdown(summary, sources, charts):
     training = measurements.get("training", [])
     lines += [_table(["Run", "Model", "Profile", "Dtype", "Device", "Batch", "samples/s", "steps/s", "Mean step ms", "Forward ms", "Backward ms", "Optimizer ms", "Peak VRAM MiB"],
                      [[r["run_id"], r["model"], r["profile"], r["dtype"], r["device"], r["batch_size"], r["samples_per_second"], r["steps_per_second"], r["mean_step_ms"], r["forward_ms"], r["backward_ms"], r["optimizer_ms"], r["peak_vram_bytes"] / 2**20] for r in training]) if training else "No successful training measurements."]
+    typed_training = measurements.get("typed-training", [])
+    lines += ["", "## Typed architecture training", "", "Synthetic prepared input; parameter counts may differ across models."]
+    lines += [_table(["Run", "Family", "Profile", "Dtype", "Batch", "Parameters", "Trainable", "Parameter MiB", "samples/s", "Mean step ms", "Peak VRAM MiB"],
+                     [[r["run_id"], r["model"], r["profile"], r["dtype"], r["batch_size"], r["parameter_count"], r["trainable_parameter_count"], r["parameter_bytes"] / 2**20, r["samples_per_second"], r["mean_step_ms"], r["peak_vram_bytes"] / 2**20] for r in typed_training]) if typed_training else "No successful typed training measurements."]
     lines += ["", "## Unsupported / incomplete measurements", ""]
     absent = summary["incomplete"]
     lines += [_table(["Run", "Kind", "Measurement", "Status", "Reason"], [[r[k] for k in ("run_id", "kind", "measurement", "status", "reason")] for r in absent]) if absent else "None."]

@@ -32,7 +32,7 @@ python -m accelerate_chess.bench.report \
 
 `--runs`가 없으면 외부 artifact root의 `reports/` 바로 아래에 있는 안전한 run ID
 디렉터리 전체에서 `*.json`을 사전순으로 읽는다. 지원 버전은
-`local-performance-v1`, 종류는 engine/inference/training/pipeline이다. 잘못된
+`local-performance-v1`, 종류는 engine/inference/training/typed-training/pipeline이다. 잘못된
 JSON과 다른 버전은 오류로 중단한다. CPU/GPU 구성이 다른 run도 한 보고서로
 합치지 않으며 `--runs`로 분리해야 한다. Git SHA가 섞이면 보고서에 경고한다.
 `unsupported`/`oom`/실패는 숫자 0 대신 이유와 함께 불완전 측정 표에 남긴다.
@@ -92,6 +92,42 @@ python -m accelerate_chess.bench.inference --model resnet-m --profiles normal --
 python -m accelerate_chess.bench.pipeline --workers 2 --concurrent-games 4 --mcts-simulations 32 --max-inference-batch 8 --batch-wait-us 500 --device cuda --run-id pipeline-capability
 python -m accelerate_chess.bench.training --device cuda --steps 10 --batch-size 2 --run-id training-smoke
 ```
+
+## Production typed architecture 학습 벤치
+
+`typed_training`은 기존 Fixed8 전용 `training`과 별개인 synthetic optimizer throughput
+벤치다. 두 family는 같은 typed observation, record, relation, candidate, condition
+배열을 `TypedBatch.as_family_inputs()`로 투영한다. 현재 production typed 기본 구성인
+128 채널/hidden, mask-resnet 8 block, entity-transformer 4 block·4 heads·512 FFN,
+LoRA rank 8을 쓴다. vocabulary 크기는 고정 v7 catalog에서 읽는다.
+
+```bash
+python -m accelerate_chess.bench.typed_training \
+  --model-family mask-resnet --profile normal --device cuda --dtype bf16 \
+  --batch-size 64 --steps 100 --warmup 5 \
+  --torch-threads 1 --torch-interop-threads 1 \
+  --artifact-root ~/.cache/accelerate/bench-results --run-id typed-mask-bf16-b64
+
+python -m accelerate_chess.bench.typed_training \
+  --model-family entity-transformer --profile normal --device cuda --dtype bf16 \
+  --batch-size 64 --steps 100 --warmup 5 \
+  --torch-threads 1 --torch-interop-threads 1 \
+  --artifact-root ~/.cache/accelerate/bench-results --run-id typed-entity-bf16-b64
+```
+
+프로필의 `(records, relations, candidates, candidate nodes, board height, board width)`는
+small `(8, 8, 32, 3, 8, 8)`, normal `(16, 24, 80, 8, 8, 8)`, monster
+`(32, 64, 160, 160, 8, 8)`이다. 실제 게임 분포가 아니라 성능 부하용 synthetic
+shape다. 큰 batch와 monster의 조합은 production working-set 제한에 따라 거부될
+수 있다. 입력은 한 번 준비·검증하며 `data_load_ms=0`은 timed loop에서 로딩이
+없다는 뜻이다. warm-up은 optimizer step까지 실행하지만 성능 측정에서 제외한다.
+`typed-training.json`은 model parameter 수와 byte, workload shape, thread 값,
+timed latency/throughput, peak VRAM을 기록한다.
+
+이 측정은 실제 replay loading이나 self-play 속도, architecture strength 또는
+playing strength를 측정하지 않는다. 두 모델의 parameter count가 다르면 samples/s만으로
+우열을 판단할 수 없다. 실제 model quality는 향후 같은 self-play, training,
+arena 예산에서 별도로 비교해야 한다.
 
 `engine`은 Rust 어댑터의 공개 행동 경계에서 fork, legal, bind, apply,
 observe, encode와 조합 transition을 측정한다. `--workers`는 기계의 논리 CPU
