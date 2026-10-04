@@ -13,7 +13,7 @@ def args(tmp_path, family="entity-transformer", **changes):
     values = dict(model_family=family, profile="small", steps=1, batch_size=1,
                   warmup=1, device="cpu", dtype="fp32", seed=37,
                   torch_threads=1, torch_interop_threads=1,
-                  artifact_root=str(tmp_path), run_id=None)
+                  artifact_root=str(tmp_path), run_id=None, transformer_hidden_dim=128)
     values.update(changes)
     return Namespace(**values)
 
@@ -29,7 +29,8 @@ def test_typed_cpu_smoke_and_counts(family, tmp_path, monkeypatch, capsys):
         original(model, optimizer)
 
     monkeypatch.setattr(bench, "validate_fp32_training_state", checked)
-    result = bench.run(args(tmp_path, family, steps=2))["results"]
+    payload = bench.run(args(tmp_path, family, steps=2))
+    result = payload["results"]
     capsys.readouterr()
     model = bench.model_for(family, len(default_spec(model_family=family).category_vocabulary))
     assert result["parameter_count"] == sum(p.numel() for p in model.parameters())
@@ -40,6 +41,9 @@ def test_typed_cpu_smoke_and_counts(family, tmp_path, monkeypatch, capsys):
     assert result["torch_threads"] == torch.get_num_threads() == 1
     assert result["torch_interop_threads"] == torch.get_num_interop_threads() == 1
     assert result["status"] == "ok" and result["peak_vram_bytes"] == 0
+    assert payload["config"]["transformer_hidden_dim"] == 128
+    context_key = "typed" if family == "entity-transformer" else "typed_context"
+    assert result["architecture_config"][context_key]["hidden_dim"] == 128
 
 
 def test_shared_typed_state_projects_to_both_families():
@@ -55,6 +59,52 @@ def test_shared_typed_state_projects_to_both_families():
         model.validate_inputs(*inputs)
         logits, value = model(*inputs)
         assert logits.shape == (1, 32) and value.shape == (1, 1)
+
+
+@pytest.mark.parametrize("hidden_dim", [128, 208])
+def test_transformer_hidden_dim_model_and_report(hidden_dim, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(bench, "artifact_root", lambda path: tmp_path)
+    vocabulary = len(default_spec(model_family="entity-transformer").category_vocabulary)
+    model = bench.model_for("entity-transformer", vocabulary, hidden_dim)
+    assert model.config.typed.hidden_dim == hidden_dim
+    payload = bench.run(args(tmp_path, transformer_hidden_dim=hidden_dim, warmup=0))
+    capsys.readouterr()
+    assert payload["config"]["transformer_hidden_dim"] == hidden_dim
+    result = payload["results"]
+    assert result["architecture_config"]["typed"]["hidden_dim"] == hidden_dim
+    assert result["parameter_count"] == sum(p.numel() for p in model.parameters())
+    assert result["trainable_parameter_count"] == sum(
+        p.numel() for p in model.parameters() if p.requires_grad)
+    assert result["parameter_bytes"] == sum(
+        p.numel() * p.element_size() for p in model.parameters())
+
+
+@pytest.mark.parametrize("hidden_dim", [0, -4, 127, 4097])
+def test_invalid_transformer_hidden_dim_rejected(hidden_dim):
+    vocabulary = len(default_spec(model_family="entity-transformer").category_vocabulary)
+    with pytest.raises(ValueError):
+        bench.model_for("entity-transformer", vocabulary, hidden_dim)
+
+
+def test_transformer_hidden_dim_obeys_parameter_budget():
+    vocabulary = len(default_spec(model_family="entity-transformer").category_vocabulary)
+    with pytest.raises(ValueError, match="64 million"):
+        bench.model_for("entity-transformer", vocabulary, 4096)
+
+
+def test_mask_resnet_rejects_nondefault_transformer_hidden_dim(tmp_path, monkeypatch):
+    monkeypatch.setattr(bench, "artifact_root", lambda path: tmp_path)
+    with pytest.raises(ValueError, match="applies only to entity-transformer"):
+        bench.run(args(tmp_path, family="mask-resnet", transformer_hidden_dim=208))
+
+
+@pytest.mark.parametrize("extra_args, expected", [([], 128), (["--transformer-hidden-dim", "208"], 208)])
+def test_transformer_hidden_dim_cli(monkeypatch, extra_args, expected):
+    captured = []
+    monkeypatch.setattr(bench, "run", lambda parsed: captured.append(parsed.transformer_hidden_dim))
+    monkeypatch.setattr("sys.argv", ["typed_training", "--model-family", "entity-transformer", *extra_args])
+    bench.main()
+    assert captured == [expected]
 
 
 def test_typed_report_kind_is_separate(tmp_path, monkeypatch, capsys):

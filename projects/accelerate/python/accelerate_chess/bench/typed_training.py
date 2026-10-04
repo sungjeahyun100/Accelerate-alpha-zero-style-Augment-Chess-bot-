@@ -79,9 +79,12 @@ def synthetic_batch(batch_size: int, profile: str, seed: int, vocabulary: int) -
     return TypedBatch(arrays, (), "synthetic-typed-training-v1")
 
 
-def model_for(family: str, vocabulary: int):
+def model_for(family: str, vocabulary: int, transformer_hidden_dim: int = 128):
+    if family == "mask-resnet" and transformer_hidden_dim != 128:
+        raise ValueError("--transformer-hidden-dim applies only to entity-transformer")
     context = TypedContextConfig((vocabulary,) * 4, (vocabulary,) * 2,
-                                 (vocabulary,) * 4, hidden_dim=128)
+                                 (vocabulary,) * 4,
+                                 hidden_dim=transformer_hidden_dim if family == "entity-transformer" else 128)
     if family == "mask-resnet":
         config = MaskResNetConfig(6, context, channels=128, residual_blocks=8,
                                   lora_rank=8, lora_alpha=8.)
@@ -119,7 +122,7 @@ def run(args):
         torch.cuda.manual_seed_all(args.seed)
     spec = default_spec(model_family=args.model_family)
     vocabulary = len(spec.category_vocabulary)
-    model = model_for(args.model_family, vocabulary).to(args.device).train()
+    model = model_for(args.model_family, vocabulary, args.transformer_hidden_dim).to(args.device).train()
     optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad), lr=3e-4)
     validate_fp32_training_state(model, optimizer)
     state = synthetic_batch(args.batch_size, args.profile, args.seed, vocabulary)
@@ -208,6 +211,8 @@ def run(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-family", choices=("mask-resnet", "entity-transformer"), required=True)
+    parser.add_argument("--transformer-hidden-dim", type=int, default=128,
+                        help="Entity Transformer hidden dimension (default: 128; must be divisible by 4)")
     parser.add_argument("--profile", choices=PROFILES, default="small")
     parser.add_argument("--steps", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=2)

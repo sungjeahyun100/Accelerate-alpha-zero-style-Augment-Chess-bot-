@@ -115,6 +115,28 @@ python -m accelerate_chess.bench.typed_training \
   --artifact-root ~/.cache/accelerate/bench-results --run-id typed-entity-bf16-b64
 ```
 
+파라미터 수를 맞춘 처리량 비교에는 다음 설정을 사용한다.
+
+```bash
+python -m accelerate_chess.bench.typed_training \
+  --model-family entity-transformer \
+  --transformer-hidden-dim 208 \
+  --profile normal \
+  --device cuda \
+  --dtype bf16 \
+  --batch-size 64 \
+  --steps 100 \
+  --warmup 3 \
+  --torch-threads 1 \
+  --torch-interop-threads 1 \
+  --artifact-root ~/.cache/accelerate/bench-results \
+  --run-id typed-transformer-matched-bf16-b64
+```
+
+hidden=208은 현재 Mask ResNet 기본값과 parameter count를 근접시키기 위한
+benchmark 설정이다. Production Transformer 기본 hidden=128은 바뀌지 않는다.
+파라미터 수가 비슷해도 model quality나 playing strength가 같다는 뜻은 아니다.
+
 프로필의 `(records, relations, candidates, candidate nodes, board height, board width)`는
 small `(8, 8, 32, 3, 8, 8)`, normal `(16, 24, 80, 8, 8, 8)`, monster
 `(32, 64, 160, 160, 8, 8)`이다. 실제 게임 분포가 아니라 성능 부하용 synthetic
