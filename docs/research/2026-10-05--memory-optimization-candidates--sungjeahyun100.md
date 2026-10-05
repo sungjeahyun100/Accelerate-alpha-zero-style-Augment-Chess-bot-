@@ -32,14 +32,14 @@
 
 ## 측정 규칙
 
-각 행의 `검증`은 같은 입력·seed·규칙/profile, 동일 worker/leaf batch, 같은 빌드와 반복 조건에서 전후 비교한다. 최소한 peak RSS(전체 프로세스와 필요한 자식), steady RSS, allocator 호출·요청 byte·live byte, 시간/노드, nodes/sec, retained nodes/edges, action당 allocation, 상태 복제 시간·byte를 구분한다. `Vec` capacity와 arena가 반환하지 않은 보유 메모리도 기록한다. `perf`, `/usr/bin/time -v`, `/proc/<pid>/smaps_rollup`·`status`, heap profiler 또는 기존 native allocation probe를 용도에 맞춰 사용한다. Python은 `tracemalloc`과 native RSS를 함께 본다. `tracemalloc`만으로 Rust/NumPy/ONNX의 전체 할당량을 판단하지 않는다. 초기에 OOM이 난 공동 실행 조건은 재현 예산을 제한하고 단독 실행과 별도로 비교한다. 게임 동등성·공개 정보 경계·정확한 action 순서/identity·오류 복구를 성능 수치와 같이 확인한다.
+각 행의 `검증 방법`은 같은 입력·seed·규칙/profile, 동일 worker/leaf batch, 같은 빌드와 반복 조건에서 전후 비교한다. 최소한 peak RSS(전체 프로세스와 필요한 자식), steady RSS, allocator 호출·요청 byte·live byte, 시간/노드, nodes/sec, retained nodes/edges, action당 allocation, 상태 복제 시간·byte를 구분한다. `Vec` capacity와 arena가 반환하지 않은 보유 메모리도 기록한다. `perf`, `/usr/bin/time -v`, `/proc/<pid>/smaps_rollup`·`status`, heap profiler 또는 기존 native allocation probe를 용도에 맞춰 사용한다. Python은 `tracemalloc`과 native RSS를 함께 본다. `tracemalloc`만으로 Rust/NumPy/ONNX의 전체 할당량을 판단하지 않는다. 초기에 OOM이 난 공동 실행 조건은 재현 예산을 제한하고 단독 실행과 별도로 비교한다. 게임 동등성·공개 정보 경계·정확한 action 순서/identity·오류 복구를 성능 수치와 같이 확인한다.
 
-표의 `메모리`는 peak/steady 예상, `속도`는 CPU·locality 예상이다. `오버헤드·경계`는 초기화, reset/free, thread, Python/ONNX 영향까지 포함한다. 행에서 언급하지 않은 bridge 영향은 Rust 내부 한정 시 직접 영향 없음이며, 공개 DTO·action 순서·tensor 계약을 바꾸는 후보는 별도 계약 검증을 요구한다. `저/중/고` 위험도는 정확성·수명·동시성·borrow checker 구현 난이도를 합친 상대 등급이다.
+표의 `예상 메모리 효과`는 peak/steady 예상, `예상 성능 효과`는 CPU·locality 예상이다. `추가 오버헤드`는 초기화, reset/free, thread, Python/ONNX 영향까지 포함한다. 행에서 언급하지 않은 bridge 영향은 Rust 내부 한정 시 직접 영향 없음이며, 공개 DTO·action 순서·tensor 계약을 바꾸는 후보는 별도 계약 검증을 요구한다. `저/중/고` 위험도는 정확성·수명·동시성·borrow checker 구현 난이도를 합친 상대 등급이다.
 
 ### 1. 낮은 위험·즉시 검토 가능
 
 | 기법 | 대상 | 해결하려는 문제 | 예상 메모리 효과 (peak/steady) | 예상 성능 효과 (CPU/locality) | 추가 오버헤드 | 구현 난이도 | 위험도 | 적용 조건 | 부적합 조건 | 검증 방법 | 현재 프로젝트 적합성 | 우선순위 | 비고 |
-|---|---|---|---|---|---|---|---|---|---|---|---|
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 불필요한 `Clone` 제거·borrow/move | `accepts`, action 포장, JSON projection | 반복 깊은 복사 | 높음/중간 가능 | 향상 가능 | borrow 범위·오류 원자성 검토; thread·bridge 계약 유지 | 중 | 중 | 복제물이 읽기 전용이거나 소유권 이전 가능 | 원본을 변경하거나 rollback 보장이 필요한 clone | clone당 byte·시간, legal action parity | 높음 | P0 | `Arc` handle clone과 깊은 clone 분리 |
 | `Vec::with_capacity`·`reserve` | legal intent/page/result, Python 전 단계 Rust Vec | 재할당 | 낮음/중립 | 향상 가능 | 과대 예약은 peak·steady 증가; 초기 예약 비용 | 저 | 저 | 후보 상한·분포가 알려짐 | 희소·조기 종료가 흔함 | 재할당 수, capacity/len, RSS | 높음 | P0 | [Rust Vec 문서](https://doc.rust-lang.org/std/vec/struct.Vec.html) |
 | 임시 Vec/버퍼 재사용 | action canonical byte, per-page scratch | 반복 할당 | 중간/중립~증가 | 향상 가능 | clear/drop 뒤 큰 capacity 잔류; session 간 공유 시 lock 비용 | 중 | 중 | 명확한 호출 경계와 최대 보유량 | 중첩 호출·비동기 수명·큰 outlier | alloc/action, warm RSS, reset RSS | 높음 | P0 | 재사용 뒤 큰 버퍼 shrink 기준 필요 |
@@ -50,7 +50,7 @@
 ### 2. 자료구조 최적화
 
 | 기법 | 대상 | 해결하려는 문제 | 예상 메모리 효과 (peak/steady) | 예상 성능 효과 (CPU/locality) | 추가 오버헤드 | 구현 난이도 | 위험도 | 적용 조건 | 부적합 조건 | 검증 방법 | 현재 프로젝트 적합성 | 우선순위 | 비고 |
-|---|---|---|---|---|---|---|---|---|---|---|---|
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | compact struct layout·padding 순서 | Rust `Action`, `Piece`, cursor | padding | 낮음/낮음 | locality 향상 가능 | 내부 레이아웃만; serde/API/FFI layout 확인 | 중 | 중 | `size_of`와 heap profile에서 실익 확인 | dynamic JSON/String이 지배 | size/alignment, bytes/action | 중 | P2 | 필드 순서만으로 heap payload 감소 없음 |
 | enum·정수 폭 축소 | 좌표·카운터·stage | 과대 필드 | 낮음/낮음 | cache 개선 가능 | 범위·overflow 검증; wire 정수 의미 보존 | 중 | 중 | 실제 상한 증명 | JS 안전정수·장기 카운터 축소 위험 | size, range/property 검사 | 중 | P2 | 공개 schema 변경은 별도 PR |
 | bit packing·bitboard | occupancy·hazard·board query | 반복 bool/좌표 저장 | 중간/중간 가능 | query 향상 또는 decode 저하 | variant 규칙·다중 셀·상태 동기화 비용 | 고 | 고 | query profile이 지배적 | 복잡한 `extra`와 보드 JSON이 대부분 | memory/query, 규칙 차분 | 낮음 | P3 | 단순 8×8 체스 가정 금지 |
@@ -66,7 +66,7 @@
 ### 3. MCTS·탐색 전용
 
 | 기법 | 대상 | 해결하려는 문제 | 예상 메모리 효과 (peak/steady) | 예상 성능 효과 (CPU/locality) | 추가 오버헤드 | 구현 난이도 | 위험도 | 적용 조건 | 부적합 조건 | 검증 방법 | 현재 프로젝트 적합성 | 우선순위 | 비고 |
-|---|---|---|---|---|---|---|---|---|---|---|---|
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 현재 node/edge 보유량·key 계측 | Python `nodes`, `edges` | per-entry 비용 불명 | 측정만 | 계측 시 저하 | 임시 계측 데이터 제한; thread 영향 없음 | 저 | 저 | 실제 탐색 입력 준비 | 샘플을 전체 게임으로 일반화 | bytes/node·edge, retained count | 높음 | P0 | 현재 노드에 state 없음 |
 | edge intent/key 중복 완화 | `_Edge.intent`, `edges` key, `intents` | JSON dict+canonical string 중복 | 중간/중간 가능 | encode 재계산 시 저하 | 공개 intent 정확성·순서, Python 참조 수명 | 중 | 중 | 중복 보유가 profile로 확인 | re-encode가 hot path 지배 | bytes/edge, nodes/sec, intent parity | 높음 | P1 | key 유일성 보장 유지 |
 | index 기반 graph·contiguous storage | Python node/edge 사전 또는 미래 Rust 트리 | per-object/hash 오버헤드 | 중간/중간 가능 | locality 향상·lookup 비용 | index 유효성, generation, borrow/API 변경 | 고 | 고 | profile상 graph overhead 큼 | 정보집합 키 lookup이 지배·작은 트리 | bytes/node, lookup, correctness | 중 | P2 | Rust `Box` pointer graph는 현재 없음 |
@@ -81,7 +81,7 @@
 ### 4. allocation 전략
 
 | 기법 | 대상 | 해결하려는 문제 | 예상 메모리 효과 (peak/steady) | 예상 성능 효과 (CPU/locality) | 추가 오버헤드 | 구현 난이도 | 위험도 | 적용 조건 | 부적합 조건 | 검증 방법 | 현재 프로젝트 적합성 | 우선순위 | 비고 |
-|---|---|---|---|---|---|---|---|---|---|---|---|
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | object pool | 동일형 후보/임시 객체 | 반복 생성·해제 | 낮음/steady 증가 가능 | 향상 또는 lock 저하 | 초기 용량·반환·reset; worker 간 격리 | 중 | 중 | 큰 동일형 객체 반복 사용 | 동적 JSON·수명 불규칙 | alloc/action, pool high-water | 중 | P2 | 잔류 heap이 OOM 악화 가능 |
 | free list·slab | 장수 Rust object graph 후보 | 개별 할당·fragmentation | 현행 낮음/미상 | locality 가능 | slot metadata·세대·동기화 | 고 | 고 | 잦은 node 제거/재생성 | 현행 탐색이 Python dict/per-run | bytes/node, churn | 낮음 | P3 | [slotmap 문서](https://docs.rs/slotmap/latest/slotmap/) |
 | generational arena | 미래 index graph | stale index 방지 | 현행 낮음/미상 | lookup 간접 비용 | 세대 byte·slot 보유·borrow 설계 | 고 | 중 | 삭제 후 index 재사용 필요 | 현행 그래프 없음 | stale-key 검사, bytes/slot | 낮음 | P3 | 단순 arena보다 metadata 큼 |
@@ -93,7 +93,7 @@
 ### 5. allocator 변경
 
 | 기법 | 대상 | 해결하려는 문제 | 예상 메모리 효과 (peak/steady) | 예상 성능 효과 (CPU/locality) | 추가 오버헤드 | 구현 난이도 | 위험도 | 적용 조건 | 부적합 조건 | 검증 방법 | 현재 프로젝트 적합성 | 우선순위 | 비고 |
-|---|---|---|---|---|---|---|---|---|---|---|---|
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | fragmentation 완화·큰 버퍼 release 정책 | Rust/Python 장수 process | 해제 뒤 RSS 잔류 | 중간/중간 가능 | shrink·재할당 비용 | allocator별 반환 차이; thread cache | 중 | 중 | live byte 대비 RSS 격차가 큼 | 실제 live object가 원인 | live vs RSS, reset 후 RSS | 중 | P2 | `shrink_to_fit` 반환 보장 아님 |
 | jemalloc 교체 실험 | Rust native process | allocator fragmentation/경합 | 불명/불명 | workload 의존 | 빌드·배포·PyO3 process-wide 상호작용 | 중 | 중 | system allocator가 병목으로 확인 | Python/ONNX 포함 전체 RSS 설명 불가 | 동일 binary 조건 RSS·throughput | 낮음 | P3 | 구현은 이번 PR 범위 밖 |
 | mimalloc 교체 실험 | Rust native process | allocator 경합·fragmentation | 불명/불명 | workload 의존 | 배포/ABI·다른 allocator와 공존 확인 | 중 | 중 | allocator profile 근거 있음 | 코드의 live data 자체가 지배 | RSS·throughput·fragmentation | 낮음 | P3 | 단독 A/B 실험만 |
@@ -102,7 +102,7 @@
 ### 6. 병렬·self-play·bridge
 
 | 기법 | 대상 | 해결하려는 문제 | 예상 메모리 효과 (peak/steady) | 예상 성능 효과 (CPU/locality) | 추가 오버헤드 | 구현 난이도 | 위험도 | 적용 조건 | 부적합 조건 | 검증 방법 | 현재 프로젝트 적합성 | 우선순위 | 비고 |
-|---|---|---|---|---|---|---|---|---|---|---|---|
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | leaf batch/particle 예산의 메모리 모델 | `leaf_batch_size`, belief particles, padded features | 동시 요청 곱셈 peak | 높음/중간 가능 | 작은 batch는 throughput 저하 | 품질·추론 효율; 기존 제한 유지 | 중 | 중 | batch/particle과 RSS 상관 확인 | 무조건 줄여 모델 품질/속도 훼손 | RSS/batch·particle, nodes/sec | 높음 | P1 | 조용한 자동 축소 금지 |
 | immutable catalog/model 공유 | 향후 병렬 self-play worker | worker당 중복 모델/규칙 | 높음/중간 가능 | refcount/IPC 비용 | process 간 `Arc` 불가; Python/ONNX session thread safety | 고 | 고 | 실제 worker 복제 확인 | process 격리·모델 mutable state 필요 | RSS/worker, throughput | 중 | P2 | 현행 검색 루프는 단일 프로세스·협력적 |
 | worker 수/동시성 예산 | 향후 self-play scheduler | 동시 peak 합산 | 높음/중간 | throughput 저하 | 총 메모리·GPU·termination 명시 | 저 | 중 | worker별 RSS 측정 | 품질·시간 예산 미충족 | total/worker RSS, games/sec | 중 | P1 | 아직 별도 구현 확인 전 후보 |
@@ -113,7 +113,7 @@
 ### 7. 고위험 구조 변경·현재 부적합 후보
 
 | 기법 | 대상 | 해결하려는 문제 | 예상 메모리 효과 (peak/steady) | 예상 성능 효과 (CPU/locality) | 추가 오버헤드 | 구현 난이도 | 위험도 | 적용 조건 | 부적합 조건 | 검증 방법 | 현재 프로젝트 적합성 | 우선순위 | 비고 |
-|---|---|---|---|---|---|---|---|---|---|---|---|
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | `GameState` 전체 compact board 재설계 | 보드와 `Piece` | heap 및 clone | 높음 가능/중간 | 변환 비용·locality 혼합 | source-shape JSON, replay, oracle, Python 계약 광범위 | 고 | 고 | 보드가 실제 RSS 지배 | JSON extra/trace가 지배 | 전체 v7 차분·RSS·nodes/sec | 낮음 | P3 | 현재 작업에서 구조 변경 금지 |
 | Python tree를 Rust로 이동 | `_SearchState` 전체 | Python object overhead | 높음 가능/중간 | FFI 감소 또는 증가 | 정보집합·hidden state·평가 경계 재설계 | 고 | 고 | Python heap이 지배·계약 안정 | 알고리즘/모델 경계가 변동 중 | parity, RSS, visits/sec | 낮음 | P3 | 규칙 중복 구현 금지 |
 | 전체 상태 zero-copy 직렬화 | `GameState`/JSON/bridge | DTO 복사 | 불명/불명 | 향상 또는 alias 비용 | canonical identity·가변 `Value`·수명·FFI 불변식 | 고 | 고 | 소비자가 같은 immutable byte를 사용 | 변형/재정렬/서로 다른 표현 필요 | byte equality, lifetime, RSS | 낮음 | P3 | 선택적 buffer 재사용부터 평가 |
