@@ -9,6 +9,7 @@ import json
 import math
 from pathlib import Path
 import re
+import statistics
 
 from . import VERSION
 
@@ -18,6 +19,7 @@ REPORTS = Path(__file__).resolve().parents[3] / "bench" / "results"
 ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
 INFERENCE_METRICS = ("positions_per_second", "latency_mean_ms", "latency_p50_ms", "latency_p95_ms", "peak_vram_bytes")
 TRAINING_METRICS = ("samples_per_second", "steps_per_second", "mean_step_ms", "forward_ms", "backward_ms", "optimizer_ms", "peak_vram_bytes")
+AGGREGATE_METRICS = ("samples_per_second", "mean_step_ms", "forward_ms", "backward_ms", "optimizer_ms", "peak_vram_bytes")
 
 
 def _reject_nonfinite(value):
@@ -67,6 +69,9 @@ def _validate(payload, run_id, relative):
     except (ValueError, TypeError) as error:
         raise ValueError(f"{where}.timestamp: invalid ISO timestamp") from error
     config = _field(payload, "config", dict, where)
+    power_profile = payload.get("power_profile")
+    if power_profile is not None and (not isinstance(power_profile, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", power_profile)):
+        raise ValueError(f"{where}.power_profile: expected a simple profile name or null")
     results = _field(payload, "results", dict, where)
     rows, incomplete = [], []
 
@@ -128,7 +133,14 @@ def _validate(payload, run_id, relative):
             if kind == "typed-training":
                 for field in ("parameter_count", "trainable_parameter_count", "parameter_bytes"):
                     row[field] = _field(results, field, int, where + ".results")
-                _field(results, "workload_shape", dict, where + ".results")
+                row["workload_shape"] = _field(results, "workload_shape", dict, where + ".results")
+                architecture = results.get("architecture_config", {})
+                if not isinstance(architecture, dict):
+                    raise ValueError(f"{where}.results.architecture_config: expected object")
+                row["architecture_config"] = architecture
+                row["benchmark_config"] = {key: value for key, value in config.items()
+                                           if key not in {"run_id", "seed", "artifact_root"}}
+                row["power_profile"] = power_profile
             rows.append(row)
         if isinstance(results.get("replay_loading"), str) and results["replay_loading"].startswith("unsupported"):
             incomplete.append({"run_id": run_id, "kind": kind, "measurement": "replay_loading", "status": "unsupported", "reason": results["replay_loading"]})
@@ -143,8 +155,18 @@ def _validate(payload, run_id, relative):
     return kind, rows, incomplete
 
 
-def _source_files(root, runs):
+def _source_files(root, runs, run_prefix=None):
     reports = root / "reports"
+    if run_prefix is not None:
+        if runs:
+            raise ValueError("--runs and --run-prefix cannot be combined")
+        if not ID.fullmatch(run_prefix) or len(run_prefix) < 3:
+            raise ValueError(f"invalid run prefix: {run_prefix!r}")
+        if not reports.is_dir():
+            raise FileNotFoundError("benchmark reports directory not found")
+        runs = sorted(p.name for p in reports.iterdir() if p.name.startswith(run_prefix) and p.is_dir() and not p.is_symlink() and ID.fullmatch(p.name))
+        if not runs:
+            raise ValueError(f"no benchmark runs match prefix {run_prefix!r}")
     if runs:
         if len(set(runs)) != len(runs):
             raise ValueError("duplicate run ID in --runs")
@@ -166,9 +188,9 @@ def _source_files(root, runs):
                 yield from sorted(directory.glob("*.json"))
 
 
-def collect(root, runs=None):
+def collect(root, runs=None, run_prefix=None):
     sources, data, incomplete = [], defaultdict(list), []
-    for path in _source_files(root, runs):
+    for path in _source_files(root, runs, run_prefix):
         relative = path.relative_to(root)
         if path.is_symlink() or not path.is_file() or root.resolve() not in path.resolve().parents:
             raise ValueError(f"unsafe benchmark JSON path: {relative}")
@@ -189,7 +211,7 @@ def collect(root, runs=None):
         config = {key: value for key, value in payload["config"].items() if key != "artifact_root"}
         sources.append({"run_id": path.parent.name, "kind": kind, "benchmark_version": VERSION,
                         "git_sha": payload["git_sha"], "timestamp": payload["timestamp"],
-                        "config": config, "source_json_path": relative.as_posix(),
+                        "config": config, "power_profile": payload.get("power_profile"), "source_json_path": relative.as_posix(),
                         "environment": {key: payload.get(key) for key in ("cpu", "logical_cpu_count", "gpu", "gpu_vram_bytes", "python_version", "rust_version", "torch_version", "cuda_version")}})
         data[kind].extend(rows)
         incomplete.extend(absent)
@@ -200,9 +222,94 @@ def collect(root, runs=None):
         raise ValueError("selected runs have different CPU/GPU hardware; create separate reports with --runs")
     shas = {s["git_sha"] for s in sources}
     warnings = ["Selected runs use different Git SHAs; measurements are not one revision baseline."] if len(shas) > 1 else []
+    profiles = {s["power_profile"] for s in sources}
+    if len(profiles) > 1:
+        warnings.append("Selected runs have different or unknown power profiles; compare only like-for-like groups.")
+    aggregates = aggregate_typed(data["typed-training"])
+    comparisons = compare_typed(aggregates)
     return {"report_version": 1, "benchmark_version": VERSION, "environment": sources[0]["environment"],
             "warnings": warnings, "measurements": {kind: data[kind] for kind in sorted(KINDS) if data[kind]},
+            "aggregates": {"typed-training": aggregates}, "comparisons": {"typed-training": comparisons},
+            "precision_scaling": precision_scaling(aggregates),
             "incomplete": incomplete, "source_runs": [{"run_id": s["run_id"], "kind": s["kind"], "source_json_path": s["source_json_path"]} for s in sources]}, sources
+
+
+def metric_stats(values):
+    """Sample standard deviation; one observation has undefined std and CV."""
+    mean = statistics.mean(values)
+    std = statistics.stdev(values) if len(values) > 1 else None
+    return {"mean": mean, "median": statistics.median(values), "std": std,
+            "cv_percent": std / mean * 100 if std is not None and mean else None,
+            "min": min(values), "max": max(values)}
+
+
+def aggregate_typed(rows):
+    grouped = defaultdict(list)
+    for row in rows:
+        identity = {key: row[key] for key in ("model", "dtype", "profile", "device", "batch_size",
+                    "parameter_count", "trainable_parameter_count", "parameter_bytes", "workload_shape",
+                    "architecture_config", "benchmark_config", "power_profile")}
+        grouped[json.dumps(identity, sort_keys=True)].append(row)
+    aggregates = []
+    for encoded, members in sorted(grouped.items()):
+        identity = json.loads(encoded)
+        aggregates.append({**identity, "count": len(members), "source_run_ids": sorted(r["run_id"] for r in members),
+                           "metrics": {metric: metric_stats([r[metric] for r in members]) for metric in AGGREGATE_METRICS}})
+    return aggregates
+
+
+def _delta(left, right):
+    return (right - left) / left * 100 if left else None
+
+
+def _comparison_context(row):
+    config = dict(row["benchmark_config"])
+    config.pop("model_family", None)
+    config.pop("transformer_hidden_dim", None)
+    return (row["dtype"], row["profile"], row["device"], row["batch_size"],
+            row["power_profile"], json.dumps(row["workload_shape"], sort_keys=True), json.dumps(config, sort_keys=True))
+
+
+def compare_typed(aggregates):
+    comparisons = []
+    for mask in aggregates:
+        if mask["model"] != "mask-resnet":
+            continue
+        for transformer in aggregates:
+            if transformer["model"] != "entity-transformer" or _comparison_context(mask) != _comparison_context(transformer):
+                continue
+            param_delta = _delta(mask["parameter_count"], transformer["parameter_count"])
+            if abs(param_delta) > 2:
+                continue
+            comparisons.append({"dtype": mask["dtype"], "profile": mask["profile"], "batch_size": mask["batch_size"],
+                                "power_profile": mask["power_profile"], "mask_run_ids": mask["source_run_ids"],
+                                "transformer_run_ids": transformer["source_run_ids"],
+                                "parameter_difference_percent": param_delta,
+                                "mask_means": {m: mask["metrics"][m]["mean"] for m in AGGREGATE_METRICS},
+                                "transformer_means": {m: transformer["metrics"][m]["mean"] for m in AGGREGATE_METRICS},
+                                "delta_percent": {m: _delta(mask["metrics"][m]["mean"], transformer["metrics"][m]["mean"])
+                                                  for m in AGGREGATE_METRICS}})
+    return sorted(comparisons, key=lambda r: (r["dtype"], r["batch_size"]))
+
+
+def precision_scaling(aggregates):
+    output = []
+    for fp32 in aggregates:
+        if fp32["dtype"] != "fp32":
+            continue
+        for bf16 in aggregates:
+            if bf16["dtype"] != "bf16":
+                continue
+            matching = ("model", "profile", "device", "batch_size", "parameter_count", "workload_shape", "architecture_config", "power_profile")
+            fp_config, bf_config = dict(fp32["benchmark_config"]), dict(bf16["benchmark_config"])
+            fp_config.pop("dtype", None)
+            bf_config.pop("dtype", None)
+            if all(fp32[k] == bf16[k] for k in matching) and fp_config == bf_config:
+                output.append({"model": fp32["model"], "batch_size": fp32["batch_size"],
+                               "power_profile": fp32["power_profile"],
+                               "delta_percent": _delta(fp32["metrics"]["samples_per_second"]["mean"], bf16["metrics"]["samples_per_second"]["mean"]),
+                               "fp32_run_ids": fp32["source_run_ids"], "bf16_run_ids": bf16["source_run_ids"]})
+    return output
 
 
 def _cell(value):
@@ -211,6 +318,10 @@ def _cell(value):
     if isinstance(value, float):
         return f"{value:,.3f}"
     return str(value).replace("|", "\\|").replace("\n", " ").replace("\r", " ")
+
+
+def _change(value):
+    return "—" if value is None else f"{value:+.2f}% ({'lower' if value < 0 else 'higher' if value > 0 else 'equal'})"
 
 
 def _table(headers, rows):
@@ -246,6 +357,35 @@ def markdown(summary, sources, charts):
     lines += ["", "## Typed architecture training", "", "Synthetic prepared input; parameter counts may differ across models."]
     lines += [_table(["Run", "Family", "Profile", "Dtype", "Batch", "Parameters", "Trainable", "Parameter MiB", "samples/s", "Mean step ms", "Peak VRAM MiB"],
                      [[r["run_id"], r["model"], r["profile"], r["dtype"], r["batch_size"], r["parameter_count"], r["trainable_parameter_count"], r["parameter_bytes"] / 2**20, r["samples_per_second"], r["mean_step_ms"], r["peak_vram_bytes"] / 2**20] for r in typed_training]) if typed_training else "No successful typed training measurements."]
+    aggregates = summary["aggregates"]["typed-training"]
+    if aggregates:
+        lines += ["", "## Typed architecture aggregate", "", "Sample standard deviation (n-1); a single run has undefined std and CV.", ""]
+        lines += [_table(["Family", "hidden/config", "dtype", "batch", "N", "params", "mean samples/s", "median", "std", "CV %", "step ms", "VRAM MiB"],
+                         [[a["model"], a["architecture_config"].get("typed", a["architecture_config"].get("typed_context", {})).get("hidden_dim"),
+                           a["dtype"], a["batch_size"], a["count"], a["parameter_count"],
+                           a["metrics"]["samples_per_second"]["mean"], a["metrics"]["samples_per_second"]["median"],
+                           a["metrics"]["samples_per_second"]["std"], a["metrics"]["samples_per_second"]["cv_percent"],
+                           a["metrics"]["mean_step_ms"]["mean"], a["metrics"]["peak_vram_bytes"]["mean"] / 2**20]
+                          for a in aggregates])]
+        comparisons = summary["comparisons"]["typed-training"]
+        lines += ["", "## Matched-size comparison", "", "Delta = (Transformer − Mask) / Mask × 100; lower step time and VRAM are favorable.", ""]
+        lines += [_table(["dtype", "batch", "Mask samples/s", "Transformer samples/s", "throughput delta %", "Mask step ms", "Transformer step ms", "step delta %", "VRAM delta %", "parameter delta %"],
+                         [[c["dtype"], c["batch_size"], c["mask_means"]["samples_per_second"], c["transformer_means"]["samples_per_second"],
+                           c["delta_percent"]["samples_per_second"], c["mask_means"]["mean_step_ms"], c["transformer_means"]["mean_step_ms"],
+                           _change(c["delta_percent"]["mean_step_ms"]), _change(c["delta_percent"]["peak_vram_bytes"]), c["parameter_difference_percent"]]
+                          for c in comparisons]) if comparisons else "No matched-size pair within 2% parameter count and identical workload/power conditions."]
+        if comparisons:
+            lines += ["", "Step component deltas (Transformer relative to Mask):", "",
+                      _table(["dtype", "batch", "forward", "backward", "optimizer"],
+                             [[c["dtype"], c["batch_size"], *(_change(c["delta_percent"][metric])
+                              for metric in ("forward_ms", "backward_ms", "optimizer_ms"))] for c in comparisons])]
+        lines += ["", "## Stability", "", "Compare repetition CV before interpreting throughput differences.", "",
+                  _table(["Family", "dtype", "batch", "N", "CV %", "min samples/s", "max samples/s"],
+                         [[a["model"], a["dtype"], a["batch_size"], a["count"], a["metrics"]["samples_per_second"]["cv_percent"],
+                           a["metrics"]["samples_per_second"]["min"], a["metrics"]["samples_per_second"]["max"]] for a in aggregates])]
+        lines += ["", "## Precision scaling", "", "BF16 throughput relative to FP32 for the same architecture and batch.", ""]
+        scaling = summary["precision_scaling"]
+        lines += [_table(["Family", "batch", "BF16 vs FP32 %"], [[s["model"], s["batch_size"], s["delta_percent"]] for s in scaling]) if scaling else "No comparable FP32/BF16 pairs."]
     lines += ["", "## Unsupported / incomplete measurements", ""]
     absent = summary["incomplete"]
     lines += [_table(["Run", "Kind", "Measurement", "Status", "Reason"], [[r[k] for k in ("run_id", "kind", "measurement", "status", "reason")] for r in absent]) if absent else "None."]
@@ -323,15 +463,50 @@ def charts_for(summary, directory):
                 plt.bar([p + index * width for p in x], [r[metric] / divisor for r in training], width, label=metric)
             plt.xticks([p + .4 for p in x], labels, rotation=30, ha="right")
             save(name, "Training (synthetic)", "run", ylabel)
+    aggregates = summary["aggregates"]["typed-training"]
+    if aggregates:
+        for filename, metric, ylabel, divisor in (
+            ("typed-throughput-aggregate.png", "samples_per_second", "samples/s", 1),
+            ("typed-step-time-aggregate.png", "mean_step_ms", "ms/step", 1),
+            ("typed-vram-aggregate.png", "peak_vram_bytes", "MiB", 2**20)):
+            plt.figure(figsize=(9, 5))
+            series = defaultdict(list)
+            for row in aggregates:
+                hidden = row["architecture_config"].get("typed", row["architecture_config"].get("typed_context", {})).get("hidden_dim")
+                series[(row["model"], hidden, row["dtype"])].append(row)
+            for (model, hidden, dtype), rows in sorted(series.items(), key=lambda item: str(item[0])):
+                rows.sort(key=lambda r: r["batch_size"])
+                means = [r["metrics"][metric]["mean"] / divisor for r in rows]
+                errors = [r["metrics"][metric]["std"] / divisor if r["metrics"][metric]["std"] is not None else 0 for r in rows]
+                plt.errorbar([r["batch_size"] for r in rows], means, yerr=errors, marker="o", capsize=3,
+                             label=f"{model} h{hidden} {dtype}")
+            save(filename, metric.replace("_", " ").title(), "batch size", ylabel)
+        b64 = [r for r in aggregates if r["batch_size"] == 64]
+        if b64:
+            plt.figure(figsize=(9, 5))
+            for metric in ("forward_ms", "backward_ms", "optimizer_ms"):
+                plt.plot([f"{r['model']} {r['dtype']}" for r in b64], [r["metrics"][metric]["mean"] for r in b64], marker="o", label=metric)
+            plt.xticks(rotation=25, ha="right")
+            save("typed-breakdown-b64.png", "Batch 64 step breakdown", "architecture / dtype", "ms")
+        scaling = summary["precision_scaling"]
+        if scaling:
+            plt.figure(figsize=(9, 5))
+            by_model = defaultdict(list)
+            for row in scaling:
+                by_model[row["model"]].append(row)
+            for model, rows in sorted(by_model.items()):
+                rows.sort(key=lambda r: r["batch_size"])
+                plt.plot([r["batch_size"] for r in rows], [r["delta_percent"] for r in rows], marker="o", label=model)
+            save("typed-bf16-scaling.png", "BF16 vs FP32 throughput", "batch size", "change %")
     return made
 
 
-def generate(*, report_id, artifact=None, runs=None):
+def generate(*, report_id, artifact=None, runs=None, run_prefix=None):
     from accelerate_chess.replay import artifact_root
     if not ID.fullmatch(report_id):
         raise ValueError(f"invalid report ID: {report_id!r}")
     root = artifact_root(artifact)
-    summary, sources = collect(root, runs)
+    summary, sources = collect(root, runs, run_prefix)
     if REPORTS.is_symlink():
         raise ValueError("repository report directory must not be a symlink")
     target = REPORTS / report_id
@@ -357,8 +532,9 @@ def main():
     parser.add_argument("--report-id", required=True)
     parser.add_argument("--artifact-root")
     parser.add_argument("--runs", nargs="+", metavar="RUN_ID")
+    parser.add_argument("--run-prefix", metavar="PREFIX")
     args = parser.parse_args()
-    print(generate(report_id=args.report_id, artifact=args.artifact_root, runs=args.runs))
+    print(generate(report_id=args.report_id, artifact=args.artifact_root, runs=args.runs, run_prefix=args.run_prefix))
 
 
 if __name__ == "__main__":

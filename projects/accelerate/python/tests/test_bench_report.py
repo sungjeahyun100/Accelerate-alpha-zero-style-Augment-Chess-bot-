@@ -40,6 +40,21 @@ def inference(dtype="fp32", status="ok"):
     return payload("inference", {"model": "resnet-s", "dtype": dtype}, {"measurements": [row]})
 
 
+def typed(family="mask-resnet", dtype="fp32", batch=16, hidden=128, rate=100, power="performance"):
+    params = 4_196_226 if family == "mask-resnet" else (4_159_570 if hidden == 208 else 2_232_850)
+    config = {"model_family": family, "profile": "normal", "dtype": dtype, "device": "cuda",
+              "batch_size": batch, "transformer_hidden_dim": hidden, "steps": 100, "warmup": 3,
+              "torch_threads": 1, "torch_interop_threads": 1}
+    result = {"status": "ok", "synthetic": True, "parameter_count": params,
+              "trainable_parameter_count": params - 1000, "parameter_bytes": params * 4,
+              "workload_shape": {"record_count": 16, "candidate_count": 80, "batch_size": batch},
+              "architecture_config": {"typed": {"hidden_dim": hidden}, "blocks": 4},
+              "samples_per_second": rate, "steps_per_second": rate / batch,
+              "mean_step_ms": batch * 1000 / rate, "forward_ms": 10, "backward_ms": 20,
+              "optimizer_ms": 5, "peak_vram_bytes": 400 * 2**20}
+    return payload("typed-training", config, result, power_profile=power)
+
+
 class ReportTests(unittest.TestCase):
     def setUp(self):
         from tempfile import TemporaryDirectory
@@ -150,6 +165,74 @@ class ReportTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "matplotlib is required"):
                 report.generate(report_id="new", artifact=str(self.root))
         self.assertFalse((output / "new").exists())
+
+    def test_typed_aggregate_comparison_and_precision(self):
+        for index, rate in enumerate((90, 100, 110), 1):
+            self.put(f"mask-fp32-{index}", typed(rate=rate))
+        self.put("transformer-fp32", typed("entity-transformer", hidden=208, rate=150))
+        self.put("mask-bf16", typed(dtype="bf16", rate=120))
+        self.put("transformer-h128", typed("entity-transformer", hidden=128, rate=130))
+        self.put("mask-b32", typed(batch=32, rate=200))
+        summary, sources = report.collect(self.root)
+        aggregates = summary["aggregates"]["typed-training"]
+        self.assertEqual(len(aggregates), 5)
+        mask = next(a for a in aggregates if a["model"] == "mask-resnet" and a["dtype"] == "fp32" and a["batch_size"] == 16)
+        self.assertEqual(mask["source_run_ids"], [f"mask-fp32-{i}" for i in (1, 2, 3)])
+        self.assertEqual(mask["count"], 3)
+        self.assertEqual(mask["metrics"]["samples_per_second"],
+                         {"mean": 100, "median": 100, "std": 10, "cv_percent": 10,
+                          "min": 90, "max": 110})
+        pair = summary["comparisons"]["typed-training"]
+        self.assertEqual(len(pair), 1)
+        self.assertAlmostEqual(pair[0]["delta_percent"]["samples_per_second"], 50)
+        self.assertAlmostEqual(pair[0]["parameter_difference_percent"], -0.87354, places=3)
+        scaling = summary["precision_scaling"]
+        self.assertEqual(len(scaling), 1)
+        self.assertAlmostEqual(scaling[0]["delta_percent"], 20)
+        self.assertIsNone(next(a for a in aggregates if a["model"] == "entity-transformer")["metrics"]["samples_per_second"]["std"])
+        rendered = report.markdown(summary, sources, [])
+        for section in ("Typed architecture aggregate", "Matched-size comparison", "Stability", "Precision scaling"):
+            self.assertIn(section, rendered)
+
+    def test_typed_config_and_power_separation(self):
+        self.put("base", typed())
+        changed = typed()
+        changed["results"]["architecture_config"]["blocks"] = 8
+        self.put("blocks", changed)
+        self.put("balanced", typed(power="balanced"))
+        self.put("legacy", typed(power=None))
+        summary, _ = report.collect(self.root)
+        self.assertEqual(len(summary["aggregates"]["typed-training"]), 4)
+        self.assertTrue(any("power profiles" in warning for warning in summary["warnings"]))
+        malformed = typed(power="performance /private/path")
+        self.put("malformed", malformed)
+        with self.assertRaisesRegex(ValueError, "power_profile"):
+            report.collect(self.root)
+
+    def test_safe_prefix_selection(self):
+        self.put("matched-a", typed())
+        self.put("other", typed())
+        summary, _ = report.collect(self.root, run_prefix="matched-")
+        self.assertEqual(len(summary["source_runs"]), 1)
+        with self.assertRaisesRegex(ValueError, "invalid run prefix"):
+            report.collect(self.root, run_prefix="../")
+        with self.assertRaisesRegex(ValueError, "cannot be combined"):
+            report.collect(self.root, ["other"], run_prefix="matched-")
+
+    @unittest.skipUnless(importlib.util.find_spec("matplotlib"), "matplotlib unavailable")
+    def test_typed_aggregate_charts(self):
+        self.put("mask", typed(batch=64))
+        self.put("transformer", typed("entity-transformer", batch=64, hidden=208))
+        self.put("mask-bf16", typed(dtype="bf16", batch=64))
+        self.put("transformer-bf16", typed("entity-transformer", dtype="bf16", batch=64, hidden=208))
+        summary, _ = report.collect(self.root)
+        directory = Path(self.temp.name) / "charts"
+        directory.mkdir()
+        charts = report.charts_for(summary, directory)
+        for name in ("typed-throughput-aggregate.png", "typed-step-time-aggregate.png",
+                     "typed-vram-aggregate.png", "typed-breakdown-b64.png", "typed-bf16-scaling.png"):
+            self.assertIn(name, charts)
+            self.assertEqual((directory / name).read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
 
     @unittest.skipUnless(importlib.util.find_spec("matplotlib"), "matplotlib unavailable in this environment")
     def test_png_and_complete_report(self):

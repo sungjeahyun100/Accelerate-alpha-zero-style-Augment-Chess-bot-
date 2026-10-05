@@ -1,5 +1,7 @@
 # 로컬 성능 측정
 
+실험 과정, 폐기한 측정과 최종 matched-size 결과 해석은 [실험 기록](EXPERIMENTS.md)에 있다.
+
 이 도구는 `accelerate_chess.bench` 모듈을 실행한다. 결과는 실행 환경, Git SHA,
 설정, 성공·미지원 상태를 JSON으로 남긴다. `--run-id`를 지정하면 저장소 밖의
 `reports/<run-id>/`에 기록한다. 기본 루트는 기존 `artifact_root()` 정책을 따른다.
@@ -31,7 +33,12 @@ python -m accelerate_chess.bench.report \
 ```
 
 `--runs`가 없으면 외부 artifact root의 `reports/` 바로 아래에 있는 안전한 run ID
-디렉터리 전체에서 `*.json`을 사전순으로 읽는다. 지원 버전은
+디렉터리 전체에서 `*.json`을 사전순으로 읽는다.
+`--run-prefix matched-`처럼 명시하면 해당 접두사의 안전한 run ID만 선택한다.
+`--runs`와 함께 사용할 수 없다. 최종 36-run 보고서의 재생성 명령은
+[실험 기록](EXPERIMENTS.md#보고서-재생성)에 있다.
+
+지원 버전은
 `local-performance-v1`, 종류는 engine/inference/training/typed-training/pipeline이다. 잘못된
 JSON과 다른 버전은 오류로 중단한다. CPU/GPU 구성이 다른 run도 한 보고서로
 합치지 않으며 `--runs`로 분리해야 한다. Git SHA가 섞이면 보고서에 경고한다.

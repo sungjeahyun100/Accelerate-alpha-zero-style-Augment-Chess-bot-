@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 
@@ -29,9 +30,9 @@ def workers(value: str) -> int:
 
 
 def report(kind: str, config: dict, results: dict, *, output_root=None, run_id=None) -> dict:
-    def version(command):
+    def version(command, timeout=5):
         try:
-            return subprocess.run(command, check=True, capture_output=True, text=True, timeout=5).stdout.strip()
+            return subprocess.run(command, check=True, capture_output=True, text=True, timeout=timeout).stdout.strip()
         except (OSError, subprocess.SubprocessError):
             return None
 
@@ -62,6 +63,8 @@ def report(kind: str, config: dict, results: dict, *, output_root=None, run_id=N
                "rust_version": version(["rustc", "--version"]),
                "torch_version": torch_version, "cuda_version": cuda_version,
                "config": config, "results": results}
+    power_profile = version(["powerprofilesctl", "get"], timeout=2) if sys.platform.startswith("linux") else None
+    payload["power_profile"] = power_profile if power_profile and re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", power_profile) else None
     if run_id is not None:
         path = reserve_slot(artifact_root(output_root), "reports", run_id) / f"{kind}.json"
         atomic_json(path, payload)
