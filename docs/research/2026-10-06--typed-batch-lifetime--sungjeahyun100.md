@@ -8,7 +8,7 @@
 | 항목 | 기록 |
 |---|---|
 | 작성 시점 | 2026-10-06 UTC |
-| 마지막 정정 시점 | 해당 없음: 최초 기록 |
+| 마지막 정정 시점 | 2026-10-06 01:40 UTC: 기존 native-bot CI 관측 결과 추가 |
 | GitHub 작성자 | [sungjeahyun100](https://github.com/sungjeahyun100), `gh api user`로 확인 |
 | 관련 PR | [#39](https://github.com/sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-/pull/39) benchmark 기반, [#40](https://github.com/sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-/pull/40) 후보 조사 |
 | 저장소·기준 | `sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-`; PR #39 head `505edfe4271f8d5ee724cf901f5feff32dea4d2c` |
@@ -80,14 +80,21 @@ value의 public 확률 결과가 같음을 확인했다. `test_ir.py` 29개와
 `test_bench_report.py` 포함 42개 검사는 통과했다. 전체 Python suite는
 PyTorch 미설치로 collection 오류 4개(`test_inference_runtime.py`,
 `test_model_stack.py`, `test_search.py`, `test_session.py`)에서 중단됐다.
-따라서 native evaluator와 고정 seed 전체 search public result 검증은
-**미검증**이다. CI 요청·CI 성공·모델 성능 검증도 없다.
+로컬에서는 native evaluator와 고정 seed 전체 search public result 검증이
+**미검증**이었다. 이후 기존 [native-bot CI run 37397830283](https://github.com/sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-/actions/runs/37397830283)을
+실험 head `410c7a5128c70aaac12ea1f9934f89e48e69c460`에서 수동 실행했다.
+Linux와 Windows의 설치 wheel Python 검사는 각각 **172 passed, 1 skipped**였다.
+두 skip 모두 CUDA BF16 하드웨어 선택 검사였다. 두 CI job은 skip을 거부하는
+후처리 규칙 때문에 실패했다. 동결 adapter와 Rust workspace의 Linux·Windows
+job 4개는 모두 성공했고, run 전체 결론은 **failure**다. 실제 native evaluator와
+전체 search 테스트는 실행됐지만 CI 성공이나 모델 성능 검증으로 해석하지 않는다.
 
 ### 오류와 산출물
 
 | 단계 | 실제 오류·원인 | 처리와 남은 영향 |
 |---|---|---|
 | 전체 Python suite collection | `ModuleNotFoundError: No module named 'torch'`, exit 2; 시험 환경의 PyTorch 부재 | pure typed IR와 benchmark reporter 검사를 별도 실행. native·model 관련 검증은 남음 |
+| Linux·Windows native-bot CI 후처리 | 각 `RuntimeError: native bot CI requires real tests with no skips`, exit 1; 각 Python 테스트 172 passed, CUDA BF16 선택 검사 1 skipped | 테스트 assertion 실패는 아님. 전체 CI는 failure로 표시하고 [run](https://github.com/sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-/actions/runs/37397830283)과 두 플랫폼 보고 artifact(7일 보존)를 근거로 남김 |
 | 표준 artifact 저장 | `ValueError: generated artifacts must be outside the source checkout`; 임시 산출물 루트의 Git 경계 검사 | stdout JSON을 외부 임시 영역에 저장. `report`의 `--run-id` 경로는 미검증 |
 
 - 원시 JSON: `${ARTIFACT_ROOT}/reports/typed-lifetime-ab/baseline/` 24개와
@@ -107,9 +114,15 @@ throughput은 약 4.1% 낮지만 0.3~0.4 ms의 단발 배치 시간에서 지속
 **판정: 정확성의 검증 가능한 부분은 통과, 메모리 개선 채택은 보류.** 이
 workload와 환경에서 의미 있는 peak RSS 감소를 확인하지 못했다. 다음 후보로
 바로 넘어가기 전에 Python 3.12·실제 evaluator가 있는 환경에서 동일한
-독립 프로세스 측정과 전체 관련 Python 검사를 마쳐야 한다. 이 기록은 모델
+독립 프로세스 RSS·throughput을 재측정해야 한다. 관련 Python 테스트는 두 OS의
+설치 wheel에서 각각 통과했으며 선택적 CUDA skip 때문에 CI gate는 실패했다.
+이 기록은 모델
 성능 개선이나 배포 승인 근거가 아니다.
 
 ## 정정과 후속 기록
 
-해당 없음: 최초 기록. 후속 측정은 같은 연구 질문이므로 이 영수증에 추가한다.
+| 시점 | 변경·후속 기록 | 기존 결론에 미치는 영향 |
+|---|---|---|
+| 2026-10-06 01:40 UTC | 기존 native-bot workflow run의 Linux·Windows Python 결과와 skip gate 실패 추가 | 정확성의 실행 범위는 넓어졌고, RSS 개선 보류 판정은 그대로 |
+
+후속 측정은 같은 연구 질문이므로 이 영수증에 추가한다.
