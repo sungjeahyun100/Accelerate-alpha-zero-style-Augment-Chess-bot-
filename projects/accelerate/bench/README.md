@@ -1,5 +1,33 @@
 # 로컬 성능 측정
 
+## Typed batch 메모리 A/B
+
+`accelerate_chess.bench.typed_memory`는 공개 v7 observation을 production typed
+encoder로 인코딩하고 `batch_typed_positions()`를 호출한다. `normal`은 기물 1개와
+후보 최대 8개, `stress`는 기물 32개·record 290개·relation 321개와 후보 최대
+48개를 사용한다. evaluator의 추가 host 입력은 NumPy 복사로 모사한다. 실제
+PyTorch/ONNX backend 처리량이나 모델 성능 측정은 아니다.
+
+각 profile·batch size·반복을 **새 프로세스**에서 실행해야 `/proc/self/status`의
+`VmHWM`이 앞선 실행의 peak를 포함하지 않는다. `--non-retaining`은 비교할
+최적화 경로이며, 생략하면 기존 API 기본 동작을 측정한다. `--run-id`와
+`--artifact-root`는 아래 한 실행마다 고유하게 지정한다.
+
+```bash
+python -m accelerate_chess.bench.typed_memory \
+  --profile stress --batch-size 64 --seed 37 --repeat 1 \
+  --non-retaining --artifact-root "${ARTIFACT_ROOT}" \
+  --run-id typed-memory-stress-64-1
+```
+
+batch size는 4·16·32·64이며 profile당 최소 3개의 독립 실행을 비교한다.
+JSON은 기존 benchmark 봉투와 `reports/<run-id>/typed-memory.json` 경로를
+사용한다. 비교 수치는 같은 조건의 median으로 집계한다. 단일 batch의
+`batching_batches_per_second`는 batching 시간의 역수이므로 미세한 실행 잡음에
+민감하다. RSS는 전체 프로세스 peak와 evaluator 입력 복사 직후 값을 담는다.
+이번 A/B 결과와 한계는
+[연구 영수증](../../../docs/research/2026-10-06--typed-batch-lifetime--sungjeahyun100.md)에 기록한다.
+
 실험 과정, 폐기한 측정과 최종 matched-size 결과 해석은 [실험 기록](EXPERIMENTS.md)에 있다.
 
 이 도구는 `accelerate_chess.bench` 모듈을 실행한다. 결과는 실행 환경, Git SHA,
