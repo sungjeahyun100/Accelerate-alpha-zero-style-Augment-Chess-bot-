@@ -826,7 +826,7 @@ class InformationSetSearch:
         if elements > self.limits.max_inference_elements:
             raise SearchBudgetError("requested leaf batch exceeds the declared inference input budget")
         batch = batch_positions([self.encoder.encode(observation, intents, belief_summary=summary)
-                                 for observation, intents, summary in requests])
+                                 for observation, intents, summary in requests], retain_positions=False)
         logits, values = self.evaluator.evaluate(batch.board, batch.condition, batch.action_features)
         if logits.shape != (count, actions) or values.shape != (count, 1) or not np.isfinite(logits).all() or not np.isfinite(values).all() or np.abs(values).max() > 1.00001:
             raise InformationMismatchError("native evaluator returned invalid policy/value")
@@ -1090,7 +1090,8 @@ class TypedInformationSetSearch(InformationSetSearch):
             raise SearchBudgetError("requested typed leaf batch exceeds the declared inference element budget")
         if estimated_bytes > min(self.limits.max_inference_bytes, self.encoder.spec.max_input_bytes):
             raise SearchBudgetError("requested typed leaf batch exceeds the declared inference input budget")
-        batch = batch_typed_positions(positions)
+        batch = batch_typed_positions(positions, retain_positions=False)
+        del positions, arrays
         inputs = dict(zip(order, batch.as_family_inputs(family), strict=True))
         if not all(isinstance(array, np.ndarray) for array in inputs.values()):
             raise InformationMismatchError("typed encoder returned a non-array model input")

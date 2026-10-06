@@ -8,11 +8,12 @@ from functools import lru_cache
 import hashlib
 import json
 from pathlib import Path
+import weakref
 
 import numpy as np
 import pytest
 
-from accelerate_chess.encoding import PUBLIC_MOVE_SELECTION_MODES, PublicEncoder, canonical_json
+from accelerate_chess.encoding import PUBLIC_MOVE_SELECTION_MODES, PublicEncoder, batch_positions, canonical_json
 from accelerate_chess.ir import (
     BoardGeometry, HISTORY_VERSION, MAX_CANDIDATE_NODES, ObservationIR, TypedEncoder,
     TypedEncoderSpec, batch_typed_positions, validate_typed_public_observation,
@@ -318,6 +319,82 @@ def test_synthetic_geometry_padding_and_candidate_split():
         np.testing.assert_array_equal(whole.inputs[name][1, :split.inputs[name].shape[1]],
                                       split.inputs[name][0])
     assert batched.as_family_inputs("entity-transformer")[0].shape[0] == 2
+
+
+def test_non_retaining_typed_batch_preserves_all_inputs_and_releases_sources():
+    contract = spec()
+    encoder = TypedEncoder(contract)
+    public_ir = ObservationIR.from_public(frame(), contract)
+
+    def build(retain):
+        positions = [encoder.encode(public_ir, intents()), encoder.encode(public_ir, intents()[:1])]
+        source = weakref.ref(positions[0].inputs["candidate_category"])
+        return batch_typed_positions(positions, retain_positions=retain), source
+
+    retained, retained_source = build(True)
+    released, released_source = build(False)
+    assert retained_source() is not None and len(retained.positions) == 2
+    assert released.positions == () and released_source() is None
+    assert retained.spec_digest == released.spec_digest
+    assert retained.inputs.keys() == released.inputs.keys()
+    for name in retained.inputs:
+        assert retained.inputs[name].shape == released.inputs[name].shape
+        assert retained.inputs[name].dtype == released.inputs[name].dtype
+        np.testing.assert_array_equal(retained.inputs[name], released.inputs[name])
+
+
+def test_non_retaining_legacy_batch_preserves_inputs_and_releases_sources():
+    encoder = PublicEncoder(spec().legacy_validator().spec)
+
+    def build(retain):
+        positions = [encoder.encode(frame(), intents()), encoder.encode(frame(), intents()[:1])]
+        source = weakref.ref(positions[0].action_features)
+        return batch_positions(positions, retain_positions=retain), source
+
+    retained, retained_source = build(True)
+    released, released_source = build(False)
+    assert retained_source() is not None and len(retained.positions) == 2
+    assert released.positions == () and released_source() is None
+    for name in ("board", "condition", "action_features", "action_mask"):
+        np.testing.assert_array_equal(getattr(retained, name), getattr(released, name))
+
+
+@pytest.mark.parametrize("family", ["mask-resnet", "entity-transformer"])
+def test_typed_search_releases_source_features_before_evaluator(family):
+    from accelerate_chess.inference import ProductionEvaluator
+    from accelerate_chess.search import TypedInformationSetSearch, _SearchState
+
+    contract = spec()
+    source_refs = []
+
+    class RecordingEncoder(TypedEncoder):
+        def encode(self, *args, **kwargs):
+            position = super().encode(*args, **kwargs)
+            source_refs.append(weakref.ref(position.inputs["candidate_category"]))
+            return position
+
+    class Evaluator(ProductionEvaluator):
+        def __init__(self):
+            self.spec = contract
+
+        @property
+        def architecture_family(self):
+            return family
+
+        def evaluate_typed(self, inputs):
+            assert all(reference() is None for reference in source_refs)
+            mask = inputs["candidate_mask"]
+            assert mask.tolist() == [[True, True], [True, False]]
+            return (np.tile(np.array([1., 2.], np.float32), (2, 1)),
+                    np.array([[0.25], [-0.5]], np.float32))
+
+    request = frame()
+    first, second = intents(), intents()[:1]
+    result = TypedInformationSetSearch(RecordingEncoder(contract), Evaluator())._evaluate_many(
+        [(request, first, None), (request, second, None)], _SearchState())
+    np.testing.assert_allclose(result[0][0], np.exp([1., 2.]) / np.exp([1., 2.]).sum())
+    np.testing.assert_array_equal(result[1][0], [1.])
+    assert [item[1] for item in result] == [0.25, -0.5]
 
 
 def test_public_footprint_has_one_piece_entity_and_ordered_cell_links():
