@@ -344,6 +344,7 @@ def selfplay(args, root, spec, cancelled):
 
 def stage_sample(args, root, spec, cancelled):
     """Generate a legal source position and one bounded student rollout."""
+    start = time.monotonic()
     from dataclasses import replace
     from .staged import END, MIDDLE, SyntheticConfig, generate_position, replay_position, rollout_stage
 
@@ -359,13 +360,13 @@ def stage_sample(args, root, spec, cancelled):
     generation = SyntheticConfig(stage, args.seed, max_actions=args.max_generation_actions,
                                  capture_bias=args.capture_bias,
                                  assumed_ply_center=25 if stage.name == "middle" else 45)
-    start = time.monotonic()
     def peak_rss_bytes():
         if os.name != "posix":
             return None
         import resource
         return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
     output = reserve_slot(root, "datasets", args.run_id)
+    generated_seconds = None
     try:
         if args.source_provenance:
             source_provenance = read_json(args.source_provenance)
@@ -440,6 +441,9 @@ def stage_sample(args, root, spec, cancelled):
                   "terminal_ratio": float(result["outcome"] == "terminal"),
                   "teacher_inference_count": int(result["outcome"].startswith("bootstrap:")),
                   "teacher_inference_seconds": result["teacher_inference_seconds"],
+                  "belief_initialization_seconds": result["belief_initialization_seconds"],
+                  "root_belief_seconds": result["root_belief_seconds"],
+                  "belief_diagnostics": result["belief_diagnostics"],
                   "terminal_rollout_length": len(result["samples"]) if result["outcome"] == "terminal" else None,
                   "invalid_generated_state_rejection_ratio": 0.0,
                   "teacher_checkpoint_sha256": result["teacher_checkpoint_sha256"],
@@ -483,7 +487,14 @@ def stage_sample(args, root, spec, cancelled):
     except (Exception, KeyboardInterrupt) as error:
         atomic_json(slot(root, "reports", args.run_id) / "stage-sample-failure.json",
                     {"status": "failed", "error": type(error).__name__, "reason": str(error),
-                     "dataset_slot": str(output)})
+                     "dataset_slot": str(output),
+                     "belief_diagnostics": getattr(error, "belief_diagnostics", None),
+                     "belief_initialization_seconds": getattr(error, "belief_initialization_seconds", None),
+                     "root_belief_seconds": getattr(error, "root_belief_seconds", None),
+                     "stage_samples_completed": getattr(error, "stage_samples_completed", None),
+                     "generation_seconds": generated_seconds,
+                     "wall_seconds": time.monotonic() - start,
+                     "peak_rss_bytes": peak_rss_bytes()})
         raise
 
 

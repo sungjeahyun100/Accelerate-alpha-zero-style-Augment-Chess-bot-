@@ -829,6 +829,10 @@ pub struct GameState {
     /// availability probes do not enter this semantic outcome trace.
     #[serde(skip)]
     pub(crate) semantic_chance_probability: Option<f64>,
+    /// One transaction's source-owned public draft proposal. It is consumed
+    /// before observation/event construction and never serialized or imported.
+    #[serde(skip)]
+    pub(crate) source_offer_condition: Option<crate::draft::SourceOfferCondition>,
     /// Source WeakMap의 보드 행동 원점. 실행 중에만 존재하며 공개/저장 DTO에 넣지 않는다.
     #[serde(skip)]
     pub(crate) board_action_origins: Option<Vec<crate::v7_card_context::BoardActionOrigin>>,

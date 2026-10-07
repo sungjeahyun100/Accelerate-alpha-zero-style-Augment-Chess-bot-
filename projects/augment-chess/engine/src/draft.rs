@@ -12,6 +12,14 @@ pub(crate) struct Definitions {
     pub(crate) definitions: Vec<Value>,
     pub(crate) constants: Value,
 }
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct SourceOfferCondition {
+    pub(crate) phase: String,
+    pub(crate) color: Color,
+    pub(crate) choices: Vec<Value>,
+    pub(crate) density: Option<(f64, f64)>,
+}
 pub(crate) fn definitions() -> &'static Definitions {
     static DATA: OnceLock<Definitions> = OnceLock::new();
     DATA.get_or_init(|| {
@@ -603,7 +611,7 @@ pub(crate) fn propose_hidden_normal_offer(
     required: &str,
     color: Color,
 ) -> Result<(f64, f64)> {
-    balanced_normal_proposal(state, color, |state, force| {
+    balanced_normal_proposal_with_tilt(state, color, true, |state, force| {
         normal_offer_trace(state, required, color, force)
     })
 }
@@ -661,6 +669,15 @@ pub(crate) fn propose_unobserved_normal_offer(
 fn balanced_normal_proposal(
     state: &mut GameState,
     color: Color,
+    draw: impl FnMut(&mut GameState, bool) -> Result<(Vec<Value>, f64, f64)>,
+) -> Result<(f64, f64)> {
+    balanced_normal_proposal_with_tilt(state, color, false, draw)
+}
+
+fn balanced_normal_proposal_with_tilt(
+    state: &mut GameState,
+    color: Color,
+    tilt_each_attempt: bool,
     mut draw: impl FnMut(&mut GameState, bool) -> Result<(Vec<Value>, f64, f64)>,
 ) -> Result<(f64, f64)> {
     let target = state
@@ -672,16 +689,26 @@ fn balanced_normal_proposal(
     // to tilt. q is the MIXTURE density, not merely the density of the chosen
     // component: branches whose attempt is never reached are ordinary source
     // draws. This keeps every successful source acquisition trace in support.
-    let force_index = if target.is_some() {
+    let force_index = if target.is_some() && !tilt_each_attempt {
         (state.rng.sample()? * 3.0).floor() as usize
     } else {
         0
     };
+    // The hidden opposing offer is observed only through its later
+    // acquisition. Tilt each balancing attempt with a small source-prior
+    // component: every source trace keeps positive proposal support, while
+    // the best selected attempt is much likelier to contain that acquisition.
+    const HIDDEN_OFFER_TILT: f64 = 0.95;
     let mut traces = Vec::new();
     let mut best = Vec::new();
     let mut best_gap = f64::INFINITY;
     for attempt in 0..if target.is_some() { 3 } else { 1 } {
-        let (candidate, p, q) = draw(state, attempt == force_index)?;
+        let force = if tilt_each_attempt {
+            state.rng.sample()? < HIDDEN_OFFER_TILT
+        } else {
+            attempt == force_index
+        };
+        let (candidate, p, q) = draw(state, force)?;
         traces.push((p, q));
         let gap = target
             .map(|target| (average_score(&candidate).unwrap_or(target) - target).abs())
@@ -695,7 +722,12 @@ fn balanced_normal_proposal(
         }
     }
     let source_probability = traces.iter().map(|(p, _)| p).product::<f64>();
-    let proposal_probability = if target.is_some() {
+    let proposal_probability = if tilt_each_attempt {
+        traces
+            .iter()
+            .map(|(p, q)| (1.0 - HIDDEN_OFFER_TILT) * p + HIDDEN_OFFER_TILT * q)
+            .product::<f64>()
+    } else if target.is_some() {
         (0..3)
             .map(|component| {
                 traces
@@ -1232,6 +1264,239 @@ fn draw_choices(
     }
     Ok(best)
 }
+
+fn observed_stage_segment(
+    state: &mut GameState,
+    categories: &[&str],
+    count: usize,
+    color: Color,
+    public: &[Value],
+    force: bool,
+    unavailable: &mut BTreeSet<String>,
+    picked: &mut Vec<Value>,
+    source_probability: &mut f64,
+    matches: &mut bool,
+) -> Result<()> {
+    for _ in 0..count {
+        let pool = mixed_pool(state, categories, color, unavailable)?;
+        if pool.is_empty() {
+            break;
+        }
+        let total = pool
+            .iter()
+            .map(|card| weight_with_ruleset(&state.ruleset_id, card, false))
+            .sum::<f64>();
+        let selected = if force {
+            let required = public.get(picked.len()).and_then(|card| card.get("id"));
+            let card = pool.iter().copied().find(|card| Some(&card["id"]) == required)
+                .ok_or_else(|| EngineError::ConditioningMismatch(
+                    "observed stage offer violates source pool or ordered category".into(),
+                ))?;
+            // The source draw is consumed, while its semantic outcome is
+            // proposed from the public offer with q=1. The source trace still
+            // records the true branch probability below.
+            state.rng.sample()?;
+            card
+        } else {
+            weighted_pick(state, &pool, false)?.ok_or_else(|| {
+                EngineError::InvalidState("nonempty stage pool returned no card".into())
+            })?
+        };
+        let mass = if total > 0.0 {
+            weight_with_ruleset(&state.ruleset_id, selected, false) / total
+        } else {
+            1.0 / pool.len() as f64
+        };
+        if force {
+            state.rng.record_last_probability(mass, "source observed stage offer")?;
+        }
+        *source_probability *= mass;
+        *matches &= public.get(picked.len()).is_some_and(|card| card["id"] == selected["id"]);
+        picked.push(clone_card(state, selected)?);
+        unavailable.insert(selected["id"].as_str().expect("source card id").into());
+    }
+    Ok(())
+}
+
+fn observed_stage_trace(
+    state: &mut GameState,
+    phase: &str,
+    color: Color,
+    public: &[Value],
+    force: bool,
+) -> Result<(Vec<Value>, f64, f64)> {
+    let mut unavailable = acquired_ids(state);
+    let mut picked = Vec::new();
+    let mut source_probability = 1.0;
+    let mut matches = true;
+    if phase == "MIDDLE" {
+        observed_stage_segment(state, &["MIDDLE"], 2, color, public, force, &mut unavailable,
+            &mut picked, &mut source_probability, &mut matches)?;
+        observed_stage_segment(state, &["PIECE"], 1, color, public, force, &mut unavailable,
+            &mut picked, &mut source_probability, &mut matches)?;
+        if picked.len() < 3 {
+            observed_stage_segment(state, &["MIDDLE", "PIECE"], 3 - picked.len(), color,
+                public, force, &mut unavailable, &mut picked, &mut source_probability,
+                &mut matches)?;
+        }
+    } else if phase == "END" {
+        observed_stage_segment(state, &["MIDDLE", "END"], 3, color, public, force,
+            &mut unavailable, &mut picked, &mut source_probability, &mut matches)?;
+    } else {
+        return Err(EngineError::UnsupportedFeature(format!(
+            "observed stage offer for {phase}"
+        )));
+    }
+    matches &= picked.len() == public.len();
+    Ok((picked, source_probability, if matches { 1.0 } else { 0.0 }))
+}
+
+fn propose_observed_stage_offer(
+    state: &mut GameState,
+    phase: &str,
+    color: Color,
+    public: &[Value],
+) -> Result<(Vec<Value>, f64, f64)> {
+    if state.extra.get("gameStyle").and_then(Value::as_str) != Some("normal")
+        || public.len() != 3 || !matches!(phase, "MIDDLE" | "END")
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "observed stage offer requires a normal three-card MIDDLE/END draft".into(),
+        ));
+    }
+    let target = state.extra.get("draftBalance")
+        .filter(|balance| color == Color::Black && balance["phase"] == phase)
+        .and_then(|balance| balance["averageScore"].as_f64());
+    let Some(target) = target else {
+        return observed_stage_trace(state, phase, color, public, true);
+    };
+    const TILT: f64 = 0.95;
+    let mut best = Vec::new();
+    let mut best_gap = f64::INFINITY;
+    let mut source_probability = 1.0;
+    let mut proposal_probability = 1.0;
+    for _ in 0..3 {
+        let force = state.rng.sample_invariant("source stage proposal component")? < TILT;
+        let (candidate, p, q) = observed_stage_trace(state, phase, color, public, force)?;
+        source_probability *= p;
+        proposal_probability *= (1.0 - TILT) * p + TILT * q;
+        let gap = (average_score(&candidate).unwrap_or(target) - target).abs();
+        if gap < best_gap {
+            best = candidate;
+            best_gap = gap;
+        }
+        if best_gap <= 2.0 {
+            break;
+        }
+    }
+    Ok((best, source_probability, proposal_probability))
+}
+
+fn hidden_stage_segment(
+    state: &mut GameState,
+    categories: &[&str],
+    count: usize,
+    color: Color,
+    required: &str,
+    required_category: &str,
+    force: bool,
+    unavailable: &mut BTreeSet<String>,
+    picked: &mut Vec<Value>,
+    source_probability: &mut f64,
+    proposal_probability: &mut f64,
+) -> Result<()> {
+    for index in 0..count {
+        let source = mixed_pool(state, categories, color, unavailable)?;
+        if source.is_empty() {
+            break;
+        }
+        let already_selected = unavailable.contains(required);
+        let last_chance = categories.contains(&required_category) && index + 1 == count;
+        let proposal = source.iter().copied().filter(|card| {
+            let id = card["id"].as_str().expect("source card id");
+            already_selected || if last_chance {
+                id == required
+            } else {
+                !conflicts_with_ruleset(&state.ruleset_id, required,
+                    &BTreeSet::from([id.to_owned()]))
+            }
+        }).collect::<Vec<_>>();
+        let sum = |pool: &[&Value]| pool.iter()
+            .map(|card| weight_with_ruleset(&state.ruleset_id, card, false))
+            .sum::<f64>();
+        let source_sum = sum(&source);
+        let proposal_sum = sum(&proposal);
+        if force && (proposal.is_empty() || proposal_sum <= 0.0) {
+            return Err(EngineError::ConditioningMismatch(
+                "observed stage acquisition has no source-valid hidden offer".into(),
+            ));
+        }
+        let selected = weighted_pick(state, if force { &proposal } else { &source }, false)?
+            .ok_or_else(|| EngineError::InvalidState("nonempty hidden stage pool returned no card".into()))?;
+        let weight = weight_with_ruleset(&state.ruleset_id, selected, false);
+        *source_probability *= if source_sum > 0.0 { weight / source_sum }
+            else { 1.0 / source.len() as f64 };
+        *proposal_probability *= if proposal.contains(&selected) {
+            if proposal_sum > 0.0 { weight / proposal_sum }
+            else { 1.0 / proposal.len() as f64 }
+        } else { 0.0 };
+        picked.push(clone_card(state, selected)?);
+        unavailable.insert(selected["id"].as_str().expect("source card id").into());
+    }
+    Ok(())
+}
+
+fn hidden_stage_trace(
+    state: &mut GameState, phase: &str, color: Color, required: &str, force: bool,
+) -> Result<(Vec<Value>, f64, f64)> {
+    let definition = definitions_for_ruleset(&state.ruleset_id)?.definitions.iter()
+        .find(|card| card["id"] == required)
+        .ok_or_else(|| EngineError::ConditioningMismatch("unknown observed stage card".into()))?;
+    let required_category = category_with_ruleset(&state.ruleset_id, definition);
+    let mut unavailable = acquired_ids(state);
+    let mut picked = Vec::new();
+    let mut source_probability = 1.0;
+    let mut proposal_probability = 1.0;
+    if phase == "MIDDLE" {
+        hidden_stage_segment(state, &["MIDDLE"], 2, color, required, &required_category, force,
+            &mut unavailable, &mut picked, &mut source_probability, &mut proposal_probability)?;
+        hidden_stage_segment(state, &["PIECE"], 1, color, required, &required_category, force,
+            &mut unavailable, &mut picked, &mut source_probability, &mut proposal_probability)?;
+        if picked.len() < 3 {
+            hidden_stage_segment(state, &["MIDDLE", "PIECE"], 3 - picked.len(), color,
+                required, &required_category, force, &mut unavailable, &mut picked,
+                &mut source_probability, &mut proposal_probability)?;
+        }
+    } else if phase == "END" {
+        hidden_stage_segment(state, &["MIDDLE", "END"], 3, color, required,
+            &required_category, force, &mut unavailable, &mut picked,
+            &mut source_probability, &mut proposal_probability)?;
+    } else {
+        return Err(EngineError::UnsupportedFeature(format!("hidden {phase} stage offer")));
+    }
+    if force && !picked.iter().any(|card| card["id"] == required) {
+        return Err(EngineError::ConditioningMismatch(
+            "hidden stage proposal omitted the observed acquisition".into(),
+        ));
+    }
+    Ok((picked, source_probability, proposal_probability))
+}
+
+pub(crate) fn propose_hidden_stage_offer(
+    state: &mut GameState, phase: &str, required: &str, color: Color,
+) -> Result<(f64, f64)> {
+    if state.extra.get("gameStyle").and_then(Value::as_str) != Some("normal")
+        || !matches!(phase, "MIDDLE" | "END")
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "hidden stage offer requires a normal MIDDLE/END draft".into(),
+        ));
+    }
+    balanced_normal_proposal_with_tilt(state, color, true, |state, force| {
+        hidden_stage_trace(state, phase, color, required, force)
+    })
+}
+
 pub(crate) fn start_draft(state: &mut GameState, color: Color, phase: &str) -> Result<()> {
     if state.ruleset_id == RULES_VERSION_V7 {
         crate::card_effects::return_judgment_exiles_for_draft(state, phase)?;
@@ -1260,7 +1525,20 @@ pub(crate) fn start_draft(state: &mut GameState, color: Color, phase: &str) -> R
     } else {
         3
     };
-    let choices = draw_choices(state, phase, count, color)?;
+    let choices = if let Some(mut condition) = state.source_offer_condition.take() {
+        if condition.phase != phase || condition.color != color {
+            return Err(EngineError::ConditioningMismatch(
+                "conditioned stage offer phase or actor differs from source draft".into(),
+            ));
+        }
+        let (choices, p, q) = propose_observed_stage_offer(
+            state, phase, color, &condition.choices)?;
+        condition.density = Some((p, q));
+        state.source_offer_condition = Some(condition);
+        choices
+    } else {
+        draw_choices(state, phase, count, color)?
+    };
     if choices.is_empty() {
         return Err(EngineError::UnsupportedFeature(
             "empty draft skip settlement".into(),
@@ -2650,5 +2928,88 @@ mod v7_rule_draft_pool_tests {
                 "{excluded}"
             );
         }
+    }
+
+    #[test]
+    fn observed_middle_offer_uses_source_pool_and_density_without_public_context_leak() {
+        let mut source = initialize_for_ruleset(GameConfig::default(), 37, RULES_VERSION_V7)
+            .unwrap();
+        for _ in 0..2 {
+            let action = legal_actions(&source).unwrap().remove(0);
+            crate::transition::apply(&mut source, &action).unwrap();
+            crate::replay::canonicalize_position_frames(&mut source).unwrap();
+        }
+        source.turns_taken = Sides::new(10, 10);
+        source.move_count = 20;
+        source.full_move = 11;
+        let mut expected = source.clone();
+        assert!(crate::flow::maybe_start_milestone_draft(&mut expected).unwrap());
+        let observed = expected.extra["draft"]["choices"].as_array().unwrap().clone();
+
+        let mut proposal = source;
+        proposal.rng = RngState::seeded(71);
+        proposal.source_offer_condition = Some(SourceOfferCondition {
+            phase: "MIDDLE".into(), color: Color::White, choices: observed.clone(), density: None,
+        });
+        proposal.rng.begin_source_trace().unwrap();
+        assert!(crate::flow::maybe_start_milestone_draft(&mut proposal).unwrap());
+        let traced = proposal.rng.finish_source_trace().unwrap();
+        let density = proposal.source_offer_condition.take().unwrap().density.unwrap();
+        assert!(density.0.is_finite() && density.0 > 0.0);
+        assert_eq!(density.1, 1.0);
+        assert!(traced > 0.0 && traced <= density.0);
+        let choices = proposal.extra["draft"]["choices"].as_array().unwrap();
+        assert_eq!(choices.len(), 3);
+        assert!(choices.iter().zip(&observed).all(|(candidate, public)|
+            candidate["id"] == public["id"]));
+        assert!(serde_json::to_value(&proposal).unwrap().get("sourceOfferCondition").is_none());
+    }
+
+    #[test]
+    fn hidden_middle_offer_tilt_keeps_white_view_and_source_density() {
+        let mut state = initialize_for_ruleset(GameConfig::default(), 37, RULES_VERSION_V7)
+            .unwrap();
+        for _ in 0..2 {
+            let action = legal_actions(&state).unwrap().remove(0);
+            crate::transition::apply(&mut state, &action).unwrap();
+            crate::replay::canonicalize_position_frames(&mut state).unwrap();
+        }
+        state.turns_taken = Sides::new(10, 10);
+        state.move_count = 20;
+        state.full_move = 11;
+        assert!(crate::flow::maybe_start_milestone_draft(&mut state).unwrap());
+        let black_view = state.try_observe(Color::Black).unwrap();
+        let white_required = state.extra["draft"]["choices"][0]["id"]
+            .as_str().unwrap().to_owned();
+        let mut white_matching = 0;
+        for seed in 0..16 {
+            let mut proposal = state.clone();
+            proposal.rng = RngState::seeded(seed);
+            let (p, q) = propose_hidden_stage_offer(
+                &mut proposal, "MIDDLE", &white_required, Color::White).unwrap();
+            assert!(p.is_finite() && p > 0.0 && q.is_finite() && q > 0.0);
+            assert_eq!(proposal.try_observe(Color::Black).unwrap(), black_view);
+            white_matching += usize::from(proposal.extra["draft"]["choices"].as_array().unwrap()
+                .iter().any(|card| card["id"] == white_required));
+        }
+        assert!(white_matching >= 12, "White hidden offer should usually contain the public acquisition");
+        let white_pick = legal_actions(&state).unwrap().remove(0);
+        crate::transition::apply(&mut state, &white_pick).unwrap();
+        crate::replay::canonicalize_position_frames(&mut state).unwrap();
+        assert_eq!(state.extra["draft"]["color"], "black");
+        let before = state.try_observe(Color::White).unwrap();
+        let required = state.extra["draft"]["choices"][0]["id"].as_str().unwrap().to_owned();
+        let mut matching = 0;
+        for seed in 0..16 {
+            let mut proposal = state.clone();
+            proposal.rng = RngState::seeded(seed);
+            let (p, q) = propose_hidden_stage_offer(
+                &mut proposal, "MIDDLE", &required, Color::Black).unwrap();
+            assert!(p.is_finite() && p > 0.0 && q.is_finite() && q > 0.0);
+            assert_eq!(proposal.try_observe(Color::White).unwrap(), before);
+            matching += usize::from(proposal.extra["draft"]["choices"].as_array().unwrap()
+                .iter().any(|card| card["id"] == required));
+        }
+        assert!(matching >= 12, "hidden offer should usually contain the public acquisition");
     }
 }

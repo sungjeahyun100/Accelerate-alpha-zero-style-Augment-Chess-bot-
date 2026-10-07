@@ -328,11 +328,15 @@ class NativeSourceFactory:
             raise InformationMismatchError("native conditioned step has no child position")
         profile = "source-weighted-conditional-step-v1"
         if mode == "play":
-            if (proposal["source_probability"] != proposal["proposal_probability"]
-                    or proposal["importance_weight"] != 1.):
-                raise InformationMismatchError(
-                    "native source-prior play transition requires equal source/proposal chance densities and unit importance")
-            profile = "source-prior-v1"
+            stage_offer = expected["publicState"].get("draft")
+            if isinstance(stage_offer, Mapping) and stage_offer.get("phase") in ("MIDDLE", "END"):
+                profile = "source-weighted-conditional-step-v1"
+            else:
+                if (proposal["source_probability"] != proposal["proposal_probability"]
+                        or proposal["importance_weight"] != 1.):
+                    raise InformationMismatchError(
+                        "native source-prior play transition requires equal source/proposal chance densities and unit importance")
+                profile = "source-prior-v1"
         # The former StepResult-only helper proves compatibility, but carries
         # no observed-chance likelihood. It is never a posterior fallback.
         return TransitionProposal(child, proposal["importance_weight"],
@@ -342,13 +346,19 @@ class NativeSourceFactory:
     def prepare_transition(self, position, expected, independent_seed):
         before = _public(position.observe(expected["viewer"]), self.typed_spec)
         public = before["publicState"]
-        if (public.get("mode") != "draft" or public.get("phase") != "OPENING"
+        if (public.get("mode") != "draft" or public.get("phase") not in ("OPENING", "MIDDLE", "END")
                 or _actor(position) == expected["viewer"] or "draft" in public
                 or len(expected["publicState"].get("revealedOpponentCards", ())) <= len(public.get("revealedOpponentCards", ()))):
             return TransitionProposal(position)
-        condition = getattr(position, "condition_hidden_opening_draft", None)
+        # The public phase follows completed drafts and may still read
+        # OPENING during either player's MIDDLE choice. Previously revealed
+        # opposing cards distinguish a later normal draft from the opening.
+        stage = bool(public.get("revealedOpponentCards"))
+        condition = getattr(position, "condition_hidden_stage_draft" if stage
+                            else "condition_hidden_opening_draft", None)
         if condition is None:
-            raise SourceCapabilityError("native hidden opening offer conditioning is unavailable")
+            raise SourceCapabilityError("native hidden stage offer conditioning is unavailable" if stage
+                                        else "native hidden opening offer conditioning is unavailable")
         from ._native import ConditioningMismatchError
         try:
             proposal = condition(expected, independent_seed)
@@ -383,6 +393,55 @@ class NativeSourceFactory:
                 raise InformationMismatchError("native streamed action changed its public intent")
             return action
         return _bind_source_public_intent(position, intent)
+
+    def public_result_candidates(self, position, expected):
+        """Use only a viewer-visible result to propose source-bound intents.
+
+        A missing candidate set means the result is ambiguous and the general
+        source stream must be used. No provenance or opponent intent enters.
+        """
+        before = _public(position.observe(expected["viewer"]), self.typed_spec)
+        if before["publicState"].get("mode") != "play":
+            return None
+        actor = _actor(position)
+        trolley = before["publicState"].get("activeTrolley") is not None
+        if trolley:
+            # The source admits exactly two branches for this pending window.
+            # Try both as latent proposals; never infer the opponent's choice
+            # or enumerate unrelated intents from an unobserved window.
+            intents = ({"type": "trolleyChoice", "color": actor, "doomedIndex": index}
+                       for index in (0, 1))
+            legal_count = 2
+        else:
+            if (before["ownCards"] != expected["ownCards"]
+                    or before["publicState"].get("revealedOpponentCards")
+                    != expected["publicState"].get("revealedOpponentCards")):
+                return None
+            changes = expected["history"][-1].get("boardChanges", ())
+            if len(changes) != 2:
+                return None
+            removed = [change for change in changes if isinstance(change.get("before"), dict)
+                       and change["before"].get("color") == actor and change.get("after") is None]
+            added = [change for change in changes if isinstance(change.get("after"), dict)
+                     and change["after"].get("color") == actor]
+            if (len(removed) != 1 or len(added) != 1
+                    or removed[0]["before"].get("type") != added[0]["after"].get("type")):
+                return None
+            origin, destination = removed[0]["square"], added[0]["square"]
+            legal = position.legal_intents()
+            legal_count = len(legal)
+            intents = [intent for intent in legal if (intent.get("type") != "move"
+                       or intent.get("selectionMode") is not None
+                       or intent.get("from") == origin and intent.get("destination") == destination)]
+        actions = []
+        for intent in intents:
+            try:
+                actions.append(_bind_source_public_intent(position, intent))
+            except ValueError:
+                continue
+        if trolley and len(actions) != 2:
+            raise SourceCapabilityError("source trolley window does not admit both latent choices")
+        return actions, legal_count, not trolley
 
 
 def _actor(position: Any) -> str:
@@ -493,7 +552,29 @@ class ParticleBelief:
         self.proposals_used = 0
         self._proposal_profiles: set[str] = set()
         self._effective_sample_size = 0.
-        self.rebuild()
+        self.diagnostics = {"source_proposal_seconds": 0., "public_history_replay_seconds": 0.,
+                            "own_intent_seconds": 0., "opponent_result_seconds": 0.,
+                            "legal_enumeration_seconds": 0., "bind_apply_seconds": 0.,
+                            "rebuild_seconds": 0., "update_seconds": 0.,
+                            "source_proposals": 0, "latent_source_proposals": 0,
+                            "legal_enumerations": 0,
+                            "transitions": 0, "transitions_per_proposal": [],
+                            "unrecorded_proposal_counts": 0, "rejections": {},
+                            "rejections_by_transition": {}}
+        self._diagnostic_transition = 0
+        try:
+            self.rebuild()
+        except Exception as error:
+            error.belief_diagnostics = _copy(self.diagnostics)
+            raise
+
+    def _reject(self, reason):
+        rejected = self.diagnostics["rejections"]
+        rejected[reason] = rejected.get(reason, 0) + 1
+        by_transition = self.diagnostics["rejections_by_transition"]
+        key = str(self._diagnostic_transition)
+        reasons = by_transition.setdefault(key, {})
+        reasons[reason] = reasons.get(reason, 0) + 1
 
     def _public(self, observation):
         return _public(observation, self.tracker.typed_spec)
@@ -508,11 +589,18 @@ class ParticleBelief:
         return int(self._rng.integers(0, 2**32, dtype=np.uint64))
 
     def _advance(self, position: Any, step: TraceStep, expected: Mapping[str, Any], started: float | None):
+        self.diagnostics["transitions"] += 1
         if _actor(position) != step.events[0]["actor"]:
+            self._reject("actor")
             return None
         prepare = getattr(self.factory, "prepare_transition", None)
+        proposal_started = time.perf_counter()
         proposal = prepare(position, expected, self._seed()) if prepare is not None else TransitionProposal(position)
+        self.diagnostics["source_proposal_seconds"] += time.perf_counter() - proposal_started
+        if isinstance(proposal, TransitionProposal) and proposal.profile != "source-prior-v1":
+            self.diagnostics["latent_source_proposals"] += 1
         if proposal is None:
+            self._reject("source_prepare")
             return None
         if not isinstance(proposal, TransitionProposal):
             raise InformationMismatchError("source transition proposal must carry validated density metadata")
@@ -532,28 +620,69 @@ class ParticleBelief:
         def advance(action):
             child = self.factory.apply_conditioned(position, action, expected, self._seed())
             if child is None:
+                self._reject("source_apply")
                 return None
             if not isinstance(child, TransitionProposal):
                 raise InformationMismatchError("conditioned source transition must carry validated density metadata")
             self._proposal_profiles.add(child.profile)
             if self._public(child.position.observe(self.tracker.viewer)) != expected:
+                self._reject("public_observation")
                 return None
             return child.position, math.log(child.importance_weight)
 
         known = canonical_json(step.own_intent) if step.own_intent is not None else None
         if known is not None:
+            own_started = time.perf_counter()
             if _actor(position) != self.tracker.viewer:
+                self._reject("own_actor")
                 return None
+            bind_started = time.perf_counter()
             action = _bind_source_public_intent(position, step.own_intent)
+            self.diagnostics["bind_apply_seconds"] += time.perf_counter() - bind_started
             if not compatible(action):
+                self._reject("own_compatibility")
                 return None
+            apply_started = time.perf_counter()
             child = advance(action)
+            self.diagnostics["bind_apply_seconds"] += time.perf_counter() - apply_started
+            self.diagnostics["own_intent_seconds"] += time.perf_counter() - own_started
             if child is None:
                 return None
             return child[0], log_weight + child[1]
+        opponent_started = time.perf_counter()
+        candidates = getattr(self.factory, "public_result_candidates", None)
+        if _actor(position) != self.tracker.viewer and callable(candidates):
+            enumerate_started = time.perf_counter()
+            narrowed = candidates(position, expected)
+            self.diagnostics["legal_enumeration_seconds"] += time.perf_counter() - enumerate_started
+            if narrowed is not None:
+                actions, legal_count, enumerated = narrowed
+                if enumerated:
+                    self.diagnostics["legal_enumerations"] += 1
+                if legal_count < 1 or len(actions) > legal_count:
+                    raise InformationMismatchError("source public-result candidates have an invalid count")
+                selected, log_mass = None, -math.inf
+                for action in actions:
+                    self._check(started)
+                    if not compatible(action):
+                        continue
+                    apply_started = time.perf_counter()
+                    child = advance(action)
+                    self.diagnostics["bind_apply_seconds"] += time.perf_counter() - apply_started
+                    if child is not None:
+                        log_mass = float(np.logaddexp(log_mass, child[1]))
+                        if self._rng.random() < math.exp(child[1] - log_mass):
+                            selected = child[0]
+                self.diagnostics["opponent_result_seconds"] += time.perf_counter() - opponent_started
+                if selected is None:
+                    self._reject("public_result")
+                    return None
+                return selected, log_weight + log_mass - math.log(legal_count)
         selected, log_mass, exhausted = None, -math.inf, False
         seen: set[str] = set()
         bind_streamed = getattr(self.factory, "bind_streamed_public_intent", None)
+        enumerate_started = time.perf_counter()
+        self.diagnostics["legal_enumerations"] += 1
         for actions, exhausted in _stream(position, self.limits.page_size, self.limits.actions_per_transition):
             if not actions:
                 self._check(started)
@@ -564,16 +693,23 @@ class ParticleBelief:
                 if key in seen:
                     continue
                 seen.add(key)
+                self.diagnostics["legal_enumeration_seconds"] += time.perf_counter() - enumerate_started
+                bind_started = time.perf_counter()
                 bound = (bind_streamed(position, action, intent) if bind_streamed is not None
                          else _bind_source_public_intent(position, intent))
+                self.diagnostics["bind_apply_seconds"] += time.perf_counter() - bind_started
                 if _intent(bound) != intent:
                     raise InformationMismatchError("native host changed the public intent fields or ordered selections")
                 # Provably incompatible actions retain their prior mass in the
                 # denominator. Source rules, rather than Python heuristics,
                 # decide whether their effects need to be evaluated.
                 if not compatible(bound):
+                    enumerate_started = time.perf_counter()
                     continue
+                apply_started = time.perf_counter()
                 child = advance(bound)
+                self.diagnostics["bind_apply_seconds"] += time.perf_counter() - apply_started
+                enumerate_started = time.perf_counter()
                 if child is not None:
                     # Source-conditioned chance proposals can have different
                     # corrections for different intents. Keep the uniform
@@ -583,6 +719,10 @@ class ParticleBelief:
                         selected = child[0]
         if not exhausted:
             raise SearchBudgetError("belief action enumeration is incomplete; a partial posterior is not accepted")
+        self.diagnostics["legal_enumeration_seconds"] += time.perf_counter() - enumerate_started
+        self.diagnostics["opponent_result_seconds"] += time.perf_counter() - opponent_started
+        if selected is None:
+            self._reject("no_matching_intent")
         return (selected, log_weight + log_mass - math.log(len(seen))) if selected is not None else None
 
     def _resample(self, weighted):
@@ -601,28 +741,49 @@ class ParticleBelief:
         return particles, float(1. / np.square(weights).sum())
 
     def rebuild(self) -> None:
+        wall_started = time.perf_counter()
         started = self._clock() if self.limits.elapsed_ms is not None else None
         initial = self.tracker.initial
         weighted: list[tuple[Any, float]] = []
         proposals = 0
-        while len(weighted) < self.limits.particles and proposals < self.limits.proposals:
-            self._check(started)
-            proposals += 1
-            position = self.factory.sample_initial(initial, self._seed())
-            if position is None:
-                continue
-            if self._public(position.observe(self.tracker.viewer)) != initial:
-                raise InformationMismatchError("source-conditioned initial particle does not match the full public frame")
-            log_weight = 0.
-            for step, frame in self.tracker.frames():
-                advanced = self._advance(position, step, frame, started)
-                if advanced is None:
-                    position = None
-                    break
-                position, transition_weight = advanced
-                log_weight += transition_weight
-            if position is not None:
-                weighted.append((position, log_weight))
+        try:
+            while len(weighted) < self.limits.particles and proposals < self.limits.proposals:
+                self._check(started)
+                proposals += 1
+                self.diagnostics["source_proposals"] += 1
+                proposal_started = time.perf_counter()
+                position = self.factory.sample_initial(initial, self._seed())
+                self.diagnostics["source_proposal_seconds"] += time.perf_counter() - proposal_started
+                if position is None:
+                    self._reject("source_initial")
+                    continue
+                if self._public(position.observe(self.tracker.viewer)) != initial:
+                    raise InformationMismatchError("source-conditioned initial particle does not match the full public frame")
+                log_weight = 0.
+                replay_started = time.perf_counter()
+                transition_before = self.diagnostics["transitions"]
+                try:
+                    for transition, (step, frame) in enumerate(self.tracker.frames(), 1):
+                        self._diagnostic_transition = transition
+                        advanced = self._advance(position, step, frame, started)
+                        if advanced is None:
+                            position = None
+                            break
+                        position, transition_weight = advanced
+                        log_weight += transition_weight
+                finally:
+                    self.diagnostics["public_history_replay_seconds"] += time.perf_counter() - replay_started
+                    counts = self.diagnostics["transitions_per_proposal"]
+                    if len(counts) < 512:
+                        counts.append(self.diagnostics["transitions"] - transition_before)
+                    else:
+                        self.diagnostics["unrecorded_proposal_counts"] += 1
+                if position is not None:
+                    weighted.append((position, log_weight))
+                else:
+                    self._reject("particle_history")
+        finally:
+            self.diagnostics["rebuild_seconds"] += time.perf_counter() - wall_started
         if not weighted:
             raise ParticleExhaustedError("no source-valid particles reproduce the complete public trace within the finite proposal budget")
         particles, effective_size = self._resample(weighted)
@@ -635,16 +796,21 @@ class ParticleBelief:
             return
         if self._revision > self.tracker.steps:
             raise InformationMismatchError("public tracker revision went backwards")
+        update_started = time.perf_counter()
         started = self._clock() if self.limits.elapsed_ms is not None else None
         surviving = self._particles
-        for step, frame in self.tracker._frames_since(self._revision):
-            weighted = [child for position in surviving if (child := self._advance(position, step, frame, started)) is not None]
-            if not weighted:
-                self.rebuild()
-                return
-            surviving, effective_size = self._resample(weighted)
-        self._effective_sample_size = effective_size
-        self._particles, self._revision = surviving, self.tracker.steps
+        try:
+            for transition, (step, frame) in enumerate(self.tracker._frames_since(self._revision), self._revision + 1):
+                self._diagnostic_transition = transition
+                weighted = [child for position in surviving if (child := self._advance(position, step, frame, started)) is not None]
+                if not weighted:
+                    self.rebuild()
+                    return
+                surviving, effective_size = self._resample(weighted)
+            self._effective_sample_size = effective_size
+            self._particles, self._revision = surviving, self.tracker.steps
+        finally:
+            self.diagnostics["update_seconds"] += time.perf_counter() - update_started
 
     def draw(self):
         if not self._particles:

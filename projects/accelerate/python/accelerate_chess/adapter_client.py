@@ -410,6 +410,17 @@ class GameAdapterClient:
                                                                      snapshot_revision=revision)
         return self._proposal(proposal)
 
+    def condition_hidden_stage_draft(self, expected_next_public: Mapping[str, Any],
+                                     independent_seed: int) -> dict[str, Any]:
+        _independent_seed(independent_seed)
+        ObservationIR.from_public(expected_next_public, self.spec)
+        with self._lock:
+            revision = self.snapshot_revision
+            proposal = self._session.condition_hidden_stage_draft(_owned(expected_next_public),
+                                                                   independent_seed,
+                                                                   snapshot_revision=revision)
+        return self._proposal(proposal)
+
     def public_transition_compatible(self, action: _PublicIntentAction,
                                      expected_next_public: Mapping[str, Any]) -> bool:
         ObservationIR.from_public(expected_next_public, self.spec)

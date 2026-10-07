@@ -278,11 +278,14 @@ def rollout_stage(position, trackers, stage, search, teacher, config: Mapping[st
         trackers[viewer].latest != position.observe(viewer) for viewer in trackers
     ):
         raise ValueError("stage rollout requires a complete source public history")
+    belief_started = time.monotonic()
     beliefs = {viewer: ParticleBelief(trackers[viewer], NativeSourceFactory(config, typed_spec=spec),
                seed=belief_seed + index, limits=BeliefLimits(particles=particles,
                    proposals=proposals, elapsed_ms=belief_ms),
                cancelled=cancelled) for index, viewer in enumerate(trackers)}
+    belief_initialization_seconds = time.monotonic() - belief_started
     samples, boundary_actions = [], []
+    root_belief_seconds = []
     boundary_seen = False
     teacher_seconds = 0.0
     started = time.monotonic()
@@ -304,9 +307,28 @@ def rollout_stage(position, trackers, stage, search, teacher, config: Mapping[st
         observation = position.observe(actor)
         if trackers[actor].latest != observation:
             raise ValueError("source public state diverged from rollout tracker")
-        result = search.run(beliefs[actor], cancelled=cancelled)
+        root_started = time.monotonic()
+        try:
+            beliefs[actor].synchronize()
+        except Exception as error:
+            error.belief_diagnostics = {viewer: belief.diagnostics for viewer, belief in beliefs.items()}
+            raise
+        root_belief_seconds.append(time.monotonic() - root_started)
+        try:
+            result = search.run(beliefs[actor], cancelled=cancelled)
+        except Exception as error:
+            error.belief_diagnostics = {viewer: belief.diagnostics for viewer, belief in beliefs.items()}
+            error.belief_initialization_seconds = belief_initialization_seconds
+            error.root_belief_seconds = root_belief_seconds
+            error.stage_samples_completed = len(samples)
+            raise
         if result.stop_reason != "iterations":
-            raise ValueError("stage search did not complete its fixed iteration budget")
+            error = ValueError("stage search did not complete its fixed iteration budget")
+            error.belief_diagnostics = {viewer: belief.diagnostics for viewer, belief in beliefs.items()}
+            error.belief_initialization_seconds = belief_initialization_seconds
+            error.root_belief_seconds = root_belief_seconds
+            error.stage_samples_completed = len(samples)
+            raise error
         if boundary_seen:
             boundary_actions.append(result.intent)
         else:
@@ -329,6 +351,9 @@ def rollout_stage(position, trackers, stage, search, teacher, config: Mapping[st
         sample["value_target_source"] = source
         sample["teacher_checkpoint_sha256"] = teacher_hash
     return {"samples": samples, "outcome": source, "winner": winner,
+            "belief_initialization_seconds": belief_initialization_seconds,
+            "root_belief_seconds": root_belief_seconds,
+            "belief_diagnostics": {viewer: belief.diagnostics for viewer, belief in beliefs.items()},
             "teacher_checkpoint_sha256": teacher_hash, "boundary_actions": boundary_actions,
             "teacher_inference_seconds": teacher_seconds,
             "final_position_id": position.snapshot_revision, "elapsed_seconds": time.monotonic() - started,

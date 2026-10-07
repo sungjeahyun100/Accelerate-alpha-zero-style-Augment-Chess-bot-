@@ -475,6 +475,102 @@ def test_native_streamed_public_actions_reuse_source_admission_across_families()
             factory.bind_streamed_public_intent(position, action, intent)
 
 
+def test_public_result_conditioning_preserves_hidden_alternatives_and_rejects_mismatch():
+    class ResultFactory(TestFactory):
+        def sample_initial(self, initial, seed):
+            position = TestPosition()
+            position.action_stream = lambda: (_ for _ in ()).throw(
+                AssertionError("result conditioning must not stream all actions"))
+            return position
+
+        def public_result_candidates(self, position, expected):
+            actions = [TestAction(0, latent) for latent in (0, 1)]
+            for action in actions:
+                action.public_intent = lambda action=action: {
+                    "type": "trolleyChoice", "color": "white", "doomedIndex": action.latent}
+            return actions, 2, False
+
+        def apply_conditioned(self, position, action, expected, seed):
+            child = position.apply(TestAction(0, 0)).position
+            child.latent = action.latent
+            return TransitionProposal(child)
+
+    tracker = PublicTracker(TestPosition().observe("black"))
+    factory = ResultFactory()
+    posterior = ParticleBelief(tracker, factory, seed=23,
+                               limits=BeliefLimits(particles=1, proposals=1, elapsed_ms=None))
+    root = posterior.draw()
+    child = TestPosition().apply(TestAction(0, 0)).position
+    tracker.append(child.observe("black"))
+    step, frame = next(tracker.frames())
+    sampled = [posterior._advance(root, step, frame, None) for _ in range(128)]
+    assert {position.latent for position, _ in sampled} == {0, 1}
+    assert all(weight == pytest.approx(0.) for _, weight in sampled)
+    tampered = deepcopy(frame)
+    tampered["board"][0][0] = {"type": "wall", "color": "neutral"}
+    sign(tampered)
+    assert posterior._advance(root, step, tampered, None) is None
+    posterior.synchronize()
+    assert all(position.observe("black") == tracker.latest for position in posterior._particles)
+    rebuilt = ParticleBelief(tracker, ResultFactory(), seed=23,
+                             limits=BeliefLimits(particles=1, proposals=1, elapsed_ms=None))
+    assert {canonical_json(position.observe("black")) for position in posterior._particles} == {
+        canonical_json(position.observe("black")) for position in rebuilt._particles}
+
+
+def test_own_intent_stays_exact_when_result_fast_path_exists():
+    class OwnFactory(TestFactory):
+        def public_result_candidates(self, position, expected):
+            raise AssertionError("own intent must bypass opponent result conditioning")
+
+    tracker = PublicTracker(TestPosition().observe("white"))
+    factory = OwnFactory()
+    posterior = ParticleBelief(tracker, factory, seed=19,
+                               limits=BeliefLimits(particles=1, proposals=1, elapsed_ms=None))
+    child = TestPosition().apply(TestAction(0, 0)).position
+    tracker.append(child.observe("white"), own_intent=TestAction(0, 0).public_intent())
+    posterior.synchronize()
+    assert posterior.draw().observe("white") == tracker.latest
+    wrong = PublicTracker(TestPosition().observe("white"))
+    wrong.append(child.observe("white"), own_intent={"type": "move", "color": "white",
+                 "from": {"row": 0, "col": 0}, "destination": {"row": 1, "col": 0}})
+    with pytest.raises(ValueError, match="impossible public choice"):
+        ParticleBelief(wrong, OwnFactory(), seed=19,
+                       limits=BeliefLimits(particles=1, proposals=1, elapsed_ms=None))
+
+
+def test_native_public_result_candidates_keep_trolley_choices_without_streaming():
+    factory = object.__new__(NativeSourceFactory)
+    factory.typed_spec = None
+    initial = TestPosition().observe("black")
+    initial["publicState"]["activeTrolley"] = {"color": "white"}
+    sign(initial)
+    intents = [{"type": "trolleyChoice", "color": "white", "doomedIndex": index}
+               for index in (0, 1)]
+
+    class Position:
+        decision_actor = "white"
+
+        def observe(self, viewer):
+            return initial
+
+        def legal_intents(self):
+            raise AssertionError("hidden trolley choice cannot trigger legal enumeration")
+
+        def bind_public_intent(self, intent):
+            if intent not in intents:
+                raise ValueError("illegal source choice")
+            return type("Action", (), {"public_intent": lambda self: deepcopy(intent)})()
+
+        def action_stream(self):
+            raise AssertionError("hidden trolley choice cannot trigger full intent streaming")
+
+    actions, total, enumerated = factory.public_result_candidates(Position(), initial)
+    assert total == 2
+    assert not enumerated
+    assert [action.public_intent() for action in actions] == intents
+
+
 def test_unmatched_public_trace_and_empty_belief_fail_explicitly():
     posterior = belief(particles=4)
     child = TestPosition().apply(TestAction(0, 0)).position.observe("white")

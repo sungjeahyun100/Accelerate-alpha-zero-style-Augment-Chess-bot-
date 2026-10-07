@@ -442,6 +442,37 @@ impl GameAdapterSession {
         Ok(result)
     }
 
+    #[pyo3(signature = (expected_next_public, independent_seed, *, snapshot_revision=None))]
+    fn condition_hidden_stage_draft<'py>(
+        &self,
+        py: Python<'py>,
+        expected_next_public: &Bound<'_, PyAny>,
+        independent_seed: u32,
+        snapshot_revision: Option<&str>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let expected = conversion::from_python(expected_next_public)?;
+        let position = self.cloned_position(py, snapshot_revision)?;
+        let proposal = py
+            .detach(move || {
+                v7_conditioning::condition_hidden_stage_draft(&position, expected, independent_seed)
+            })
+            .map_err(crate::error)?;
+        proposal_probabilities(
+            proposal.importance_weight,
+            proposal.source_probability,
+            proposal.proposal_probability,
+        )?;
+        let result = PyDict::new(py);
+        result.set_item(
+            "position",
+            Py::new(py, Self::from_position(proposal.position)?)?,
+        )?;
+        result.set_item("importance_weight", proposal.importance_weight)?;
+        result.set_item("source_probability", proposal.source_probability)?;
+        result.set_item("proposal_probability", proposal.proposal_probability)?;
+        Ok(result)
+    }
+
     /// 공개 전이의 source 호환성을 확인한다. Python action ID나 환경의 숨은
     /// Position/RNG를 입력으로 받지 않으며 이 session의 상태를 변경하지 않는다.
     #[pyo3(signature = (public_intent, expected_next_public, *, snapshot_revision=None))]

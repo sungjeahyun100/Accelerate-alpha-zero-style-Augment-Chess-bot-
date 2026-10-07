@@ -7,9 +7,9 @@
 | 항목 | 기록 |
 |---|---|
 | 작성 시점 | 2026-10-07 20:40 UTC |
-| 마지막 정정 시점 | 2026-10-07 20:54 UTC |
+| 마지막 정정 시점 | 2026-10-07 22:03 UTC |
 | GitHub 작성자 | [sungjeahyun100](https://github.com/sungjeahyun100) |
-| 관련 PR·이슈 | 이 변경의 별도 draft PR; 작성 시점에는 번호 미생성. #42와 별개 |
+| 관련 PR·이슈 | [Draft PR #43](https://github.com/sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-/pull/43). #42와 별개 |
 | 저장소·기준 SHA | sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-, 3552b96fb276dd59e805bc09cf80c975a4525474 |
 | 미커밋 변경 | projects/accelerate/python/accelerate_chess/staged.py, cli.py, python/tests/test_staged.py, docs/backward-stage-training.md, 이 영수증 |
 | 자료 유형 | 합성 상태 검증과 belief 병목 실패 분석 |
@@ -70,6 +70,27 @@
 - 추론: 공개 이력에서 상대 행동을 조건화하며 particle을 재구성하는 비용이 작은 stage smoke의 주요 병목이다. 결과는 seed 37, 작은 무학습 모델과 명시한 예산에 한정된다.
 - 미검증: end teacher 학습, middle→end bootstrap dataset, Chaos의 stage rollout 및 teacher bootstrap, full-game 대 staged sample throughput, GPU memory, 승률/Elo. Chaos 생성 시 bundle intent를 보존한 것과 전체 staged 학습 검증을 구분한다.
 - 후속 작업: 합성 위치에서 belief 재구성의 단계별 비용·정합성을 측정하고, 비공개 transition에만 조건화를 적용하는 현재 계약을 유지하며 최적화한다. 이후 동결 end teacher smoke와 동등 예산 A/B를 수행한다.
+
+## 2026-10-07 공개 belief 병목 재측정과 수정
+
+같은 seed 37 Basic MIDDLE provenance와 같은 초기 가중치의 frozen teacher를 사용했다. 시작 위치는 26개 공개 action을 원본 source revision에 맞춰 재생했다. 아래 경로는 모두 `${ARTIFACT_ROOT}` 기준이다. 새 실행에서는 모델 초기화부터 `stage_sample` wall timer를 시작했다. 이전 실행은 이 계측을 하지 않았으므로 전체 wall 수치를 정확한 동일 범위의 속도비로 해석하지 않는다.
+
+| 실행 | particle/proposal/belief 한도 | 결과 | 주요 관측 | 근거 |
+|---|---|---|---|---|
+| 수정 전, 이 문서의 기존 smoke | 1/16/120초와 1/16/300초 | 모두 0 sample | 공개 이력 재구성 중 예산 초과. 단계별 시간·enumeration 수·RSS는 미계측 | 앞 표의 `middle-probe-6`, `middle-probe-7` |
+| 공개 결과 후보만 적용한 30초 smoke | 1/4/30초 | 0 sample | 1 proposal, 21/26 transition 뒤 예산 초과. rebuild 30.01초, replay 29.96초, legal enumeration 10회·18.11초, bind/apply 8.33초, RSS 332,558,336 byte | `${ARTIFACT_ROOT}/reports/middle-release-30/stage-sample-failure.json` |
+| 같은 중간 구현의 120초 smoke | 1/4/120초 | 0 sample | 3 proposal에서 24, 24, 21 transition. 공개 MIDDLE offer의 독립 난수 불일치로 앞 두 particle 기각. rebuild 120.32초, replay 120.18초, legal enumeration 64.87초, bind/apply 38.87초, RSS 335,425,536 byte | `${ARTIFACT_ROOT}/reports/middle-release-120/stage-sample-failure.json` |
+| source draft offer 조건화 뒤 4회 MCTS·10초 root | 1/4/120초 | 0 sample | 양쪽 belief가 120초 안에 만들어졌으나 첫 root에서 공개 결정 평가 전 10초 경과. 전체 103.15초, RSS 351,113,216 byte | `${ARTIFACT_ROOT}/reports/middle-stage-offer-120d/stage-sample-failure.json` |
+| 4회 MCTS·30초 root | 1/4/120초 | 0 sample | 공개 결정은 평가했으나 정해진 4회 반복을 30초 안에 완료하지 못함 | `${ARTIFACT_ROOT}/reports/middle-stage-offer-search30/stage-sample-failure.json` |
+| 1회 MCTS·30초 root, 최종 통합 smoke | 1/4/120초 | **20 sample, `bootstrap:end`** | END draft와 후속 공개 선택 완료, teacher 1회 평가. 전체 530.20초, 생성 재생 11.80초, 양쪽 belief 초기화 합계 79.07초, root belief 준비 합계 196.49초, 최고 RSS 410,886,144 byte | `${ARTIFACT_ROOT}/reports/middle-stage-offer-iter1/stage-sample.json`; `${ARTIFACT_ROOT}/datasets/middle-stage-offer-iter1/samples.json` |
+
+최종 smoke는 22개 stage action 중 20개에서 root sample을 남겼다. `accelerate-staged-v1` 자료의 20개 sample 모두 `value_target_source=bootstrap:end`이며 관측 viewer와 actor가 일치했다. Teacher checkpoint hash와 deployment 모델 hash도 일치했다. 모델은 학습되지 않은 smoke 가중치이므로 이는 성능 검증이 아니다.
+
+최종 계측에서 White/Black 초기 rebuild는 각각 43.51/35.55초, 각각 source proposal 1회와 완전 공개 이력 26 transition을 사용했다. 전체 rollout 동안 White/Black의 공개 이력 최초 replay는 각각 43.47/35.50초, 증분 update는 각각 90.93/105.56초였다. legal enumeration은 각각 23/24회로, 이 수에는 초기 재구성 뒤의 20개 sample과 경계 처리 update도 포함된다. source proposal은 각 1회였고 전체 particle 기각은 0회였다. `source_apply` 후보 기각은 White/Black 각각 68/139회로, 공개 관측과 다른 action 후보를 버린 횟수다. 이 수를 particle 기각으로 합산하지 않는다. 최초 재구성 이후 새 공개 관측은 이전 particle에 증분 적용했으며 root마다 최초 26개 이력을 재생하지 않았다.
+
+병목 원인은 과거 상대 행동에서 법적 공개 intent 전체를 펼쳐 각 후보를 bind/apply하고, 공개 MIDDLE offer의 독립 난수까지 무조건 맞추려 한 것이다. 실제 공개된 보드 변화로 일반 이동 후보를 좁히고, Trolley의 비공개 선택은 source의 두 잠재 분기를 공개 결과로 검증하며, 공개 stage 카드 획득은 source draft pool과 balance 선택의 p/q로 조건화했다. 자기 행동은 기존 intent를 정확히 bind한다. 후보의 최종 허용 조건은 전체 공개 observation 일치다. 이 조건화 자료는 belief 내부에서만 쓰며 모델 관측에는 넣지 않는다.
+
+남은 비용은 상대 후보의 source bind/apply와 각 root의 증분 belief update다. 최종 smoke의 `legal_enumeration_seconds`는 White/Black 79.07/73.63초, `opponent_result_seconds`는 113.43/118.80초였다. 같은 모델·seed에서도 4회 MCTS는 30초 root 한도로 완료되지 않았으므로 1회 통합 smoke 성공을 4회 예산의 처리량 성공으로 확장하지 않는다. 기존 120/300초 실패 실행에는 세부 계측이 없어 초기 최종 재구성과 정확한 동등조건 수치 비교는 제한된다.
 
 ## 정정과 공유 점검
 
