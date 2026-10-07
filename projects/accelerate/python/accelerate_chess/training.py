@@ -242,7 +242,7 @@ def validate_fp32_training_state(model, optimizer):
             raise ValueError("AdamW optimizer state must remain finite FP32")
 
 
-def optimize(model, optimizer, encoder: PublicEncoder, cursor: DatasetCursor, *, limits: TrainingLimits = TrainingLimits(), dtype: str = "fp32", cancelled: Callable[[], bool] | None = None, on_step: Callable[[int], None] | None = None):
+def optimize(model, optimizer, encoder: PublicEncoder, cursor: DatasetCursor, *, limits: TrainingLimits = TrainingLimits(), dtype: str = "fp32", cancelled: Callable[[], bool] | None = None, on_step: Callable[[int], None] | None = None, timings: dict | None = None):
     from .ir import TypedEncoder
     from .network.mask_resnet import MaskResNetPolicyValueNetwork
     from .network.entity_transformer import EntityTransformer
@@ -280,12 +280,22 @@ def optimize(model, optimizer, encoder: PublicEncoder, cursor: DatasetCursor, *,
     completed = 0
     metrics = []
     reason = "steps"
+    def tick(name, previous):
+        if timings is not None:
+            if next(model.parameters()).device.type == "cuda":
+                torch.cuda.synchronize()
+            now = time.monotonic()
+            timings[name] = timings.get(name, 0.) + now - previous
+            return now
+        return 0.
     for _ in range(limits.steps):
         was_cancelled = cancelled()
         if was_cancelled or (time.monotonic() - start) * 1000 >= limits.elapsed_ms:
             reason = "cancelled" if was_cancelled else "elapsed"
             break
+        measured = time.monotonic() if timings is not None else 0.
         examples = cursor.next_batch(limits.batch_size)
+        measured = tick("replay_loading_seconds", measured)
         if typed:
             from .ir import ObservationIR, batch_typed_positions
 
@@ -299,7 +309,9 @@ def optimize(model, optimizer, encoder: PublicEncoder, cursor: DatasetCursor, *,
                 belief_summary=example.belief_summary) for example in examples])
             arrays = (encoded.board, encoded.condition, encoded.action_features)
             action_mask = encoded.action_mask
+        measured = tick("encoding_batching_seconds", measured)
         tensors = tuple(torch.from_numpy(array).to(next(model.parameters()).device) for array in arrays)
+        measured = tick("host_to_device_seconds", measured)
         model.validate_inputs(*tensors)
         policy = torch.zeros(action_mask.shape, device=tensors[0].device)
         for row, example in enumerate(examples):
@@ -308,7 +320,9 @@ def optimize(model, optimizer, encoder: PublicEncoder, cursor: DatasetCursor, *,
             policy[row, :len(example.policy)] = torch.tensor(example.policy, device=policy.device)
         targets = torch.tensor([[example.value] for example in examples], device=policy.device)
         optimizer.zero_grad(set_to_none=True)
+        measured = tick("target_setup_seconds", measured)
         logits, value = training_forward(model, tensors, dtype=dtype)
+        measured = tick("forward_seconds", measured)
         mask = torch.from_numpy(action_mask).to(policy.device)
         log_policy = torch.log_softmax(logits.masked_fill(~mask, -torch.inf), dim=1)
         policy_loss = -(policy * log_policy.masked_fill(~mask, 0)).sum(dim=1).mean()
@@ -316,9 +330,12 @@ def optimize(model, optimizer, encoder: PublicEncoder, cursor: DatasetCursor, *,
         loss = policy_loss + value_loss
         if not bool(torch.isfinite(loss)):
             raise ValueError("non-finite policy/value loss")
+        measured = tick("loss_seconds", measured)
         loss.backward()
+        measured = tick("backward_seconds", measured)
         torch.nn.utils.clip_grad_norm_([parameter for parameter in model.parameters() if parameter.requires_grad], limits.gradient_norm, error_if_nonfinite=True)
         optimizer.step()
+        measured = tick("optimizer_seconds", measured)
         completed += 1
         metrics.append({"policy_ce": float(policy_loss.detach()), "value_mse": float(value_loss.detach())})
         if len(metrics) > 128:

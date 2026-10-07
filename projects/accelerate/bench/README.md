@@ -1,5 +1,8 @@
 # 로컬 성능 측정
 
+실제 모델 초기화부터 source-backed self-play, terminal replay 학습 및 arena까지의
+유한 연결 진입점과 관측 결과는 [로컬 E2E 연결 실험](E2E.md)에 있다.
+
 ## Typed batch 메모리 A/B
 
 `accelerate_chess.bench.typed_memory`는 공개 v7 observation을 production typed

@@ -260,6 +260,8 @@ def selfplay(args, root, spec, cancelled):
                                  save_attempted=False, replay_saved=False)
         raise
     episodes = []
+    workload = {"search_elapsed_seconds": 0., "decisions": 0, "simulations": 0,
+                "inference_batches": 0, "max_inference_batch": 0, "candidates": 0}
     stopped_reason = None
     for game in range(args.games):
         was_cancelled = cancelled()
@@ -295,7 +297,14 @@ def selfplay(args, root, spec, cancelled):
                 actor = position.decision_actor
                 if recorder.trackers[actor].latest != position.observe(actor):
                     raise ValueError("environment public projection diverged from the complete replay")
+                search_started = time.monotonic()
                 result = search.run(beliefs[actor], cancelled=cancelled)
+                workload["search_elapsed_seconds"] += time.monotonic() - search_started
+                workload["decisions"] += 1
+                workload["simulations"] += result.iterations
+                workload["inference_batches"] += result.inference_batches
+                workload["max_inference_batch"] = max(workload["max_inference_batch"], result.max_inference_batch)
+                workload["candidates"] += len(result.policy)
                 recorder.record_decision(actor, result)
                 was_cancelled = cancelled()
                 if was_cancelled or result.stop_reason == "cancelled" or (time.monotonic() - started) * 1000 >= args.elapsed_ms:
@@ -336,12 +345,13 @@ def selfplay(args, root, spec, cancelled):
             raise
     was_cancelled = cancelled()
     report = {"episodes": episodes, "stop_reason": stopped_reason or ("cancelled" if was_cancelled else ("elapsed" if (time.monotonic() - started) * 1000 >= args.elapsed_ms else "games")),
-              "games_requested": args.games, "evidence_kind": "bounded-verification" if args.verification else "selfplay"}
+              "games_requested": args.games, "evidence_kind": "bounded-verification" if args.verification else "selfplay",
+              "workload": workload}
     atomic_json(slot(root, "reports", args.run_id) / "selfplay.json", report)
     return report
 
 
-def train(args, root, spec, cancelled):
+def train(args, root, spec, cancelled, *, timings=None):
     validate_training_dtype(args.dtype, args.device)
     if (root / "runs" / args.run_id).is_symlink():
         raise ValueError("training run slot is a symlink; choose a new --run-id")
@@ -368,7 +378,12 @@ def train(args, root, spec, cancelled):
             raise ValueError("requested CUDA device is unavailable")
         model.to(args.device)
         optimizer = create_optimizer(model, mode=args.mode, learning_rate=args.learning_rate)
+        dataset_started = time.monotonic() if timings is not None else None
         dataset = ReplayDataset(args.replay, spec, architecture_family=args.model_family if typed else None)
+        if timings is not None:
+            timings["dataset_index_seconds"] = time.monotonic() - dataset_started
+            timings["dataset_files"] = len(dataset.paths)
+            timings["training_examples"] = len(dataset)
         cursor = DatasetCursor(dataset, args.seed)
         previous = load_training_checkpoint(model, optimizer, spec, cursor, args.resume, dtype=args.dtype) if args.resume else 0
         limits = TrainingLimits(steps=args.steps, batch_size=args.batch_size, elapsed_ms=args.elapsed_ms,
@@ -379,7 +394,10 @@ def train(args, root, spec, cancelled):
         def checkpoint_progress(completed):
             nonlocal last_saved
             if completed % args.checkpoint_every == 0:
+                checkpoint_started = time.monotonic() if timings is not None else None
                 save_training_checkpoint(model, optimizer, spec, cursor, checkpoint, completed_steps=previous + completed, dtype=args.dtype)
+                if timings is not None:
+                    timings["checkpoint_seconds"] = timings.get("checkpoint_seconds", 0.) + time.monotonic() - checkpoint_started
                 last_saved = previous + completed
         try:
             if typed:
@@ -388,8 +406,11 @@ def train(args, root, spec, cancelled):
                 encoder = TypedEncoder(spec)
             else:
                 encoder = PublicEncoder(spec)
-            report = optimize(model, optimizer, encoder, cursor, limits=limits, dtype=args.dtype, cancelled=cancelled, on_step=checkpoint_progress)
+            report = optimize(model, optimizer, encoder, cursor, limits=limits, dtype=args.dtype, cancelled=cancelled, on_step=checkpoint_progress, timings=timings)
+            checkpoint_started = time.monotonic() if timings is not None else None
             save_training_checkpoint(model, optimizer, spec, cursor, checkpoint, completed_steps=previous + report["steps"], dtype=args.dtype)
+            if timings is not None:
+                timings["checkpoint_seconds"] = timings.get("checkpoint_seconds", 0.) + time.monotonic() - checkpoint_started
         except (Exception, KeyboardInterrupt) as error:
             # Do not retry, lower resources or relabel data. A prior valid checkpoint
             # remains intact; a non-finite failed state cannot overwrite it.
@@ -407,6 +428,8 @@ def train(args, root, spec, cancelled):
             else:
                 save_adapter(model, spec, directory / "adapter.pt")
         report.update({"checkpoint": str(checkpoint), "completed_steps": previous + report["steps"], "mode": args.mode})
+        if timings is not None:
+            report["timings"] = timings
         if typed:
             report["architecture_family"] = args.model_family
         atomic_json(slot(root, "reports", args.run_id) / "training.json", report)
