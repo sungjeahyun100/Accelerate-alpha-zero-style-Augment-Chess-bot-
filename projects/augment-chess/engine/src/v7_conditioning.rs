@@ -339,9 +339,14 @@ pub fn condition_hidden_stage_draft(
     let expected = checked_observation(expected_next_public)?;
     let state = position.state();
     let actor = state.decision_actor();
-    let phase = state.extra.get("draft").and_then(|draft| draft.get("phase"))
-        .and_then(Value::as_str).ok_or(EngineError::IllegalAction)?;
-    if state.mode != "draft" || !matches!(phase, "MIDDLE" | "END")
+    let phase = state
+        .extra
+        .get("draft")
+        .and_then(|draft| draft.get("phase"))
+        .and_then(Value::as_str)
+        .ok_or(EngineError::IllegalAction)?;
+    if state.mode != "draft"
+        || !matches!(phase, "MIDDLE" | "END")
         || expected.viewer != actor.opponent()
         || state.extra.get("gameStyle").and_then(Value::as_str) != Some("normal")
     {
@@ -360,17 +365,26 @@ pub fn condition_hidden_stage_draft(
     }
     let prior_cards = cards_for_actor(&before, actor)?;
     let next_cards = cards_for_actor(&expected, actor)?;
-    let known = prior_cards.iter().filter_map(|card| card.get("instanceId").and_then(Value::as_str))
+    let known = prior_cards
+        .iter()
+        .filter_map(|card| card.get("instanceId").and_then(Value::as_str))
         .collect::<std::collections::BTreeSet<_>>();
-    let added = next_cards.iter().filter(|card| card.get("instanceId")
-        .and_then(Value::as_str).is_some_and(|id| !known.contains(id)))
+    let added = next_cards
+        .iter()
+        .filter(|card| {
+            card.get("instanceId")
+                .and_then(Value::as_str)
+                .is_some_and(|id| !known.contains(id))
+        })
         .collect::<Vec<_>>();
     if next_cards.len() != prior_cards.len() + 1 || added.len() != 1 {
         return Err(EngineError::ConditioningMismatch(
             "hidden stage acquisition must reveal exactly one new card".into(),
         ));
     }
-    let required = added[0].get("id").and_then(Value::as_str)
+    let required = added[0]
+        .get("id")
+        .and_then(Value::as_str)
         .ok_or_else(|| EngineError::InvalidState("revealed stage card has no definition".into()))?;
     let (proposed, (source_probability, proposal_probability)) =
         position.transact(position.position_id(), |working| {
@@ -383,8 +397,12 @@ pub fn condition_hidden_stage_draft(
             "hidden stage proposal changed previously public information".into(),
         ));
     }
-    Ok(V7HiddenDraftProposal { position: proposed, importance_weight,
-        source_probability, proposal_probability })
+    Ok(V7HiddenDraftProposal {
+        position: proposed,
+        importance_weight,
+        source_probability,
+        proposal_probability,
+    })
 }
 
 /// source가 증명하는 필요조건만 사용하는 prefilter. true는 도달 가능성의
@@ -663,8 +681,10 @@ pub fn apply_weighted_conditioned_public(
     let visible_stage = expected.public_state.get("draft").and_then(|draft| {
         let phase = draft.get("phase")?.as_str()?;
         let color = draft.get("color")?.as_str()?;
-        if actor == Color::White && expected.viewer == Color::Black
-            && color == "black" && matches!(phase, "MIDDLE" | "END")
+        if actor == Color::White
+            && expected.viewer == Color::Black
+            && color == "black"
+            && matches!(phase, "MIDDLE" | "END")
             && old_draft.as_ref()?.get("phase")?.as_str()? == phase
         {
             Some((phase.to_owned(), draft.get("choices")?.as_array()?.clone()))
@@ -677,7 +697,9 @@ pub fn apply_weighted_conditioned_public(
             working.semantic_chance_probability = Some(1.0);
             if let Some((phase, choices)) = &visible_stage {
                 working.source_offer_condition = Some(crate::draft::SourceOfferCondition {
-                    phase: phase.clone(), color: Color::Black, choices: choices.clone(),
+                    phase: phase.clone(),
+                    color: Color::Black,
+                    choices: choices.clone(),
                     density: None,
                 });
             }
@@ -720,7 +742,10 @@ pub fn apply_weighted_conditioned_public(
                         "observed stage offer was not produced by the source draft".into(),
                     )
                 })?;
-                (semantic_probability * offer_p, semantic_probability * offer_q)
+                (
+                    semantic_probability * offer_p,
+                    semantic_probability * offer_q,
+                )
             } else if visible_stage.is_some() {
                 return Err(EngineError::ConditioningMismatch(
                     "observed stage offer was not reached by the source draft".into(),
@@ -829,38 +854,52 @@ fn apply_source_prior_play(
         let phase = draft.get("phase")?.as_str()?;
         let color = draft.get("color")?.as_str()?;
         if matches!(phase, "MIDDLE" | "END") && color == expected.viewer.as_str() {
-            Some((phase.to_owned(), expected.viewer, draft.get("choices")?.as_array()?.clone()))
+            Some((
+                phase.to_owned(),
+                expected.viewer,
+                draft.get("choices")?.as_array()?.clone(),
+            ))
         } else {
             None
         }
     });
     let (next, (captures, source_probability, proposal_probability)) =
         position.transact(position.position_id(), |working| {
-        working.rng = RngState::seeded(u64::from(independent_seed));
-        working.rng.begin_source_trace()?;
-        if let Some((phase, color, choices)) = &visible_stage {
-            working.source_offer_condition = Some(crate::draft::SourceOfferCondition {
-                phase: phase.clone(), color: *color, choices: choices.clone(), density: None,
-            });
-        }
-        let captures =
-            v7_adapter_actions::execute_on_working(working, action, actor, old_history_len)?;
-        // 실제 carry된 probe의 분기까지 인증한다. unclassified draw는 정확한
-        // source callsite 오류이며 공개 관측 불일치로 바꿔 숨기지 않는다.
-        let offer_density = working.source_offer_condition.take();
-        let probability = working.rng.finish_source_trace()?;
-        let proposal_probability = match (visible_stage.as_ref(), offer_density) {
-            (None, None) => probability,
-            (Some(_), Some(crate::draft::SourceOfferCondition {
-                density: Some((offer_p, offer_q)), ..
-            })) if offer_p > 0.0 && offer_q > 0.0 => probability * offer_q / offer_p,
-            _ => return Err(EngineError::ConditioningMismatch(
-                "observed public stage offer was not produced by the source transition".into(),
-            )),
-        };
-        bind_public_identities(working, &expected, Some(&prior))?;
-        Ok((captures, probability, proposal_probability))
-    })?;
+            working.rng = RngState::seeded(u64::from(independent_seed));
+            working.rng.begin_source_trace()?;
+            if let Some((phase, color, choices)) = &visible_stage {
+                working.source_offer_condition = Some(crate::draft::SourceOfferCondition {
+                    phase: phase.clone(),
+                    color: *color,
+                    choices: choices.clone(),
+                    density: None,
+                });
+            }
+            let captures =
+                v7_adapter_actions::execute_on_working(working, action, actor, old_history_len)?;
+            // 실제 carry된 probe의 분기까지 인증한다. unclassified draw는 정확한
+            // source callsite 오류이며 공개 관측 불일치로 바꿔 숨기지 않는다.
+            let offer_density = working.source_offer_condition.take();
+            let probability = working.rng.finish_source_trace()?;
+            let proposal_probability = match (visible_stage.as_ref(), offer_density) {
+                (None, None) => probability,
+                (
+                    Some(_),
+                    Some(crate::draft::SourceOfferCondition {
+                        density: Some((offer_p, offer_q)),
+                        ..
+                    }),
+                ) if offer_p > 0.0 && offer_q > 0.0 => probability * offer_q / offer_p,
+                _ => {
+                    return Err(EngineError::ConditioningMismatch(
+                        "observed public stage offer was not produced by the source transition"
+                            .into(),
+                    ));
+                }
+            };
+            bind_public_identities(working, &expected, Some(&prior))?;
+            Ok((captures, probability, proposal_probability))
+        })?;
     let importance_weight = checked_density(source_probability, proposal_probability)?;
     let event = next.state().history.last().cloned().ok_or_else(|| {
         EngineError::InvalidState("v7 source prior play omitted its public event".into())
@@ -1258,11 +1297,19 @@ mod tests {
         let source = source_host("normal", 37);
         let (_, after_white) = first_step(&source);
         let (_, after_black) = first_step(&after_white.position);
-        let expected = after_black.position.state().try_observe(Color::White).unwrap();
+        let expected = after_black
+            .position
+            .state()
+            .try_observe(Color::White)
+            .unwrap();
         let acquired = expected.public_state["revealedOpponentCards"][0]["id"]
             .as_str()
             .unwrap();
-        let before = after_white.position.state().try_observe(Color::White).unwrap();
+        let before = after_white
+            .position
+            .state()
+            .try_observe(Color::White)
+            .unwrap();
         let mut matching = 0;
         for seed in 0..32 {
             let proposal = condition_hidden_opening_draft(
@@ -1271,7 +1318,10 @@ mod tests {
                 seed,
             )
             .unwrap();
-            assert_eq!(proposal.position.state().try_observe(Color::White).unwrap(), before);
+            assert_eq!(
+                proposal.position.state().try_observe(Color::White).unwrap(),
+                before
+            );
             assert!(proposal.source_probability.is_finite());
             assert!(proposal.proposal_probability.is_finite());
             assert!(proposal.proposal_probability > 0.0);
@@ -1280,7 +1330,10 @@ mod tests {
                 .unwrap();
             matching += usize::from(choices.iter().any(|card| card["id"] == acquired));
         }
-        assert!(matching >= 24, "observed public acquisition should be proposed in most draws");
+        assert!(
+            matching >= 24,
+            "observed public acquisition should be proposed in most draws"
+        );
     }
 
     #[test]
