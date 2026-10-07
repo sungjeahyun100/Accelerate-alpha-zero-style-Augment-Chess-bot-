@@ -624,7 +624,7 @@ class PublicEncoder:
                 PublicEncoder._reject_private(item, depth + 1)
 
 
-def batch_positions(positions: Sequence[EncodedPosition]) -> EncodedBatch:
+def batch_positions(positions: Sequence[EncodedPosition], *, retain_positions: bool = True) -> EncodedBatch:
     if not positions:
         raise ValueError("an inference batch must contain positions")
     if any(not isinstance(position, EncodedPosition) for position in positions):
@@ -655,4 +655,5 @@ def batch_positions(positions: Sequence[EncodedPosition]) -> EncodedBatch:
         count = len(position.actions)
         features[index, :count] = position.action_features
         mask[index, :count] = True
-    return EncodedBatch(np.stack([p.board for p in positions]), np.stack([p.condition for p in positions]), features, mask, tuple(positions))
+    return EncodedBatch(np.stack([p.board for p in positions]), np.stack([p.condition for p in positions]),
+                        features, mask, tuple(positions) if retain_positions else ())
