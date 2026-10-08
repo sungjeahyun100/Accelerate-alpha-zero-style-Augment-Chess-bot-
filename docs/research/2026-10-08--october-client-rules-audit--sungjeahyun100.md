@@ -409,3 +409,32 @@ white·black 각각 28턴을 완료한 직후 같은 기물 ID가 `queen`으로
 `october-acquisition.test.js`의 8번째 검사로 고정했으며 8/8 통과했다.
 앞 문단의 `holdout` 미도달 설명은 첫 탐색 경로의 결과로만 읽어야 한다.
 이 한 경로로 다른 자동 효과·종료 조건과의 모든 조합을 검증한 것은 아니다.
+
+## 2026-10-08 후속: P0 원본 전이 영수증의 비교 계약
+
+`projects/augment-chess/tests/differential/october-source-transition.cjs`에서
+기존 SHA 고정 probe를 재사용해 P0 5종의 전후 상태를 다시 생성했다.
+원본 번들과 Acorn은 기존 조사와 같은 SHA이며 Git에 추가하지 않았다.
+원문 `collectValidAiActions`·`applyAiAction`, 카드 선택 및 시작 RULE
+경로만 사용했다. `sourceExpected`는 원본 결과이고 `--actual`의 Rust
+결과는 별도 입력으로 비교한다. 영수증의 기물 ID·종류·좌표, 덱 사용 상태,
+턴·완료 반수·종료 및 양측 가시 보드 투영은 값과 순서가 다르면 실패한다.
+
+| 사례 | 원본 재생 결과 | 이번 비교 범위의 한계 |
+| --- | --- | --- |
+| switcheroo | 0→1반수, 두 기물 ID와 32개 점유를 유지하며 교환 | 전체 공개 이력·합법 행동 집합 미비교 |
+| holdout | 55→56반수, 공유 턴 27→28에서 동일 ID 폰→퀸 | 다른 자동 효과 조합 미비교 |
+| monster | 시작 RULE 소환 후 2→3반수에 동일 ID 이동, 33개 점유 유지 | 고정 난수 0.1 경로만 재생 |
+| chimera | 2→3반수 실제 퀸 이동 후 원본 후보 종류로 변신 | 이동 전체의 결과 분포 미계산 |
+| reaper | 카드 사용으로 동일 ID 퀸→사신, 반수 소비 없음 | 아군 포획·승리 전이 미검증 |
+
+다섯 생성 명령 모두 성공했다. 의도적으로 `switcheroo`의 폰 ID를 바꾼
+Rust 형식 비교 입력은 실패했고, 원본 투영을 복사한 제어 입력은 통과했다.
+이 제어 입력은 Rust 엔진 결과가 아니므로 JS↔Rust 차분 성공 0건이다.
+9월 Rust 라이브러리 회귀를 이 체크아웃에서 다시 실행해 727 passed,
+0 failed, 53 ignored를 확인했다. 10월 probe의 두 Node 시험 파일은
+2/2 파일 성공이며 기존 내부 12/12·8/8 범위의 재실행이다. 현재 Rust의
+공개 Position은 10월 `rulesVersion`을 받지 않고 9월 실행 프로필과
+catalog·관측 정책을 고정한다. 10월 규칙의 실제 Rust 포팅·공개
+intent 결합·chance 분포 및 viewer 전체 observation 비교는 미완료다.
+원본 영수증 성공을 Rust 구현 성공으로 합산하지 않는다.

@@ -30,6 +30,32 @@ legal actions, action 적용 결과, 보드·턴·카드·특수 기물 상태, 
 - `fixtures/oracle-v1.jsonl.gz`: JS oracle(`engine-merged.js`) 기준 2,072개.
 - `fixtures/site-reference-v1/`: **사이트 규칙 코드 기준** reference fixture 349개(약 5.5 MB). 규칙 차이 분석과 Rust 포팅의 참고 데이터. JS와 사이트가 다를 때의 최종 처리 기준은 [O-002](../../../../docs/DECISIONS.md#o-002-정답-기준을-사이트-원본으로-명시할지)에 남아 있다. 형식은 oracle-v1의 상위 호환이며 생성 방법·커버리지·한계는 그 폴더의 README.md 참고.
 
+## 10월 원본 전이 영수증
+
+`october-source-transition.cjs`는 SHA가 고정된 10월 원본과 Acorn을 외부
+절대 경로에서 읽어 `switcheroo`, `holdout`, `monster`, `chimera`,
+`reaper` 사례를 원문 행동으로 재생한다. 출력은 JSON 한 줄이며
+`sourceExpected`가 원본의 전후 상태 투영, `sourceEvidence`가
+`JSON.stringify(state)`로 만든 조사 자료다. 비교 대상인 Rust 결과는
+`--actual`로 따로 전달하고, 실제 양측 입력은 합치지 않는다.
+
+```sh
+node projects/augment-chess/tests/differential/october-source-transition.cjs \
+  "$OCTOBER_SOURCE_MAIN" "$OCTOBER_ACORN_PARSER" switcheroo \
+  > "$REPORTS/october-switcheroo.json"
+```
+
+`--actual` JSON에는 `schemaVersion`, `caseName`, `rulesVersion`,
+`sourceMainSha256`, `sourcePublicCatalogHash`, `executionProfileVersion`,
+`publicIntent`, `before`, `after`가 필요하다. 비교는 기물 ID·종류·
+위치·이동 표지, 양측 카드 사용, 턴·완료 반수·종료, 두 viewer의
+`pieceVisibleToColorAt` 보드 투영에서 값과 배열 순서를 보존한다.
+누락이나 불일치는 실패다. 이 파일만으로 Rust 실행이나 전체 합법 행동,
+전체 공개 observation, chance 분포의 일치를 선언하지 않는다.
+`sourceEvidence`의 JSON 직렬화는 원본의 비 JSON 내부 자료를 보존하지
+않으므로 Rust 입력은 별도 검토한 공개 계약으로 구성해야 한다. 생성된
+영수증과 원본 번들은 Git에 추가하지 않는다.
+
 ## v7 행동 표면 경계
 
 `node --test projects/augment-chess/tests/differential/v7-action-surface.test.cjs`는 SHA-256으로 고정된
