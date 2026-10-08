@@ -19,5 +19,20 @@
     "topLevelStatements": "359 indexed statements classified in october-top-level-review.json; execute 99, 127-168 and 171-194 in source order before reset; startup reset 331 invoked explicitly",
     "bootstrap": "September adapter bootstrap with exact digest, reused for bounded probe",
     "rng": "host injected xorshift32 seed 0x6d2b79f5 for reproducibility; distribution not validated"
-  }
+  },
+  "supportLevel": "bounded-source-probe-only",
+  "verifiedExecutionBoundaries": {
+    "initialization": "resetGame(false, []) then beginInitialGameFlow; selected RULE probe calls original maybeApplyOpeningRuleEvent between them",
+    "legalIntent": "source draft choices or grandAvailableCardsForColor/chaosDraftBundles; collectValidAiActions for play",
+    "apply": "finishDraft/finishChaosDraftBundle and completeDraftStep/completeGrandDraftStep; applyAiAction for play",
+    "chance": "host seeded RNG replay and one exact synthetic completeRandom microdistribution; full source chance space unverified",
+    "viewerObservation": "source pieceVisibleToColorAt with digest-pinned bootstrap __publicPieceView for board only",
+    "terminal": "state.mode and state.winner inspected after selected actions; complete terminal contract unverified"
+  },
+  "notYetSupported": [
+    "complete player-specific observation and trolley privacy",
+    "full chance outcome sets and distributions",
+    "all P0 reachable terminal paths",
+    "Rust October ruleset and JS-Rust differential parity"
+  ]
 }

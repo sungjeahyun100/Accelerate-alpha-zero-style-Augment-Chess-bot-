@@ -120,3 +120,52 @@ test("both viewers receive distinct source board projections after stealth", () 
   const blackVisible = views.black.flat().filter(Boolean).length;
   assert.equal(blackVisible - whiteVisible, 1);
 });
+
+
+test("selected opening RULE monster fires before draft and moves after three source actions", () => {
+  assert.ok(source && parser);
+  const context = loadSource(source, parser);
+  context.__fixedRandom = () => 0.1;
+  run(context, "Math.random=__fixedRandom;selectedGameStyle='normal';localPlayMode='local';playMode='local';ruleOpeningEnabled=true;ruleSelectionEnabled=true;selectedRuleCardIds=['monster'];resetGame(false,[]);maybeApplyOpeningRuleEvent();beginInitialGameFlow()");
+  assert.deepEqual(read(context, "({enabled:state.ruleSelectionEnabled,selected:state.selectedRuleCardIds,event:state.ruleOpeningEvent.status,applied:state.appliedRuleCard.id})"),
+    { enabled: true, selected: ["monster"], event: "hit", applied: "monster" });
+  assert.equal(read(context, "state.board.flat().filter(piece=>piece?.type==='monster').length"), 1);
+  for (let step = 0; step < 16 && run(context, "state.mode==='draft'"); step++) {
+    assert.equal(run(context, "(()=>{const color=state.draft.color,phase=state.draft.phase,card=state.draft.choices[0];const ok=finishDraft(card,null,{auto:true});if(ok)completeDraftStep(color,phase);return ok})()"), true);
+  }
+  assert.equal(run(context, "state.mode"), "play");
+  const monster = () => read(context, "state.board.flatMap((row,r)=>row.map((piece,c)=>piece?.type==='monster'?{id:piece.id,row:r,col:c}:null).filter(Boolean))");
+  const start = monster();
+  assert.equal(start.length, 1);
+  for (let step = 1; step <= 3; step++) {
+    const action = read(context, "collectValidAiActions(state.turn,{includeCards:false,exhaustiveCards:false}).find(action=>action.type==='move')");
+    play(context, action);
+    assert.equal(run(context, "state.moveCount"), step);
+    if (step < 3) assert.deepEqual(monster(), start);
+  }
+  const end = monster();
+  assert.equal(end.length, 1);
+  assert.equal(end[0].id, start[0].id);
+  assert.notDeepEqual(end, start);
+});
+
+test("draft-acquired chimera transforms through an actual queen move", () => {
+  const context = acquire("chimera");
+  cardAction(context, "chimera");
+  const queenId = run(context, "state.board[7][3].id");
+  const move = (fromRow, fromCol, toRow, toCol) => {
+    const action = read(context, `collectValidAiActions(state.turn,{includeCards:false,exhaustiveCards:false}).find(action=>action.type==='move'&&action.from.row===${fromRow}&&action.from.col===${fromCol}&&action.move.row===${toRow}&&action.move.col===${toCol})`);
+    play(context, action);
+  };
+  move(6, 3, 5, 3);
+  const black = read(context, "collectValidAiActions('black',{includeCards:false,exhaustiveCards:false}).find(action=>action.type==='move')");
+  play(context, black);
+  const possible = read(context, "chimeraMajorTypes(state)");
+  move(7, 3, 6, 3);
+  const transformed = read(context, "({id:state.board[6][3].id,type:state.board[6][3].type,chimera:state.board[6][3].chimera,moveCount:state.moveCount,turn:state.turn})");
+  assert.equal(transformed.id, queenId);
+  assert.equal(transformed.chimera, true);
+  assert.ok(possible.includes(transformed.type));
+  assert.equal(transformed.moveCount, 3);
+  assert.equal(transformed.turn, "black");
+});

@@ -328,3 +328,65 @@ OCTOBER_SOURCE_MAIN="${SOURCE_MAIN}" OCTOBER_ACORN_PARSER="${ACORN_PARSER}" \
 이전에는 P0 5종 모두 **합성 카드 지급 후 효과**만 검증했다. 현재는 그중 normal 드래프트 카드 4종의 **실제 후보→선택→덱→원본 효과 행동**을 검증했다. `monster`는 일반 드래프트 카드가 아니라 시작 RULE 경로임을 확인했다. 9월 회귀는 `ENOENT`에서 client 전용 34/34 성공으로 바뀌었다. 전체 10월 공개 observation, `monster` 정상 시작 RULE 발동, `chimera` 실제 이동 변신, `reaper` 실제 포획 승리, `holdout` 28수 실제 승격과 9월 전체 worker oracle은 완료로 표시하지 않는다. 이 경계를 해결하고 10월 정식 실행 profile 및 양측 비누출 계약을 확인하기 전에는 Rust 동기화 착수 근거가 부족하다.
 
 추가 구조 검사 명령 `node --test .github/scripts/check-repository-policy.test.mjs`는 14/14 성공, `node .github/scripts/check-repository-policy.mjs`는 통과(403 indexed files), `git diff --cached --check`는 오류 없이 통과했다. 처음 제한된 sandbox에서는 Git 하위 프로세스 `EPERM`으로 구조 검사 두 개가 실패했고, 같은 stage 입력을 정상 Git 접근 권한으로 재실행해 성공했다. 이 중간 환경 오류를 코드 실패로 취급하지 않는다. 원격 CI는 아직 요청·관측하지 않았다.
+
+
+## 2026-10-08 후속: 시작 RULE과 실제 퀸 이동 전이
+
+기준 브랜치는 기존 PR #44의 `feature/october-rules-sync`이고, 조사 시작 SHA는
+`2a37eaf7f8b8058caaeaaa70159592e43cbae982`이다. 미추적 원본 번들은
+보존하고 Git에 포함하지 않았다. 번들·Acorn SHA는 앞의 10월 프로브와 동일하다.
+
+`october-acquisition.test.js`에 원본 함수 경로 두 건을 추가했다. 첫째,
+`resetGame(false, [])`로 headless 상태를 만든 뒤 원본
+`maybeApplyOpeningRuleEvent`를 호출하고 `beginInitialGameFlow`로 드래프트를
+시작했다. `ruleOpeningEnabled=true`, `ruleSelectionEnabled=true`,
+`selectedRuleCardIds=['monster']`에서 원본 이벤트 `hit`, 적용 카드 `monster`,
+소환 기물 1개를 확인했다. 원본이 제시한 드래프트 선택을 끝내고 합법 수
+3반수를 `collectValidAiActions`와 `applyAiAction`으로 실행했다. 1·2반수에는
+괴물 위치가 유지되고 3반수에 동일 기물 ID가 다른 칸으로 이동했다.
+이 검사는 headless 시작 경계에서 RULE 함수를 명시 호출한다. 브라우저의
+`resetGame(true, …)` 전체 비동기·UI 흐름을 검증한 것으로 표시하지 않는다.
+
+둘째, seed 17의 원본 normal 드래프트에서 `chimera`를 획득하고 원본 카드
+행동으로 퀸에 부여했다. 원본 합법 행동으로 백 폰 d2→d3, 흑 일반 수,
+백 퀸 d1→d2를 적용했다. 이동 뒤 같은 퀸 ID와 `chimera=true`, 3반수,
+다음 차례 black을 확인했고 기물 종류가 원본 `chimeraMajorTypes(state)`의
+결과 집합에 속했다. 이 단일 재생은 실제 변신 경로의 증거다. 앞서 확인한
+20개 균등 구간의 종류 열거와 구분하며, 이동 전체의 정확한 확률 분포나
+양측 공개 결과의 증거로 합산하지 않는다.
+
+`holdout`은 합성 `turnsTaken` 경계 검사와 실제 첫 수까지만 확인했다.
+추가로 원본 행동을 임의 선택해 32반수까지 진행한 조사에서는 게임이
+white 승리로 끝나 `turnsTaken={white:16,black:16}`이었다. 따라서 28수
+승격에 도달하지 못했다. 이 종료 경로를 승격 실패나 성공으로 해석하지
+않는다. `reaper`의 실제 아군 포획 2회·승리, `trolley` 비선택자 정보 차단,
+전체 viewer별 이력·덱·자동 효과·종료 projection도 미검증이다.
+
+프로브 manifest에 실제 호출 경계와 미지원 범위를 적었다. 그 파일의
+`supportLevel`은 계속 `bounded-source-probe-only`다. 정식 10월 headless
+profile, Rust ruleset, JS↔Rust 차분 일치를 선언하지 않는다.
+
+
+### 이번 후속의 실행 검사와 남은 작업
+
+| 검사 | 이번 실행 결과 | 범위 |
+| --- | --- | --- |
+| 10월 `october-source-probe.test.js` | 12/12 성공 | 세 mode 초기화·드래프트·선별 전이·합성 P0 경계 |
+| 10월 `october-acquisition.test.js` | 7/7 성공 | 실제 획득 4종, 선택 RULE `monster`, 실제 `chimera` 퀸 이동, 제한된 보드 투영 |
+| 9월 client baseline `--verify` | 1/1 성공 | 9월 main·parser SHA, catalog, profile 검증 |
+| 9월 `latest-client.test.cjs` | 34/34 성공 | client 전용 회귀; 전체 worker oracle은 미실행 |
+| Rust `cargo test -p augment-chess-engine --lib --offline` | 727 성공, 0 실패, 53 ignored | 기존 9월 엔진 회귀; 10월 차분 검사 아님 |
+| repository-policy 테스트·검사, staged diff | 14/14 성공, 정책 통과, 공백 오류 없음 | stage된 세 파일 기준 |
+
+Rust 첫 시도는 worktree 기본 `target`의 읽기 전용 파일시스템 때문에
+실행 전에 실패했다. `${ARTIFACT_ROOT}/build/cargo`로 출력 경로를 지정해
+동일한 library 검사를 재실행했고 위 결과를 얻었다. repository-policy
+테스트도 제한된 Git 접근에서 한 차례 실행되지 않았으나 stage 후 정상
+Git 접근으로 14/14 통과했다. 두 환경 오류를 코드 테스트 실패로 세지 않는다.
+원격 CI는 이번 후속에서 관측하지 않았다.
+
+남은 순서는 원본 `holdout`의 정상 28수 승격과 `reaper`의 실제 아군 포획
+2회 승리, 전체 viewer별 공개 관측과 `trolley` 비누출, 10월 정식
+headless profile, Rust 규칙 버전 분리·P0/P1 구현, 동일 조건의 JS↔Rust
+행동·전이·분포 차분, 9월 전체 worker oracle이다. 이 입력이 없으므로
+10월 동기화 완료 판정을 보류한다.
