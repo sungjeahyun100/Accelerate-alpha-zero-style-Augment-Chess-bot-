@@ -260,3 +260,71 @@ execution profile, P0 전체 카드 행동 fixture, 관측 계약 및 Rust 교�
 검증은 아직 완료하지 않았다. 다음 단계는 9월 baseline을 마련해 회귀를
 실행하고, 10월 원본 카드 보유→선택→적용 경로와 양측 observation을
 재생 가능한 fixture로 고정하는 것이다.
+
+## 2026-10-08 후속: 실제 획득 4종·양측 보드 투영·9월 client 복구
+
+### 범위와 변경 파일
+
+- `projects/augment-chess/oracle/tools/site-parity/october-acquisition.test.js` 신규: 원본 normal 드래프트의 조건부 획득, 원본 행동 적용, 제한된 양측 보드 투영.
+- 이 연구 영수증 갱신. 10월 probe와 9월 실행 profile, Rust 엔진, 원본 JS 번들은 수정하거나 추적하지 않았다.
+
+입력은 10월 원본 `main-Dm4wrmOx.js` SHA-256 `958e8e6787d8d107152e4c07e45736d2ffbf05ad8fad4e7de63558c3c70d024c`, Acorn 8.16.0 SHA-256 `24974706ffc00984a334f9ee085cc3cb2bf0a0ec80787ea9374ab5b5b6535681`이다. 기존 probe의 SHA·최상위 문장 분류·bootstrap 게이트를 그대로 통과한 뒤 실행한다. 원본 드래프트 추첨 함수를 바꾸지 않고 xorshift32 난수 seed를 주입했다. 아래 seed는 **특정 카드가 이미 후보로 나오는 조건부 재생**이며 무조건부 등장 확률 측정이 아니다.
+
+| 카드 | seed (10진) | 원본 첫 후보 | 실제 획득·효과·턴 확인 | 남은 경계 |
+| --- | ---: | --- | --- | --- |
+| `holdout` | 74 | `severance, holdout, campfire` | white 후보 선택·덱 슬롯 반영, 원본 카드 행동으로 폰 지정, `readyTurn=28`, 원본 일반 수 후 black·1반수 | 실제 28수 재생·자동 승격과 공개 결과 미검증. 기존 합성 27/28 경계만 유지 |
+| `switcheroo` | 169 | `castling, hook, switcheroo` | white 획득·원본 카드 행동, 원본 왕→폰 합법 행동으로 ID 보존 교환, black·1반수 | 상대 관측의 세부 이력 미검증 |
+| `chimera` | 17 | `nullification, checker, chimera` | white 획득·원본 카드 행동으로 퀸에 효과 부여, 원본 일반 수로 black·1반수 | 퀸의 **실제 이동 후** 무작위 변신·관측 미검증. 기존 합성 fixture가 유형 집합만 열거 |
+| `reaper` | 66 | `siege-ram, martyrdom, reaper` | white 획득·원본 카드 행동으로 퀸을 사신으로 변경, 원본 일반 수로 black·1반수 | 실제 아군 포획 2회 및 원본 승리 전이 미검증 |
+| `monster` | 해당 없음 | normal 드래프트 대상이 아님 | 원본 `CARD_CATEGORY_BY_ID`는 `RULE`; `ruleCardPool()`에 존재하지만 일반 `draftPoolForCategories`에는 없음 | 시작 RULE 이벤트의 정상 설정·선택·발동부터 자동 이동까지 연결한 fixture 미완료 |
+
+카드 후보 여부는 원본 `draftPoolForCategories`(143493행), 선택과 덱 획득은 `finishDraftSelection`(143250행), 행동은 `collectValidAiActions`(160514행)와 `applyAiAction`(161275행)을 사용했다. `monster`는 `maybeApplyOpeningRuleEvent`(142296행)에서 선택되는 별도 시작 RULE 경로다. 합성 지급한 기존 fixture를 실제 획득 성공으로 재표시하지 않는다. 드래프트 4종의 `winner`는 선택 직후 `null`이었다. 이 한 상태로 종료 조건 전체를 검증했다고 보지 않는다.
+
+### 공개 관측 계약: 관측한 부분과 미검증 부분
+
+아래 `__publicPieceView`는 **9월 headless bootstrap을 SHA 고정하여 재사용한 투영**이다(`game-adapter.js` 128행). 10월 원본 자체의 모든 viewer 전용 API를 검증한 것은 아니다. 원본 `pieceVisibleToColorAt`(187718행)와 은신 카드 실행을 함께 사용했다. 내부 `state` 또는 로컬 UI에 값이 있다는 사실만으로 공개를 인정하지 않는다.
+
+| 필드·결과 | JS 출처 | viewer와 공개 조건 | 숨김·마스킹 조건 | fixture·결과 |
+| --- | --- | --- | --- | --- |
+| 8×8 보드의 비은신 기물 타입·색 | 원본 `pieceVisibleToColorAt`; bootstrap `__publicPieceView` | white·black, 해당 칸이 viewer에게 보일 때 | 보이지 않는 기물은 `null`; `hiddenFrom` 같은 내부 필드는 제거 | 새 양측 은신 검사 1/1 성공. 양측의 흑 퀸은 동일하게 보임 |
+| 은신 흑 비숍 | 원본 `stealth`; 위 보드 투영 | 소유자 black에게 비숍이 보임 | 상대 white에게 해당 칸 `null`; black 투영에도 내부 `hiddenFrom` 필드는 없음 | 새 양측 은신 검사 1/1 성공; 두 viewer 가시 기물 수 차이 1 |
+| 카드 덱·선택 후보 | 원본 `startDraft`·`finishDraftSelection`·`playerDeck` | 내부 후보·덱 반영만 확인 | 상대 공개 시점·숨김 정책 미확정 | 실제 획득 4종 검사 성공, **공개 계약 미검증** |
+| 턴·단계 | 원본 `completeDraftStep`·`applyAiAction` | 내부 draft→play, white→black 전이 확인 | viewer별 공개 형태 미확정 | 실제 획득·일반 수 검사 성공, **투영 미검증** |
+| 공개 행동 이력·포획·카드 결과·자동 효과 | 원본 `recordBoardHistory`(166762행), `recordOnlineEvent`(132854행) 및 개별 효과 | 공개 시점·필드 미확정 | 내부 선택·난수·deferred 값의 마스킹 미확정 | **미검증** |
+| 승리·종료·확률 전이 | 원본 `applyAiAction` 및 효과별 판정 | 공개 결과 schema 미확정 | chance seed·숨은 선택 공개 여부 미확정 | **미검증** |
+
+은신 결과의 양측 보드 투영만 확인했으며, 이를 **전체 observation이나 public action의 비누출 증거로 확대하지 않는다**. `trolley`의 상대 비공개 선택·제거 결과, 다른 deferred/randomized 카드, 카드 후보와 이력, 종료·승리 projection은 아직 대조하지 않았다. 원본 내부 선택을 상대의 공개 행동으로 열거하지 않는다.
+
+### 9월 28일 동결 client 복구와 회귀
+
+공식 고정 URL의 `main-OahWs0tU.js`와 Acorn 8.15.0을 외부 `${ARTIFACT_ROOT}/cache/site-baseline-20260928-e5ed84fc` 슬롯에 다시 받았다. SHA-256은 각각 `e5ed84fcf8e72a24e6a8cfeb9050787387a616c55184e6501fca2077e302c45c`, `fdb08546776ec6228b03e8d02b40d4ab3255bae5f401adba7ff5dad927ac5c9c`였고 카탈로그의 바이트 수 12,892,256·241,575와 일치했다. `site-20260928.json`의 원래 `frozenAt=2026-09-28T07:41:32.828Z`와 파일 메타데이터로 **client 전용** manifest를 만들었다. 오늘의 HTML·worker를 9월 자료로 둔갑시키지 않았다. 저장소 추적 파일에 baseline을 추가하지 않았다.
+
+`prepare-current-baseline.js --verify`는 9월 `rulesVersion=augment-site-20260928-e5ed84fcf8e72a24`, profile `accelerate-headless-semantic-v7-faithful-init-v1`, projection `source-visible-20260928-v2`, 256 공개 카드와 257 정의를 확인했다. `latest-client.test.cjs`의 34/34 검사가 실제 실행되어 세 모드 초기화·드래프트·관측·전이, profile 거부, 종료 등 기존 회귀가 통과했다. 이는 **client 전용** 복구다. 원본 9월 worker·HTML의 완전한 묶음과 `offline-oracle.test.js`는 복구하거나 실행하지 않았다. 기존 `cache/site-baseline` 전체 baseline 부재와 이 제한을 구분한다.
+
+재현(저장소 루트, `${ARTIFACT_ROOT}`는 외부 절대 경로):
+
+```sh
+node projects/augment-chess/oracle/tools/site-parity/prepare-current-baseline.js --verify \
+  "${ARTIFACT_ROOT}/cache/site-baseline-20260928-e5ed84fc"
+ACCELERATE_SITE_BASELINE_LATEST="${ARTIFACT_ROOT}/cache/site-baseline-20260928-e5ed84fc" \
+  node projects/augment-chess/tests/site-adapter/parity/latest-client.test.cjs
+OCTOBER_SOURCE_MAIN="${SOURCE_MAIN}" OCTOBER_ACORN_PARSER="${ACORN_PARSER}" \
+  node projects/augment-chess/oracle/tools/site-parity/october-source-probe.test.js
+OCTOBER_SOURCE_MAIN="${SOURCE_MAIN}" OCTOBER_ACORN_PARSER="${ACORN_PARSER}" \
+  node projects/augment-chess/oracle/tools/site-parity/october-acquisition.test.js
+```
+
+| 검사 | 실제 결과 | 입력·seed |
+| --- | --- | --- |
+| 9월 `prepare-current-baseline --verify` | 성공 1/1 | 9월 원본 main·Acorn SHA와 `site-20260928` catalog |
+| 9월 `latest-client.test.cjs` | 34/34 성공, 실패 0 | 위 9월 client 전용 manifest; 테스트 내부 seed는 해당 파일의 12345 등 |
+| 기존 10월 `october-source-probe.test.js` | 12/12 성공, 실패 0 | 10월 SHA·parser SHA; 고정 난수 및 기존 fixture |
+| 신규 10월 `october-acquisition.test.js` | 5/5 성공, 실패 0 | 10월 SHA·parser SHA; 위 4개 xorshift32 seed, 은신 검사는 seed 1 |
+| 10월 SHA 불일치 거부 | 기존 프로브 검사 1/1 성공 | 원본이 아닌 입력 거부 |
+| 9월 전체 `offline-oracle.test.js`, 10월 CI·Rust 차분·성능 | 미실행 | 9월 전체 worker baseline 없음; 이번 작업 범위 밖 |
+
+### 결론 변경과 Rust 동기화 차단 요인
+
+이전에는 P0 5종 모두 **합성 카드 지급 후 효과**만 검증했다. 현재는 그중 normal 드래프트 카드 4종의 **실제 후보→선택→덱→원본 효과 행동**을 검증했다. `monster`는 일반 드래프트 카드가 아니라 시작 RULE 경로임을 확인했다. 9월 회귀는 `ENOENT`에서 client 전용 34/34 성공으로 바뀌었다. 전체 10월 공개 observation, `monster` 정상 시작 RULE 발동, `chimera` 실제 이동 변신, `reaper` 실제 포획 승리, `holdout` 28수 실제 승격과 9월 전체 worker oracle은 완료로 표시하지 않는다. 이 경계를 해결하고 10월 정식 실행 profile 및 양측 비누출 계약을 확인하기 전에는 Rust 동기화 착수 근거가 부족하다.
+
+추가 구조 검사 명령 `node --test .github/scripts/check-repository-policy.test.mjs`는 14/14 성공, `node .github/scripts/check-repository-policy.mjs`는 통과(403 indexed files), `git diff --cached --check`는 오류 없이 통과했다. 처음 제한된 sandbox에서는 Git 하위 프로세스 `EPERM`으로 구조 검사 두 개가 실패했고, 같은 stage 입력을 정상 Git 접근 권한으로 재실행해 성공했다. 이 중간 환경 오류를 코드 실패로 취급하지 않는다. 원격 CI는 아직 요청·관측하지 않았다.
