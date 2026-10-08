@@ -383,7 +383,10 @@ Rust 첫 시도는 worktree 기본 `target`의 읽기 전용 파일시스템 때
 동일한 library 검사를 재실행했고 위 결과를 얻었다. repository-policy
 테스트도 제한된 Git 접근에서 한 차례 실행되지 않았으나 stage 후 정상
 Git 접근으로 14/14 통과했다. 두 환경 오류를 코드 테스트 실패로 세지 않는다.
-원격 CI는 이번 후속에서 관측하지 않았다.
+검증 코드 SHA `3f784e199e4f170c68340ea3a22efb3d9ab3f192`의 PR 검사에서
+`checks`, `Metadata policy (ubuntu-latest)`, `Metadata policy (windows-latest)`
+3개가 통과한 것을 관측했다. 이 SHA의 Rust·worker oracle CI 성공은
+관측하지 않았다.
 
 남은 순서는 `reaper`의 실제 아군 포획 2회 승리, 전체 viewer별 공개
 관측과 `trolley` 비누출, 10월 정식
