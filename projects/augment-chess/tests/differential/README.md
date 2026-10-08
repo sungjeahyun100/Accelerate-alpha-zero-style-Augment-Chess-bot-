@@ -32,6 +32,29 @@ legal actions, action 적용 결과, 보드·턴·카드·특수 기물 상태, 
 
 ## 10월 원본 전이 영수증
 
+### 첫 Rust 차분: switcheroo
+
+`october-native-switcheroo.cjs`는 10월 원본에서 카드 사용 전, 카드 사용 후,
+왕·폰 교환 후의 투영을 재생성한다. 영수증의 `rustInput`은 원시 내부
+`sourceEvidence`를 그대로 Rust에 입력하지 않고 보드·덱·턴·카드 효과·완료 반수 등 검토한 필드만 추려
+규칙 버전, 원본 SHA, catalog hash, 실행 profile과 함께 전달한다. Rust JSON
+바이너리의 `apply_public_intent`가 카드 행동과 교환 행동을 각각 바인딩·검증·
+적용한다. 별도로 직렬화한 Rust 결과를 `sourceExpected`와 비교한다.
+
+```sh
+CARGO_TARGET_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/accelerate/october-rust" \
+  cargo build -p augment-chess-engine --bin augment-chess-engine-json --offline
+node projects/augment-chess/tests/differential/october-native-switcheroo.cjs \
+  "$OCTOBER_SOURCE_MAIN" "$OCTOBER_ACORN_PARSER" \
+  "${XDG_CACHE_HOME:-$HOME/.cache}/accelerate/october-rust/debug/augment-chess-engine-json"
+```
+
+이 경로는 활성 `switcheroo`의 카드 사용과 왕·아군 폰 교환만 지원한다.
+10월 전체 합법 행동 열거와 action stream은 unsupported다. viewer별 비교는
+이 사례에서 양측 모두 볼 수 있는 보드 기물의 투영에 한정된다. 전체 공개
+observation, replay, 특수 자동 효과와 다른 10월 카드의 동등성은 검증하지 않는다.
+원본 번들과 생성한 영수증은 Git에 넣지 않는다.
+
 `october-source-transition.cjs`는 SHA가 고정된 10월 원본과 Acorn을 외부
 절대 경로에서 읽어 `switcheroo`, `holdout`, `monster`, `chimera`,
 `reaper` 사례를 원문 행동으로 재생한다. 출력은 JSON 한 줄이며

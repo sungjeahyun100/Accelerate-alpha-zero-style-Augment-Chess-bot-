@@ -874,6 +874,7 @@ fn play() -> String {
 }
 pub const RULES_VERSION_V6: &str = "augment-site-20260927-abfe01a035813875";
 pub const RULES_VERSION_V7: &str = "augment-site-20260928-e5ed84fcf8e72a24";
+pub const RULES_VERSION_OCTOBER: &str = "augment-site-20261007-958e8e6787d8d107";
 fn default_ruleset() -> String {
     RULES_VERSION_V6.into()
 }
@@ -1192,6 +1193,10 @@ impl GameState {
         }
     }
     pub fn validate_and_identify(&mut self) -> Result<()> {
+        if self.ruleset_id == RULES_VERSION_OCTOBER {
+            crate::october_switcheroo::check_profile(self)?;
+            return self.validate_source_shape_and_identify();
+        }
         if self.ruleset_id != RULES_VERSION_V6 {
             return Err(if self.ruleset_id == RULES_VERSION_V7 {
                 EngineError::UnsupportedFeature("v7 rules profile is not executable".into())

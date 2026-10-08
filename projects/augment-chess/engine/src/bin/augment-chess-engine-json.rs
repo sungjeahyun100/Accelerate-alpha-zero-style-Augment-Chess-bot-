@@ -48,7 +48,14 @@ fn execute(request: &Value) -> Result<Value, String> {
         );
     }
     let state = request.get("state").ok_or("state missing")?;
-    let position = Position::from_snapshot_value(state.clone()).map_err(|e| e.to_string())?;
+    let position = Position::from_snapshot_value_with_rules_version(
+        state.clone(),
+        request
+            .get("rulesVersion")
+            .and_then(Value::as_str)
+            .unwrap_or(augment_chess_engine::RULES_VERSION_V6),
+    )
+    .map_err(|e| e.to_string())?;
     let position = if let Some(rng) = request.get("rng") {
         position
             .with_metadata(
@@ -87,6 +94,34 @@ fn execute(request: &Value) -> Result<Value, String> {
         "bind_public_intent" => Ok(json!({"action":position.bind_public_intent(
             request.get("intent").cloned().ok_or("intent missing")?
         ).map_err(|e|e.to_string())?})),
+        "apply_public_intent" => {
+            let october = position.rules_version() == augment_chess_engine::RULES_VERSION_OCTOBER;
+            let before_visible = if october {
+                Some(
+                    json!({"white":position.october_visible_board(Color::White).map_err(|e|e.to_string())?,
+                    "black":position.october_visible_board(Color::Black).map_err(|e|e.to_string())?}),
+                )
+            } else {
+                None
+            };
+            let action = position
+                .bind_public_intent(request.get("intent").cloned().ok_or("intent missing")?)
+                .map_err(|e| e.to_string())?;
+            let step = position.apply(&action).map_err(|e| e.to_string())?;
+            let after_visible = if october {
+                Some(
+                    json!({"white":step.position.october_visible_board(Color::White).map_err(|e|e.to_string())?,
+                    "black":step.position.october_visible_board(Color::Black).map_err(|e|e.to_string())?}),
+                )
+            } else {
+                None
+            };
+            Ok(
+                json!({"action":action,"state":step.position.state(),"actor":step.actor,
+                "turnChanged":step.turn_changed,"captures":step.captures,"result":step.result,
+                "visibleBefore":before_visible,"visibleAfter":after_visible}),
+            )
+        }
         "apply" => {
             let action: Action =
                 serde_json::from_value(request.get("action").cloned().ok_or("action missing")?)

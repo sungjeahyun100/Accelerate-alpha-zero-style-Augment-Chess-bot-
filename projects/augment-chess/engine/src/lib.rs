@@ -12,6 +12,7 @@ pub mod geometry;
 pub mod move_program;
 mod movement;
 mod observation;
+mod october_switcheroo;
 mod opening;
 mod replay;
 mod source_chance_trace;
@@ -161,6 +162,20 @@ impl Position {
     }
     pub fn public_intent(&self, action: &Action) -> Result<Value> {
         self.validate_action(action)?;
+        if self.rules_version() == RULES_VERSION_OCTOBER {
+            if action.kind == ActionKind::Card {
+                return Ok(serde_json::json!({"type":"card","color":action.color,
+                    "cardId":"switcheroo","target":null}));
+            }
+            let from = action.from.ok_or(EngineError::IllegalAction)?;
+            let to = action
+                .destination
+                .as_ref()
+                .ok_or(EngineError::IllegalAction)?;
+            return Ok(
+                serde_json::json!({"type":"move","color":action.color,"from":from,"destination":{"row":to.row,"col":to.col}}),
+            );
+        }
         self.validate_public_selection(action)?;
         let mut semantic = action.clone();
         semantic.position_key = None;
@@ -177,6 +192,11 @@ impl Position {
     }
     pub fn bind_public_intent(&self, intent: Value) -> Result<Action> {
         state::validate_json_value(&intent, 0)?;
+        if self.rules_version() == RULES_VERSION_OCTOBER {
+            let mut action = october_switcheroo::bind(self.state(), &intent)?;
+            action.position_key = Some(format!("{:016x}", self.key()));
+            return Ok(action);
+        }
         let action = if intent.get("type").and_then(Value::as_str) == Some("trolleyChoice") {
             let fields = intent.as_object().ok_or(EngineError::IllegalAction)?;
             if fields.len() != 3
@@ -257,13 +277,16 @@ impl Position {
         Self::from_snapshot_value_with_rules_version(value, RULES_VERSION_V6)
     }
     /// Select the source rules version from the outer Position envelope, not
-    /// from card metadata or an absent state.rulesetId. v7 is recognized but
-    /// cannot create an executable Position until its rules are ported.
+    /// from card metadata or an absent state.rulesetId. October imports
+    /// require an explicit catalog/profile marker and expose only switcheroo.
     pub fn from_snapshot_value_with_rules_version(
         value: Value,
         rules_version: &str,
     ) -> Result<Self> {
-        if !matches!(rules_version, RULES_VERSION_V6 | RULES_VERSION_V7) {
+        if !matches!(
+            rules_version,
+            RULES_VERSION_V6 | RULES_VERSION_V7 | RULES_VERSION_OCTOBER
+        ) {
             return Err(EngineError::InvalidConfig("unknown rules version".into()));
         }
         state::validate_json_value(&value, 0)?;
@@ -361,6 +384,11 @@ impl Position {
         )
     }
     pub fn legal_actions(&self) -> Result<Vec<Action>> {
+        if self.rules_version() == RULES_VERSION_OCTOBER {
+            return Err(EngineError::UnsupportedFeature(
+                "complete October legal-action enumeration is unavailable".into(),
+            ));
+        }
         let mut actions = movement::legal_actions(self.state())?;
         let key = format!("{:016x}", self.key());
         for action in &mut actions {
@@ -369,6 +397,11 @@ impl Position {
         Ok(actions)
     }
     pub fn action_stream(&self) -> Result<ActionStream> {
+        if self.rules_version() == RULES_VERSION_OCTOBER {
+            return Err(EngineError::UnsupportedFeature(
+                "October action stream is unavailable".into(),
+            ));
+        }
         Ok(ActionStream {
             position: self.clone(),
             cursor: movement::ActionCursor::new(self.state())?,
@@ -399,7 +432,11 @@ impl Position {
             &serde_json::to_value(&semantic).map_err(EngineError::serialization)?,
             0,
         )?;
-        movement::validate_action(self.state(), &semantic)
+        if self.rules_version() == RULES_VERSION_OCTOBER {
+            october_switcheroo::validate(self.state(), &semantic)
+        } else {
+            movement::validate_action(self.state(), &semantic)
+        }
     }
     pub fn apply(&self, action: &Action) -> Result<StepResult> {
         if let Some(key) = &action.position_key
@@ -417,7 +454,9 @@ impl Position {
         let mut state = self.state().clone();
         let captures = transition::apply(&mut state, &comparable)?;
         state.validate_and_identify()?;
-        replay::canonicalize_position_frames(&mut state)?;
+        if self.rules_version() != RULES_VERSION_OCTOBER {
+            replay::canonicalize_position_frames(&mut state)?;
+        }
         let turn_changed = self.state().turn != state.turn;
         let result = state.result();
         Ok(StepResult {
@@ -430,6 +469,15 @@ impl Position {
     }
     pub fn result(&self) -> Option<GameResult> {
         self.state().result()
+    }
+    /// Verified board-only October projection for an all-visible position.
+    pub fn october_visible_board(&self, viewer: Color) -> Result<Value> {
+        if self.rules_version() != RULES_VERSION_OCTOBER {
+            return Err(EngineError::UnsupportedFeature(
+                "October board projection requires October rules".into(),
+            ));
+        }
+        october_switcheroo::visible_board(self.state(), viewer)
     }
     pub fn observe(&self, viewer: Color) -> Observation {
         self.state().observe(viewer)

@@ -438,3 +438,37 @@ Rust 형식 비교 입력은 실패했고, 원본 투영을 복사한 제어 입
 catalog·관측 정책을 고정한다. 10월 규칙의 실제 Rust 포팅·공개
 intent 결합·chance 분포 및 viewer 전체 observation 비교는 미완료다.
 원본 영수증 성공을 Rust 구현 성공으로 합산하지 않는다.
+
+## 2026-10-08 후속: 10월 switcheroo Rust 첫 차분
+
+이번 변경에서 `augment-site-20261007-958e8e6787d8d107`를 9월 버전과
+별도로 인식하고, 원본 SHA-256·공개 catalog hash·조사용 실행 profile을
+정확히 대조한다. 이 profile은 정식 전체 규칙 profile로 승격하지 않았다.
+Rust `Position`은 10월 snapshot을 명시적 버전과 식별자가 있을 때
+가져오지만, 실행 범위는 `switcheroo` 카드 사용과 활성화된 왕·아군 폰
+교환뿐이다. 전체 합법 행동 열거와 action stream은 unsupported를 반환한다.
+기존 9월 28일 공개 `Position` gate는 그대로 유지한다.
+
+`october-source-transition.cjs`의 seed 169 원본 경로에서 카드 사용 전,
+카드 사용 후, 교환 후의 투영을 생성했다. `october-native-switcheroo.cjs`는
+영수증의 별도 `rustInput` 계약에서 보드·덱·포획·턴·카드 플래그·반수 등 명시한 필드만
+Rust 입력으로 고르고, 카드와 이동의 public intent를 JSON 바이너리로
+각각 바인딩·적용했다. `sourceExpected`는 Rust 입력에 복사하지 않고
+각 Rust 출력과 비교했다. 카드 instance ID, 왕·폰 ID와 이동 표지,
+좌표와 배열 순서, 덱 사용, 턴·완료 반수·종료, Rust가 독립 계산한
+양측 가시 보드가 일치했다.
+이 사례의 기물은 양측에서 모두 보인다. Rust의 전체 viewer별
+`Observation` 계약을 통과했다는 뜻은 아니다.
+
+| 검사 | 이번 실행 결과 | 범위 |
+| --- | --- | --- |
+| 10월 JS↔Rust 차분 | 성공, 1개 원본 사례·17개 검사 | 실제 Rust 바이너리 카드 사용·교환, 잘못된 버전·catalog·profile·원본 SHA, 상대 폰·다른 기물·잘못된 intent·action·stale action·카드 재사용·효과 상태 누락·숨은 기물·전체 행동 열거 거부 |
+| 9월 switcheroo 직접 회귀 | 성공, 1개 Rust 테스트 | 기존 9월 폰 제거 유지 |
+| Rust 라이브러리 전체 | 728 성공, 0 실패, 53 ignored | 신규 9월 직접 회귀를 포함해 전체 재실행 |
+| 10월 원본 Node 테스트 | 2/2 테스트 파일 성공 | SHA 고정 원본 취득·전이 |
+
+재현 명령은 `projects/augment-chess/tests/differential/README.md`에
+기록했다. 원본 번들과 생성된 영수증은 Git에 넣지 않았다. 미검증 범위는
+10월의 나머지 카드·자동 효과·전체 합법 행동 집합·chance 분포·공개
+이력과 비가시 기물의 양측 관측·종료 경로다. 따라서 전체 규칙 동기화나
+정식 10월 운영 지원으로 해석하지 않는다.

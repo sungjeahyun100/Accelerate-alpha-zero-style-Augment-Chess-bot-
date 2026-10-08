@@ -99,7 +99,9 @@ function projection(context) {
   return read(context, `({
     sourceState: state,
     mode: state.mode, turn: state.turn, moveCount: state.moveCount,
-    turnsTaken: state.turnsTaken, winner: state.winner,
+    turnsTaken: state.turnsTaken, cardsUsedThisTurn: state.cardsUsedThisTurn,
+    actionsRemaining: state.actionsRemaining, fullMove: state.fullMove,
+    switcheroo: state.switcheroo, winner: state.winner,
     board: state.board.flatMap((line,row)=>line.flatMap((piece,col)=>piece?[{
       row,col,id:piece.id,type:piece.type,color:piece.color,moved:Boolean(piece.moved),
       holdoutPromotion:piece.holdoutPromotion||null,chimera:Boolean(piece.chimera),
@@ -114,12 +116,25 @@ function projection(context) {
   })`);
 }
 
+function switcherooRustInput(sourceState) {
+  // Reviewed, bounded import shape; sourceEvidence is diagnostic material only.
+  const fields = ["board", "deckSlots", "captures", "turn", "mode", "actionsRemaining",
+    "switcheroo", "moveCount", "turnsTaken", "cardsUsedThisTurn", "winner", "fullMove"];
+  return {
+    ...Object.fromEntries(fields.map(key => [key, sourceState[key]])),
+    octoberCatalogHash: profile.sourcePublicCatalogHash,
+    octoberExecutionProfile: profile.profileVersion,
+    octoberSourceMainSha256: profile.sourceMainSha256,
+  };
+}
+
 function switcheroo(sourcePath, parserPath) {
   const seed = 169;
   const context = start(sourcePath, parserPath, seed);
   finishOpening(context, "switcheroo");
   assert.equal(read(context, "playerDeck('white').some(card=>card?.id==='switcheroo')"), true);
   const card = read(context, "collectValidAiActions('white',{includeCards:true,exhaustiveCards:true}).find(action=>action.type==='card'&&action.cardId==='switcheroo')");
+  const cardBefore = projection(context);
   apply(context, card);
   const actions = read(context, "collectValidAiActions('white',{includeCards:false,exhaustiveCards:true})");
   const move = actions.find(action => action.type === "move" &&
@@ -137,10 +152,19 @@ function switcheroo(sourcePath, parserPath) {
   assert.equal(after.board.find(piece => piece.id === pawn.id)?.row, 7);
   assert.equal(after.board.find(piece => piece.id === pawn.id)?.col, 4);
   assert.equal(after.moveCount, before.moveCount + 1);
-  return receipt("switcheroo", context, seed, before, after,
+  const result = receipt("switcheroo", context, seed, before, after,
     { openingChoice: "switcheroo", otherOpeningChoice: "first offered", cardAction: card,
       publicIntent: moveIntent(move), sourceAction: move },
     "source switcheroo transition and visible board only");
+  const {sourceState: cardBeforeState, ...cardBeforeProjection} = cardBefore;
+  result.sourceExpected.cardBefore = cardBeforeProjection;
+  result.sourceExpected.cardAfter = result.sourceExpected.before;
+  result.sourceEvidence.cardBeforeState = cardBeforeState;
+  result.rustInput = {
+    cardBefore: switcherooRustInput(cardBeforeState),
+    before: switcherooRustInput(before.sourceState),
+  };
+  return result;
 }
 
 function holdout(sourcePath, parserPath) {
