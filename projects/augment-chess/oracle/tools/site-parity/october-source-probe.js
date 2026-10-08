@@ -123,14 +123,14 @@ function probe(sourcePath, parserPath, style) {
   assert.ok(applied.draftColor !== before.draftColor || applied.draftPhase !== before.draftPhase || applied.mode !== before.mode,
     "Source draft action caused no phase or actor transition.");
   let play = null;
-  if (style === "normal") {
-    // The first offer is followed by the opponent's opening offer. Bound the
-    // source loop so a changed draft protocol cannot hang this probe.
-    for (let step = 0; step < 16 && vm.runInContext("state.mode==='draft'", context); step++) {
-      const accepted = vm.runInContext("(()=>{const color=state.draft.color,phase=state.draft.phase,card=state.draft.choices[0];if(!card)return false;const ok=finishDraft(card,null,{auto:true});if(ok)completeDraftStep(color,phase);return ok;})()", context, { timeout: 15000 });
+  {
+    // Continue source-provided choices to play. Grand has more picks than the
+    // two opening decisions in normal/chaos; the bound catches protocol drift.
+    for (let step = 0; step < 32 && vm.runInContext("state.mode==='draft'", context); step++) {
+      const accepted = vm.runInContext("(()=>{const color=state.draft.color,phase=state.draft.phase,grand=isGrandDraftState(),chaos=isChaosDraftState();let ok;if(chaos){const bundle=chaosDraftBundles()[0];if(!bundle)return false;ok=finishChaosDraftBundle({index:bundle.index},{auto:true});}else{const card=grand?grandAvailableCardsForColor(color)[0]:state.draft.choices[0];if(!card)return false;ok=finishDraft(card,null,{auto:true});}if(ok){if(grand)completeGrandDraftStep(color,state.draft.pickIndex);else completeDraftStep(color,phase);}return ok;})()", context, { timeout: 15000 });
       assert.equal(accepted, true, "Source failed to complete its own opening draft.");
     }
-    assert.equal(vm.runInContext("state.mode", context), "play", "Opening draft did not reach play within 16 decisions.");
+    assert.equal(vm.runInContext("state.mode", context), "play", "Opening draft did not reach play within 32 decisions.");
     const visibleBefore = JSON.parse(vm.runInContext("JSON.stringify(Object.fromEntries(['white','black'].map(viewer=>[viewer,state.board.flatMap((row,r)=>row.map((piece,c)=>piece&&pieceVisibleToColorAt(piece,r,c,viewer,state.board)?{row:r,col:c,type:piece.type,color:piece.color}:null)).filter(Boolean)])))", context, { timeout: 15000 }));
     const actions = JSON.parse(vm.runInContext("JSON.stringify(collectValidAiActions(state.turn,{includeCards:true,exhaustiveCards:false}))", context, { timeout: 15000 }));
     assert.ok(actions.length > 0 && actions.length <= 100000, "Source legal action count is outside probe budget.");

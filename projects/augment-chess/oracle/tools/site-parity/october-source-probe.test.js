@@ -23,6 +23,22 @@ function game() {
   return context;
 }
 
+function syntheticGrantActions(context, id) {
+  context.__cardId = id;
+  assert.equal(read(context, "addCardToPlayerDeck(state.turn,CARD_BY_ID.get(__cardId))").ok, true);
+  const actions = read(context, "collectValidAiActions(state.turn,{includeCards:true,exhaustiveCards:true}).filter(a=>a.type==='card'&&a.cardId===__cardId)");
+  assert.ok(actions.length > 0, `No source card action for ${id}.`);
+  return actions;
+}
+
+function applyCardAction(context, id, select = actions => actions[0]) {
+  const actions = syntheticGrantActions(context, id);
+  context.__action = select(actions);
+  assert.ok(context.__action, `No matching source card target for ${id}.`);
+  assert.equal(read(context, "applyAiAction(__action)").ok, true);
+  assert.equal(run(context, "playerDeck(state.turn).find(card=>card?.id===__cardId)?.used"), true);
+}
+
 test("source digest rejects an altered bundle", () => {
   assert.throws(() => loadSource(parser, parser), /October source SHA-256 mismatch/);
 });
@@ -32,6 +48,9 @@ for (const style of ["normal", "chaos", "grand"]) {
     const result = probe(source, parser, style);
     assert.equal(result.applied.ok, true);
     assert.ok(result.before.choices.length > 0);
+    assert.equal(result.play.outcome.ok, true);
+    assert.equal(result.play.after.moveCount, 1);
+    assert.equal(result.play.after.turn, "black");
   });
 }
 
@@ -47,13 +66,13 @@ test("normal source move advances the turn; invalid source action is rejected", 
   assert.equal(run(context, "state.moveCount"), 1);
 });
 
-// The following fixtures invoke original source rule functions on a normally
-// initialized board. Card ownership is bypassed, so these are synthetic card
-// effect fixtures and do not prove deck binding or legal card action admission.
+// The following fixtures use original source grant, action enumeration, binding,
+// and application on a normally initialized board. Acquisition is synthetic:
+// they do not prove the card was offered by a real draft at this turn.
 test("switcheroo source effect enables a legal king-pawn swap with both identities retained", () => {
   const context = game();
   const original = read(context, "({king:state.board[7][4].id,pawn:state.board[6][0].id})");
-  assert.equal(read(context, "switcheroo()").ok, true);
+  applyCardAction(context, "switcheroo");
   const action = read(context, "collectValidAiActions('white',{includeCards:false,exhaustiveCards:false}).find(a=>a.move?.switcherooMove&&a.move.row===6&&a.move.col===0)");
   assert.ok(action);
   context.__action = action;
@@ -64,7 +83,7 @@ test("switcheroo source effect enables a legal king-pawn swap with both identiti
 
 test("holdout source effect promotes at the 28 shared-turn boundary", () => {
   const context = game();
-  assert.equal(read(context, "holdout({row:6,col:0})").ok, true);
+  applyCardAction(context, "holdout", actions => actions.find(action => action.target?.row === 6 && action.target?.col === 0));
   assert.equal(run(context, "state.board[6][0].holdoutPromotion.readyTurn"), 28);
   run(context, "state.turnsTaken={white:27,black:27}");
   assert.equal(run(context, "resolveHoldoutPromotions('white')"), 0);
@@ -77,7 +96,7 @@ test("holdout source effect promotes at the 28 shared-turn boundary", () => {
 test("chimera source rejects a knight, accepts a queen, and enumerates source RNG outcomes", () => {
   const context = game();
   assert.equal(read(context, "chimera({row:7,col:1})").ok, false);
-  assert.equal(read(context, "chimera({row:7,col:3})").ok, true);
+  applyCardAction(context, "chimera");
   assert.equal(run(context, "state.board[7][3].chimera"), true);
   const types = read(context, "chimeraMajorTypes(state)");
   assert.ok(types.length > 1);
@@ -94,7 +113,7 @@ test("monster source timing fires only after positive multiples of three half-mo
   const context = game();
   assert.deepEqual(read(context, "[0,1,2,3,4,5,6].map(n=>monsterMoveDue(state,n,'white'))"),
     [false, false, false, true, false, false, true]);
-  assert.equal(read(context, "monsterRule()").ok, true);
+  applyCardAction(context, "monster");
   assert.equal(read(context, "state.board.flat().filter(p=>p?.type==='monster').length"), 1);
 });
 
@@ -105,7 +124,7 @@ test("spawned monster moves automatically after the third applied half-move", ()
     assert.equal(read(context, "applyAiAction(__action)").ok, true);
   }
   assert.equal(run(context, "state.moveCount"), 2);
-  assert.equal(read(context, "monsterRule()").ok, true);
+  applyCardAction(context, "monster");
   const before = read(context, "state.board.flatMap((row,r)=>row.map((p,c)=>p?.type==='monster'?{row:r,col:c,id:p.id}:null).filter(Boolean))");
   context.__action = read(context, "collectValidAiActions(state.turn,{includeCards:false,exhaustiveCards:false}).find(a=>a.type==='move')");
   assert.equal(read(context, "applyAiAction(__action)").ok, true);
@@ -119,7 +138,7 @@ test("spawned monster moves automatically after the third applied half-move", ()
 test("reaper source effect and allied-capture filter", () => {
   const context = game();
   assert.equal(read(context, "reaper({row:7,col:1})").ok, false);
-  assert.equal(read(context, "reaper({row:7,col:3})").ok, true);
+  applyCardAction(context, "reaper");
   assert.equal(run(context, "state.board[7][3].type"), "reaper");
   assert.equal(run(context, "reaperCaptureTarget(state)"), 2);
   assert.deepEqual(read(context, "[['white','white','black'],['white','black','white'],['white','white','white']].map(([a,b,c])=>reaperSoulCountsCapture(a,b,c,state))"),
