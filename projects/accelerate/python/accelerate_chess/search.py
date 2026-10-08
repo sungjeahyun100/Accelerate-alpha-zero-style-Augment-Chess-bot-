@@ -8,6 +8,7 @@ and all legal actions, UI intent resolution and game transitions stay native.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from contextlib import contextmanager, nullcontext
 import hashlib
 import json
 import math
@@ -503,15 +504,29 @@ def _bind_source_public_intent(position: Any, intent: Mapping[str, Any]):
     return action
 
 
-def _stream(position: Any, limit: int, maximum: int):
-    stream = position.action_stream()
+def _stream(position: Any, limit: int, maximum: int, profile_page=None, profile_open=None):
+    if profile_open is None:
+        stream = position.action_stream()
+    else:
+        open_started = time.perf_counter()
+        try:
+            stream = position.action_stream()
+        finally:
+            profile_open(time.perf_counter() - open_started)
     # Public display aliases may drain from the cursor without examining a
     # new source candidate. Preserve that count and bound returned results too.
     examined, returned = 0, 0
     max_results = maximum
     while examined < maximum and returned < max_results:
         requested = min(limit, maximum - examined, max_results - returned)
-        page = stream.next_page(requested)
+        if profile_page is None:
+            page = stream.next_page(requested)
+        else:
+            page_started = time.perf_counter()
+            try:
+                page = stream.next_page(requested)
+            finally:
+                page_seconds = time.perf_counter() - page_started
         if not isinstance(page, Mapping) or set(page) != {"actions", "exhausted", "examined"}:
             raise InformationMismatchError("native action stream returned an invalid page")
         actions, exhausted = page["actions"], page["exhausted"]
@@ -525,6 +540,8 @@ def _stream(position: Any, limit: int, maximum: int):
             raise InformationMismatchError("native action stream returned an invalid page: no progress (no candidates examined, no actions returned, and not exhausted)")
         examined += page_examined
         returned += len(actions)
+        if profile_page is not None:
+            profile_page(requested, page_examined, len(actions), exhausted, page_seconds)
         yield actions, exhausted
         if exhausted:
             return
@@ -981,6 +998,116 @@ class _SearchState:
     partial: bool = False
     inference_batches: int = 0
     max_inference_batch: int = 0
+    profile: Any = None
+    current_detail: Any = None
+    active_details: Any = None
+
+
+class _MctsProfile:
+    """Run-local, bounded, numeric-only diagnostic data."""
+    TIMES = ("observe", "public_projection_verify", "action_stream", "intent_projection",
+             "allowed_filter", "canonical_intent", "edge_lookup_update", "bind", "observation_ir",
+             "encode", "batch_build", "inference", "postprocess", "apply",
+             "puct_selection", "backup")
+    COUNTS = ("action_stream_pages", "actions_examined", "actions_returned",
+              "bind_count", "apply_count", "observe_count")
+    MAX_SIMULATIONS = 16
+    MAX_DEPTH = 8
+    MAX_PAGES = 16
+
+    def __init__(self, requested):
+        self.started = time.perf_counter()
+        self.data = {"version": "mcts-profile-v1", "requested_iterations": requested,
+                     "simulations": [], "batches": [], "detail_limits": {"simulations": self.MAX_SIMULATIONS,
+                     "depth": self.MAX_DEPTH, "pages_per_depth": self.MAX_PAGES},
+                     "details_omitted": 0, "timed_out_during": None}
+        self.data.update({name + "_seconds": 0. for name in self.TIMES})
+        self.data.update({name: 0 for name in self.COUNTS})
+        self.current = None
+        self.phase = None
+        self.last_phase = None
+        self.nodes_seen = {}
+        self.node_visits = {}
+        self.inferred_sets = set()
+
+    def begin(self, index, state):
+        detail = {"simulation_index": index, "completed": False, "wall_seconds": 0.,
+                  "execution_seconds": 0.,
+                  "max_depth_reached": 0, "nodes_created": 0, "edges_created": 0,
+                  "inference_requests": 0, "apply_count": 0, "observe_count": 0,
+                  "stop_reason": None, "depths": [], "_started": time.perf_counter()}
+        if len(self.data["simulations"]) < self.MAX_SIMULATIONS:
+            self.data["simulations"].append(detail)
+        else:
+            self.data["details_omitted"] += 1
+        return detail
+
+    def depth(self, simulation, index):
+        simulation["max_depth_reached"] = max(simulation["max_depth_reached"], index)
+        detail = {"depth": index, "pages": []}
+        if len(simulation["depths"]) < self.MAX_DEPTH:
+            simulation["depths"].append(detail)
+        return detail
+
+    @contextmanager
+    def measure(self, name, detail=None):
+        prior = self.phase
+        self.phase = name
+        started = time.perf_counter()
+        try:
+            yield
+        finally:
+            seconds = time.perf_counter() - started
+            key = name + "_seconds"
+            self.data[key] += seconds
+            if detail is not None:
+                detail[key] = detail.get(key, 0.) + seconds
+            self.last_phase = name
+            self.phase = prior
+
+    def count(self, name, amount=1, detail=None):
+        self.data[name] += amount
+        if detail is not None:
+            detail[name] = detail.get(name, 0) + amount
+
+    def page(self, detail, requested, examined, returned, exhausted, seconds):
+        self.data["action_stream_seconds"] += seconds
+        detail["action_stream_seconds"] = detail.get("action_stream_seconds", 0.) + seconds
+        self.last_phase = "action_stream"
+        self.count("action_stream_pages", detail=detail)
+        self.count("actions_examined", examined, detail)
+        self.count("actions_returned", returned, detail)
+        detail["candidate_generation_seconds"] = detail.get("candidate_generation_seconds", 0.) + seconds
+        if len(detail["pages"]) < self.MAX_PAGES:
+            detail["pages"].append({"requested_limit": requested, "examined": examined,
+                                    "returned": returned, "exhausted": exhausted,
+                                    "wall_seconds": seconds})
+
+    def finish_simulation(self, detail, state, completed):
+        detail["wall_seconds"] = time.perf_counter() - detail.pop("_started")
+        detail["completed"] = completed
+        if not completed:
+            detail["stop_reason"] = state.stop
+
+    def finish(self, state):
+        self.data.update(wall_seconds=time.perf_counter() - self.started,
+                         search_wall_seconds=time.perf_counter() - self.started,
+                         completed_simulations=state.completed, nodes=len(state.nodes),
+                         edges=state.edges, inference_batches=state.inference_batches,
+                         max_inference_batch=state.max_inference_batch,
+                         stop_reason=state.stop)
+        if state.stop in ("elapsed", "cancelled"):
+            self.data["timed_out_during"] = self.phase or self.last_phase
+        return self.data
+
+    def batch(self, state, count):
+        detail = {"batch_index": state.inference_batches, "requests": count}
+        if len(self.data["batches"]) < self.MAX_SIMULATIONS:
+            self.data["batches"].append(detail)
+        for simulation in state.active_details:
+            if simulation["depths"]:
+                simulation["depths"][-1]["batch_index"] = detail["batch_index"]
+        return detail
 
 
 class _SimulationStopped(Exception):
@@ -1007,6 +1134,7 @@ class SearchResult:
     model_sha256: str | None = None
     inference_batches: int = 0
     max_inference_batch: int = 0
+    mcts_profile: dict[str, Any] | None = None
 
     def bind(self, environment):
         """The caller's execution boundary; no actual state enters search.
@@ -1059,7 +1187,7 @@ def _allowed(intent: Mapping[str, Any], observation: Mapping[str, Any]) -> bool:
 
 class InformationSetSearch:
     """Availability-count PUCT, sampled chance, and finite progressive widening."""
-    def __init__(self, encoder: PublicEncoder, evaluator: ProductionEvaluator, *, limits: SearchLimits = SearchLimits(), clock: Callable[[], float] | None = None):
+    def __init__(self, encoder: PublicEncoder, evaluator: ProductionEvaluator, *, limits: SearchLimits = SearchLimits(), clock: Callable[[], float] | None = None, profile: bool = False):
         if not isinstance(evaluator, ProductionEvaluator):
             raise TypeError("production search requires the explicit native Rust ProductionEvaluator")
         if clock is not None and not callable(clock):
@@ -1070,6 +1198,7 @@ class InformationSetSearch:
             raise ValueError("production search requires an explicit public-decision-intent-v1 model contract")
         self.encoder, self.evaluator, self.limits = encoder, evaluator, limits
         self._clock = clock if clock is not None else time.monotonic
+        self.profile = profile
 
     def _verify_public(self, observation):
         return _public(observation)
@@ -1083,9 +1212,20 @@ class InformationSetSearch:
         elements = count * (64 * spec.board_channels + spec.condition_dim + actions * spec.action_dim)
         if elements > self.limits.max_inference_elements:
             raise SearchBudgetError("requested leaf batch exceeds the declared inference input budget")
-        batch = batch_positions([self.encoder.encode(observation, intents, belief_summary=summary)
-                                 for observation, intents, summary in requests])
-        logits, values = self.evaluator.evaluate(batch.board, batch.condition, batch.action_features)
+        profile = state.profile
+        batch_detail = profile.batch(state, count) if profile else None
+        with profile.measure("encode", batch_detail) if profile else nullcontext():
+            positions = [self.encoder.encode(observation, intents, belief_summary=summary)
+                         for observation, intents, summary in requests]
+        with profile.measure("batch_build", batch_detail) if profile else nullcontext():
+            batch = batch_positions(positions)
+        with profile.measure("inference", batch_detail) if profile else nullcontext():
+            logits, values = self.evaluator.evaluate(batch.board, batch.condition, batch.action_features)
+        with profile.measure("postprocess", batch_detail) if profile else nullcontext():
+            return self._postprocess_legacy(requests, state, batch, logits, values, count, actions)
+
+    @staticmethod
+    def _postprocess_legacy(requests, state, batch, logits, values, count, actions):
         if logits.shape != (count, actions) or values.shape != (count, 1) or not np.isfinite(logits).all() or not np.isfinite(values).all() or np.abs(values).max() > 1.00001:
             raise InformationMismatchError("native evaluator returned invalid policy/value")
         state.inference_batches += 1
@@ -1120,19 +1260,38 @@ class InformationSetSearch:
         backpropagate values. No worker thread or extra rules implementation is
         involved in preparing a batch of independent particle simulations.
         """
+        profile = state.profile
+        simulation_detail = state.current_detail
+        completed = False
         viewer, root_key = root["viewer"], root["informationStateKey"]
-        position = belief.draw()
-        if _actor(position) != viewer or self._verify_public(position.observe(viewer)) != root:
-            raise InformationMismatchError("root belief viewer must equal the actual decision actor and match the public frame")
         path: list[tuple[_Node, _Edge]] = []
         try:
-            for _ in range(self.limits.max_depth):
+            position = belief.draw()
+            if _actor(position) != viewer:
+                raise InformationMismatchError("root belief viewer must equal the actual decision actor and match the public frame")
+            with profile.measure("observe") if profile else nullcontext():
+                root_observation = position.observe(viewer)
+            if profile:
+                profile.count("observe_count")
+                simulation_detail["observe_count"] += 1
+            with profile.measure("public_projection_verify") if profile else nullcontext():
+                verified_root = self._verify_public(root_observation)
+            if verified_root != root:
+                raise InformationMismatchError("root belief viewer must equal the actual decision actor and match the public frame")
+            for depth_index in range(self.limits.max_depth):
                 check()
+                depth = profile.depth(simulation_detail, depth_index) if profile else None
                 actor = _actor(position)
                 value, value_actor = self._outcome(position, actor), actor
                 if value is not None:
                     break
-                observation = self._verify_public(position.observe(actor))
+                with profile.measure("observe", depth) if profile else nullcontext():
+                    raw_observation = position.observe(actor)
+                if profile:
+                    profile.count("observe_count", detail=depth)
+                    simulation_detail["observe_count"] += 1
+                with profile.measure("public_projection_verify", depth) if profile else nullcontext():
+                    observation = self._verify_public(raw_observation)
                 if observation["viewer"] != actor:
                     raise InformationMismatchError("neural observation viewer must be the decision actor")
                 key = observation["informationStateKey"]
@@ -1142,46 +1301,91 @@ class InformationSetSearch:
                         _, value = yield observation, [], belief.summary if key == root_key else None
                         break
                     state.nodes[key] = _Node(actor)
+                    if profile:
+                        simulation_detail["nodes_created"] += 1
                 node = state.nodes[key]
                 new = node.visits == 0
+                if profile:
+                    if key not in profile.nodes_seen and len(profile.nodes_seen) < profile.MAX_SIMULATIONS * profile.MAX_DEPTH:
+                        profile.nodes_seen[key] = len(profile.nodes_seen)
+                    depth["node_id"] = profile.nodes_seen.get(key)
+                    depth["node_visit_number"] = profile.node_visits.get(key, 0) + 1
+                    if depth["node_id"] is not None:
+                        profile.node_visits[key] = depth["node_visit_number"]
+                    depth["node_visits_before"] = node.visits
+                    depth["existing_edge_count"] = len(node.edges)
+                    depth["action_stream_reopened"] = depth["node_visit_number"] > 1
                 if node.actor != actor:
                     raise InformationMismatchError("information node actor identity changed")
                 width = min(self.limits.max_candidates, max(1, math.ceil(self.limits.widening_constant * (node.visits + 1)**self.limits.widening_exponent)))
+                if profile:
+                    depth["target_width"] = width
+                    depth["page_size_requested"] = self.limits.page_size
                 available: dict[str, Any] = {}
                 intents: dict[str, dict[str, Any]] = {}
                 exhausted, capped = False, False
                 bind_streamed = getattr(belief.factory, "bind_streamed_public_intent", None)
-                for actions, page_exhausted in _stream(position, self.limits.page_size, self.limits.max_examined_actions):
+                page_callback = (lambda requested, examined, returned, exhausted, seconds:
+                                 profile.page(depth, requested, examined, returned, exhausted, seconds)) if profile else None
+                def opened(seconds):
+                    profile.data["action_stream_seconds"] += seconds
+                    depth["action_stream_seconds"] = depth.get("action_stream_seconds", 0.) + seconds
+                    depth["candidate_generation_seconds"] = depth.get("candidate_generation_seconds", 0.) + seconds
+                    profile.last_phase = "action_stream"
+                for actions, page_exhausted in _stream(position, self.limits.page_size,
+                        self.limits.max_examined_actions, page_callback, opened if profile else None):
                     check()
                     for action in actions:
-                        intent = _intent(action)
-                        intent_key = canonical_json(intent)
-                        if not _allowed(intent, observation) or intent_key in available:
+                        with profile.measure("intent_projection", depth) if profile else nullcontext():
+                            intent = _intent(action)
+                        with profile.measure("canonical_intent", depth) if profile else nullcontext():
+                            intent_key = canonical_json(intent)
+                        with profile.measure("allowed_filter", depth) if profile else nullcontext():
+                            allowed = _allowed(intent, observation)
+                        if not allowed or intent_key in available:
                             continue
-                        if intent_key not in node.edges:
-                            if len(node.edges) >= width:
-                                capped = True
-                                continue
-                            if state.edges >= self.limits.max_edges:
-                                state.stop, state.partial, capped = "edges", True, True
-                                continue
-                            node.edges[intent_key] = _Edge(intent)
-                            state.edges += 1
-                        bound = (bind_streamed(position, action, intent)
-                                 if bind_streamed is not None
-                                 else _bind_source_public_intent(position, intent))
-                        if _intent(bound) != intent:
-                            raise InformationMismatchError("native host changed the public intent fields or ordered selections")
+                        with profile.measure("edge_lookup_update", depth) if profile else nullcontext():
+                            if intent_key not in node.edges:
+                                if len(node.edges) >= width:
+                                    capped = True
+                                    continue
+                                if state.edges >= self.limits.max_edges:
+                                    state.stop, state.partial, capped = "edges", True, True
+                                    continue
+                                node.edges[intent_key] = _Edge(intent)
+                                state.edges += 1
+                                if profile:
+                                    simulation_detail["edges_created"] += 1
+                        with profile.measure("bind", depth) if profile else nullcontext():
+                            bound = (bind_streamed(position, action, intent)
+                                     if bind_streamed is not None
+                                     else _bind_source_public_intent(position, intent))
+                            if _intent(bound) != intent:
+                                raise InformationMismatchError("native host changed the public intent fields or ordered selections")
+                        if profile:
+                            profile.count("bind_count", detail=depth)
                         available[intent_key] = bound
                         intents[intent_key] = intent
                     exhausted = page_exhausted
                     if capped or len(available) >= width:
                         break
                 covered = exhausted and not capped
+                if profile:
+                    depth["candidate_cap_hit"] = capped
+                    depth["stream_exhausted"] = exhausted
+                    depth["new_edges_added"] = len(node.edges) - depth["existing_edge_count"]
+                    depth["candidate_count"] = len(available)
                 if key == root_key:
                     state.root_exhausted &= covered
                 state.partial |= not covered
                 ordered = sorted(available)
+                if profile:
+                    candidate_set = (depth["node_id"], tuple(ordered))
+                    depth["inference_repeated"] = candidate_set in profile.inferred_sets
+                    if (depth["node_id"] is not None and len(profile.inferred_sets)
+                            < profile.MAX_SIMULATIONS * profile.MAX_DEPTH):
+                        profile.inferred_sets.add(candidate_set)
+                    simulation_detail["inference_requests"] += 1
                 # The belief was conditioned on the root public trace only.
                 # A simulated child has a longer public history, but no child
                 # posterior has been reconstructed for it.
@@ -1199,13 +1403,18 @@ class InformationSetSearch:
                     break
                 if new and path:
                     break
-                selected = max(ordered, key=lambda item: (
-                    node.edges[item].q + self.limits.cpuct * (node.edges[item].prior_sum / node.edges[item].availability)
-                    * math.sqrt(node.edges[item].availability) / (1 + node.edges[item].visits + node.edges[item].in_flight), item))
+                with profile.measure("puct_selection", depth) if profile else nullcontext():
+                    selected = max(ordered, key=lambda item: (
+                        node.edges[item].q + self.limits.cpuct * (node.edges[item].prior_sum / node.edges[item].availability)
+                        * math.sqrt(node.edges[item].availability) / (1 + node.edges[item].visits + node.edges[item].in_flight), item))
                 edge = node.edges[selected]
                 edge.in_flight += 1
                 path.append((node, edge))
-                position = position.apply(available[selected]).position
+                with profile.measure("apply", depth) if profile else nullcontext():
+                    position = position.apply(available[selected]).position
+                if profile:
+                    profile.count("apply_count", detail=depth)
+                    simulation_detail["apply_count"] += 1
                 # Independent native particle RNG samples future chance;
                 # alternative random outcomes are never maximized.
             else:
@@ -1216,13 +1425,17 @@ class InformationSetSearch:
                 if value is None:
                     _, value = yield self._verify_public(position.observe(value_actor)), [], None
             check()
-            for node, edge in reversed(path):
-                edge.visits += 1
-                edge.value_sum += value if node.actor == value_actor else -value
+            with profile.measure("backup") if profile else nullcontext():
+                for node, edge in reversed(path):
+                    edge.visits += 1
+                    edge.value_sum += value if node.actor == value_actor else -value
             state.completed += 1
+            completed = True
         finally:
             for _, edge in path:
                 edge.in_flight -= 1
+            if profile:
+                profile.finish_simulation(simulation_detail, state, completed)
 
     def run(self, belief: ParticleBelief, *, cancelled: Callable[[], bool] | None = None) -> SearchResult:
         if not isinstance(belief, ParticleBelief):
@@ -1238,6 +1451,8 @@ class InformationSetSearch:
         root = belief.tracker.latest
         root_key = root["informationStateKey"]
         state = _SearchState()
+        profile = _MctsProfile(self.limits.iterations) if self.profile else None
+        state.profile = profile
         started = self._clock() if self.limits.elapsed_ms is not None else None
         cancelled = cancelled or (lambda: False)
 
@@ -1250,35 +1465,65 @@ class InformationSetSearch:
                 raise _SimulationStopped()
 
         issued = 0
-        while issued < self.limits.iterations:
-            active = []
-            try:
-                check()
-                count = min(self.limits.leaf_batch_size, self.limits.iterations - issued)
-                issued += count
-                for _ in range(count):
-                    simulation = self._simulation(belief, root, state, check)
-                    active.append((simulation, next(simulation)))
-                while active:
+        try:
+            while issued < self.limits.iterations:
+                active = []
+                details = {}
+                try:
                     check()
-                    outputs = self._evaluate_many([request for _, request in active], state)
-                    next_active = []
-                    for (simulation, _), output in zip(active, outputs):
+                    count = min(self.limits.leaf_batch_size, self.limits.iterations - issued)
+                    issued += count
+                    for _ in range(count):
+                        simulation = self._simulation(belief, root, state, check)
+                        if profile:
+                            detail = profile.begin(issued - count + len(active), state)
+                            details[simulation] = detail
+                            state.current_detail = detail
+                        resume_started = time.perf_counter() if profile else None
                         try:
-                            next_active.append((simulation, simulation.send(output)))
-                        except StopIteration:
-                            pass
-                    active = next_active
-            except _SimulationStopped:
-                break
-            finally:
-                for simulation, _ in active:
-                    simulation.close()
-            if state.stop != "iterations":
-                break
+                            request = next(simulation)
+                        finally:
+                            if profile:
+                                detail["execution_seconds"] += time.perf_counter() - resume_started
+                        active.append((simulation, request))
+                    while active:
+                        check()
+                        if profile:
+                            state.active_details = [details[simulation] for simulation, _ in active]
+                        outputs = self._evaluate_many([request for _, request in active], state)
+                        next_active = []
+                        for (simulation, _), output in zip(active, outputs):
+                            try:
+                                if profile:
+                                    state.current_detail = details[simulation]
+                                    resume_started = time.perf_counter()
+                                try:
+                                    request = simulation.send(output)
+                                finally:
+                                    if profile:
+                                        details[simulation]["execution_seconds"] += time.perf_counter() - resume_started
+                                next_active.append((simulation, request))
+                            except StopIteration:
+                                pass
+                        active = next_active
+                except _SimulationStopped:
+                    break
+                finally:
+                    for simulation, _ in active:
+                        simulation.close()
+                if state.stop != "iterations":
+                    break
+        except Exception as error:
+            if profile:
+                error.mcts_profile = profile.finish(state)
+            raise
+        profile_data = profile.finish(state) if profile else None
         root_node = state.nodes.get(root_key)
         if root_node is None or not root_node.edges or not any(edge.visits for edge in root_node.edges.values()):
-            raise SearchBudgetError(f"no public decision was evaluated before {state.stop}")
+            error = SearchBudgetError(f"no public decision was evaluated before {state.stop}")
+            if profile:
+                error.mcts_profile = profile_data
+            raise error
         selected = max(root_node.edges, key=lambda item: (root_node.edges[item].visits, root_node.edges[item].q, item))
         total = sum(edge.visits for edge in root_node.edges.values())
         policy = tuple({"action_key": key, "intent": _copy(edge.intent), "visits": edge.visits,
@@ -1288,13 +1533,14 @@ class InformationSetSearch:
                             state.root_exhausted, state.partial, len(state.nodes), state.edges, self.encoder.spec.digest,
                             belief_summary=_copy(belief.summary),
                             model_sha256=getattr(getattr(self.evaluator, "session", None), "model_sha256", None),
-                            inference_batches=state.inference_batches, max_inference_batch=state.max_inference_batch)
+                            inference_batches=state.inference_batches, max_inference_batch=state.max_inference_batch,
+                            mcts_profile=profile_data)
 
 
 class TypedInformationSetSearch(InformationSetSearch):
     """The same information-set tree with the explicit typed v3 model input."""
 
-    def __init__(self, encoder, evaluator: ProductionEvaluator, *, limits: SearchLimits = SearchLimits(), clock: Callable[[], float] | None = None):
+    def __init__(self, encoder, evaluator: ProductionEvaluator, *, limits: SearchLimits = SearchLimits(), clock: Callable[[], float] | None = None, profile: bool = False):
         from .ir import TypedEncoder
 
         if not isinstance(encoder, TypedEncoder) or not isinstance(evaluator, ProductionEvaluator):
@@ -1307,6 +1553,7 @@ class TypedInformationSetSearch(InformationSetSearch):
             raise TypeError("search clock must be callable")
         self.encoder, self.evaluator, self.limits = encoder, evaluator, limits
         self._clock = clock if clock is not None else time.monotonic
+        self.profile = profile
 
     def _verify_public(self, observation):
         return _public(observation, self.encoder.spec)
@@ -1319,10 +1566,14 @@ class TypedInformationSetSearch(InformationSetSearch):
 
     def _evaluate_many(self, requests, state):
         from .ir import ObservationIR, batch_typed_positions
-
-        positions = [self.encoder.encode(ObservationIR.from_public(observation, self.encoder.spec,
-                        belief_summary=summary), intents)
-                     for observation, intents, summary in requests]
+        profile = state.profile
+        batch_detail = profile.batch(state, len(requests)) if profile else None
+        positions = []
+        for observation, intents, summary in requests:
+            with profile.measure("observation_ir", batch_detail) if profile else nullcontext():
+                ir = ObservationIR.from_public(observation, self.encoder.spec, belief_summary=summary)
+            with profile.measure("encode", batch_detail) if profile else nullcontext():
+                positions.append(self.encoder.encode(ir, intents))
         if not positions:
             raise InformationMismatchError("typed leaf batch is empty")
         family = self.evaluator.architecture_family
@@ -1348,8 +1599,9 @@ class TypedInformationSetSearch(InformationSetSearch):
             raise SearchBudgetError("requested typed leaf batch exceeds the declared inference element budget")
         if estimated_bytes > min(self.limits.max_inference_bytes, self.encoder.spec.max_input_bytes):
             raise SearchBudgetError("requested typed leaf batch exceeds the declared inference input budget")
-        batch = batch_typed_positions(positions)
-        inputs = dict(zip(order, batch.as_family_inputs(family), strict=True))
+        with profile.measure("batch_build", batch_detail) if profile else nullcontext():
+            batch = batch_typed_positions(positions)
+            inputs = dict(zip(order, batch.as_family_inputs(family), strict=True))
         if not all(isinstance(array, np.ndarray) for array in inputs.values()):
             raise InformationMismatchError("typed encoder returned a non-array model input")
         if sum(array.size for array in inputs.values()) > self.limits.max_inference_elements:
@@ -1357,7 +1609,13 @@ class TypedInformationSetSearch(InformationSetSearch):
         if sum(array.nbytes for array in inputs.values()) > min(self.limits.max_inference_bytes,
                                                                  self.encoder.spec.max_input_bytes):
             raise SearchBudgetError("requested typed leaf batch exceeds the declared inference input budget")
-        logits, values = self.evaluator.evaluate_typed(inputs)
+        with profile.measure("inference", batch_detail) if profile else nullcontext():
+            logits, values = self.evaluator.evaluate_typed(inputs)
+        with profile.measure("postprocess", batch_detail) if profile else nullcontext():
+            return self._postprocess_typed(requests, state, batch, logits, values)
+
+    @staticmethod
+    def _postprocess_typed(requests, state, batch, logits, values):
         count = len(requests)
         candidates = batch.candidate_mask
         if (candidates.dtype != np.bool_ or candidates.shape[0] != count

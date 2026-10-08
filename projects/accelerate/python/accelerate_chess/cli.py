@@ -101,12 +101,14 @@ def _search(args, spec, manifest, backend):
                           leaf_batch_size=args.leaf_batch_size)
     evaluator = ProductionEvaluator(manifest, spec, backend, threads=args.threads)
     if args.model_family == "legacy-resnet":
-        return InformationSetSearch(PublicEncoder(spec), evaluator, limits=limits)
+        return InformationSetSearch(PublicEncoder(spec), evaluator, limits=limits,
+                                    profile=getattr(args, "mcts_profile", False))
     from .ir import TypedEncoder
 
     if evaluator.architecture_family != args.model_family:
         raise ValueError("typed manifest architecture differs from the explicit CLI family")
-    return TypedInformationSetSearch(TypedEncoder(spec), evaluator, limits=limits)
+    return TypedInformationSetSearch(TypedEncoder(spec), evaluator, limits=limits,
+                                     profile=getattr(args, "mcts_profile", False))
 
 
 def _typed_model(args, spec):
@@ -214,7 +216,10 @@ def choose(args, root, spec, cancelled):
     belief = ParticleBelief(tracker, factory, seed=args.belief_seed,
               limits=BeliefLimits(particles=args.particles, proposals=args.proposals, elapsed_ms=args.belief_ms), cancelled=cancelled)
     search = _search(args, spec, _manifest(args, root, spec), args.backend)
-    return asdict(search.run(belief, cancelled=cancelled))
+    result = asdict(search.run(belief, cancelled=cancelled))
+    if result["mcts_profile"] is None:
+        del result["mcts_profile"]
+    return result
 
 
 def _record_selfplay_failure(root, run_id, path, recorder, error, *, save_attempted, replay_saved):
@@ -451,6 +456,8 @@ def stage_sample(args, root, spec, cancelled):
                   "peak_rss_bytes": peak_rss_bytes(),
                   "gpu_memory_bytes": None,
                   "statistics": result["statistics"]}
+        if args.mcts_profile:
+            report["mcts_profiles"] = result["mcts_profiles"]
         if args.compare_full:
             # Same seed, model and search limits; use the staged wall budget for
             # the full arm. An unfinished full game remains explicitly unfinished.
@@ -787,6 +794,8 @@ def parser():
     staged.add_argument("--max-stage-actions", type=int, default=128)
     staged.add_argument("--capture-bias", type=float, default=2.)
     staged.add_argument("--iterations", type=int, default=8)
+    staged.add_argument("--mcts-profile", action="store_true",
+                        help="record bounded numeric MCTS timing diagnostics")
     staged.add_argument("--leaf-batch-size", type=int, default=2)
     staged.add_argument("--depth", type=int, default=4)
     staged.add_argument("--search-ms", type=int, default=1000)

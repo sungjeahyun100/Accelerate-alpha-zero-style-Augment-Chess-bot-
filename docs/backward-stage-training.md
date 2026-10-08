@@ -32,6 +32,16 @@ Student는 기존 information-set MCTS의 root visit 분포를 policy target으�
 각 실행에는 유한 action/search budget이 있다. 실패는 성공 dataset으로 저장하지 않고 reports/stage-sample-failure.json에 이유를 기록한다.
 source-provenance 재생은 각 원본 position revision, draft phase, 적용 후 revision 및 최종 공개 통계를 대조한다. end 요청에 완료된 middle provenance를 주면 먼저 재생한 뒤 그 상태에서 합법 행동으로 END 드래프트까지 이어 간다.
 
+## MCTS 진단 모드
+
+`stage-sample --mcts-profile`은 기본적으로 꺼져 있다. 켜면 root별 수치 진단을 성공 보고서의 `mcts_profiles` 또는 실패 보고서의 `search_diagnostics.mcts_profile`에 기록한다. 실패 시에도 완료된 simulation과 중단된 simulation을 구분한다. 자세한 simulation은 최대 16개, 각 simulation의 depth는 최대 8개, 각 depth의 page는 최대 16개만 저장한다. 집계 count와 시간은 이 상세 저장 한도와 관계없이 전체 root를 센다. node 식별자는 해당 root 안에서만 쓰는 정수다. 공개 intent와 비공개 상태·카드·난수 상태는 profile에 저장하지 않는다.
+
+`action_stream_seconds`는 Python에서 source stream 생성과 native `next_page` 호출을 감싼 시간이며, `candidate_generation_seconds`는 해당 depth에서 같은 호출을 합한 값이다. page의 `examined`와 `returned`는 native가 보고한 수치이고, `candidate_count`는 공개 필터와 중복 제거 뒤 해당 depth에서 선택 가능한 수다. `new_edges_added`는 tree에 새로 등록한 edge 수다. `action_stream_reopened`는 같은 정보 노드를 재방문해 stream을 다시 연 경우이고, `inference_repeated`는 같은 node와 정렬된 candidate key 집합을 다시 평가한 경우다. key 원문은 profile에 출력하지 않는다.
+
+`observe_seconds`는 `position.observe` 호출, `public_projection_verify_seconds`는 Python 공개 관측 검증·복사다. typed 평가의 `observation_ir_seconds`는 `ObservationIR.from_public`, `encode_seconds`는 `TypedEncoder.encode`, `batch_build_seconds`는 batch padding·입력 구성, `inference_seconds`는 evaluator 호출, `postprocess_seconds`는 결과 검사와 softmax를 포함한다. inference batch 시간은 `batches`에 기록하고 각 depth의 `batch_index`로 연결한다. 한 batch가 여러 simulation을 포함하면 그 시간을 simulation마다 복사해 합산하지 않는다. `wall_seconds`는 root 전체 경과 시간이고, simulation `wall_seconds`는 다른 generator가 실행되는 대기 시간도 포함한다. simulation `execution_seconds`는 해당 generator가 실제로 재개되어 실행된 시간이다. 겹치거나 포함된 시간을 단순히 더해 전체 시간으로 해석하지 않는다.
+
+`intent_projection_seconds`는 native action의 공개 intent 추출·검증이고, `canonical_intent_seconds`는 그 결과에 대한 `canonical_json` 호출이다. `allowed_filter_seconds`와 `edge_lookup_update_seconds`는 각각 공개 힌트 필터와 tree edge 조회·추가를 잰다.
+
 ## 측정, 위험과 확장
 
 stage-sample은 wall time, 생성 및 stage action 수, samples/s, transitions/s, MCTS nodes/sample, terminal/bootstrap 비율, teacher inference 횟수/시간, Linux peak RSS, piece count/type, king 위치, 공개 move/turn count와 합법 행동 수를 JSON으로 남긴다. --compare-full을 추가하면 같은 seed·모델·탐색 설정으로 기존 full selfplay를 staged 실행의 wall budget 동안 돌린다. full arm이 terminal에 닿지 못했다면 미완료를 그대로 기록한다. 이 방식은 wall budget을 맞추지만 동일 sample 수를 보장하지 않는다. GPU memory와 full arm 단독 peak RSS 계측은 아직 없다. 실측 전에는 속도 개선을 주장할 수 없다.

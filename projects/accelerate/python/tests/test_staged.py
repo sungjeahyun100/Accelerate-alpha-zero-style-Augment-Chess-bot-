@@ -55,6 +55,7 @@ def test_terminal_before_boundary_never_calls_teacher():
         result = staged.rollout_stage(position, trackers, staged.MIDDLE, Search(), teacher,
                                       {"gameStyle": "normal"})
     assert result["outcome"] == "terminal"
+    assert "mcts_profiles" not in result
     value.assert_not_called()
 
 
@@ -114,6 +115,27 @@ def test_teacher_waits_for_post_draft_card_choice():
                                       {"gameStyle": "normal"})
     assert len(result["boundary_actions"]) == 2
     assert value.call_args.args[0].step == 3
+
+
+def test_stage_failure_retains_partial_mcts_profile():
+    class StoppedSearch(Search):
+        limits = SimpleNamespace(iterations=4)
+
+        def run(self, *_args, **_kwargs):
+            return SimpleNamespace(stop_reason="elapsed", iterations=2, nodes=3, edges=17,
+                inference_batches=3, max_inference_batch=2,
+                mcts_profile={"completed_simulations": 2, "timed_out_during": "action_stream"})
+
+    position = Position()
+    trackers = {viewer: Tracker(position.observe(viewer)) for viewer in ("white", "black")}
+    teacher = SimpleNamespace(spec=SimpleNamespace(digest="spec"),
+                              architecture_family="mask-resnet")
+    with patch.object(staged, "NativeSourceFactory"), patch.object(staged, "ParticleBelief"):
+        with pytest.raises(ValueError, match="fixed iteration budget") as captured:
+            staged.rollout_stage(position, trackers, staged.MIDDLE, StoppedSearch(), teacher,
+                                {"gameStyle": "normal"})
+    assert captured.value.search_diagnostics["mcts_profile"] == {
+        "completed_simulations": 2, "timed_out_during": "action_stream"}
 
 
 def test_synthetic_end_assumption_cannot_precede_31():

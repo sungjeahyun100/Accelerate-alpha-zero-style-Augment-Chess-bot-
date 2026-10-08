@@ -22,6 +22,7 @@ from accelerate_chess.search import (BeliefLimits, InformationMismatchError, Inf
     MissingHistoryError, NativeSourceFactory, ParticleBelief, ParticleExhaustedError,
     PublicTracker, SearchBudgetError, SearchLimits, SourceCapabilityError, TransitionProposal,
     TypedInformationSetSearch, _SearchState, _allowed, _bind_source_public_intent, _stream)
+from accelerate_chess.search import _MctsProfile
 from test_ir import frame as v7_public_frame, source as v7_source
 from test_model_stack import observation_policy
 
@@ -727,6 +728,55 @@ def test_hidden_execution_flags_do_not_change_public_features_or_choice():
         InformationSetSearch(PublicEncoder(old), TestEvaluator(old))
 
 
+def test_mcts_profile_preserves_search_and_bounds_numeric_details():
+    contract = spec()
+    limits = SearchLimits(iterations=20, max_depth=2, elapsed_ms=None)
+    plain_evaluator, profiled_evaluator = TestEvaluator(contract), TestEvaluator(contract)
+    plain = InformationSetSearch(PublicEncoder(contract), plain_evaluator, limits=limits).run(belief())
+    profiled = InformationSetSearch(PublicEncoder(contract), profiled_evaluator,
+                                    limits=limits, profile=True).run(belief())
+    assert profiled.mcts_profile is not None and plain.mcts_profile is None
+    assert replace(profiled, mcts_profile=None) == plain
+    assert len(plain_evaluator.calls) == len(profiled_evaluator.calls)
+    for first, second in zip(plain_evaluator.calls, profiled_evaluator.calls):
+        for left, right in zip(first, second):
+            np.testing.assert_array_equal(left, right)
+    diagnostics = profiled.mcts_profile
+    assert diagnostics["completed_simulations"] == limits.iterations
+    assert diagnostics["requested_iterations"] == limits.iterations
+    assert diagnostics["nodes"] == profiled.nodes and diagnostics["edges"] == profiled.edges
+    assert diagnostics["inference_batches"] == profiled.inference_batches
+    assert diagnostics["action_stream_pages"] >= 1
+    assert diagnostics["actions_examined"] >= diagnostics["actions_returned"] >= 1
+    assert all(diagnostics[key] >= 0 for key in ("observe_seconds", "action_stream_seconds",
+              "bind_seconds", "encode_seconds", "batch_build_seconds", "inference_seconds",
+              "apply_seconds", "puct_selection_seconds", "backup_seconds"))
+    assert len(diagnostics["simulations"]) == 16 and diagnostics["details_omitted"] == 4
+    assert all(len(item["depths"]) <= 8 for item in diagnostics["simulations"])
+    assert all(len(depth["pages"]) <= 16 for item in diagnostics["simulations"]
+               for depth in item["depths"])
+    assert "private-" not in json.dumps(diagnostics)
+
+    stopped = InformationSetSearch(PublicEncoder(contract), TestEvaluator(contract),
+        limits=SearchLimits(iterations=1, elapsed_ms=None), profile=True)
+    with pytest.raises(SearchBudgetError) as captured:
+        stopped.run(belief(), cancelled=lambda: True)
+    partial = captured.value.mcts_profile
+    assert partial["stop_reason"] == "cancelled"
+    assert partial["completed_simulations"] == 0
+    assert partial["timed_out_during"] is None
+
+    bounded = _MctsProfile(1)
+    detail = bounded.begin(0, _SearchState())
+    for index in range(10):
+        depth = bounded.depth(detail, index)
+        for _ in range(18):
+            bounded.page(depth, 4, 4, 2, False, 0.)
+    assert len(detail["depths"]) == 8
+    assert all(len(depth["pages"]) == 16 for depth in detail["depths"])
+    assert bounded.data["action_stream_pages"] == 180
+
+
 def test_progressive_widening_cancellation_and_finite_budgets():
     class WidePosition(TestPosition):
         def action_stream(self):
@@ -773,10 +823,15 @@ def test_progressive_widening_cancellation_and_finite_budgets():
         return result
     evaluator.evaluate = cancel_in_batch
     cancelled_search = InformationSetSearch(PublicEncoder(spec()), evaluator,
-                          limits=SearchLimits(iterations=12, max_depth=1, elapsed_ms=1000))
+                          limits=SearchLimits(iterations=12, max_depth=1, elapsed_ms=1000),
+                          profile=True)
     result = cancelled_search.run(belief(), cancelled=lambda: stopped)
     assert result.stop_reason == "cancelled" and result.iterations == 4
     assert sum(item["visits"] for item in result.policy) == 4
+    assert result.mcts_profile["completed_simulations"] == 4
+    assert sum(not item["completed"] for item in result.mcts_profile["simulations"]) == 4
+    assert all(item["stop_reason"] == "cancelled" for item in result.mcts_profile["simulations"]
+               if not item["completed"])
     budget_search = InformationSetSearch(PublicEncoder(spec()), TestEvaluator(spec()),
                         limits=SearchLimits(iterations=4, max_inference_elements=1))
     with pytest.raises(SearchBudgetError, match="inference input budget"):
@@ -843,6 +898,17 @@ def test_typed_search_keeps_public_intent_and_family_tensor_contract(family, mon
     assert evaluator.inputs
     assert all(tuple(inputs) == tuple(contract.feature_schema["input_order"][family]) for inputs in evaluator.inputs)
     assert all(inputs["candidate_mask"].dtype == np.bool_ for inputs in evaluator.inputs)
+    profiled_evaluator = TypedEvaluator()
+    profiled = TypedInformationSetSearch(TypedEncoder(contract), profiled_evaluator,
+        limits=SearchLimits(iterations=1, max_depth=1, elapsed_ms=None), profile=True).run(
+            belief(particles=2, typed_spec=contract))
+    assert replace(profiled, mcts_profile=None) == result
+    assert len(profiled_evaluator.inputs) == len(evaluator.inputs)
+    for first, second in zip(evaluator.inputs, profiled_evaluator.inputs):
+        for name in first:
+            np.testing.assert_array_equal(first[name], second[name])
+    assert profiled.mcts_profile["observation_ir_seconds"] >= 0
+    assert profiled.mcts_profile["inference_seconds"] >= 0
 
     exact_limit = max(sum(array.size for array in inputs.values()) for inputs in evaluator.inputs)
     exact = TypedInformationSetSearch(TypedEncoder(contract), evaluator,

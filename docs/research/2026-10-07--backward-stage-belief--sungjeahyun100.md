@@ -98,7 +98,7 @@
 
 ## 2026-10-08 seed 37 public-result conditioning 2차 측정
 
-이 절은 PR #43의 `d4fcf056e8071c6ff269ec457e93efcd56dc104e`에서 시작한 수정의 로컬 측정이다. 기존 원시 artifact 경로가 남아 있지 않아 추측하여 재사용하지 않았다. 사용자가 이번 재현에 정확한 경로 기록을 요청했으므로 이 절에만 로컬 절대 경로를 적는다. 새 `ARTIFACT_ROOT`는 `/home/sjh100/accelerate-stage43-opt`다. student manifest는 `/home/sjh100/accelerate-stage43-opt/models/student-deployment/manifest.json`, END teacher manifest는 `/home/sjh100/accelerate-stage43-opt/models/end-teacher-deployment/manifest.json`, Basic MIDDLE provenance는 `/home/sjh100/accelerate-stage43-opt/datasets/middle-generate/position-provenance.json`이다. 별도 저장소 추적 모델·원시 로그는 만들지 않았다.
+이 절은 PR #43의 `d4fcf056e8071c6ff269ec457e93efcd56dc104e`에서 시작한 수정의 로컬 측정이다. 기존 원시 artifact 경로가 남아 있지 않아 추측하여 재사용하지 않았다. 재현 입력은 `${ARTIFACT_ROOT}/models/student-deployment/manifest.json`, `${ARTIFACT_ROOT}/models/end-teacher-deployment/manifest.json`, `${ARTIFACT_ROOT}/datasets/middle-generate/position-provenance.json`이다. 별도 저장소 추적 모델·원시 로그는 만들지 않았다.
 
 student와 teacher는 seed 37, `mask-resnet` 8 channels/1 block/rank 8 초기 가중치로 같은 방식으로 만들었다. deployment 모델 SHA-256은 두 manifest 모두 `c7c8b017787461e620019b99d6d53097510517850e60d9a09763c8d2b24cffbd`로 이전 smoke 기록과 일치한다. 무학습 가중치이므로 성능 검증 자료가 아니다. 새 provenance는 Basic MIDDLE의 26 action, `moveCount=20`, 양측 10턴, 백/흑 기물 14/15, 양측 왕 존재, 합법 행동 37로 이전 공개 통계와 일치했다. 생성 작업은 디버그 native 빌드로 180.46초였고, release 빌드 재생은 11.45초였다. 생성 시간은 이전 release 기준 53.25초와 비교하지 않는다.
 
@@ -128,3 +128,29 @@ student와 teacher는 seed 37, `mask-resnet` 8 channels/1 block/rank 8 초기 �
 후보는 source가 허용한 공개 intent만 Python으로 반환한다. source revision으로 묶인 후보를 조건부 apply 시 native가 다시 검증하고, viewer의 complete public observation equality가 최종 acceptance 조건이다. 독립 source particle과 seed, 기존 Trolley 두 latent 선택, MIDDLE/END offer p/q 보정, own exact intent를 유지한다. 실제 environment의 hidden state·RNG·상대 intent를 conditioning 입력으로 읽지 않는다. 단순 2칸 보드 변화에서만 좌표 fast path를 쓰고, 복합 카드 효과·다중/모호한 보드 변화·지원되지 않는 결과·source 후보 한도는 이유를 기록해 기존 source stream으로 돌아간다. 1회 실행의 fallback은 백 4회(복합 카드 2, 미지원 형태 2), 흑 5회(복합 카드 2, 미지원 형태 3)였다. native scalar precheck와 Python 공개 필드 precheck를 거친 뒤에도 완전 일치 검사를 수행한다. 자기 행동 eager advance는 revision·weight 정합성을 확인하지 못해 구현하지 않았고, 기존 증분 synchronize를 유지했다.
 
 이 절의 결과는 로컬 실행이다. CI 성공이나 모델 성능 근거로 사용하지 않는다. 4회 실패는 새 조건화 경로만으로 root 30초 목표를 달성하지 못한다는 관측이다. MCTS selection/PUCT와 별도 커리큘럼은 이번 범위에서 바꾸지 않았다.
+
+## 2026-10-08 MCTS 진단 모드와 첫 root 병목
+
+PR #43 `feature/backward-stage-training`의 기준 SHA `1265808a3ff2dbd342312b202fe33a5cbab50b86`에서 Python search와 staged CLI에 진단 전용 profile을 추가했다. 이 절의 측정은 해당 변경을 적용해 `maturin build --release --offline --locked`로 명시적으로 빌드하고 격리 Python 3.12 환경에 설치한 wheel 실행이며, CI 결과가 아니다. Python search와 native 모듈이 모두 설치 wheel 경로에서 로드됨을 확인했다. source·모델·seed·예산은 위 2차 측정과 같다. `stage-sample --stage middle --source-provenance "${ARTIFACT_ROOT}/datasets/middle-generate/position-provenance.json" --manifest "${ARTIFACT_ROOT}/models/student-deployment/manifest.json" --teacher-manifest "${ARTIFACT_ROOT}/models/end-teacher-deployment/manifest.json" --seed 37 --belief-ms 120000 --particles 1 --proposals 4 --max-stage-actions 80 --capture-bias 1 --iterations 4 --search-ms 30000 --mcts-profile`을 CPU/ORT 1 thread, `mask-resnet`으로 실행했다. 전체 명령은 `timeout --signal=INT --kill-after=10s 1800s`로 제한했다. 실행 ID는 `middle-mcts-profile-release-iter4`다. 앞선 editable 설치 실험의 수치는 release 여부가 확인되지 않아 최종 판단에서 제외했다.
+
+결과는 의도한 첫 root 실패 재현이다. `ValueError: stage search did not complete its fixed iteration budget`, exit 2; root 내부 `stop_reason=elapsed`, 4회 요청 중 2회 완료, 진행 중이던 2회는 미완료다. 세부 근거는 `${ARTIFACT_ROOT}/reports/middle-mcts-profile-release-iter4/stage-sample-failure.json`이다. 원시 JSON과 모델은 Git에 넣지 않았다.
+
+| 첫 root 항목 | 실측 |
+|---|---:|
+| 전체 search wall | 30.5651초 |
+| source action stream 생성·native page 호출 | 28.7473초, 전체의 94.1% |
+| native page / 검사·반환 action | 8개 / 252개·252개 |
+| progressive widening target | 첫 방문 4, 후속 root 7, child 재방문 6 |
+| 첫 root page 요청 / 실제 검사·반환 | 최대 64 / 37개·37개 |
+| 실제 새 edge / bind | 17개 / 36회·0.00128초 |
+| `position.apply()` | 4회·1.3053초 |
+| `position.observe()` / 공개 projection 검증·복사 | 12회·0.1101초 / 0.2418초 |
+| `ObservationIR.from_public` / `TypedEncoder.encode` / batch 구성 | 0.1108초 / 0.0278초 / 0.00075초 |
+| native evaluator / 결과 검사·softmax | 3 batch·0.00406초 / 0.00023초 |
+| PUCT 선택 / backup | 0.000031초 / 0.000005초 |
+
+simulation 0은 완료됐고 실행 8.037초 중 action stream이 7.569초였다. depth 0에서 37개를 검사해 width 4의 새 edge 4개를 만들고, depth 1에서 27개를 검사해 새 edge 4개를 만들었다. simulation 1도 완료됐고 실행 7.257초 중 action stream이 6.856초였다. 동일 root node를 재방문해 37개를 다시 검사했고 동일 4개 후보에 대한 inference도 반복했다. child는 다른 node에서 25개를 검사해 edge 4개를 만들었다. 두 simulation의 실행 시간 차이 약 0.780초는 주로 child action stream의 27개·3.405초와 25개·2.671초 차이에 대응한다. 각 simulation의 경과 시간은 generator가 다른 simulation을 기다린 시간도 포함하므로 비교에는 `execution_seconds`를 사용한다.
+
+미완료 simulation 2·3도 root에서 각각 37개를 재검사했다. simulation 2의 child는 27개를 재검사했다. simulation 3의 child는 25개 page를 받았으나 바로 뒤의 시간 검사에서 중단됐다. 따라서 `timed_out_during=action_stream`이며 그 depth의 필터·edge 갱신·inference는 실행되지 않았다. 동일 node의 stream 재개방은 관측됐고, 동일 node·candidate set의 inference 반복도 관측됐다. 후보 집합이 width 4에서 7로 바뀐 재방문은 동일 집합의 inference 반복으로 세지 않았다.
+
+측정된 병목 순서는 A source action enumeration 28.7473초, C native apply/transition 1.3053초, D observe/public projection 0.3520초, E IR·encoding·batching 0.1394초, G 공개 intent 추출·정규화·필터·edge·PUCT·backup 약 0.0073초, F neural inference 0.00406초, B bind/admission 0.00128초다. 항목은 같은 root에서의 Python 경계 시간이며 native 내부 세부 비용은 분리하지 않았다. batch 시간은 여러 simulation이 공유하며, simulation 경과 시간과 단계 시간은 포함 관계가 있어 합산한 전체값으로 보지 않는다. 이 결과는 현재 실행의 직접 병목이 source action enumeration이라는 판단을 뒷받침하지만 최적화 효과는 검증하지 않는다.
