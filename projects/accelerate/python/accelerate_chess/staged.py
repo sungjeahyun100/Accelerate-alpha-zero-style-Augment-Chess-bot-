@@ -314,6 +314,7 @@ def rollout_stage(position, trackers, stage, search, teacher, config: Mapping[st
             error.belief_diagnostics = {viewer: belief.diagnostics for viewer, belief in beliefs.items()}
             raise
         root_belief_seconds.append(time.monotonic() - root_started)
+        search_started = time.monotonic()
         try:
             result = search.run(beliefs[actor], cancelled=cancelled)
         except Exception as error:
@@ -324,6 +325,14 @@ def rollout_stage(position, trackers, stage, search, teacher, config: Mapping[st
             raise
         if result.stop_reason != "iterations":
             error = ValueError("stage search did not complete its fixed iteration budget")
+            error.search_diagnostics = {"root_index": len(samples), "actor": actor,
+                "elapsed_seconds": time.monotonic() - search_started,
+                "iterations_completed": result.iterations,
+                "iterations_requested": search.limits.iterations,
+                "stop_reason": result.stop_reason,
+                "nodes": result.nodes, "edges": result.edges,
+                "inference_batches": result.inference_batches,
+                "max_inference_batch": result.max_inference_batch}
             error.belief_diagnostics = {viewer: belief.diagnostics for viewer, belief in beliefs.items()}
             error.belief_initialization_seconds = belief_initialization_seconds
             error.root_belief_seconds = root_belief_seconds

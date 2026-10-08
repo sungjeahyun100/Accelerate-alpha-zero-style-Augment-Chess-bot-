@@ -400,12 +400,17 @@ class NativeSourceFactory:
         A missing candidate set means the result is ambiguous and the general
         source stream must be used. No provenance or opponent intent enters.
         """
+        self.public_result_fallback_reason = None
+        self.public_result_candidate_kind = None
+        self.public_result_bind_calls = 0
         before = _public(position.observe(expected["viewer"]), self.typed_spec)
         if before["publicState"].get("mode") != "play":
+            self.public_result_fallback_reason = "unsupported_public_transition_shape"
             return None
         actor = _actor(position)
         trolley = before["publicState"].get("activeTrolley") is not None
         if trolley:
+            self.public_result_candidate_kind = "trolley"
             # The source admits exactly two branches for this pending window.
             # Try both as latent proposals; never infer the opponent's choice
             # or enumerate unrelated intents from an unobserved window.
@@ -416,9 +421,11 @@ class NativeSourceFactory:
             if (before["ownCards"] != expected["ownCards"]
                     or before["publicState"].get("revealedOpponentCards")
                     != expected["publicState"].get("revealedOpponentCards")):
+                self.public_result_fallback_reason = "complex_card_effect"
                 return None
             changes = expected["history"][-1].get("boardChanges", ())
             if len(changes) != 2:
+                self.public_result_fallback_reason = "multiple_piece_delta"
                 return None
             removed = [change for change in changes if isinstance(change.get("before"), dict)
                        and change["before"].get("color") == actor and change.get("after") is None]
@@ -426,22 +433,41 @@ class NativeSourceFactory:
                      and change["after"].get("color") == actor]
             if (len(removed) != 1 or len(added) != 1
                     or removed[0]["before"].get("type") != added[0]["after"].get("type")):
+                self.public_result_fallback_reason = "ambiguous_board_delta"
                 return None
             origin, destination = removed[0]["square"], added[0]["square"]
-            legal = position.legal_intents()
-            legal_count = len(legal)
-            intents = [intent for intent in legal if (intent.get("type") != "move"
-                       or intent.get("selectionMode") is not None
-                       or intent.get("from") == origin and intent.get("destination") == destination)]
+            targeted = getattr(position, "public_delta_candidate_intents", None)
+            if not callable(targeted):
+                self.public_result_fallback_reason = "targeted_source_unavailable"
+                return None
+            from ._native import UnsupportedFeatureError
+            try:
+                result = targeted(origin, destination)
+            except UnsupportedFeatureError:
+                self.public_result_fallback_reason = "source_candidate_limit"
+                return None
+            self.public_result_candidate_kind = "delta"
+            legal_count = result["legal_count"]
+            intents = result["intents"]
+            source_actions = result.get("actions")
+            if source_actions is not None:
+                if len(source_actions) != len(intents) or any(
+                        type(action) is not self._action_type
+                        or action.revision != position.snapshot_revision
+                        or _intent(action) != intent
+                        for action, intent in zip(source_actions, intents)):
+                    raise InformationMismatchError("targeted source actions differ from public intents")
+                return list(source_actions), legal_count, False
         actions = []
         for intent in intents:
             try:
+                self.public_result_bind_calls += 1
                 actions.append(_bind_source_public_intent(position, intent))
             except ValueError:
                 continue
         if trolley and len(actions) != 2:
             raise SourceCapabilityError("source trolley window does not admit both latent choices")
-        return actions, legal_count, not trolley
+        return actions, legal_count, False
 
 
 def _actor(position: Any) -> str:
@@ -555,6 +581,20 @@ class ParticleBelief:
         self.diagnostics = {"source_proposal_seconds": 0., "public_history_replay_seconds": 0.,
                             "own_intent_seconds": 0., "opponent_result_seconds": 0.,
                             "legal_enumeration_seconds": 0., "bind_apply_seconds": 0.,
+                            "targeted_candidate_generation_seconds": 0.,
+                            "targeted_candidate_generations": 0,
+                            "targeted_candidates": 0,
+                            "full_enumeration_fallback_seconds": 0.,
+                            "full_enumeration_fallbacks": 0,
+                            "full_enumeration_fallback_reasons": {},
+                            "candidates_before_cheap_filter": 0,
+                            "candidates_rejected_by_cheap_precheck": 0,
+                            "candidates_reaching_full_comparison": 0,
+                            "full_public_comparison_seconds": 0.,
+                            "native_bind_admission_seconds": 0.,
+                            "native_apply_seconds": 0.,
+                            "conditioning_calls": 0,
+                            "own_action_incremental_advance_seconds": 0.,
                             "rebuild_seconds": 0., "update_seconds": 0.,
                             "source_proposals": 0, "latent_source_proposals": 0,
                             "legal_enumerations": 0,
@@ -612,20 +652,48 @@ class ParticleBelief:
         compatibility = getattr(self.factory, "transition_compatible", None)
 
         def compatible(action):
+            checked_started = time.perf_counter()
             result = compatibility(position, action, expected) if compatibility is not None else True
+            if compatibility is not None:
+                self.diagnostics["conditioning_calls"] += 1
+                self.diagnostics["native_bind_admission_seconds"] += time.perf_counter() - checked_started
             if type(result) is not bool:
                 raise InformationMismatchError("source transition compatibility must be boolean")
             return result
 
         def advance(action):
+            self.diagnostics["conditioning_calls"] += 1
+            native_started = time.perf_counter()
             child = self.factory.apply_conditioned(position, action, expected, self._seed())
+            self.diagnostics["native_apply_seconds"] += time.perf_counter() - native_started
             if child is None:
                 self._reject("source_apply")
                 return None
             if not isinstance(child, TransitionProposal):
                 raise InformationMismatchError("conditioned source transition must carry validated density metadata")
             self._proposal_profiles.add(child.profile)
-            if self._public(child.position.observe(self.tracker.viewer)) != expected:
+            observed = child.position.observe(self.tracker.viewer)
+            self.diagnostics["candidates_before_cheap_filter"] += 1
+            public_fields = ("viewer", "turn", "opponentHandCount")
+            state_fields = ("mode", "moveCount", "turnsTaken", "draft")
+            cheap_match = (all(observed.get(key) == expected.get(key) for key in public_fields)
+                and len(observed.get("history", ())) == len(expected["history"])
+                and all(observed["publicState"].get(key) == expected["publicState"].get(key)
+                        for key in state_fields)
+                and observed.get("ownCards") == expected.get("ownCards")
+                and observed["publicState"].get("revealedOpponentCards")
+                    == expected["publicState"].get("revealedOpponentCards")
+                and observed["history"][-1].get("boardChanges")
+                    == expected["history"][-1].get("boardChanges"))
+            if not cheap_match:
+                self.diagnostics["candidates_rejected_by_cheap_precheck"] += 1
+                self._reject("public_precheck")
+                return None
+            self.diagnostics["candidates_reaching_full_comparison"] += 1
+            comparison_started = time.perf_counter()
+            matched = self._public(observed) == expected
+            self.diagnostics["full_public_comparison_seconds"] += time.perf_counter() - comparison_started
+            if not matched:
                 self._reject("public_observation")
                 return None
             return child.position, math.log(child.importance_weight)
@@ -638,7 +706,9 @@ class ParticleBelief:
                 return None
             bind_started = time.perf_counter()
             action = _bind_source_public_intent(position, step.own_intent)
+            self.diagnostics["conditioning_calls"] += 1
             self.diagnostics["bind_apply_seconds"] += time.perf_counter() - bind_started
+            self.diagnostics["native_bind_admission_seconds"] += time.perf_counter() - bind_started
             if not compatible(action):
                 self._reject("own_compatibility")
                 return None
@@ -646,6 +716,7 @@ class ParticleBelief:
             child = advance(action)
             self.diagnostics["bind_apply_seconds"] += time.perf_counter() - apply_started
             self.diagnostics["own_intent_seconds"] += time.perf_counter() - own_started
+            self.diagnostics["own_action_incremental_advance_seconds"] += time.perf_counter() - own_started
             if child is None:
                 return None
             return child[0], log_weight + child[1]
@@ -654,9 +725,15 @@ class ParticleBelief:
         if _actor(position) != self.tracker.viewer and callable(candidates):
             enumerate_started = time.perf_counter()
             narrowed = candidates(position, expected)
-            self.diagnostics["legal_enumeration_seconds"] += time.perf_counter() - enumerate_started
+            generated_seconds = time.perf_counter() - enumerate_started
+            self.diagnostics["conditioning_calls"] += getattr(self.factory, "public_result_bind_calls", 0)
             if narrowed is not None:
+                if getattr(self.factory, "public_result_candidate_kind", None) == "delta":
+                    self.diagnostics["targeted_candidate_generations"] += 1
+                    self.diagnostics["targeted_candidate_generation_seconds"] += generated_seconds
                 actions, legal_count, enumerated = narrowed
+                if getattr(self.factory, "public_result_candidate_kind", None) == "delta":
+                    self.diagnostics["targeted_candidates"] += len(actions)
                 if enumerated:
                     self.diagnostics["legal_enumerations"] += 1
                 if legal_count < 1 or len(actions) > legal_count:
@@ -664,7 +741,11 @@ class ParticleBelief:
                 selected, log_mass = None, -math.inf
                 for action in actions:
                     self._check(started)
-                    if not compatible(action):
+                    # The native conditioned apply rebinds and revalidates the
+                    # source-cursor choice and checks the same complete prior
+                    # history. A separate compatibility call repeats that
+                    # work for every play candidate.
+                    if not isinstance(self.factory, NativeSourceFactory) and not compatible(action):
                         continue
                     apply_started = time.perf_counter()
                     child = advance(action)
@@ -678,10 +759,15 @@ class ParticleBelief:
                     self._reject("public_result")
                     return None
                 return selected, log_weight + log_mass - math.log(legal_count)
+            reason = getattr(self.factory, "public_result_fallback_reason", None) or "unsupported_public_transition_shape"
+            reasons = self.diagnostics["full_enumeration_fallback_reasons"]
+            reasons[reason] = reasons.get(reason, 0) + 1
+            self.diagnostics["full_enumeration_fallbacks"] += 1
         selected, log_mass, exhausted = None, -math.inf, False
         seen: set[str] = set()
         bind_streamed = getattr(self.factory, "bind_streamed_public_intent", None)
         enumerate_started = time.perf_counter()
+        fallback_enumeration_before = self.diagnostics["legal_enumeration_seconds"]
         self.diagnostics["legal_enumerations"] += 1
         for actions, exhausted in _stream(position, self.limits.page_size, self.limits.actions_per_transition):
             if not actions:
@@ -697,7 +783,10 @@ class ParticleBelief:
                 bind_started = time.perf_counter()
                 bound = (bind_streamed(position, action, intent) if bind_streamed is not None
                          else _bind_source_public_intent(position, intent))
+                if bind_streamed is None:
+                    self.diagnostics["conditioning_calls"] += 1
                 self.diagnostics["bind_apply_seconds"] += time.perf_counter() - bind_started
+                self.diagnostics["native_bind_admission_seconds"] += time.perf_counter() - bind_started
                 if _intent(bound) != intent:
                     raise InformationMismatchError("native host changed the public intent fields or ordered selections")
                 # Provably incompatible actions retain their prior mass in the
@@ -720,6 +809,9 @@ class ParticleBelief:
         if not exhausted:
             raise SearchBudgetError("belief action enumeration is incomplete; a partial posterior is not accepted")
         self.diagnostics["legal_enumeration_seconds"] += time.perf_counter() - enumerate_started
+        if _actor(position) != self.tracker.viewer and callable(candidates):
+            self.diagnostics["full_enumeration_fallback_seconds"] += (
+                self.diagnostics["legal_enumeration_seconds"] - fallback_enumeration_before)
         self.diagnostics["opponent_result_seconds"] += time.perf_counter() - opponent_started
         if selected is None:
             self._reject("no_matching_intent")

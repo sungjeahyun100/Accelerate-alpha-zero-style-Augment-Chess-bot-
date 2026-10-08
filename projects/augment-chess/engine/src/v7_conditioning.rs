@@ -897,6 +897,22 @@ fn apply_source_prior_play(
                     ));
                 }
             };
+            // These fields are already public and cannot be changed by the
+            // later opaque-identity binding. Reject a wrong result before
+            // building and canonically comparing the complete observation.
+            if working.turn != expected.turn
+                || working.mode
+                    != expected
+                        .public_state
+                        .get("mode")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                || working.history.len() != expected.history.len()
+            {
+                return Err(EngineError::ConditioningMismatch(
+                    "v7 play proposal fails public scalar precheck".into(),
+                ));
+            }
             bind_public_identities(working, &expected, Some(&prior))?;
             Ok((captures, probability, proposal_probability))
         })?;

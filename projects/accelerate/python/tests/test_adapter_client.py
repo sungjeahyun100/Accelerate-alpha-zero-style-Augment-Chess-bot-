@@ -222,6 +222,43 @@ def test_v7_public_initial_particle_and_weighted_step_keep_density_explicit():
     assert particle.snapshot_revision == action.revision
 
 
+def test_native_public_delta_candidates_preserve_complete_prior_and_revision():
+    from accelerate_chess import GameAdapterClient
+
+    position = GameAdapterClient.new_game(
+        {"gameStyle": "normal", "draftDelete": False}, 19, spec=pinned_spec())
+    for _ in range(2):
+        intent = position.legal_intents()[0]
+        position = position.apply(position.bind_public_intent(intent)).position
+    assert position.observe("white")["publicState"]["mode"] == "play"
+    legal = position.legal_intents()
+    move = next(intent for intent in legal if intent["type"] == "move")
+    revision = position.snapshot_revision
+    result = position.public_delta_candidate_intents(move["from"], move["destination"])
+    assert result["legal_count"] == len(legal)
+    assert result["examined"] >= 1
+    assert move in result["intents"]
+    assert [action.public_intent() for action in result["actions"]] == result["intents"]
+    assert all(action.revision == revision for action in result["actions"])
+    assert position.snapshot_revision == revision
+    assert all("positionId" not in intent and "actionId" not in intent
+               for intent in result["intents"])
+
+
+def test_public_observation_cache_is_owned_and_invalidated_on_revision_change():
+    from accelerate_chess import GameAdapterClient
+
+    position = GameAdapterClient.new_game(
+        {"gameStyle": "normal", "draftDelete": False}, 37, spec=pinned_spec())
+    original = position.observe("white")
+    changed = position.observe("white")
+    changed["publicState"]["mode"] = "tampered"
+    assert position.observe("white") == original
+    intent = position.legal_intents()[0]
+    position.apply_public_intent(intent)
+    assert position.observe("white") != original
+
+
 @pytest.mark.parametrize("style", ["normal", "chaos", "grand"])
 def test_v7_play_public_particles_use_one_source_attempt_and_preserve_independent_branches(style):
     from accelerate_chess import ConditioningMismatchError, GameAdapterClient, StaleActionError

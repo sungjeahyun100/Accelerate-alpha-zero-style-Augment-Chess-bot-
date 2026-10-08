@@ -469,6 +469,49 @@ pub fn legal_public_intents(position: &V7HostPosition) -> V7ActionHostResult<Vec
     Ok(intents)
 }
 
+/// Count the complete source public-choice prior without exporting the full
+/// choice set, and return only choices that can explain a visible two-square
+/// move. Non-move and presentation-mode choices remain candidates: their
+/// effects cannot be excluded from coordinates alone. The caller must still
+/// execute and compare the complete public observation.
+pub fn public_delta_candidate_intents(
+    position: &V7HostPosition,
+    origin: &Value,
+    destination: &Value,
+) -> V7ActionHostResult<(Vec<Value>, usize, usize)> {
+    require_decision(position)?;
+    // The verified set performs source admission once. The cursor replays
+    // admission while paging every candidate, which is costly when the
+    // posterior needs only a count and a small matching subset.
+    let verified = VerifiedV7ActionSet::complete(position)?;
+    let mut seen = BTreeSet::new();
+    let mut candidates = Vec::new();
+    let mut examined = 0;
+    for (action, _, _) in verified.source_entries() {
+        examined += 1;
+        for intent in public_intents_for_source_action(position.state(), action)? {
+            let key = serde_jcs::to_vec(&intent).map_err(EngineError::serialization)?;
+            if !seen.insert(key) {
+                continue;
+            }
+            if seen.len() > MAX_LEGAL_ACTIONS {
+                return Err(EngineError::UnsupportedFeature(format!(
+                    "v7 public choices exceed the eager limit of {MAX_LEGAL_ACTIONS}"
+                ))
+                .into());
+            }
+            if intent.get("type").and_then(Value::as_str) != Some("move")
+                || intent.get("selectionMode").is_some()
+                || intent.get("from") == Some(origin)
+                    && intent.get("destination") == Some(destination)
+            {
+                candidates.push(intent);
+            }
+        }
+    }
+    Ok((candidates, seen.len(), examined))
+}
+
 /// Bind a public intent. The caller supplies only public coordinates and
 /// choices, without Position/action IDs; the host constructs those identities
 /// and compares the selected payload with its source-owned public projection.
@@ -871,6 +914,20 @@ mod tests {
         let before = host.export_envelope().unwrap();
         let source = legal_action_envelopes(&host).unwrap();
         let public = legal_public_intents(&host).unwrap();
+        let (targeted, count, examined) = public_delta_candidate_intents(
+            &host,
+            &json!({"row":6,"col":0}),
+            &json!({"row":5,"col":0}),
+        )
+        .unwrap();
+        assert_eq!(count, public.len());
+        assert!(examined >= count);
+        assert!(targeted.iter().any(|choice| choice == &public[0]));
+        assert!(targeted.iter().all(|choice| {
+            choice["type"] != "move"
+                || choice.get("selectionMode").is_some()
+                || choice == &public[0]
+        }));
         assert_eq!(source.len(), 21);
         assert_eq!(public.len(), 21);
         let intent = json!({"type":"move","color":"white","from":{"row":6,"col":0},"destination":{"row":5,"col":0}});

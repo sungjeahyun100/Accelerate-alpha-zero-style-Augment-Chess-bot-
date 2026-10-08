@@ -571,6 +571,69 @@ def test_native_public_result_candidates_keep_trolley_choices_without_streaming(
     assert [action.public_intent() for action in actions] == intents
 
 
+@pytest.mark.parametrize("capture", [False, True])
+def test_public_result_move_uses_native_delta_candidates_without_eager_legal_set(capture):
+    factory = object.__new__(NativeSourceFactory)
+    factory.typed_spec = None
+    before = TestPosition().observe("black")
+    expected = TestPosition().apply(TestAction(0, 0)).position.observe("black")
+    origin = {"row": 6, "col": 1}
+    destination = {"row": 5, "col": 1}
+    piece = {"type": "pawn", "color": "white", "status": {}}
+    expected["history"][-1]["boardChanges"] = [
+        {"square": origin, "before": piece, "after": None},
+        {"square": destination, "before": {"type": "pawn", "color": "black", "status": {}} if capture else None, "after": piece},
+    ]
+    sign(expected)
+    intent = TestAction(0, 0).public_intent()
+
+    class Position:
+        decision_actor = "white"
+
+        def observe(self, viewer):
+            return before
+
+        def public_delta_candidate_intents(self, requested_origin, requested_destination):
+            assert (requested_origin, requested_destination) == (origin, destination)
+            return {"intents": [intent], "legal_count": 1, "examined": 1}
+
+        def bind_public_intent(self, requested):
+            assert requested == intent
+            return TestAction(0, 0)
+
+        def legal_intents(self):
+            raise AssertionError("targeted result must not materialize all legal intents")
+
+        def action_stream(self):
+            raise AssertionError("targeted result must not enter the general stream")
+
+    actions, legal_count, enumerated = factory.public_result_candidates(Position(), expected)
+    assert [action.public_intent() for action in actions] == [intent]
+    assert legal_count == 1 and not enumerated
+    assert factory.public_result_candidate_kind == "delta"
+
+
+def test_complex_public_result_falls_back_with_reason():
+    factory = object.__new__(NativeSourceFactory)
+    factory.typed_spec = None
+    before = TestPosition().observe("black")
+    expected = TestPosition().apply(TestAction(0, 0)).position.observe("black")
+    expected["ownCards"] = [{"cardId": "public-card"}]
+    sign(expected)
+
+    class Position:
+        decision_actor = "white"
+
+        def observe(self, viewer):
+            return before
+
+        def public_delta_candidate_intents(self, origin, destination):
+            raise AssertionError("complex result must use the general source stream")
+
+    assert factory.public_result_candidates(Position(), expected) is None
+    assert factory.public_result_fallback_reason == "complex_card_effect"
+
+
 def test_unmatched_public_trace_and_empty_belief_fail_explicitly():
     posterior = belief(particles=4)
     child = TestPosition().apply(TestAction(0, 0)).position.observe("white")

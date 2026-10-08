@@ -492,6 +492,7 @@ def stage_sample(args, root, spec, cancelled):
                      "belief_initialization_seconds": getattr(error, "belief_initialization_seconds", None),
                      "root_belief_seconds": getattr(error, "root_belief_seconds", None),
                      "stage_samples_completed": getattr(error, "stage_samples_completed", None),
+                     "search_diagnostics": getattr(error, "search_diagnostics", None),
                      "generation_seconds": generated_seconds,
                      "wall_seconds": time.monotonic() - start,
                      "peak_rss_bytes": peak_rss_bytes()})

@@ -95,3 +95,36 @@
 ## 정정과 공유 점검
 
 추가 실행은 같은 연구 질문의 이 파일에 반영한다. 본문에는 저장소 상대 경로와 ${ARTIFACT_ROOT} 기준 경로만 사용했고, 원시 로그·모델·데이터를 포함하지 않았다. 로컬 검사와 CI, 기능 완료와 모델 성능을 구분했다.
+
+## 2026-10-08 seed 37 public-result conditioning 2차 측정
+
+이 절은 PR #43의 `d4fcf056e8071c6ff269ec457e93efcd56dc104e`에서 시작한 수정의 로컬 측정이다. 기존 원시 artifact 경로가 남아 있지 않아 추측하여 재사용하지 않았다. 사용자가 이번 재현에 정확한 경로 기록을 요청했으므로 이 절에만 로컬 절대 경로를 적는다. 새 `ARTIFACT_ROOT`는 `/home/sjh100/accelerate-stage43-opt`다. student manifest는 `/home/sjh100/accelerate-stage43-opt/models/student-deployment/manifest.json`, END teacher manifest는 `/home/sjh100/accelerate-stage43-opt/models/end-teacher-deployment/manifest.json`, Basic MIDDLE provenance는 `/home/sjh100/accelerate-stage43-opt/datasets/middle-generate/position-provenance.json`이다. 별도 저장소 추적 모델·원시 로그는 만들지 않았다.
+
+student와 teacher는 seed 37, `mask-resnet` 8 channels/1 block/rank 8 초기 가중치로 같은 방식으로 만들었다. deployment 모델 SHA-256은 두 manifest 모두 `c7c8b017787461e620019b99d6d53097510517850e60d9a09763c8d2b24cffbd`로 이전 smoke 기록과 일치한다. 무학습 가중치이므로 성능 검증 자료가 아니다. 새 provenance는 Basic MIDDLE의 26 action, `moveCount=20`, 양측 10턴, 백/흑 기물 14/15, 양측 왕 존재, 합법 행동 37로 이전 공개 통계와 일치했다. 생성 작업은 디버그 native 빌드로 180.46초였고, release 빌드 재생은 11.45초였다. 생성 시간은 이전 release 기준 53.25초와 비교하지 않는다.
+
+동일 provenance·모델·seed와 `particles=1`, `proposals=4`, belief 120초, root 탐색 30초, stage 최대 80 action, capture bias 1, CPU 1 thread로 실행했다. release native wheel을 사용했다. 명령은 위 `stage-sample` 재현 명령과 같되, `--source-provenance`·`--teacher-manifest`를 위 파일로 지정하고 `--iterations 1` 또는 `4`를 사용했다. 실행은 `timeout --signal=INT --kill-after=10s 1800s`로 경계를 뒀다.
+
+| 항목 | 기존 1회 기준 | 수정 후 1회 | 수정 후 4회 |
+|---|---:|---:|---:|
+| 결과 | `bootstrap:end` | `bootstrap:end` | 첫 root(백) 실패 |
+| 전체 wall 초 | 530.20 | 504.82 | 116.52 |
+| belief 초기화 초 | 79.07 | 72.14 | 73.91 |
+| root belief 준비 합계 초 | 196.49 | 181.19 | 0.000002 |
+| 전체 legal enumeration 백/흑 초 | 79.07 / 73.63 | 5.51 / 5.68 | 2.16 / 0.75 |
+| targeted 후보 생성 백/흑 횟수·초 | 미계측 | 19·71.44 / 19·64.44 | 10·21.10 / 10·19.47 |
+| bind/admission 백/흑 초 | 분리 미계측 | 11.31 / 11.85 | 4.24 / 2.80 |
+| native apply 백/흑 초 | 분리 미계측 | 28.76 / 35.26 | 11.88 / 7.92 |
+| complete public 비교 백/흑 횟수·초 | 미계측 | 47·0.79 / 47·0.82 | 첫 rebuild만 수행 |
+| full enumeration fallback 백/흑 횟수 | 미계측 | 4 / 5 | 첫 rebuild만 수행 |
+| 상대 결과 조건화 백/흑 초 | 113.43 / 118.80 | 106.67 / 106.40 | 35.83 / 26.96 |
+| 표본 | 20 | 20 | 0 |
+| root별 MCTS 반복 | 1 | 1 | 첫 root 2/4 |
+| 최고 RSS byte | 410,886,144 | 413,224,960 | 353,312,768 |
+
+1회 결과는 `${ARTIFACT_ROOT}/reports/middle-opt-release-iter1/stage-sample.json`과 대응 dataset의 `accelerate-staged-v1` 표본 20개에 있다. stage action은 22개이며 END draft와 후속 선택 뒤 teacher가 1회 평가됐다. 4회 결과는 `${ARTIFACT_ROOT}/reports/middle-opt-release-iter4-diagnostic/stage-sample-failure.json`이다. 첫 root에서 31.15초가 흐르는 동안 2/4 simulation만 완료했고 `stop_reason=elapsed`, node 3, edge 17, inference batch 3이었다. 첫 root의 belief 준비는 거의 0초였고 증분 update는 아직 없었다. 따라서 이 4회 실패의 직접 원인은 MCTS root 실행 시간이다. 4회 전체 staged smoke는 완료되지 않았다.
+
+수정 전 최종 smoke의 `legal_enumeration_seconds`에는 현재 분리 계측하는 targeted 후보 생성도 포함될 수 있다. 따라서 79/74초에서 5/6초로 떨어진 수치를 전체 후보 비용의 속도비로 해석하지 않는다. 현재 1회 실행에서 targeted 후보 생성만 양측 합계 135.87초로 belief 내부의 가장 큰 측정 경로다. 상대 결과 조건화는 양측 합계 213.07초이며, root 갱신과 겹치는 포함 관계가 있으므로 시간 항목을 모두 더하지 않는다. `conditioning_calls`는 백/흑 222/318회로, 이 최적화에서 계측한 Python→native conditioning 호출 수다. 기존 기준에는 같은 계측이 없어 호출 수의 감소율은 알 수 없다. 일반 move/capture fast path는 Python의 전체 `legal_intents()`를 호출하지 않고 Rust source API가 좌표 후보를 반환한다. 다만 정확한 uniform public-intent prior의 분모를 유지하려고 Rust 내부에서는 완전한 source admission set을 아직 구성한다. 이것이 targeted 생성의 큰 잔여 비용이며, 전체 source action set 제거가 완료됐다고 주장하지 않는다.
+
+후보는 source가 허용한 공개 intent만 Python으로 반환한다. source revision으로 묶인 후보를 조건부 apply 시 native가 다시 검증하고, viewer의 complete public observation equality가 최종 acceptance 조건이다. 독립 source particle과 seed, 기존 Trolley 두 latent 선택, MIDDLE/END offer p/q 보정, own exact intent를 유지한다. 실제 environment의 hidden state·RNG·상대 intent를 conditioning 입력으로 읽지 않는다. 단순 2칸 보드 변화에서만 좌표 fast path를 쓰고, 복합 카드 효과·다중/모호한 보드 변화·지원되지 않는 결과·source 후보 한도는 이유를 기록해 기존 source stream으로 돌아간다. 1회 실행의 fallback은 백 4회(복합 카드 2, 미지원 형태 2), 흑 5회(복합 카드 2, 미지원 형태 3)였다. native scalar precheck와 Python 공개 필드 precheck를 거친 뒤에도 완전 일치 검사를 수행한다. 자기 행동 eager advance는 revision·weight 정합성을 확인하지 못해 구현하지 않았고, 기존 증분 synchronize를 유지했다.
+
+이 절의 결과는 로컬 실행이다. CI 성공이나 모델 성능 근거로 사용하지 않는다. 4회 실패는 새 조건화 경로만으로 root 30초 목표를 달성하지 못한다는 관측이다. MCTS selection/PUCT와 별도 커리큘럼은 이번 범위에서 바꾸지 않았다.

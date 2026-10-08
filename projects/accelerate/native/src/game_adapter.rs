@@ -473,6 +473,44 @@ impl GameAdapterSession {
         Ok(result)
     }
 
+    /// Count the source public-choice prior in native code and return only
+    /// delta-related public candidates. The complete set never crosses into
+    /// Python. No source payload or private identity is exported.
+    #[pyo3(signature = (origin, destination, *, snapshot_revision=None))]
+    fn public_delta_candidate_intents<'py>(
+        &self,
+        py: Python<'py>,
+        origin: &Bound<'_, PyAny>,
+        destination: &Bound<'_, PyAny>,
+        snapshot_revision: Option<&str>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let origin = conversion::from_python(origin)?;
+        let destination = conversion::from_python(destination)?;
+        for square in [&origin, &destination] {
+            let fields = square
+                .as_object()
+                .ok_or_else(|| PyValueError::new_err("public delta square must be a coordinate"))?;
+            if fields.len() != 2
+                || !fields.contains_key("row")
+                || !fields.contains_key("col")
+                || !matches!(fields.get("row").and_then(Value::as_u64), Some(0..=7))
+                || !matches!(fields.get("col").and_then(Value::as_u64), Some(0..=7))
+            {
+                return Err(PyValueError::new_err("public delta square is outside 8x8"));
+            }
+        }
+        let position = self.cloned_position(py, snapshot_revision)?;
+        let (intents, legal_count, examined) = py.detach(move || {
+            v7_adapter_actions::public_delta_candidate_intents(&position, &origin, &destination)
+                .map_err(v7_action_error)
+        })?;
+        let result = PyDict::new(py);
+        result.set_item("intents", conversion::to_python(py, &json_value(intents)?)?)?;
+        result.set_item("legal_count", legal_count)?;
+        result.set_item("examined", examined)?;
+        Ok(result)
+    }
+
     /// 공개 전이의 source 호환성을 확인한다. Python action ID나 환경의 숨은
     /// Position/RNG를 입력으로 받지 않으며 이 session의 상태를 변경하지 않는다.
     #[pyo3(signature = (public_intent, expected_next_public, *, snapshot_revision=None))]
