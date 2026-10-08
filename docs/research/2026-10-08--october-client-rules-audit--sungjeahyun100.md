@@ -445,7 +445,7 @@ intent 결합·chance 분포 및 viewer 전체 observation 비교는 미완료�
 별도로 인식하고, 원본 SHA-256·공개 catalog hash·조사용 실행 profile을
 정확히 대조한다. 이 profile은 정식 전체 규칙 profile로 승격하지 않았다.
 Rust `Position`은 10월 snapshot을 명시적 버전과 식별자가 있을 때
-가져오지만, 실행 범위는 `switcheroo` 카드 사용과 활성화된 왕·아군 폰
+가져오지만, 검토한 snapshot 필드 밖은 거부하고 실행 범위는 `switcheroo` 카드 사용과 활성화된 왕·아군 폰
 교환뿐이다. 전체 합법 행동 열거와 action stream은 unsupported를 반환한다.
 기존 9월 28일 공개 `Position` gate는 그대로 유지한다.
 
@@ -462,7 +462,7 @@ Rust 입력으로 고르고, 카드와 이동의 public intent를 JSON 바이너
 
 | 검사 | 이번 실행 결과 | 범위 |
 | --- | --- | --- |
-| 10월 JS↔Rust 차분 | 성공, 1개 원본 사례·17개 검사 | 실제 Rust 바이너리 카드 사용·교환, 잘못된 버전·catalog·profile·원본 SHA, 상대 폰·다른 기물·잘못된 intent·action·stale action·카드 재사용·효과 상태 누락·숨은 기물·전체 행동 열거 거부 |
+| 10월 JS↔Rust 차분 | 성공, 1개 원본 사례·18개 검사 | 실제 Rust 바이너리 카드 사용·교환, 잘못된 버전·catalog·profile·원본 SHA·미검토 상태 필드, 상대 폰·다른 기물·잘못된 intent·action·stale action·카드 재사용·효과 상태 누락·숨은 기물·전체 행동 열거 거부 |
 | 9월 switcheroo 직접 회귀 | 성공, 1개 Rust 테스트 | 기존 9월 폰 제거 유지 |
 | Rust 라이브러리 전체 | 728 성공, 0 실패, 53 ignored | 신규 9월 직접 회귀를 포함해 전체 재실행 |
 | 10월 원본 Node 테스트 | 2/2 테스트 파일 성공 | SHA 고정 원본 취득·전이 |

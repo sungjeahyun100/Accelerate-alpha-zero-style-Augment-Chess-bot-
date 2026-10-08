@@ -290,6 +290,9 @@ impl Position {
             return Err(EngineError::InvalidConfig("unknown rules version".into()));
         }
         state::validate_json_value(&value, 0)?;
+        if rules_version == RULES_VERSION_OCTOBER {
+            october_switcheroo::check_input_shape(&value)?;
+        }
         let original = value
             .as_object()
             .ok_or_else(|| EngineError::InvalidState("snapshot state must be an object".into()))?

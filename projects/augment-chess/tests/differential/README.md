@@ -40,6 +40,7 @@ legal actions, action 적용 결과, 보드·턴·카드·특수 기물 상태, 
 규칙 버전, 원본 SHA, catalog hash, 실행 profile과 함께 전달한다. Rust JSON
 바이너리의 `apply_public_intent`가 카드 행동과 교환 행동을 각각 바인딩·검증·
 적용한다. 별도로 직렬화한 Rust 결과를 `sourceExpected`와 비교한다.
+Rust import는 이 제한된 입력 필드 집합 밖의 10월 상태를 unsupported로 거부한다.
 
 ```sh
 CARGO_TARGET_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/accelerate/october-rust" \

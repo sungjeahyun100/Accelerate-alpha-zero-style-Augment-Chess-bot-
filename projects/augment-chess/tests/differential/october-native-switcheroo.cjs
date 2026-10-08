@@ -20,6 +20,10 @@ function nativeState(receipt, phase) {
   return state;
 }
 
+function boundedState(state, receipt) {
+  return Object.fromEntries(Object.keys(receipt.rustInput.before).map(key => [key, state[key]]));
+}
+
 function project(state, visibleBoard) {
   const board = state.board.flatMap((line, row) => line.flatMap((piece, col) => piece ? [{
     row, col, id: piece.id, type: piece.type, color: piece.color,
@@ -77,7 +81,7 @@ function run(source, parser, binary) {
   assert.equal(cardResult.action.cardInstanceId, receipt.replay.cardAction.cardInstanceId);
   assert.deepEqual(project(cardInput, cardResult.visibleBefore), receipt.sourceExpected.cardBefore);
   assert.deepEqual(project(cardResult.state, cardResult.visibleAfter), receipt.sourceExpected.cardAfter);
-  const state = cardResult.state;
+  const state = boundedState(cardResult.state, receipt);
   const request = {
     method: "apply_public_intent", state, rulesVersion: receipt.rulesVersion,
     intent: receipt.replay.publicIntent,
@@ -103,6 +107,7 @@ function run(source, parser, binary) {
     ["wrong catalog", {...request, state: {...state, octoberCatalogHash: "wrong"}}],
     ["wrong profile", {...request, state: {...state, octoberExecutionProfile: "wrong"}}],
     ["wrong source digest", {...request, state: {...state, octoberSourceMainSha256: "wrong"}}],
+    ["unreviewed state field", {...request, state: {...state, pendingTrolley: []}}],
     ["conflicting state version", {...request, state: {...state, rulesetId: "augment-site-20260928-e5ed84fcf8e72a24"}}],
     ["unused card", {...request, state: {...state, deckSlots: {
       ...state.deckSlots, white: state.deckSlots.white.map(card => ({...card, used: false})),
@@ -113,7 +118,8 @@ function run(source, parser, binary) {
     ["invalid bound action", {...request, method: "apply", action: {
       ...result.action, move: {...result.action.move, switcherooMove: false},
     }}],
-    ["stale action", {...request, method: "apply", state: result.state, action: result.action}],
+    ["stale action", {...request, method: "apply",
+      state: boundedState(result.state, receipt), action: result.action}],
     ["reused card", {...cardRequest, state, intent: cardRequest.intent}],
     ["missing card effect state", {...cardRequest, state: {...cardInput, switcheroo: undefined}}],
     ["hidden viewer state", {...request, state: {...state, board: state.board.map((line, row) =>
@@ -123,7 +129,7 @@ function run(source, parser, binary) {
   ]) {
     assert.ok(native(binary, altered).error, name);
   }
-  return {status: "pass", caseName: receipt.caseName, checks: 17,
+  return {status: "pass", caseName: receipt.caseName, checks: 18,
     scope: "switcheroo transition and all-visible board projection for both viewers"};
 }
 

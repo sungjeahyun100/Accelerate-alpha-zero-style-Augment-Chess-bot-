@@ -9,6 +9,39 @@ use serde_json::{Value, json};
 const CATALOG: &str = "disfTpO_11gGrXKr6Q_AO_SsQHVecw5XIXQ0mJExQ4k";
 const PROFILE: &str = "accelerate-headless-october-draft-probe-v1";
 const SOURCE: &str = "958e8e6787d8d107152e4c07e45736d2ffbf05ad8fad4e7de63558c3c70d024c";
+const INPUT_FIELDS: &[&str] = &[
+    "board",
+    "deckSlots",
+    "captures",
+    "turn",
+    "mode",
+    "actionsRemaining",
+    "switcheroo",
+    "moveCount",
+    "turnsTaken",
+    "cardsUsedThisTurn",
+    "winner",
+    "fullMove",
+    "octoberCatalogHash",
+    "octoberExecutionProfile",
+    "octoberSourceMainSha256",
+];
+
+pub(crate) fn check_input_shape(raw: &Value) -> Result<()> {
+    let fields = raw.as_object().ok_or_else(|| {
+        EngineError::InvalidState("October switcheroo snapshot must be an object".into())
+    })?;
+    if INPUT_FIELDS.iter().any(|name| !fields.contains_key(*name))
+        || fields
+            .keys()
+            .any(|name| name != "rulesetId" && !INPUT_FIELDS.contains(&name.as_str()))
+    {
+        return Err(EngineError::UnsupportedFeature(
+            "October snapshot contains missing or unreviewed state fields".into(),
+        ));
+    }
+    Ok(())
+}
 
 pub(crate) fn check_profile(state: &GameState) -> Result<()> {
     let manifest: Value = serde_json::from_str(include_str!(
