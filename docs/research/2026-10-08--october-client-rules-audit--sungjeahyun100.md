@@ -179,3 +179,72 @@ node projects/augment-chess/oracle/tools/site-parity/october-draft-distribution.
 수학적 조건**이다. 해당 ID가 각 플레이어에게 공개되는지, 원본의 전체
 `completeRandom` 후보 풀과 색별 제한, Rust의 대응 결과가 일치하는지는
 아직 검증하지 않았다. 따라서 Phase B 전체 완료로 분류하지 않는다.
+
+## 2026-10-08 후속: 최상위 의존성 분류와 합성 카드 전이
+
+기준 commit은 PR #44의 `b83c2bf2fa768e324e529460ed4ca1481e0c8ccc`이다.
+원본 SHA, 공개 catalog hash, probe `rulesVersion`은 위 기록과 같다.
+Node.js 22.20.0, Acorn 8.16.0을 사용했고 네트워크가 차단된 VM에서
+각 호출을 최대 15초, 선별한 최상위 문장을 각각 최대 1초로 제한했다.
+`node:vm`은 적대적인 원본에 대한 완전한 보안 격리가 아니다. 원본 SHA가
+다르면 실행을 거부한다.
+
+`projects/augment-chess/contracts/catalog/october-top-level-review.json`은
+선언·import를 제외한 359개 문장의 0 기반 순번을 빠짐없이 분류한다.
+분류 수는 규칙 12, 간접 의존성 119, 공개 관측 56, UI/DOM 129,
+네트워크·계정·저장소 42, 미확정 1이다. 분류는 원본 SHA와 AST 순서에
+묶여 있다. 규칙·표시에 필요한 99번, 127~168번, 171~194번 문장을 원문
+순서로 실행하고, 브라우저 시작의 `resetGame`(331번)은 모드 선택 후
+명시적으로 호출한다. 109번 AI worker 등록이 로컬 후보 순서에 미치는
+영향은 미확정이다. 선언부의 다른 데이터·검증 문장은 참조 여부를
+분류했으나 실행하지 않았으므로 전체 실행 의존성의 동적 증명은 아니다.
+
+재현 명령:
+
+```sh
+OCTOBER_SOURCE_MAIN="${SOURCE_MAIN}" OCTOBER_ACORN_PARSER="${ACORN_PARSER}" \
+  node projects/augment-chess/oracle/tools/site-parity/october-source-probe.test.js
+```
+
+`SOURCE_MAIN`은 추적하지 않은 SHA 고정 원본,
+`ACORN_PARSER`는 SHA가 기록된 Acorn 파일의 절대 경로다. 12개 테스트가
+성공했다. normal/chaos/grand 초기화와 첫 드래프트 행동은 각각 성공했고,
+normal 일반 수는 다음 턴으로 전이했다. 잘못된 행동과 원본 SHA 불일치는
+거부됐다. 기존 9월 profile과 오라클 소스는 변경하지 않았다.
+
+아래 카드 fixture는 정상 초기화와 원문 드래프트 완료 후 **카드 소유권
+검사를 건너뛰고 원본 효과 함수를 직접 호출한 합성 fixture**다. 실제
+소유 카드의 선택·바인딩·적용 전체를 검증한 것으로 해석하지 않는다.
+조건과 결과는 `october-source-probe.test.js`의 assertion으로 재실행한다.
+
+| P0 카드 | 원본 실행에서 확인한 결과 | 남은 검증 |
+| --- | --- | --- |
+| `switcheroo` | 원본 효과 후 생성된 왕→아군 폰 합법 행동을 `applyAiAction`으로 적용. 두 기물 ID를 보존해 위치를 교환하고 1반수를 사용했다. | 카드 소유·사용 경로, 부가 상태 전체 |
+| `holdout` | 원본 효과의 `readyTurn=28`. 합성 공유 턴 27에서는 폰, 28에서는 원본 자동 승격 함수로 퀸. | 28수 실제 행동 재생과 턴 종료 호출 경계 |
+| `chimera` | 나이트 대상 거부, 퀸 대상 허용. 원본 `chimeraMajorTypes`와 `chooseChimeraNextType`의 모든 난수 구간에서 결과 종류를 열거했다. | 실제 퀸 이동 후 변신, 각 분포와 공개 관측 |
+| `monster` | 소환 후 정상 행동 세 번째 반수 종료 때 동일 ID 괴물이 이동했다. 0·1·2·4·5에서는 조건 거짓, 3·6에서 참. | 포획·보호·승리와 다양한 seed |
+| `reaper` | 퀸을 사신으로 변형, 나이트 거부, 목표 영혼 수 2, 아군 피해·적 포획자만 집계하는 필터 확인. | 실제 포획 사건, 승리·종료 전이 |
+
+`chimeraMajorTypes(state)`는 이 초기 상태에서 서로 다른 20종
+(`queen`, `rook`, `herald`, `primeMinister`, `amazon`, `jester`,
+`hook`, `man`, `assassin`, `reaper`, `windmill`, `bear`,
+`magicGirl`, `berserker`, `siren`, `undead`, `hedgehog`,
+`princess`, `octopus`, `grappler`)을 반환했다. 원본
+`randomChoice`의 `floor(random * 20)`을 각 구간의 중점으로
+실행했으므로 균등 RNG 가정 아래 각 유형은 1/20이다. 실제 이동
+전체에서 난수 호출 순서와 변신 후 상태는 아직 검증하지 않았다.
+
+은신 효과도 소유권 우회 합성 상태에서 원본 함수로 실행했다. 동일한
+보드에서 white의 숨은 흑 비숍 관측은 `null`, black 관측에는 비숍이
+있고 `hiddenFrom` 내부 필드는 노출되지 않았다. 양측의 드래프트 선택,
+상대 카드, 이력, 종료 메시지까지 아우르는 공개 observation 계약은
+미검증이다.
+
+기존 9월 회귀 테스트는 이 checkout에 동결 baseline 파일이 없어 시작하지
+못했다. `RUNNER_TEMP=/tmp`로 실행해도
+`cache/site-baseline/baseline.json` 부재(`ENOENT`)가 원인이었다.
+이 후속 기록은 **제한된 probe와 일부 합성 카드 전이**의 근거다. 정식
+execution profile, P0 전체 카드 행동 fixture, 관측 계약 및 Rust 교차
+검증은 아직 완료하지 않았다. 다음 단계는 9월 baseline을 마련해 회귀를
+실행하고, 10월 원본 카드 보유→선택→적용 경로와 양측 observation을
+재생 가능한 fixture로 고정하는 것이다.

@@ -12,11 +12,11 @@
   "importCount": 3,
   "excludedTopLevelCount": 359,
   "bootstrapSha256": "1ae94ede71d44f517e9e0ba3ed9c364a65fb58bc15163ee582d93e41fe93969a",
-  "scope": "source normal/chaos/grand reset and first draft transition; normal opening move via original non-exhaustive AI candidates and source visibility predicate; not an adopted ruleset, catalog, complete player observation or exhaustive action oracle",
+  "scope": "reviewed top-level card and observation mutations; source normal/chaos/grand reset and first draft transition; normal opening move and selected synthetic P0 effects; not an adopted ruleset, complete player observation or exhaustive action oracle",
   "sourcePolicy": {
     "ast": "acorn-8.16.0/module/latest",
     "declarations": "all original function, variable and class declarations",
-    "topLevelStatements": "excluded pending side-effect and rule dependency review",
+    "topLevelStatements": "359 indexed statements classified in october-top-level-review.json; execute 99, 127-168 and 171-194 in source order before reset; startup reset 331 invoked explicitly",
     "bootstrap": "September adapter bootstrap with exact digest, reused for bounded probe",
     "rng": "host injected xorshift32 seed 0x6d2b79f5 for reproducibility; distribution not validated"
   }

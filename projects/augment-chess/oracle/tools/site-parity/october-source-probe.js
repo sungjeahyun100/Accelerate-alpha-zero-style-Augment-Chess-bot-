@@ -9,6 +9,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const profile = require("../../../contracts/catalog/execution-profile-20261007-probe.json");
+const topLevelReview = require("../../../contracts/catalog/october-top-level-review.json");
 const sha256 = value => crypto.createHash("sha256").update(value).digest("hex");
 const DECLARATIONS = new Set(["FunctionDeclaration", "VariableDeclaration", "ClassDeclaration"]);
 
@@ -71,6 +72,17 @@ function loadSource(sourcePath, parserPath) {
   assert.equal(imports.length, profile.importCount, "October import count changed.");
   assert.equal(ast.body.length - declarations.length - imports.length, profile.excludedTopLevelCount,
     "October top-level statement partition changed.");
+  assert.equal(topLevelReview.sourceMainSha256, profile.sourceMainSha256, "Top-level review targets another source.");
+  const statements = ast.body.filter(node => !DECLARATIONS.has(node.type) && node.type !== "ImportDeclaration");
+  const covered = new Set();
+  for (const [first, last, category] of topLevelReview.ranges) {
+    assert.ok(first <= last && topLevelReview.categories[category], "Invalid top-level review range.");
+    for (let index = first; index <= last; index++) {
+      assert.ok(index < statements.length && !covered.has(index), `Duplicate/out-of-range top-level review index ${index}.`);
+      covered.add(index);
+    }
+  }
+  assert.equal(covered.size, statements.length, "Top-level review does not cover every statement.");
   const importBindings = imports.flatMap(node => node.specifiers.map(specifier => specifier.local.name));
   const executable = importBindings.map(name => `var ${name} = "";`).join("\n") + "\n" +
     declarations.map(node => raw.slice(node.start, node.end).replace(/import\.meta\.url/g, JSON.stringify(profile.sourceUrl))).join("\n");
@@ -78,6 +90,15 @@ function loadSource(sourcePath, parserPath) {
   new vm.Script(executable, { filename: path.basename(sourcePath) }).runInContext(context, { timeout: 15000 });
   context.__maxMicrotasks = 256;
   vm.runInContext(bootstrapSource(), context, { timeout: 15000 });
+  for (const [first, last] of topLevelReview.executeBeforeReset) {
+    for (let index = first; index <= last; index++) {
+      assert.ok(["rule", "observation"].includes(topLevelReview.ranges.find(([start, end]) => index >= start && index <= end)[2]),
+        `Unreviewed top-level execution at ${index}.`);
+      const node = statements[index];
+      new vm.Script(raw.slice(node.start, node.end), { filename: `october-top-level-${index}` })
+        .runInContext(context, { timeout: 1000 });
+    }
+  }
   return context;
 }
 
