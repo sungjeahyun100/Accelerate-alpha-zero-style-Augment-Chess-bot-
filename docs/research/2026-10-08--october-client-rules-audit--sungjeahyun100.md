@@ -150,3 +150,32 @@ done
 | 새 조사 프로필 | `projects/augment-chess/contracts/catalog/execution-profile-20261007-probe.json` |
 | 실제 실행 | 세 모드 초기화·드래프트 첫 선택: 3/3 성공; normal 일반 수 생성·적용: 1/1 성공; 변조 원본 SHA 거부: 1/1 성공 |
 | 미검증 | 완전 행동 목록·카드 효과·확률·전체 공개 관측·Rust 교차검증·9월 회귀·CI |
+
+## 2026-10-08 후속: `completeRandom` 소규모 정확 분포
+
+`projects/augment-chess/oracle/tools/site-parity/october-draft-distribution.js`에서
+10월 원본의 `draftCardWeight`, `hasLatestMutuallyExclusiveDraftCard`,
+`drawCompatibleDraftCards`를 실행했다. 입력은 원본 공개 정의의
+`metal`, `qxe1`, `taunt` 세 카드만 담은 **합성 후보 풀**, 추첨 목표 2장,
+기존 선택 없음이다. 원본 가중치는 각각 정수 단위 70, 85, 85이며
+`metal`과 `qxe1`은 상호 배타다. 추첨된 카드가 호환되지 않아도 남은 풀에서
+제거되는 원문 순서를 그대로 열거했다. 6개 가중 추첨 경로마다 구간 내부의
+난수 값을 원문 `drawCompatibleDraftCards`에 공급해 카드 결과와 난수 소비 순서를 확인했다.
+
+```sh
+node projects/augment-chess/oracle/tools/site-parity/october-draft-distribution.js \
+  "${SOURCE_MAIN}" "${ACORN_PARSER}"
+```
+
+| 선택 순서 | 정확한 확률 |
+| --- | ---: |
+| metal, taunt | 7/24 |
+| qxe1, taunt | 17/48 |
+| taunt, metal | 119/744 |
+| taunt, qxe1 | 289/1488 |
+
+합계는 1이다. 첫 선택이 `taunt`임을 조건으로 하면 두 번째가 `metal`일
+확률은 14/31, `qxe1`일 확률은 17/31이다. 이 조건은 **선택 ID를 안다는
+수학적 조건**이다. 해당 ID가 각 플레이어에게 공개되는지, 원본의 전체
+`completeRandom` 후보 풀과 색별 제한, Rust의 대응 결과가 일치하는지는
+아직 검증하지 않았다. 따라서 Phase B 전체 완료로 분류하지 않는다.
