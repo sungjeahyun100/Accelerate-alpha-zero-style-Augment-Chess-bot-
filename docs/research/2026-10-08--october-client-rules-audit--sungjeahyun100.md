@@ -7,7 +7,7 @@
 | 작성 시점 | 2026-10-08 04:26 UTC |
 | 마지막 정정 시점 | 해당 없음: 최초 조사 |
 | GitHub 작성자·공동 작성자 | [sungjeahyun100](https://github.com/sungjeahyun100); 공동 작성자 없음 |
-| 관련 PR·이슈·후속 기록 | 해당 없음: 구현·검증 진행 중 |
+| 관련 PR·이슈·후속 기록 | [PR #44](https://github.com/sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-/pull/44): 구현·검증 진행 중 |
 | 저장소·기준 commit SHA | `sungjeahyun100/Accelerate-alpha-zero-style-Augment-Chess-bot-`, `3552b96fb276dd59e805bc09cf80c975a4525474` (`origin/develop`) |
 | 미커밋 변경 | `projects/augment-chess/reference/infra/main-Dm4wrmOx.js`는 별도 checkout의 입력 원본; 이 문서 초안만 조사 worktree에 존재 |
 | 자료 유형 | 규칙 비교·실패 범위 분석 |
@@ -102,3 +102,51 @@ DOM, HTML/CSS, 애니메이션, 사운드, 입력, 계정, 저장소 설정, 성
 - [x] 절대 경로·로컬 식별 정보·비밀을 공유 본문에 포함하지 않았다.
 - [x] 공개 GitHub 로그인명을 확인했다.
 - [x] 원시 자료와 임시 로그를 복사하지 않았다.
+
+## 2026-10-08 후속: 새 원본의 제한된 실제 전이 실행
+
+`projects/augment-chess/contracts/catalog/execution-profile-20261007-probe.json`과
+`projects/augment-chess/oracle/tools/site-parity/october-source-probe.js`를 추가했다.
+새 원본 SHA-256 `958e8e6787d8d107152e4c07e45736d2ffbf05ad8fad4e7de63558c3c70d024c`,
+공개 catalog hash `disfTpO_11gGrXKr6Q_AO_SsQHVecw5XIXQ0mJExQ4k`,
+Acorn 8.16.0 parser SHA-256 `24974706ffc00984a334f9ee085cc3cb2bf0a0ec80787ea9374ab5b5b6535681`,
+기존 headless bootstrap SHA-256 `1ae94ede71d44f517e9e0ba3ed9c364a65fb58bc15163ee582d93e41fe93969a`를 검사한다.
+새 번들은 원문 선언 10,885개와 import 문장 3개를 실행하며, 다른 최상위 문장 359개는 부작용과 의존성 검토 전까지 제외한다.
+임의의 카드 규칙 함수를 재구현하지 않고 원문 `resetGame`, `beginInitialGameFlow`, 드래프트 후보 함수,
+`finishDraft`/`finishChaosDraftBundle`, `completeDraftStep`/`completeGrandDraftStep`을 호출한다.
+원본 번들은 Git에 추가하지 않았다.
+
+실행 명령(원본과 파서 경로는 실행 환경의 절대 경로를 넣는다):
+
+```sh
+for style in normal chaos grand; do
+  node projects/augment-chess/oracle/tools/site-parity/october-source-probe.js \
+    "${SOURCE_MAIN}" "${ACORN_PARSER}" "$style"
+done
+```
+
+실제 실행 3건 모두 성공했다. 각 모드에서 8×8 보드와 `draft` 상태를 만들고,
+원문이 제시한 합법 선택 중 첫 항목을 적용해 `ok: true`와 다음 드래프트 actor/단계 전이를 관측했다.
+`normal`은 첫 카드 `sacrifice` 후 white→black, `chaos`는 첫 묶음
+`sacrifice,ghost` 후 white→black, `grand`는 첫 카드 `princess` 후 black→white였다.
+`normal`에서는 드래프트를 한 번 더 완료해 `play`에 진입했다. 원문 `collectValidAiActions`의
+비완전 카드 후보 모드에서 27개 행동을 얻고, 첫 일반 수인 white 폰 (6,0)→(5,0)을
+원문 `applyAiAction`으로 적용했다. 결과는 `ok: true`, moveCount 1, 다음 actor black이며
+목적지에는 폰이 있다. 원문 `pieceVisibleToColorAt`로 센 공개 보드 기물은
+이 수 전후 white·black 각각 32개였다. 이는 전체 공개 observation schema 대조가 아니다.
+정해진 host RNG seed `0x6d2b79f5`를 사용했으며 이 결과로 확률 분포 일치를 주장하지 않는다.
+
+이 프로필은 **제한된 실행 조사용**이다. 기존 9월 adapter의 bootstrap을 해시로 고정해 재사용했으나
+10월 원본에 대한 359개 최상위 문장의 의존성·부작용 검토, 실제 player별 observation,
+전체 합법 행동과 카드 선택·적용, chance outcome 열거, 확률·조건부 분포, Rust 대조는 미완료다.
+따라서 Phase A 전체 또는 Phase B~E 완료로 분류하지 않는다. Rust 엔진과 기존 v7 catalog는 변경하지 않았다.
+원본 범위가 검증되기 전에는 10월 `rulesVersion`을 운영 계약에 등록하지 않는다.
+
+### 후속 수정 파일과 검증 상태
+
+| 구분 | 파일·상태 |
+| --- | --- |
+| 새 조사 코드 | `projects/augment-chess/oracle/tools/site-parity/october-source-probe.js` |
+| 새 조사 프로필 | `projects/augment-chess/contracts/catalog/execution-profile-20261007-probe.json` |
+| 실제 실행 | 세 모드 초기화·드래프트 첫 선택: 3/3 성공; normal 일반 수 생성·적용: 1/1 성공; 변조 원본 SHA 거부: 1/1 성공 |
+| 미검증 | 완전 행동 목록·카드 효과·확률·전체 공개 관측·Rust 교차검증·9월 회귀·CI |

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "manifestVersion": "augment-october-source-probe-v1",
+  "profileVersion": "accelerate-headless-october-draft-probe-v1",
+  "rulesVersion": "augment-site-20261007-958e8e6787d8d107",
+  "sourceMainSha256": "958e8e6787d8d107152e4c07e45736d2ffbf05ad8fad4e7de63558c3c70d024c",
+  "sourceUrl": "https://augmentchess.org/assets/main-Dm4wrmOx.js",
+  "sourcePublicCatalogHash": "disfTpO_11gGrXKr6Q_AO_SsQHVecw5XIXQ0mJExQ4k",
+  "parser": "acorn-8.16.0/system-local-probe",
+  "parserSha256": "24974706ffc00984a334f9ee085cc3cb2bf0a0ec80787ea9374ab5b5b6535681",
+  "declarationCount": 10885,
+  "importCount": 3,
+  "excludedTopLevelCount": 359,
+  "bootstrapSha256": "1ae94ede71d44f517e9e0ba3ed9c364a65fb58bc15163ee582d93e41fe93969a",
+  "scope": "source normal/chaos/grand reset and first draft transition; normal opening move via original non-exhaustive AI candidates and source visibility predicate; not an adopted ruleset, catalog, complete player observation or exhaustive action oracle",
+  "sourcePolicy": {
+    "ast": "acorn-8.16.0/module/latest",
+    "declarations": "all original function, variable and class declarations",
+    "topLevelStatements": "excluded pending side-effect and rule dependency review",
+    "bootstrap": "September adapter bootstrap with exact digest, reused for bounded probe",
+    "rng": "host injected xorshift32 seed 0x6d2b79f5 for reproducibility; distribution not validated"
+  }
+}
