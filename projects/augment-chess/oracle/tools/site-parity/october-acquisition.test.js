@@ -169,3 +169,49 @@ test("draft-acquired chimera transforms through an actual queen move", () => {
   assert.equal(transformed.moveCount, 3);
   assert.equal(transformed.turn, "black");
 });
+
+
+test("draft-acquired holdout promotes after 28 completed shared turns of source legal play", () => {
+  assert.ok(source && parser);
+  const context = loadSource(source, parser);
+  context.__seed = seeds.holdout;
+  context.__random = () => {
+    let value = context.__seed;
+    value ^= value << 13;
+    value ^= value >>> 17;
+    value ^= value << 5;
+    context.__seed = value;
+    return (value >>> 0) / 0x100000000;
+  };
+  run(context, "Math.random=__random;selectedGameStyle='normal';localPlayMode='local';playMode='local';ruleSelectionEnabled=false;selectedRuleCardIds=[];deathmatchEnabled=false;resetGame(false,[]);beginInitialGameFlow()");
+  for (let pick = 0; pick < 2; pick++) {
+    assert.equal(run(context, "(()=>{const color=state.draft.color,phase=state.draft.phase,card=state.draft.choices.find(card=>card.id==='holdout')||state.draft.choices[0];const ok=finishDraft(card,null,{auto:true});if(ok)completeDraftStep(color,phase);return ok})()"), true);
+  }
+  assert.equal(run(context, "state.mode"), "play");
+  cardAction(context, "holdout", actions => actions.find(action => action.target?.row === 6 && action.target?.col === 0));
+  const pawnId = run(context, "state.board[6][0].id");
+  assert.equal(run(context, "state.board[6][0].holdoutPromotion.readyTurn"), 28);
+  let observed27 = false;
+  for (let step = 0; step < 140; step++) {
+    if (run(context, "state.mode") === "draft") {
+      assert.equal(run(context, "(()=>{const color=state.draft.color,phase=state.draft.phase,card=state.draft.choices[0];if(!card)return false;const ok=finishDraft(card,null,{auto:true});if(ok)completeDraftStep(color,phase);return ok})()"), true);
+      continue;
+    }
+    assert.equal(run(context, "state.mode"), "play", "Source game ended before holdout promotion.");
+    const actions = read(context, "collectValidAiActions(state.turn,{includeCards:false,exhaustiveCards:false}).filter(action=>action.type==='move'&&!(action.from.row===6&&action.from.col===0)&&!state.board[action.move.row][action.move.col]&&!action.move.enPassant&&state.board[action.from.row][action.from.col]?.type!=='king')");
+    assert.ok(actions.length > 0, "Source has no quiet legal move.");
+    play(context, actions[(step * 17 + 3) % actions.length]);
+    const shared = run(context, "sharedTurnCount()");
+    if (shared === 27) {
+      observed27 = true;
+      assert.equal(run(context, "state.board[6][0].type"), "pawn");
+    }
+    if (shared === 28) {
+      assert.equal(observed27, true);
+      assert.deepEqual(read(context, "({id:state.board[6][0].id,type:state.board[6][0].type,promoted:state.board[6][0].promotedFromPawn,turnsTaken:state.turnsTaken,winner:state.winner})"),
+        { id: pawnId, type: "queen", promoted: true, turnsTaken: { white: 28, black: 28 }, winner: null });
+      return;
+    }
+  }
+  assert.fail("Source did not reach 28 completed shared turns within the bounded playout.");
+});

@@ -372,7 +372,7 @@ profile, Rust ruleset, JS↔Rust 차분 일치를 선언하지 않는다.
 | 검사 | 이번 실행 결과 | 범위 |
 | --- | --- | --- |
 | 10월 `october-source-probe.test.js` | 12/12 성공 | 세 mode 초기화·드래프트·선별 전이·합성 P0 경계 |
-| 10월 `october-acquisition.test.js` | 7/7 성공 | 실제 획득 4종, 선택 RULE `monster`, 실제 `chimera` 퀸 이동, 제한된 보드 투영 |
+| 10월 `october-acquisition.test.js` | 8/8 성공 | 실제 획득 4종, 선택 RULE `monster`, 실제 `chimera` 퀸 이동, `holdout` 28수, 제한된 보드 투영 |
 | 9월 client baseline `--verify` | 1/1 성공 | 9월 main·parser SHA, catalog, profile 검증 |
 | 9월 `latest-client.test.cjs` | 34/34 성공 | client 전용 회귀; 전체 worker oracle은 미실행 |
 | Rust `cargo test -p augment-chess-engine --lib --offline` | 727 성공, 0 실패, 53 ignored | 기존 9월 엔진 회귀; 10월 차분 검사 아님 |
@@ -385,8 +385,24 @@ Rust 첫 시도는 worktree 기본 `target`의 읽기 전용 파일시스템 때
 Git 접근으로 14/14 통과했다. 두 환경 오류를 코드 테스트 실패로 세지 않는다.
 원격 CI는 이번 후속에서 관측하지 않았다.
 
-남은 순서는 원본 `holdout`의 정상 28수 승격과 `reaper`의 실제 아군 포획
-2회 승리, 전체 viewer별 공개 관측과 `trolley` 비누출, 10월 정식
+남은 순서는 `reaper`의 실제 아군 포획 2회 승리, 전체 viewer별 공개
+관측과 `trolley` 비누출, 10월 정식
 headless profile, Rust 규칙 버전 분리·P0/P1 구현, 동일 조건의 JS↔Rust
 행동·전이·분포 차분, 9월 전체 worker oracle이다. 이 입력이 없으므로
 10월 동기화 완료 판정을 보류한다.
+
+
+### 정정: `holdout`의 실제 28수 자동 승격 재생
+
+앞의 32반수 조사는 임의 행동 중 흑 왕이 잡혀 조기 종료된 사례였다.
+그 뒤 동일한 원본 획득 seed 74에서 deathmatch를 끄는 정상 게임 설정을
+적용하고, 원본 `collectValidAiActions`가 제시한 **비포획 합법 수**를
+재생했다. 중간 드래프트도 원본 후보와 `finishDraft`·`completeDraftStep`으로
+완료했다. `turnsTaken`을 직접 수정하지 않았다. 각 행동은
+`applyAiAction` 성공을 확인했고 전체 경로는 140 단계 상한 안에서
+56반수에 도달했다. 공유 턴 27에는 지정한 폰이 폰으로 남았고,
+white·black 각각 28턴을 완료한 직후 같은 기물 ID가 `queen`으로
+바뀌며 `promotedFromPawn=true`, `winner=null`이었다. 이 사례는
+`october-acquisition.test.js`의 8번째 검사로 고정했으며 8/8 통과했다.
+앞 문단의 `holdout` 미도달 설명은 첫 탐색 경로의 결과로만 읽어야 한다.
+이 한 경로로 다른 자동 효과·종료 조건과의 모든 조합을 검증한 것은 아니다.
