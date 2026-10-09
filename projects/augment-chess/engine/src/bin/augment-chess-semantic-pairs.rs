@@ -44,6 +44,10 @@ fn replay_sequence(start: &V7HostPosition, source: &Value) -> Result<Value, Stri
         return Ok(json!({"status": "unsupported", "reason": source["reason"]}));
     }
     let source_steps = source["steps"].as_array().ok_or("source Replay steps missing")?;
+    let actor = source["actor"].as_str().ok_or("source Replay actor missing")?;
+    if actor != "white" && actor != "black" {
+        return Err("source Replay actor invalid".into());
+    }
     if (source_unavailable && (source_steps.len() > 2
         || source_steps.iter().any(|step| step["kind"] != "bridge")))
         || (!source_unavailable && (source_steps.len() < 2 || source_steps.len() > 4
@@ -73,6 +77,7 @@ fn replay_sequence(start: &V7HostPosition, source: &Value) -> Result<Value, Stri
         rust_steps.push(json!({
             "kind": step["kind"], "beforeActions": before_actions,
             "position": current.export_envelope().map_err(|error| error.to_string())?,
+            "replayFrame": current.state().extra["moveReplay"][actor],
             "actions": v7_adapter_actions::legal_public_intents(&current)
                 .map_err(|error| format!("Replay step {index} next intents: {error}"))?,
             "observations": observations(&current)?, "result": rule_result(&current),
@@ -133,6 +138,12 @@ fn paired_sample(case: &Value, sample: &Value, index: usize) -> Result<Value, St
     let rust_next_observations = observations(&applied.position)?;
     let replay = replay_sequence(&applied.position, &sample["replaySequence"])
         .unwrap_or_else(|reason| json!({"status": "unsupported", "reason": reason}));
+    let mut replay = replay;
+    let search_witness = case["replaySearch"]["selectedMove"] == sample["publicIntent"]
+        && sample["replaySequence"]["status"] == "complete";
+    replay["searchAttempts"] = if search_witness { case["replaySearch"]["attempts"].clone() } else { json!(0) };
+    replay["acquired"] = json!(search_witness && case["replaySearch"]["acquired"].is_object());
+    replay["sourceStatus"] = sample["replaySequence"]["status"].clone();
     let classification = classify_transition(sample);
     Ok(json!({
         "name": format!("{name}/sample[{index}]"),

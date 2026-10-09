@@ -22,6 +22,7 @@ const MAX_BATCH_BYTES = 16 * 1024 * 1024;
 // Keep every case and its complete legal stream; do not extend the deadline.
 const MAX_BATCH_CASES = 1;
 const MAX_PLAYOUT_DECISIONS = 128;
+const MAX_REPLAY_SEARCH_SEEDS = 32;
 const STYLES = ["normal", "chaos", "grand"];
 const NO_CASE_FAILURE_STATUSES = new Set([
   "native-timeout", "native-unavailable", "native-unsupported", "probe-error", "version-mismatch",
@@ -35,10 +36,12 @@ const ACTIVE_SEED19 = Object.freeze({
 });
 
 function options(argv) {
-  const selected = { python: process.env.PYTHON || "python", source: null, oracleOnly: false, exportCases: false, playouts: [] };
+  const selected = { python: process.env.PYTHON || "python", source: null, outputRoot: null,
+    oracleOnly: false, exportCases: false, playouts: [], replaySearches: [] };
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === "--python" && argv[index + 1]) selected.python = argv[++index];
     else if (argv[index] === "--source" && argv[index + 1]) selected.source = argv[++index];
+    else if (argv[index] === "--output-root" && argv[index + 1]) selected.outputRoot = argv[++index];
     else if (argv[index] === "--oracle-only") selected.oracleOnly = true;
     else if (argv[index] === "--export-cases") selected.exportCases = true;
     else if (argv[index].startsWith("--playout=")) {
@@ -47,7 +50,17 @@ function options(argv) {
         throw new TypeError("Use --playout=STYLE:SEED:DECISIONS with 1..128 decisions.");
       selected.playouts.push({ style: match[1], seed: Number(match[2]), decisions: Number(match[3]) });
       if (selected.playouts.length > 18) throw new TypeError("At most 18 playouts per invocation; shard additional runs.");
-    } else throw new TypeError("Usage: node projects/augment-chess/tests/differential/v7-native-differential.cjs [--python PYTHON] [--source ABSOLUTE_PINNED_ROOT] [--oracle-only] [--export-cases] [--playout=STYLE:SEED:DECISIONS]...");
+    } else if (argv[index].startsWith("--replay-search=")) {
+      const match = /^--replay-search=(normal|chaos|grand):(\d+):(\d+):(\d+)$/.exec(argv[index]);
+      if (!match || [2, 3, 4].some(i => !Number.isSafeInteger(Number(match[i]))) ||
+          Number(match[3]) < 1 || Number(match[3]) > MAX_REPLAY_SEARCH_SEEDS ||
+          Number(match[4]) < 1 || Number(match[4]) > MAX_PLAYOUT_DECISIONS ||
+          !Number.isSafeInteger(Number(match[2]) + Number(match[3]) - 1))
+        throw new TypeError("Use --replay-search=STYLE:START_SEED:SEED_COUNT:DECISIONS (count 1..32, decisions 1..128).");
+      selected.replaySearches.push({ style: match[1], startSeed: Number(match[2]),
+        seedCount: Number(match[3]), decisions: Number(match[4]) });
+      if (selected.replaySearches.length > 3) throw new TypeError("At most three Replay search ranges per invocation.");
+    } else throw new TypeError("Usage: node v7-native-differential.cjs [--python PYTHON] [--source ABSOLUTE_PINNED_ROOT] [--output-root ABSOLUTE_NEW_ROOT] [--oracle-only] [--export-cases] [--playout=STYLE:SEED:DECISIONS] [--replay-search=STYLE:START_SEED:SEED_COUNT:DECISIONS]...");
   }
   if (new Set(selected.playouts.map(item => `${item.style}:${item.seed}`)).size !== selected.playouts.length)
     throw new TypeError("Duplicate style/seed playout.");
@@ -184,12 +197,19 @@ function sourceReplaySequence(adapter, contract, runtime, start, actor) {
     const nextIntents = sourcePublicIntents(runtime, contract, position, nextActions).publicIntents;
     const observations = Object.fromEntries(["white", "black"].map(viewer => [viewer, adapter.observe(position, viewer)]));
     steps.push({ kind, publicIntent: intent, beforeActions: publicIntents,
-      position, actions: nextIntents, observations, result: adapter.result(position) });
+      position, actions: nextIntents, observations, result: adapter.result(position),
+      replayFrame: position.state.moveReplay?.[actor] ?? null });
   };
   try {
     for (let bridge = 0; position.state.turn !== actor && bridge < 2; bridge++) {
       const { actions } = sourceActions(adapter, position);
-      const move = actions.find(action => action.payload.type === "move");
+      const moves = actions.filter(action => action.payload.type === "move").slice(0, 8);
+      const move = moves.find(action => {
+        const trial = adapter.apply(position, action, { recordHistory: true });
+        if (!trial.ok || trial.position.state.turn !== actor) return false;
+        return sourceActions(adapter, trial.position).actions.some(candidate =>
+          candidate.payload.type === "card" && candidate.payload.cardId === "replay");
+      }) || moves[0];
       if (!move) return { status: "unsupported", reason: "no natural bridge move returns the Replay owner to turn", steps: [] };
       take("bridge", move, actions);
     }
@@ -197,18 +217,145 @@ function sourceReplaySequence(adapter, contract, runtime, start, actor) {
       return { status: "unsupported", reason: "Replay owner did not regain the turn", steps: [] };
     const { actions } = sourceActions(adapter, position);
     const replay = actions.find(action => action.payload.type === "card" && action.payload.cardId === "replay");
-    if (!replay) return { status: "unavailable",
-      reason: "Replay card is absent from the full frozen legal stream", steps,
+    if (!replay) return { status: "unavailable", actor,
+      reason: replayAbsence(position, actor, runtime), steps,
       beforeActions: sourcePublicIntents(runtime, contract, position, actions).publicIntents };
     take("replay", replay, actions);
     const { actions: after } = sourceActions(adapter, position);
     const follow = after.find(action => action.payload.type === "move") || after[0];
     if (!follow) return { status: "unsupported", reason: "no legal follow-up action after Replay", steps: [] };
     take("follow", follow, after);
-    return { status: "complete", steps };
+    return { status: "complete", actor, steps };
   } catch (error) {
     return { status: "unsupported", reason: `frozen Replay continuation: ${error.message}`, steps: [] };
   }
+}
+
+function replayAbsence(position, actor, runtime = null) {
+  const state = position.state;
+  if (state.turn !== actor) return "turn has not returned to Replay owner";
+  const card = (state.deckSlots?.[actor] || []).find(entry => entry?.id === "replay");
+  if (!card) return "Replay card is not in owner's deck slots";
+  if (card.used || card.recovering) return "Replay card is used or recovering";
+  const frame = state.moveReplay?.[actor];
+  if (!frame || !Array.isArray(frame.delta) || !frame.delta.length)
+    return "Replay capture frame is absent or empty";
+  if (runtime) {
+    runtime.restore(position);
+    if (runtime.evaluate(`canReplayLastMove(${JSON.stringify(actor)})`) !== true)
+      return "Replay capture frame does not match current board or capture prefix";
+  }
+  if (state.cardsUsedThisTurn?.[actor] || state.actionsRemaining === 0)
+    return "card use or turn action limit may block Replay";
+  return "Replay card is owned but source use conditions reject it (frame validity or other rule effect)";
+}
+
+function replayDraftChoice(position, actions) {
+  const offered = new Map((position.state.draft?.choices || []).map(card => [card.instanceId, card.id]));
+  return actions.find(action => {
+    const payload = action.payload;
+    const ids = payload.type === "draftPick" ? [payload.cardInstanceId] :
+      payload.type === "draftBundlePick" ? payload.cardInstanceIds : [];
+    return ids.some(id => offered.get(id) === "replay");
+  });
+}
+
+function validateReplayWitness(search, sample) {
+  const steps = sample?.replaySequence?.steps;
+  if (!search?.acquired || !Array.isArray(search.draft) ||
+      !search.draft.some(pick => pick.selectedCardIds?.includes("replay")) ||
+      !Array.isArray(search.preReplayActions) ||
+      !Array.isArray(steps) || sample.replaySequence.status !== "complete" ||
+      steps.filter(step => step.kind === "replay").length !== 1 ||
+      steps.at(-1)?.kind !== "follow" ||
+      !steps.find(step => step.kind === "replay")?.beforeActions?.some(
+        intent => intent.type === "card" && intent.cardId === "replay"))
+    throw new Error("Replay search witness lacks acquisition, legal availability, execution or follow-up");
+  return true;
+}
+
+// One bounded source-only search per seed. Every candidate and accepted step
+// comes from the frozen adapter. A witness is exported only after a real card
+// action and follow-up have completed; failures stay in the summary.
+function searchReplaySeed(source, contract, { style, seed, decisions }) {
+  const adapter = new GameAdapter({ source, contract });
+  const runtime = new OracleRuntime({ source, contract });
+  const trace = [], draft = [];
+  let acquired = null, attempts = 0, unavailable = "Replay not acquired";
+  try {
+    let position = adapter.newGame({ gameStyle: style }, seed);
+    for (let decision = 0; decision < decisions; decision++) {
+      const { actions } = sourceActions(adapter, position);
+      if (!actions.length) { unavailable = "source has no legal action"; break; }
+      if (position.state.mode === "draft") {
+        const chosen = replayDraftChoice(position, actions) || actions[0];
+        const cardIds = chosen.payload.type === "draftPick" ? [chosen.payload.cardInstanceId] :
+          chosen.payload.type === "draftBundlePick" ? chosen.payload.cardInstanceIds : [];
+        const offered = new Map((position.state.draft?.choices || []).map(card => [card.instanceId, card.id]));
+        draft.push({ decision, phase: position.state.draft?.phase, color: chosen.payload.color,
+          publicIntent: chosen.payload, selectedCardIds: cardIds.map(id => offered.get(id) || null) });
+        const replayIds = cardIds.filter(id => offered.get(id) === "replay");
+        const step = adapter.apply(position, chosen, { recordHistory: true });
+        if (!step.ok) throw new Error("source rejected its own draft choice");
+        position = step.position;
+        if (replayIds.length) {
+          const owned = (position.state.deckSlots?.[chosen.payload.color] || [])
+            .filter(card => card?.id === "replay" && replayIds.includes(card.instanceId));
+          if (!owned.length) throw new Error("selected Replay was not stored in owner's deck slots");
+          acquired = { decision, color: chosen.payload.color, cardInstanceIds: owned.map(card => card.instanceId) };
+          unavailable = "Replay acquired but no eligible owner turn reached within decision bound";
+        }
+        continue;
+      }
+      if (position.state.mode !== "play") { unavailable = `source mode ${position.state.mode}`; break; }
+      const actor = position.state.turn;
+      const owned = (position.state.deckSlots?.[actor] || []).some(card => card?.id === "replay" && !card.used && !card.recovering);
+      if (acquired && !owned && actor === acquired.color) unavailable = replayAbsence(position, actor);
+      if (owned) {
+        for (const move of actions.filter(action => action.payload.type === "move").slice(0, 8)) {
+          attempts++;
+          const next = adapter.apply(position, move, { recordHistory: true });
+          if (!next.ok) continue;
+          const continuation = sourceReplaySequence(adapter, contract, runtime, next.position, actor);
+          if (continuation.status !== "complete") { unavailable = continuation.reason; continue; }
+          const item = buildCase(adapter, contract, `${style}-seed${seed}-replay-${decision}`,
+            position, move.actionId, runtime);
+          const sample = item.input.samples.find(value => value.action.actionId === move.actionId);
+          if (sample?.replaySequence.status !== "complete") {
+            unavailable = sample?.replaySequence.reason || "Replay witness could not be reconstructed";
+            continue;
+          }
+          item.summary.style = style;
+          item.summary.seed = seed;
+          item.summary.replayActor = actor;
+          item.summary.replayMoveCapture =
+            (sample.position.state.captures?.[actor]?.length || 0) >
+            (position.state.captures?.[actor]?.length || 0);
+          item.summary.replaySearch = { sourceSha256: SOURCE_SHA256, profile: PROFILE,
+            style, seed, decision, attempts, draft, acquired,
+            preReplayActions: trace, selectedMove: sample.publicIntent,
+            availability: sample.replaySequence.steps.find(step => step.kind === "replay")?.beforeActions
+              .some(intent => intent.type === "card" && intent.cardId === "replay"),
+            replayIntent: sample.replaySequence.steps.find(step => step.kind === "replay")?.publicIntent,
+            followIntent: sample.replaySequence.steps.find(step => step.kind === "follow")?.publicIntent,
+            finalDigest: contract.digest(sample.replaySequence.steps.at(-1).position) };
+          validateReplayWitness(item.summary.replaySearch, sample);
+          item.input.replaySearch = item.summary.replaySearch;
+          return { item, summary: { style, seed, status: "complete", attempts, acquired,
+            decision, sourceDigest: item.summary.positionDigest } };
+        }
+      }
+      const moves = actions.filter(action => action.payload.type === "move");
+      const chosen = moves.length ? moves[Math.floor(decision / 2) % moves.length] : actions[0];
+      trace.push({ decision, publicIntent: sourcePublicIntents(runtime, contract, position, actions)
+        .byActionId.get(chosen.actionId)[0] });
+      const next = adapter.apply(position, chosen, { recordHistory: true });
+      if (!next.ok) throw new Error("source rejected its own search action");
+      position = next.position;
+    }
+    return { item: null, summary: { style, seed, status: acquired ? "inconclusive" : "unsupported",
+      reason: unavailable, attempts, acquired, draftChoices: draft.length, decisions: trace.length } };
+  } finally { adapter.dispose(); }
 }
 
 function buildCase(adapter, contract, name, position, requiredSampleId = null, publicRuntime = null) {
@@ -545,7 +692,11 @@ function compareCases(python, identity, items, report, oracleOnly, exportCase = 
 function main() {
   const parent = process.env.RUNNER_TEMP || process.env.APPDATA;
   if (!parent || !path.isAbsolute(parent)) throw new Error("APPDATA or RUNNER_TEMP must be an absolute report root");
-  const reportPath = path.join(parent, "Accelerate", "reports", "v7-native-differential", "report.json");
+  const args = options(process.argv.slice(2));
+  if (args.outputRoot && !path.isAbsolute(args.outputRoot)) throw new Error("--output-root must be absolute");
+  const reportPath = args.outputRoot ? path.join(args.outputRoot, "report.json") :
+    path.join(parent, "Accelerate", "reports", "v7-native-differential", "report.json");
+  if (args.outputRoot && fs.existsSync(reportPath)) throw new Error("output report already exists; choose a new --output-root");
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });
   const report = {
     gate: "source-pinned-v7-native-differential-probe",
@@ -555,10 +706,11 @@ function main() {
     completeRuleCoverage: false,
     projectGo: false,
     bounds: { pageSize: PAGE_SIZE, maxPages: MAX_PAGES, maxActions: MAX_ACTIONS, maxExamined: MAX_EXAMINED, maxDraftChoices: 64, maxSamplesPerPosition: 4,
-      maxPlayoutDecisions: MAX_PLAYOUT_DECISIONS, maxBatchCases: MAX_BATCH_CASES, maxBatchBytes: MAX_BATCH_BYTES },
+      maxPlayoutDecisions: MAX_PLAYOUT_DECISIONS, maxReplaySearchSeeds: MAX_REPLAY_SEARCH_SEEDS,
+      maxReplayMoveCandidates: 8, maxReplayBridgeCandidates: 8,
+      maxBatchCases: MAX_BATCH_CASES, maxBatchBytes: MAX_BATCH_BYTES },
   };
   try {
-    const args = options(process.argv.slice(2));
     const sourceRoot = args.source || process.env.ACCELERATE_SITE_BASELINE_LATEST || process.env.ACCELERATE_SITE_BASELINE ||
       path.join(parent, "Accelerate", "cache", "site-baseline-20260928-e5ed84fc");
     if (!path.isAbsolute(sourceRoot)) throw new Error("pinned source root must be absolute");
@@ -575,7 +727,10 @@ function main() {
       observationPolicyHash: contract.digest(contract.observationPolicy) };
     report.sourceCases = [];
     report.playouts = args.playouts;
+    report.replaySearch = [];
     const exportPath = path.join(path.dirname(reportPath), "source-cases.jsonl");
+    if (args.outputRoot && args.exportCases && fs.existsSync(exportPath))
+      throw new Error("source export already exists; choose a new --output-root");
     if (args.exportCases) fs.writeFileSync(exportPath, "");
     const exportCase = args.exportCases ? input => fs.appendFileSync(exportPath, `${JSON.stringify(input)}\n`) : null;
     const identity = { rulesVersion: contract.catalog.rulesVersion, catalogVersion: contract.catalog.catalogVersion,
@@ -589,6 +744,14 @@ function main() {
       const items = (function* () {
         yield* sourceCases(source, contract);
         for (const playout of args.playouts) yield* sourcePlayoutCases(source, contract, playout);
+        for (const search of args.replaySearches) {
+          for (let offset = 0; offset < search.seedCount; offset++) {
+            const result = searchReplaySeed(source, contract,
+              { style: search.style, seed: search.startSeed + offset, decisions: search.decisions });
+            report.replaySearch.push(result.summary);
+            if (result.item) yield result.item;
+          }
+        }
       })();
       report.native = compareCases(args.python, identity, items, report, args.oracleOnly, exportCase);
       report.status = report.native.status;
@@ -605,6 +768,11 @@ function main() {
       playoutPositions: report.sourceCases.filter(item => Number.isInteger(item.playoutDecision)).length,
       syntheticPositions: report.sourceCases.filter(item => item.syntheticSetup === true).length,
       syntheticStatusTypes: [...new Set(report.sourceCases.map(item => item.sourceStatus).filter(Boolean))].sort(),
+      replaySearchAttempts: report.replaySearch.reduce((sum, item) => sum + item.attempts, 0),
+      replayCardAcquired: report.replaySearch.filter(item => item.acquired).length,
+      replayAvailable: report.replaySearch.filter(item => item.status === "complete").length,
+      replayExecuted: report.replaySearch.filter(item => item.status === "complete").length,
+      replayFollowUpExecuted: report.replaySearch.filter(item => item.status === "complete").length,
     };
   } catch (error) {
     report.status = "setup-error";
@@ -614,7 +782,7 @@ function main() {
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });
   fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
   console.log(JSON.stringify({ status: report.status, decision: report.decision,
-    report: "Accelerate/reports/v7-native-differential/report.json",
+    report: args.outputRoot ? reportPath : "Accelerate/reports/v7-native-differential/report.json",
     sourceCases: report.sourceCases?.length || 0, nativeCases: report.native?.cases?.length || 0,
     reason: report.reason || report.nativePreflight?.reason || report.nativeFailure?.reason || report.native?.cases?.find(item => item.status !== "pass")?.reason || undefined }));
   if (report.status !== "pass") process.exitCode = 1;
@@ -622,5 +790,6 @@ function main() {
 
 module.exports = Object.freeze({ SOURCE_SHA256, PROFILE, ACTIVE_SEED19, STYLES,
   sourceActions, sourcePublicPayloads, sourcePublicIntents, buildCase, firstActiveDraftAction, advanceInitialDraft, sourceCases,
-  syntheticTerminalCases, syntheticTimedStatusCases, inspectNativeComparison });
+  syntheticTerminalCases, syntheticTimedStatusCases, inspectNativeComparison,
+  replayAbsence, replayDraftChoice, validateReplayWitness, searchReplaySeed, sourceReplaySequence, options });
 if (require.main === module) main();

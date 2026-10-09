@@ -88,38 +88,71 @@ def _distribution(value: Any, conditioned_on: str, realized: tuple[str, str]) ->
     return Verdict("UNSUPPORTED", "distribution needs complete exact support or bounded samples", "paired-artifact-v2")
 
 
-def _replay_sequence(value: Any) -> tuple[Verdict, list[dict[str, Any]]]:
+def _conditional_equal(source: Any, rust: Any, description: str, same_state: bool) -> Verdict:
+    if source == rust:
+        return Verdict("PASS", f"{description} agree", "replay-sequence-v2")
+    if same_state:
+        return _equal(source, rust, description)
+    return Verdict("INCONCLUSIVE", f"{description} differ after unclassified prior transitions",
+                   "replay-sequence-v2")
+
+
+def _replay_outcome(details: list[dict[str, Any]], complete: bool) -> Verdict:
+    statuses = {check["status"] for step in details for check in step["checks"].values()}
+    if "MISMATCH" in statuses:
+        return Verdict("MISMATCH", "Replay step has a mismatch under an equal rule state",
+                       "replay-sequence-v2")
+    return Verdict("INCONCLUSIVE" if complete else "UNSUPPORTED",
+                   "Replay executions are single realizations with unclassified transition laws" if complete
+                   else "Replay execution or follow-up is incomplete", "replay-sequence-v2")
+
+
+def _replay_sequence(value: Any, initial_same_state: bool = False) -> tuple[Verdict, list[dict[str, Any]]]:
     if isinstance(value, dict) and value.get("status") == "availability":
         source, rust = value.get("sourceSteps"), value.get("rustSteps")
         if not isinstance(source, list) or not isinstance(rust, list) or len(source) != len(rust):
             return Verdict("UNSUPPORTED", "Replay availability bridge has inconsistent steps", "replay-sequence-v1"), []
         try:
-            before = _equal(_legal_meanings(value["sourceBeforeActions"]),
-                            _legal_meanings(value["rustBeforeActions"]),
-                            "Replay unavailable legal streams")
-            details = [{"index": index, "kind": "bridge", "checks": {
-                "nextRuleState": compare_positions(left["position"], right["position"]).as_dict(),
-                "nextLegalActions": _equal(_legal_meanings(left["actions"]),
-                                            _legal_meanings(right["actions"]),
-                                            "bridge next legal actions").as_dict(),
-            }} for index, (left, right) in enumerate(zip(source, rust))]
+            details = []
+            same = initial_same_state
+            for index, (left, right) in enumerate(zip(source, rust)):
+                state = compare_positions(left["position"], right["position"])
+                if state.status == "UNSUPPORTED":
+                    return state, details
+                next_same = state.status == "PASS"
+                details.append({"index": index, "kind": "bridge", "checks": {
+                    "nextRuleState": (state if next_same else Verdict("INCONCLUSIVE", state.reason,
+                        "replay-sequence-v2")).as_dict(),
+                    "nextLegalActions": _conditional_equal(_legal_meanings(left["actions"]),
+                        _legal_meanings(right["actions"]), "bridge next legal actions", next_same).as_dict(),
+                    "replayFrame": _conditional_equal(left["replayFrame"], right["replayFrame"],
+                        "bridge Replay frame", next_same).as_dict(),
+                }})
+                same = next_same
+            before = _conditional_equal(_legal_meanings(value["sourceBeforeActions"]),
+                                        _legal_meanings(value["rustBeforeActions"]),
+                                        "Replay unavailable legal streams", same)
         except (KeyError, ValueError) as error:
             return Verdict("UNSUPPORTED", f"Replay availability evidence malformed: {error}", "replay-sequence-v1"), []
         details.append({"index": len(source), "kind": "availability",
                         "checks": {"legalActions": before.as_dict()}})
-        return Verdict("INCONCLUSIVE", "Replay unavailability observed after bridge; bridge transition laws unproved",
-                       "replay-sequence-v1"), details
+        return _replay_outcome(details, True), details
     if isinstance(value, dict) and value.get("status") == "unavailable":
         steps, index = value.get("sourceSteps"), value.get("failedStep")
         if isinstance(steps, list) and type(index) is int and 0 <= index < len(steps):
             try:
-                before = _equal(_legal_meanings(steps[index]["beforeActions"]),
-                                _legal_meanings(value["rustBeforeActions"]),
-                                "Replay availability in the full legal streams")
+                prior = value.get("rustSteps", [])
+                same = initial_same_state if index == 0 else (
+                    isinstance(prior, list) and len(prior) >= index and
+                    compare_positions(steps[index - 1]["position"], prior[index - 1]["position"]).status == "PASS")
+                before = _conditional_equal(_legal_meanings(steps[index]["beforeActions"]),
+                                            _legal_meanings(value["rustBeforeActions"]),
+                                            "Replay availability in the full legal streams", same)
                 detail = [{"index": index, "kind": steps[index].get("kind"),
                            "checks": {"beforeLegalActions": before.as_dict()}}]
-                return Verdict("INCONCLUSIVE", f"Rust Replay continuation unavailable at step {index}; prior transition laws unproved: {value.get('reason')}",
-                               "replay-sequence-v1"), detail
+                return (_replay_outcome(detail, False) if before.status == "MISMATCH" else
+                        Verdict("UNSUPPORTED", f"Rust Replay continuation unavailable at step {index}: {value.get('reason')}",
+                                "replay-sequence-v2")), detail
             except (KeyError, ValueError):
                 pass
         return Verdict("UNSUPPORTED", str(value.get("reason", "Replay continuation unavailable")), "replay-sequence-v1"), []
@@ -130,26 +163,39 @@ def _replay_sequence(value: Any) -> tuple[Verdict, list[dict[str, Any]]]:
     if not isinstance(source, list) or not isinstance(rust, list) or len(source) != len(rust) or not 2 <= len(source) <= 4:
         return Verdict("UNSUPPORTED", "Replay sequence step count or shape differs", "replay-sequence-v1"), []
     details = []
+    same = initial_same_state
     for index, (left, right) in enumerate(zip(source, rust)):
         if not isinstance(left, dict) or not isinstance(right, dict) or left.get("kind") != right.get("kind"):
             return Verdict("UNSUPPORTED", f"Replay step {index} kind missing or different", "replay-sequence-v1"), details
         try:
-            before = _equal(_legal_meanings(left["beforeActions"]), _legal_meanings(right["beforeActions"]), "pre-step legal actions")
-            after = _equal(_legal_meanings(left["actions"]), _legal_meanings(right["actions"]), "post-step legal actions")
+            before = _conditional_equal(_legal_meanings(left["beforeActions"]),
+                                        _legal_meanings(right["beforeActions"]), "pre-step legal actions", same)
             state = compare_positions(left["position"], right["position"])
-            observations = _equal(left["observations"], right["observations"], "post-step public observations")
-            result = _equal(_result(left["result"]), _result(right["result"]), "post-step result")
+            if state.status == "UNSUPPORTED":
+                return state, details
+            next_same = state.status == "PASS"
+            state = state if next_same else Verdict("INCONCLUSIVE", state.reason, "replay-sequence-v2")
+            after = _conditional_equal(_legal_meanings(left["actions"]),
+                                       _legal_meanings(right["actions"]), "post-step legal actions", next_same)
+            observations = _conditional_equal(left["observations"], right["observations"],
+                                              "post-step public observations", next_same)
+            result = _conditional_equal(_result(left["result"]), _result(right["result"]),
+                                        "post-step result", next_same)
+            frame = _conditional_equal(left["replayFrame"], right["replayFrame"],
+                                       "post-step Replay frame", next_same)
         except (KeyError, ValueError) as error:
             return Verdict("UNSUPPORTED", f"Replay step {index}: {error}", "replay-sequence-v1"), details
         details.append({"index": index, "kind": left["kind"], "checks": {
             "beforeLegalActions": before.as_dict(), "nextRuleState": state.as_dict(),
             "nextPublicObservations": observations.as_dict(), "nextLegalActions": after.as_dict(),
             "result": result.as_dict(),
+            "replayFrame": frame.as_dict(),
         }})
+        same = next_same
     # A chained single realization is not a distribution proof. Retain exact
     # comparison details for diagnosis, but require transition classifications
     # before using any result as a parity PASS or a stochastic mismatch.
-    return Verdict("INCONCLUSIVE", "Replay chain observed; step determinism or joint distribution is unproved", "replay-sequence-v1"), details
+    return _replay_outcome(details, True), details
 
 
 def compare_case(case: dict[str, Any]) -> dict[str, Any]:
@@ -237,12 +283,49 @@ def compare_case(case: dict[str, Any]) -> dict[str, Any]:
             "paired-artifact-v2").as_dict()
     else:
         checks["transitionDistribution"] = Verdict("UNSUPPORTED", "unknown transition kind", "paired-artifact-v2").as_dict()
-    replay_verdict, replay_steps = _replay_sequence(case.get("replaySequence"))
+    replay_start = compare_positions(case["sourceNext"], case["rustNext"])
+    replay_verdict, replay_steps = (
+        (replay_start, []) if replay_start.status == "UNSUPPORTED" else
+        _replay_sequence(case.get("replaySequence"), replay_start.status == "PASS"))
     checks["replaySequence"] = replay_verdict.as_dict()
     statuses = {check["status"] for check in checks.values()}
     status = next((item for item in ("MISMATCH", "UNSUPPORTED", "INCONCLUSIVE") if item in statuses), "PASS")
     return {"name": name, "status": status, "transitionKind": kind,
             "checks": checks, "replaySteps": replay_steps}
+
+
+def replay_diagnostics(cases: list[dict[str, Any]], searches: list[dict[str, Any]]) -> dict[str, int]:
+    replay_values = [item.get("replaySequence", {}) for item in cases if isinstance(item.get("replaySequence"), dict)]
+    replay_steps = [step for case in cases for step in case.get("replaySteps", [])]
+    replay_checks = [check["status"] for step in replay_steps for check in step.get("checks", {}).values()]
+    return {
+        "Replay Search Attempts": sum(item.get("attempts", 0) for item in searches),
+        "Replay Card Acquired": sum(bool(item.get("acquired")) for item in searches),
+        "Replay Available": sum(any(step.get("kind") == "replay" for step in value.get("sourceSteps", []))
+                                for value in replay_values),
+        "Replay Executed": sum(any(step.get("kind") == "replay" for step in value.get("sourceSteps", []))
+                               for value in replay_values),
+        "Replay Follow-up Executed": sum(any(step.get("kind") == "follow" for step in value.get("sourceSteps", []))
+                                         for value in replay_values),
+        "Replay Source Complete": sum(value.get("sourceStatus") == "complete" for value in replay_values),
+        "Replay Rust Complete": sum(value.get("status") == "complete" for value in replay_values),
+        "Replay State Matches": sum(step.get("checks", {}).get("nextRuleState", {}).get("status") == "PASS"
+                                     for step in replay_steps),
+        "Replay Frame Matches": sum(step.get("checks", {}).get("replayFrame", {}).get("status") == "PASS"
+                                     for step in replay_steps),
+        "Replay Legal Action Matches": sum(check["status"] == "PASS" for step in replay_steps
+                                           for key, check in step.get("checks", {}).items()
+                                           if key in ("beforeLegalActions", "nextLegalActions", "legalActions")),
+        "Replay Observation Matches": sum(step.get("checks", {}).get("nextPublicObservations", {}).get("status") == "PASS"
+                                           for step in replay_steps),
+        "Replay Mismatch": sum(case.get("checks", {}).get("replaySequence", {}).get("status") == "MISMATCH"
+                               for case in cases),
+        "Replay Step Mismatches": replay_checks.count("MISMATCH"),
+        "Replay Unsupported": sum(case.get("checks", {}).get("replaySequence", {}).get("status") == "UNSUPPORTED"
+                                  for case in cases),
+        "Replay Inconclusive": sum(case.get("checks", {}).get("replaySequence", {}).get("status") == "INCONCLUSIVE"
+                                   for case in cases),
+    }
 
 
 def main() -> int:
@@ -295,6 +378,9 @@ def main() -> int:
                         and item.get("sourceAction") == samples[sample_index].get("publicIntent")
                         and item.get("sourceNext") == samples[sample_index].get("position")
                         and item.get("sourceRejection") == original.get("sourceRejection")
+                        and (samples[sample_index].get("replaySequence", {}).get("status") not in ("complete", "unavailable")
+                             or item.get("replaySequence", {}).get("sourceSteps") ==
+                             samples[sample_index]["replaySequence"].get("steps"))
                     )
             cases.append(compare_case(item))
     if not cases:
@@ -321,6 +407,10 @@ def main() -> int:
                           "notApplicable": len(cases) * len(keys) - len(relevant)}
     summary["Unsupported Cases"] = sum(case["status"] == "UNSUPPORTED" for case in cases)
     summary["Inconclusive Cases"] = sum(case["status"] == "INCONCLUSIVE" for case in cases)
+    searches = source_report.get("replaySearch", []) if args.source_report else []
+    if not isinstance(searches, list):
+        raise ValueError("source Replay search summary is malformed")
+    summary["Replay Diagnostics"] = replay_diagnostics(cases, searches)
     report = {"contract": "augment-rule-semantic-v3", "status": overall, "summary": summary, "cases": cases,
               "note": "stochastic single draws are never compared; sampled PASS is statistical only"}
     args.report.parent.mkdir(parents=True, exist_ok=True)

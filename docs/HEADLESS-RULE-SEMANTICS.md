@@ -63,3 +63,25 @@ cargo test -p augment-chess-engine --lib replay_capture_probe_does_not_change_th
 - 분리된 Replay capture probe가 미래 복원 frame에 영향을 줄 수 있다는 정적·재현 사례는 있으나, JS와 Rust의 실제 복원 상태 및 이후 합법 행동을 검증하지 않았다. probe RNG 소비 제거가 조건부 확률 전이에 미치는 영향, 복수 무작위 효과의 공통 숨은 변수, Trolley 등 큰 결과 공간의 결합분포도 검증되지 않았다.
 - 관측자별 숨은 정보 투영, 다른 기물 ID의 참조 대응, 연속 대국의 미래 의존성, 모든 카드·특수 기물·종료 분기의 확률 열거가 미완료다.
 - 기존 전체 상태 diff는 RNG·UI 표현까지 비교하므로 이번 UI 제거의 규칙 동등성 gate가 아니다. 이 변경은 빌드/검사 미실행이며 Headless Rules Engine 전환의 완료나 규칙 동등성 확인을 뜻하지 않는다.
+
+## Replay 자연 도달 탐색과 연속 진단
+
+동결 원문의 카드 ID는 `replay`, 표시 이름은 `리플레이`, 효과 키는 `replayMove`다. `card-definitions-20260928.json`과 원문 `main-OahWs0tU.js`의 카드 정의는 `END` 드래프트, `REPLAYABLE_LAST_MOVE`, `ACTIVE`, `OWN_TURN`, `PRESERVE_TURN`을 명시한다. 원문 `finishDraftSelection`/`addCardToPlayerDeck`은 선택 카드를 `deckSlots[color]`에 저장한다. normal/chaos는 양쪽이 20턴을 마친 뒤 END 드래프트를 시작할 수 있고, grand는 시작할 때 공용 풀에서 드래프트한다. 풀에 정의된 사실만으로 특정 seed에서 제공되거나 획득된다고 단정하지 않는다.
+
+원문 `canPlayCard`의 `replayMove` 분기는 `moveReplay[color].available === true` 또는 `canReplayLastMove(color)`를 요구한다. 후자는 저장된 board delta와 현재 보드, 저장된 포획 목록의 접두가 맞는지 검사한다. 원문 `beginMoveReplayCapture`/`commitMoveReplayCapture`는 자기 이동의 복원 frame을 생성하며, free move에서는 capture를 취소할 수 있다. `replayMoveCard`는 delta, 자기 포획 기록, 조건에 따른 `lastMove`·앙파상·가속 흔적 및 색상별 효과를 복원하고 frame을 소모한다. 이후 턴 정책은 `PRESERVE_TURN`이다. 원문 전체 합법 행동 목록에 `{type:"card",cardId:"replay"}`가 존재해야 실제 사용 가능하다고 판정한다. Rust의 `v7_card_turn::replay_available`/`replay_move`와 이 조건의 동등성은 실행 결과 전까지 미검증이다.
+
+`v7-native-differential.cjs --replay-search=STYLE:START_SEED:SEED_COUNT:DECISIONS`는 seed마다 정상 새 대국에서 시작해 오라클의 합법 드래프트 행동 중 Replay 포함 선택을 우선한다. 선택한 인스턴스가 실제 덱 슬롯에 저장됐는지 검사하고, 이후 합법 이동만 사용한다. Replay 소유자 차례에는 최대 8개 자기 이동을 시험하고, 각 이동 뒤 최대 8개 상대 이동 중 Replay가 실제 합법 행동에 나타나는 경로를 우선한다. 실제 Replay와 후속 합법 행동까지 완료한 경우에만 source case를 export한다. seed 수 1~32, 결정 수 1~128, 한 호출의 범위 3개가 상한이다. 상한·무행동·게임 종료·획득 실패·frame 부재·턴 미복귀·사용 조건 거절은 보고서에 남긴다. 이 탐색은 유한 휴리스틱이며 상태 공간 전체를 탐색하지 않는다.
+
+성공한 source case에는 source SHA/profile과 시작 seed·스타일, 선택한 드래프트·일반 행동의 공개 intent, 획득 인스턴스, Replay/후속 intent 및 최종 digest가 포함된다. 실제 Position과 양측 공개 관측은 Git 밖 `source-cases.jsonl`에만 쓴다. 기존 paired 생성기는 이 상태를 Rust 공개 host로 import한 뒤 최초 이동, 상대 bridge, Replay, 후속 행동을 같은 공개 intent로 연속 실행한다. 각 단계의 전체 합법 intent, RuleProjection, 양측 관측, 결과 및 `moveReplay` frame은 해당 단계의 Position을 통해 비교한다. 단일 확률적 실행의 다음 상태 차이는 `INCONCLUSIVE`; 동일한 규칙 상태에 대한 완전 합법 intent 차이는 `MISMATCH`다. source에서만 카드 사용이 완료되거나 Rust가 중간 intent를 수용하지 못하면 `UNSUPPORTED`다. 성공한 실행 자체를 규칙 동등성 `PASS`로 승격하지 않는다.
+
+source 보고서의 검색 `complete`는 Replay와 후속 행동이 원문에서 실행됐다는 뜻이고, `unsupported`는 제한 범위에서 카드를 얻지 못했거나 대국을 계속할 수 없다는 뜻이다. `inconclusive`는 카드를 얻었지만 제한 범위에서 실제 Replay 사용을 완료하지 못했다는 뜻이다. paired 검증의 `MISMATCH`는 동일 상태의 검증 가능한 차이, `INCONCLUSIVE`는 단일 확률 표본이나 아직 분류되지 않은 전이, `UNSUPPORTED`는 필요한 단계·증거의 부재를 나타낸다. 원문 검색 성공 건수와 Rust 동등성 통과 건수는 별도로 읽어야 한다.
+
+`--output-root`는 기존 보고서를 덮어쓰지 않는 새 절대 출력 디렉터리를 지정하며, 해당 디렉터리의 보고서 또는 export가 이미 있으면 중단한다. Windows에서는 `%APPDATA%/Accelerate/reports` 아래의 새 실험별 디렉터리를 지정한다. 사용자 실행 예시는 다음과 같다. 모든 명령은 **미실행**이다.
+
+```text
+node projects/augment-chess/tests/differential/v7-native-differential.cjs --oracle-only --export-cases --source <고정-client-절대-경로> --output-root <새-출력-절대-루트> --replay-search=normal:0:16:128 --replay-search=chaos:0:16:128 --replay-search=grand:0:16:128
+cargo run -p augment-chess-engine --bin augment-chess-semantic-pairs -- <새-출력-절대-루트>/report.json <새-출력-절대-루트>/source-cases.jsonl <새-출력-절대-루트>/paired.jsonl
+python3 projects/augment-chess/tests/differential/semantic_differential.py --pairs <새-출력-절대-루트>/paired.jsonl --source-report <새-출력-절대-루트>/report.json --source-cases <새-출력-절대-루트>/source-cases.jsonl --report <새-출력-절대-루트>/semantic-report.json
+```
+
+원문의 활성 Replay capture는 모듈 전역 상태라 공개 Position/export에 직접 없다. `reconcile_move_replay_capture_v7`의 기존 Rust 재현은 합성 희소 보드 사례이며 자연 도달 동등성 증거가 아니다. 새 경로는 다음 committed move가 남긴 `moveReplay` frame, 실제 Replay 복원 및 후속 행동을 비교할 준비만 한다. 해당 왕 위협 분기를 자연 대국에서 만났는지 별도 판별하는 증거와 JS 활성 journal 직접 비교는 아직 미지원이다. 따라서 일반 이동·포획·백·흑·지속 효과별 Replay와 왕 위협 journal 동등성은 사용자가 해당 source case를 실제 생성하고 단계별 paired 결과를 확인하기 전까지 모두 미검증이다.
