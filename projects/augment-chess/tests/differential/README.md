@@ -42,9 +42,9 @@ Hypocrisy의 큰 후보 공간은 전체 `actions()`의 명시적 예산 오류�
 행동 표면 검사이며 Rust 규칙 parity를 대신하지 않는다. 원시 조사 보고서는
 저장소 밖 `Accelerate/reports`에 둔다.
 
-## 규칙 의미 비교 초안
+## 규칙 의미 비교와 paired 생성
 
-[Headless 규칙 동등성 계약](../../../../docs/HEADLESS-RULE-SEMANTICS.md)은 RNG·표현 상태를 제외하는 보수적 투영과 조건부 결합분포 비교 도구의 범위·미지원 항목·사용자 실행 명령을 기록한다. 아래의 전체 상태 비교와 별개이며 현재 자동 최종 gate가 아니다.
+[Headless 규칙 동등성 계약](../../../../docs/HEADLESS-RULE-SEMANTICS.md)은 행동 후 규칙 상태·관측·결과의 결정적 비교, 조건부 결합분포 비교, 동결 오라클 export와 공개 Rust host에서 paired JSONL을 생성하는 명령을 기록한다. 자동 생성 행은 결정성/확률성이 아직 분류되지 않아 `INCONCLUSIVE`이며 현재 자동 최종 gate가 아니다. v7 사운드 UI 실행 경로 제거 뒤의 Replay 복원·확률 전이 검증 범위도 해당 문서에 있다.
 
 ## v7 네이티브 비교 진입점
 

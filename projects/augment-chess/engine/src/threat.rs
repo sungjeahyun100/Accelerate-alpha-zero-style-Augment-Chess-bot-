@@ -332,7 +332,7 @@ pub(crate) fn evaluate_royal_capture(
 /// true. The source callback mutates lastMove metadata; audio output is absent.
 pub(crate) fn play_move_sound(state: &mut GameState, default: &str, color: Color) -> Result<bool> {
     if state.ruleset_id == RULES_VERSION_V7 {
-        return crate::v7_threat::play_move_sound_v7_with_control(state, default, color);
+        return crate::v7_threat::reconcile_move_replay_capture_v7(state).map(|()| false);
     }
     if state.mode != "play" {
         return Ok(false);

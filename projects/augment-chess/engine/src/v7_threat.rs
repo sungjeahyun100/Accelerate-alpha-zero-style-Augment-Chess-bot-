@@ -21,67 +21,29 @@ pub(crate) struct RoyalThreatProbe {
     pub examined: usize,
 }
 
-/// Source headless sound callback: probe White, then Black, stopping at the
-/// first check. The board stays private, while actual replay capture commands
-/// keep their source global effect. RNG and the matching lastMove sound cue
-/// become visible after all required probes succeed.
-pub(crate) fn play_move_sound_v7(state: &mut GameState, default: &str, actor: Color) -> Result<()> {
-    play_move_sound_v7_with_control(state, default, actor).map(|_| ())
-}
-
-/// The shared legacy-shaped entry also returns whether a private simulation
-/// was attempted. The existing v7 sound API keeps its Result<()> contract.
-pub(crate) fn play_move_sound_v7_with_control(
-    state: &mut GameState,
-    default: &str,
-    actor: Color,
-) -> Result<bool> {
-    // main65609: a private king-threat move keeps its original cue. Probing
-    // it again would recurse into the same move and consume unrelated RNG.
-    if state.mode != "play" || state.is_ai_simulation() || state.threat_probe_depth > 0 {
-        return Ok(false);
-    }
-    let replay_scope = crate::replay::ReplayCaptureScope::for_probe(state);
-    let mut working = state.clone();
-    replay_scope.attach(&mut working);
-    let result = live_check_sound_v7(&mut working);
-    let control = crate::replay::active_move_capture(&working)
-        .and_then(|capture| crate::replay::replace_active_move_capture(state, capture));
-    let (check, simulated) = finish_replay_capture_scope(result, control)?;
-    if check
-        && let Some(last) = working
-            .extra
-            .get_mut("lastMove")
-            .and_then(Value::as_object_mut)
-        && last.get("soundName").and_then(Value::as_str) == Some(default)
-        && (!crate::observation::truth(last.get("soundColor"))
-            || last.get("soundColor").and_then(Value::as_str) == Some(actor.as_str()))
-    {
-        last.insert("soundName".into(), json!("checkDanger"));
-    }
-    state.rng = working.rng;
-    if check && let Some(last) = working.extra.shift_remove("lastMove") {
-        state.extra.insert("lastMove".into(), last);
-    }
-    Ok(simulated)
-}
-
-/// main92318 calls liveKingThreatMoveSoundName followed by raw playSound,
-/// which never rewrites lastMove.soundName. Actual pending capture commands
-/// and the probe's shared RNG survive; audio/online transport is host-owned.
-pub(crate) fn play_crown_capture_sound_v7(state: &mut GameState, _actor: Color) -> Result<()> {
+/// Preserve only the rule-visible move Replay capture commands produced by a
+/// private royal-threat simulation. Source audio used to call this probe and
+/// copy its RNG/sound cue back to the live state. Those presentation effects
+/// are deliberately absent; the pending undo capture remains until its future
+/// Replay-card dependency can be verified independently.
+pub(crate) fn reconcile_move_replay_capture_v7(state: &mut GameState) -> Result<()> {
     if state.mode != "play" || state.is_ai_simulation() || state.threat_probe_depth > 0 {
         return Ok(());
     }
     let replay_scope = crate::replay::ReplayCaptureScope::for_probe(state);
     let mut working = state.clone();
     replay_scope.attach(&mut working);
-    let result = live_check_sound_v7(&mut working);
+    let result = (|| {
+        for defender in [Color::White, Color::Black] {
+            if probe_royal_capture(&mut working, defender, false)?.check {
+                break;
+            }
+        }
+        Ok(())
+    })();
     let control = crate::replay::active_move_capture(&working)
         .and_then(|capture| crate::replay::replace_active_move_capture(state, capture));
-    finish_replay_capture_scope(result, control)?;
-    state.rng = working.rng;
-    Ok(())
+    finish_replay_capture_scope(result, control)
 }
 
 /// Source finally restores state/depth without restoring the module-global
@@ -95,18 +57,6 @@ fn finish_replay_capture_scope<T>(result: Result<T>, control: Result<()>) -> Res
             "v7 royal threat failed: {error}; replay capture finalization also failed: {control}",
         ))),
     }
-}
-
-fn live_check_sound_v7(state: &mut GameState) -> Result<(bool, bool)> {
-    let mut simulated = false;
-    for defender in [Color::White, Color::Black] {
-        let report = probe_royal_capture(state, defender, false)?;
-        simulated |= report.simulated;
-        if report.check {
-            return Ok((true, simulated));
-        }
-    }
-    Ok((false, simulated))
 }
 
 /// Called on a transaction-owned state. Successful simulations may advance
@@ -3355,8 +3305,8 @@ mod tests {
             state.ai_simulation_depth = ai_depth;
             state.threat_probe_depth = threat_depth;
             let before = state.clone();
-            play_move_sound_v7(&mut state, "capture", Color::White).unwrap();
-            play_crown_capture_sound_v7(&mut state, Color::White).unwrap();
+            reconcile_move_replay_capture_v7(&mut state).unwrap();
+            reconcile_move_replay_capture_v7(&mut state).unwrap();
             assert!(!crate::threat::play_move_sound(&mut state, "capture", Color::White).unwrap());
             assert_eq!(state, before);
         }
@@ -3923,7 +3873,7 @@ mod tests {
     }
 
     #[test]
-    fn crown_capture_sound_preserves_the_recorded_capture_cue() {
+    fn replay_capture_probe_does_not_change_the_recorded_capture_cue() {
         let mut state = source_sparse_play();
         state.board[7][4] = Some(Piece::new("king", Color::White, "white-king"));
         state.board[6][4] = Some(Piece::new("queen", Color::Black, "black-queen"));
@@ -3932,11 +3882,31 @@ mod tests {
             json!({"soundName":"capture","soundColor":"white"}),
         );
         let before = state.clone();
-        play_crown_capture_sound_v7(&mut state, Color::White).unwrap();
+        reconcile_move_replay_capture_v7(&mut state).unwrap();
         assert_probe_capture_control_only(&state, &before, Color::Black);
-        play_move_sound_v7(&mut state, "capture", Color::White).unwrap();
-        assert_eq!(state.extra["lastMove"]["soundName"], json!("checkDanger"));
+        reconcile_move_replay_capture_v7(&mut state).unwrap();
+        assert_eq!(state.extra["lastMove"]["soundName"], json!("capture"));
         assert!(state.move_replay_scope.is_none());
+    }
+
+    #[test]
+    fn replay_capture_probe_can_change_the_next_committed_undo_frame() {
+        // Black's simulated queen capture replaces the pending capture actor.
+        // The next black commit consumes that journal; without the probe it
+        // cannot create the same moveReplay.black frame.
+        let mut state = source_sparse_play();
+        state.board[7][4] = Some(Piece::new("king", Color::White, "white-king"));
+        state.board[6][4] = Some(Piece::new("queen", Color::Black, "black-queen"));
+        let mut without_probe = state.clone();
+        reconcile_move_replay_capture_v7(&mut state).unwrap();
+        let queen = state.board[6][4].take();
+        state.board[5][4] = queen.clone();
+        without_probe.board[6][4] = None;
+        without_probe.board[5][4] = queen;
+        crate::replay::commit_active_move(&mut state, Color::Black).unwrap();
+        crate::replay::commit_active_move(&mut without_probe, Color::Black).unwrap();
+        assert!(state.extra["moveReplay"]["black"].is_object());
+        assert!(without_probe.extra["moveReplay"]["black"].is_null());
     }
 
     #[test]
@@ -4446,11 +4416,11 @@ mod tests {
                 state, actor
             )),
             "sound" => {
-                play_move_sound_v7(state, args["sound"].as_str().unwrap(), actor)?;
+                reconcile_move_replay_capture_v7(state)?;
                 Value::Null
             }
             "crown_capture_sound" => {
-                play_crown_capture_sound_v7(state, actor)?;
+                reconcile_move_replay_capture_v7(state)?;
                 Value::Null
             }
             "royal_check" => json!(probe_royal_capture(state, actor, false)?.check),

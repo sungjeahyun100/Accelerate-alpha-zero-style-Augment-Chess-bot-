@@ -1020,11 +1020,7 @@ fn execute_core_profiled(
         trail["clearOnTurnStart"] = json!(actor);
     }
     crate::card_effects::mark_animation(state, &moving)?;
-    if moving.kind == "crown" && ledger.captured_something {
-        crate::v7_threat::play_crown_capture_sound_v7(state, actor)?;
-    } else {
-        crate::v7_threat::play_move_sound_v7(state, sound, actor)?;
-    }
+    crate::v7_threat::reconcile_move_replay_capture_v7(state)?;
     crate::v7_rule_bombs::resolve_under_pieces(state, actor, false)?;
     if state.mode == "gameover" {
         crate::replay::record(state, "gameover")?;

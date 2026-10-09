@@ -1112,12 +1112,7 @@ fn apply_chain(state: &mut GameState, action: &Action) -> Result<()> {
 
 fn apply_evacuation(state: &mut GameState, action: &Action) -> Result<()> {
     apply_evacuation_pre_sound(state, action)?;
-    let sound = if state.turn == Color::White {
-        "moveSelf"
-    } else {
-        "moveOpponent"
-    };
-    crate::v7_threat::play_move_sound_v7(state, sound, state.turn)
+    crate::v7_threat::reconcile_move_replay_capture_v7(state)
 }
 
 // The source's sound callback invokes an AiNoCards threat probe after the

@@ -756,15 +756,7 @@ fn apply_card_castling(
     )?;
     mark_animation(state, &king)?;
     mark_animation(state, &rook)?;
-    crate::v7_threat::play_move_sound_v7(
-        state,
-        if captures.is_empty() {
-            "castle"
-        } else {
-            "capture"
-        },
-        state.turn,
-    )?;
+    crate::v7_threat::reconcile_move_replay_capture_v7(state)?;
     king.moved = true;
     rook.moved = true;
     state.board[castle.king_to.row as usize][castle.king_to.col as usize] = Some(king.clone());
@@ -1350,7 +1342,7 @@ fn apply_pawn_storm(state: &mut GameState, card: &CardSlot, action: &Action) -> 
                     .collect(),
             ),
         );
-    crate::v7_threat::play_move_sound_v7(state, sound, color)?;
+    crate::v7_threat::reconcile_move_replay_capture_v7(state)?;
     crate::replay::add_log(
         state,
         format!(
@@ -2272,7 +2264,7 @@ fn apply_qxe1(state: &mut GameState, _card: &CardSlot, action: &Action) -> Resul
     color_flag(state, "regency", color, true)?;
     color_flag(state, "kingDead", color, true)?;
     mark_animation(state, &queen)?;
-    crate::v7_threat::play_move_sound_v7(state, "capture", color)?;
+    crate::v7_threat::reconcile_move_replay_capture_v7(state)?;
     Ok(Vec::new())
 }
 

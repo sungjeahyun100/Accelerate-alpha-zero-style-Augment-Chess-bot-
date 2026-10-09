@@ -1521,19 +1521,11 @@ fn try_evade_capture(
         state,
         json!({"type":"evasion","color":victim.color,"from":origin,"to":destination}),
     )?;
-    let owner = victim
+    victim
         .color
         .owner()
         .ok_or_else(|| EngineError::InvalidState("v7 evasion piece lacks a player color".into()))?;
-    crate::v7_threat::play_move_sound_v7(
-        state,
-        if owner == Color::White {
-            "moveSelf"
-        } else {
-            "moveOpponent"
-        },
-        owner,
-    )?;
+    crate::v7_threat::reconcile_move_replay_capture_v7(state)?;
     crate::replay::add_piece_action_log(
         state,
         victim,

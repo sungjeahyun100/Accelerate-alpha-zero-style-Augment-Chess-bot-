@@ -598,16 +598,11 @@ pub(crate) fn execute_log_direction(
     let hidden = privacy[viewer.as_str()]["originVisible"] == json!(false)
         || !crate::observation::piece_visible_to_color_at_v7(&next, &piece, from, viewer)?;
     let hidden_from = if hidden { viewer.as_str() } else { "" };
-    let sound = if actor == Color::White {
-        "moveSelf"
-    } else {
-        "moveOpponent"
-    };
     next.extra.insert("lastMove".into(), Value::Null);
     next.extra.insert("accelerationTrail".into(), Value::Null);
     next.extra.insert("lastMove".into(), json!({
         "from":from,"to":from,"pieceId":piece.id,"pieceType":piece.kind,
-        "soundName":sound,"soundColor":actor,"hiddenFrom":hidden_from,
+        "soundColor":actor,"hiddenFrom":hidden_from,
         "idolEncoreEligible":false,"idolEncoreId":"","idolEncorePieceId":"","idolEncoreConsumed":false,
     }));
     // Source calls playSound directly: no playMoveSound/check-probe callback.
@@ -1041,7 +1036,7 @@ pub(crate) fn execute_missionary_conversion(
         ""
     };
     crate::card_effects::set_last_move(&mut next, from, to, "capture", actor, hidden_from, None)?;
-    crate::v7_threat::play_move_sound_v7(&mut next, "capture", actor)?;
+    crate::v7_threat::reconcile_move_replay_capture_v7(&mut next)?;
     let destination = square_name(to);
     crate::replay::queue_special_history_notation(
         &mut next,
@@ -1423,7 +1418,7 @@ pub(crate) fn execute_position_swap_with_privacy(
                     cells.push(quantum_to);
                 }
             }
-            crate::v7_threat::play_move_sound_v7(&mut next, sound, actor)?;
+            crate::v7_threat::reconcile_move_replay_capture_v7(&mut next)?;
         }
         crate::card_effects::track_acceleration_trail(&mut next, actor, &cells, false, hidden)?;
     }
@@ -1498,7 +1493,7 @@ pub(crate) fn execute_position_swap_with_privacy(
     };
     if relay {
         crate::card_effects::set_last_move(&mut next, from, to, sound, actor, "", Some(&moving))?;
-        crate::v7_threat::play_move_sound_v7(&mut next, sound, actor)?;
+        crate::v7_threat::reconcile_move_replay_capture_v7(&mut next)?;
         crate::replay::queue_special_history_notation(
             &mut next,
             actor,
@@ -1556,7 +1551,7 @@ pub(crate) fn execute_position_swap_with_privacy(
         let log = swap_move_log(&next, &moving, from, to, &privacy)?;
         crate::replay::add_log(&mut next, log)?;
         if substitution {
-            crate::v7_threat::play_move_sound_v7(&mut next, sound, actor)?;
+            crate::v7_threat::reconcile_move_replay_capture_v7(&mut next)?;
         }
         if dragon && moving.kind == "trickster" {
             moving
@@ -3171,7 +3166,7 @@ fn execute_large_piece_move_at(
     crate::v7_board_hazards::replace_object_aliases(&mut next, &moving);
     crate::card_effects::mark_animation(&mut next, &moving)?;
     if rook {
-        crate::v7_threat::play_move_sound_v7(&mut next, sound, actor)?;
+        crate::v7_threat::reconcile_move_replay_capture_v7(&mut next)?;
     }
     if giant {
         moving
@@ -3328,7 +3323,7 @@ pub(crate) fn execute_castle(
     crate::card_effects::track_acceleration_trail(&mut next, actor, &trail, false, hidden)?;
     crate::card_effects::mark_animation(&mut next, &king)?;
     crate::card_effects::mark_animation(&mut next, &rook)?;
-    crate::v7_threat::play_move_sound_v7(&mut next, "castle", actor)?;
+    crate::v7_threat::reconcile_move_replay_capture_v7(&mut next)?;
     king.moved = true;
     rook.moved = true;
     crate::v7_board_hazards::replace_object_aliases(&mut next, &king);
@@ -3789,15 +3784,7 @@ pub(crate) fn execute_colossus_sector(
         .insert("coolGuyCapturedLast".into(), json!(count > 0));
     crate::v7_board_hazards::replace_object_aliases(&mut next, &attacker);
     crate::card_effects::mark_animation(&mut next, &attacker)?;
-    crate::v7_threat::play_move_sound_v7(
-        &mut next,
-        if count > 0 {
-            "chessatronCatch"
-        } else {
-            "chessatronMove"
-        },
-        actor,
-    )?;
+    crate::v7_threat::reconcile_move_replay_capture_v7(&mut next)?;
     next.en_passant = None;
     let divisor = cells.len().max(1) as f64;
     let center_row = cells.iter().map(|cell| f64::from(cell.row)).sum::<f64>() / divisor;

@@ -900,7 +900,7 @@ pub(crate) fn apply_pending_pawn_storm_for_turn(
                         .collect::<Vec<_>>()
                 ),
             );
-        crate::v7_threat::play_move_sound_v7(&mut next, sound, actor)?;
+        crate::v7_threat::reconcile_move_replay_capture_v7(&mut next)?;
         crate::replay::add_log(
             &mut next,
             format!(

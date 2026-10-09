@@ -4862,16 +4862,17 @@ pub(crate) fn set_last_move_with_medium_memory(
     if truthy(Some(&hidden)) {
         state.extra.insert("accelerationTrail".into(), Value::Null);
     }
-    state.extra.insert(
-        "lastMove".into(),
-        json!({
-            "from":from,"to":to,"pieceId":moved.as_ref().map_or("",|piece| piece.id.as_str()),
-            "pieceType":moved.as_ref().map_or("",|piece| piece.kind.as_str()),
-            "soundName":sound_name,"soundColor":sound_color,"hiddenFrom":hidden,
-            "idolEncoreEligible":truthy(Some(&encore_id)),"idolEncoreId":encore_id,
-            "idolEncorePieceId":encore_piece,"idolEncoreConsumed":false
-        }),
-    );
+    let mut last_move = json!({
+        "from":from,"to":to,"pieceId":moved.as_ref().map_or("",|piece| piece.id.as_str()),
+        "pieceType":moved.as_ref().map_or("",|piece| piece.kind.as_str()),
+        "soundColor":sound_color,"hiddenFrom":hidden,
+        "idolEncoreEligible":truthy(Some(&encore_id)),"idolEncoreId":encore_id,
+        "idolEncorePieceId":encore_piece,"idolEncoreConsumed":false
+    });
+    if state.ruleset_id != RULES_VERSION_V7 {
+        last_move["soundName"] = json!(sound_name);
+    }
+    state.extra.insert("lastMove".into(), last_move);
     Ok(())
 }
 pub(crate) fn track_acceleration_trail(
@@ -5046,7 +5047,11 @@ fn apply_evacuation(state: &mut GameState, action: &Action) -> Result<()> {
     {
         trail.insert("clearOnTurnStart".into(), json!(state.turn));
     }
-    crate::threat::play_move_sound(state, sound, state.turn)?;
+    if state.ruleset_id == RULES_VERSION_V7 {
+        crate::v7_threat::reconcile_move_replay_capture_v7(state)?;
+    } else {
+        crate::threat::play_move_sound(state, sound, state.turn)?;
+    }
     Ok(())
 }
 pub(crate) fn mark_animation(state: &mut GameState, piece: &Piece) -> Result<()> {

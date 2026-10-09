@@ -907,13 +907,15 @@ fn apply_move(state: &mut GameState, action: &Action, threat_probe: bool) -> Res
         Value::Object(memory)
     });
     crate::card_effects::mark_animation(state, &piece)?;
-    state.extra.insert(
-        "lastMove".into(),
-        json!({"from":from,"to":to,"pieceId":piece.id,"pieceType":original_type,
-            "soundName":if target.flag("castle"){"castle"}else if captures.is_empty(){if actor==Color::White {"moveSelf"} else {"moveOpponent"}}else{"capture"},
-            "soundColor":actor,"hiddenFrom":piece.extra.get("hiddenFrom").and_then(Value::as_str).unwrap_or(""),
-            "idolEncoreEligible":false,"idolEncoreId":"","idolEncorePieceId":"","idolEncoreConsumed":false}),
-    );
+    let mut last_move = json!({"from":from,"to":to,"pieceId":piece.id,"pieceType":original_type,
+        "soundColor":actor,"hiddenFrom":piece.extra.get("hiddenFrom").and_then(Value::as_str).unwrap_or(""),
+        "idolEncoreEligible":false,"idolEncoreId":"","idolEncorePieceId":"","idolEncoreConsumed":false});
+    if state.ruleset_id != RULES_VERSION_V7 {
+        last_move["soundName"] = json!(if target.flag("castle") { "castle" } else if captures.is_empty() {
+            if actor == Color::White { "moveSelf" } else { "moveOpponent" }
+        } else { "capture" });
+    }
+    state.extra.insert("lastMove".into(), last_move);
     // queueMoveHistoryNotation creates its identifier before promotion and turn
     // settlement, sharing the source random stream with later rule draws.
     if !threat_probe {
@@ -944,9 +946,9 @@ fn apply_move(state: &mut GameState, action: &Action, threat_probe: bool) -> Res
             "capture"
         };
         replay_interrupted = if state.ruleset_id == RULES_VERSION_V7 {
-            // The v7 threat probe simulates against a private clone. Source
-            // commitMoveReplayCapture still runs after that sound callback.
-            crate::v7_threat::play_move_sound_v7(state, sound, actor)?;
+            // Preserve the private probe's rule-visible Replay capture at
+            // this boundary without invoking an audio callback.
+            crate::v7_threat::reconcile_move_replay_capture_v7(state)?;
             false
         } else {
             crate::threat::play_move_sound(state, sound, actor)?
@@ -954,7 +956,7 @@ fn apply_move(state: &mut GameState, action: &Action, threat_probe: bool) -> Res
     }
     if state.ruleset_id == RULES_VERSION_V7 {
         // Both ordinary moves and the source's child-state threat simulation
-        // settle bombs after the sound boundary, before terminal early return.
+        // settle bombs after the Replay capture boundary, before terminal early return.
         crate::v7_rule_bombs::resolve_under_pieces(state, actor, false)?;
     }
     // Source movePiece returns immediately after the move sound/under-piece
