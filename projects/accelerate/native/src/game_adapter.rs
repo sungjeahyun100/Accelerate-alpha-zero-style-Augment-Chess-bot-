@@ -2,6 +2,7 @@
 //! game state stay in augment-chess-engine; this module only converts bounded
 //! values and forwards exact versioned requests.
 
+use std::collections::BTreeSet;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -14,6 +15,7 @@ use adapter_runtime::{
 use augment_chess_engine::adapter::{
     GameAdapterPayload, GameAdapterSession as EngineGameAdapterSession,
 };
+use augment_chess_engine::legal_profile;
 use augment_chess_engine::v7_action_admission::AdmissionErrorKind;
 use augment_chess_engine::v7_adapter_actions::{self, V7ActionHostError};
 use augment_chess_engine::v7_conditioning;
@@ -250,6 +252,39 @@ impl GameAdapterSession {
 
 #[pymethods]
 impl GameAdapterSession {
+    /// Explicit diagnostic transport, separate from public adapter responses.
+    fn begin_legal_profile(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let inner = self.inner.clone();
+        let stats = py.detach(move || {
+            let guard = inner.lock().map_err(|_| NativeError::new_err("game adapter session lock poisoned"))?;
+            let state = guard.position().state();
+            let pieces: BTreeSet<&str> = state.board.iter().flatten().flatten()
+                .map(|piece| piece.id.as_str()).collect();
+            let serialization_started = Instant::now();
+            let serialized_state_bytes = serde_json::to_vec(state)
+                .map_err(|error| NativeError::new_err(error.to_string()))?.len();
+            let serialization_ms = serialization_started.elapsed().as_secs_f64() * 1000.0;
+            let stats = serde_json::json!({
+                "board_piece_count": pieces.len(),
+                "current_player_card_instances": state.deck_slots.get(state.decision_actor()).iter().filter(|card| !card.vacant).count(),
+                "all_card_instances": state.deck_slots.white.iter().chain(&state.deck_slots.black).filter(|card| !card.vacant).count(),
+                "history_len": state.history.len(),
+                "capture_count": state.captures.white.len() + state.captures.black.len(),
+                "serialized_state_bytes": serialized_state_bytes,
+                "state_size_serialization_ms": serialization_ms,
+            });
+            Ok::<_, PyErr>(stats)
+        })?;
+        let stats = conversion::to_python(py, &stats)?;
+        legal_profile::start().map_err(NativeError::new_err)?;
+        Ok(stats)
+    }
+
+    fn finish_legal_profile(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let profile = legal_profile::finish().map_err(NativeError::new_err)?;
+        conversion::to_python(py, &json_value(profile)?)
+    }
+
     /// Independently reconstruct a v7 opening from a signed public frame.
     /// The source environment's hidden seed and position never enter Python.
     #[staticmethod]

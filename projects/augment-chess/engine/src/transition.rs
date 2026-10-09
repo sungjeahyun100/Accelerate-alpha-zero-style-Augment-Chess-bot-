@@ -327,7 +327,9 @@ pub(crate) fn apply_without_public_event(
 ) -> Result<Vec<Piece>> {
     let captures = match action.kind {
         ActionKind::Move => apply_move(state, action, false)?,
-        ActionKind::Card => apply_card(state, action)?,
+        ActionKind::Card => {
+            crate::legal_profile::measure("card_effect_apply", || apply_card(state, action))?
+        }
         ActionKind::Promotion if state.ruleset_id == RULES_VERSION_V7 => {
             crate::v7_promotion::start_deferred_promotion_v7(state, action)?;
             Vec::new()

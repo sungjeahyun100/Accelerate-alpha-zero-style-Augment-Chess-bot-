@@ -4632,7 +4632,9 @@ pub(crate) fn v7_legal_move_targets(
     from: Square,
     options: V7MoveOptions,
 ) -> Result<Vec<MoveTarget>> {
-    Ok(v7_legal_move_query(state, piece, from, options)?.targets)
+    crate::legal_profile::measure("movement_targets", || {
+        Ok(v7_legal_move_query(state, piece, from, options)?.targets)
+    })
 }
 
 fn v7_legal_move_targets_with_population(
