@@ -37,6 +37,11 @@ class RuleProjectionTests(unittest.TestCase):
         other["state"]["newUnclassifiedField"] = 1
         self.assertEqual(compare_positions(self.position, other).status, "MISMATCH")
 
+    def test_json_safe_number_spelling_does_not_change_rules(self) -> None:
+        other = {**self.position, "state": {**self.position["state"], "moveCount": 1.0}}
+        source = {**self.position, "state": {**self.position["state"], "moveCount": 1}}
+        self.assertEqual(compare_positions(source, other).status, "PASS")
+
     def test_unsettled_presentation_replay_is_not_a_pass(self) -> None:
         other = {**self.position, "state": {**self.position["state"],
                                            "pendingReplayVisuals": [{"type": "vanish"}]}}

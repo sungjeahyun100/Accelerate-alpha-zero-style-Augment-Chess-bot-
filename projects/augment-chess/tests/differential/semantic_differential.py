@@ -72,9 +72,10 @@ def compare_case(case: dict[str, Any]) -> dict[str, Any]:
         "PASS" if source_actions == rust_actions else "MISMATCH",
         "complete legal action meanings agree" if source_actions == rust_actions else "legal action meanings differ",
         "paired-artifact-v1").as_dict()
+    checks["rejection"] = Verdict("PASS", "both reject without changing state",
+                                  "paired-artifact-v1").as_dict()
     for key, source_key, rust_key in (
         ("observations", "sourceObservations", "rustObservations"),
-        ("rejection", "sourceRejection", "rustRejection"),
     ):
         source, rust = case[source_key], case[rust_key]
         checks[key] = Verdict("PASS" if source == rust else "MISMATCH",

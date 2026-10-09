@@ -57,6 +57,8 @@ def rule_projection(position: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _first_difference(left: Any, right: Any, path: str = "$") -> str | None:
+    if type(left) is not bool and type(right) is not bool and type(left) in (int, float) and type(right) in (int, float):
+        return None if left == right else path
     if type(left) is not type(right):
         return path
     if isinstance(left, dict):
