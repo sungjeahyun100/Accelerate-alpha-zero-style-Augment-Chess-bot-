@@ -754,7 +754,7 @@ def test_run_action_pages_replay_resume_and_isolate_source_positions(monkeypatch
     monkeypatch.setattr(_RunCache, "source_key", staticmethod(lambda position: (type(position), position.latent)))
     cache = _RunCache()
     profile = _MctsProfile(3)
-    limits = SearchLimits(page_size=1, max_examined_actions=3)
+    limits = SearchLimits(page_size=1, max_candidates=3, max_examined_actions=3)
     first = ManyPosition(0)
     entry = cache.action_entry(first, profile)
     pages = cache.pages(entry, first, first.observe("white"), limits, profile, {"pages": []})
@@ -773,7 +773,7 @@ def test_run_action_pages_replay_resume_and_isolate_source_positions(monkeypatch
 def test_run_inference_cache_deduplicates_batch_and_separates_candidate_sets():
     evaluator = TestEvaluator(spec())
     search = InformationSetSearch(PublicEncoder(spec()), evaluator)
-    state = _SearchState(profile=_MctsProfile(3))
+    state = _SearchState(profile=_MctsProfile(3), active_details=[])
     request = (TestPosition().observe("white"), [TestAction(0, 0).public_intent()], None)
     first = search._evaluate_cached([request, request], state)
     repeated = search._evaluate_cached([request], state)
@@ -908,18 +908,15 @@ def test_progressive_widening_cancellation_and_finite_budgets():
     evaluator = TestEvaluator(spec())
     stopped = False
 
-    class CancelOnSecondLeafBatch(InformationSetSearch):
-        batches = 0
-
+    class CancelDuringNextGroup(InformationSetSearch):
         def _evaluate_cached(self, requests, state):
             nonlocal stopped
             result = super()._evaluate_cached(requests, state)
-            self.batches += 1
-            if self.batches == 2:
+            if state.completed == 4:
                 stopped = True
             return result
 
-    cancelled_search = CancelOnSecondLeafBatch(PublicEncoder(spec()), evaluator,
+    cancelled_search = CancelDuringNextGroup(PublicEncoder(spec()), evaluator,
                           limits=SearchLimits(iterations=12, max_depth=1, elapsed_ms=1000),
                           profile=True)
     result = cancelled_search.run(belief(), cancelled=lambda: stopped)
