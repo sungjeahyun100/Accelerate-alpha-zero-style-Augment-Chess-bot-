@@ -1676,6 +1676,16 @@ pub(crate) fn prepare_v7_move_selection(
     from: Square,
     target: &MoveTarget,
 ) -> Result<V7MoveSelection> {
+    crate::legal_profile::measure("move_prepare", || {
+        prepare_v7_move_selection_profiled(state, from, target)
+    })
+}
+
+pub(crate) fn prepare_v7_move_selection_profiled(
+    state: &mut GameState,
+    from: Square,
+    target: &MoveTarget,
+) -> Result<V7MoveSelection> {
     let mut next = state.clone();
     let mut moving = require_origin(&next, from)?;
     let privacy = privacy_snapshot(&next, &moving, from)?;

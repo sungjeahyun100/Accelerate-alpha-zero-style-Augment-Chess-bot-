@@ -169,6 +169,15 @@ pub(crate) fn activate_othello(state: &mut GameState, actor: Color) -> Result<us
 /// effects are ported, active cases that could change this scan fail closed.
 /// v6 uses its existing transition path unchanged.
 pub(crate) fn settle_after_completed_turn(state: &mut GameState, actor: Color) -> Result<usize> {
+    crate::legal_profile::measure("end_move_piece_effects", || {
+        settle_after_completed_turn_profiled(state, actor)
+    })
+}
+
+pub(crate) fn settle_after_completed_turn_profiled(
+    state: &mut GameState,
+    actor: Color,
+) -> Result<usize> {
     if state.ruleset_id == RULES_VERSION_V6 || state.mode == "gameover" {
         return Ok(0);
     }

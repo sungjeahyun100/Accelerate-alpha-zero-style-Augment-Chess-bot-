@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-const KEYS: [&str; 12] = [
+const KEYS: [&str; 51] = [
     "cursor_init",
     "movement_generation",
     "movement_targets",
@@ -19,6 +19,45 @@ const KEYS: [&str; 12] = [
     "public_deduplication",
     "cursor_page",
     "total_legal",
+    "move_execute",
+    "move_prepare",
+    "move_core",
+    "move_capture",
+    "move_capture_inner",
+    "move_landing",
+    "move_after_placement",
+    "move_after_surviving",
+    "move_finish_control",
+    "move_finish_removed_mover",
+    "move_before_middle_callbacks",
+    "move_after_middle_callbacks",
+    "replay_begin_move",
+    "replay_state_clone",
+    "replay_commit_active_move",
+    "replay_commit_move",
+    "replay_record",
+    "replay_record_pipeline",
+    "replay_frame",
+    "replay_delta",
+    "replay_board_delta",
+    "replay_json_compare",
+    "replay_record_update",
+    "end_move_for_decision",
+    "finish_move_with_history",
+    "finish_move_with_count_inner",
+    "settle_end_move_before_count",
+    "settle_end_move_after_count",
+    "end_move_piece_effects",
+    "end_move_auto_effects",
+    "no_action_loss",
+    "threat_probe_royal_capture",
+    "threat_square_attacked",
+    "threat_herald",
+    "threat_initiative",
+    "game_over_democracy_check",
+    "game_over_racing_kings_check",
+    "game_over_gomoku_check",
+    "game_over_apply",
 ];
 
 #[derive(Clone, Default, Serialize)]
@@ -55,12 +94,21 @@ pub struct LegalProfile {
     pub counts: BTreeMap<&'static str, u64>,
     pub slowest_candidates: Vec<SlowCandidate>,
     pub unclassified_ms: f64,
+    /// transition_apply exclusive time: work outside its measured child spans.
+    pub transition_unclassified_ms: f64,
+    /// Nearest instrumented ancestor of each movement target calculation.
+    pub movement_targets_callers: BTreeMap<&'static str, u64>,
     #[serde(skip)]
     started: Option<Instant>,
     #[serde(skip)]
-    stack: Vec<Duration>,
+    stack: Vec<Frame>,
     #[serde(skip)]
     root_measured: Duration,
+}
+
+struct Frame {
+    key: &'static str,
+    children: Duration,
 }
 
 thread_local! {
@@ -111,30 +159,72 @@ pub fn finish() -> Result<LegalProfile, &'static str> {
                 .or_default()
                 .add(elapsed, exclusive);
         }
+        profile.transition_unclassified_ms = profile
+            .timing_ms
+            .get("transition_apply")
+            .map_or(0.0, |timing| timing.exclusive_ms);
         Ok(profile)
     })
 }
 
 pub(crate) fn measure<T>(key: &'static str, operation: impl FnOnce() -> T) -> T {
-    let enabled = ACTIVE.with(|cell| cell.borrow().is_some());
+    let enabled = ACTIVE.with(|cell| {
+        let active = cell.borrow();
+        let Some(profile) = active.as_ref() else {
+            return false;
+        };
+        // New breakdowns belong to transition_apply. Existing top-level
+        // diagnostic keys retain their original whole-run scope.
+        let existing = matches!(
+            key,
+            "cursor_init"
+                | "movement_generation"
+                | "movement_targets"
+                | "card_generation"
+                | "card_effect_apply"
+                | "state_clone"
+                | "transition_apply"
+                | "canonicalization"
+                | "public_projection"
+                | "public_deduplication"
+                | "cursor_page"
+                | "total_legal"
+        );
+        existing
+            || profile
+                .stack
+                .iter()
+                .any(|frame| frame.key == "transition_apply")
+    });
     if !enabled {
         return operation();
     }
     ACTIVE.with(|cell| {
-        cell.borrow_mut()
-            .as_mut()
-            .unwrap()
-            .stack
-            .push(Duration::ZERO)
+        let mut active = cell.borrow_mut();
+        let profile = active.as_mut().unwrap();
+        if key == "movement_targets" {
+            let parent = profile
+                .stack
+                .last()
+                .map_or("unclassified", |frame| frame.key);
+            *profile.movement_targets_callers.entry(parent).or_default() += 1;
+        }
+        profile.stack.push(Frame {
+            key,
+            children: Duration::ZERO,
+        });
     });
     let start = Instant::now();
     let result = operation();
     let elapsed = start.elapsed();
     ACTIVE.with(|cell| {
         if let Some(profile) = cell.borrow_mut().as_mut() {
-            let child = profile.stack.pop().unwrap_or_default();
+            let child = profile
+                .stack
+                .pop()
+                .map_or(Duration::ZERO, |frame| frame.children);
             if let Some(parent) = profile.stack.last_mut() {
-                *parent += elapsed;
+                parent.children += elapsed;
             } else {
                 profile.root_measured += elapsed;
             }

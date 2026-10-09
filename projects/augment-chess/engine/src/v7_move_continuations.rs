@@ -418,6 +418,15 @@ pub(crate) fn before_middle_callbacks_v7(
     state: &mut GameState,
     input: &V7MoveContinuationInput,
 ) -> Result<V7ContinuationControl> {
+    crate::legal_profile::measure("move_before_middle_callbacks", || {
+        before_middle_callbacks_v7_profiled(state, input)
+    })
+}
+
+pub(crate) fn before_middle_callbacks_v7_profiled(
+    state: &mut GameState,
+    input: &V7MoveContinuationInput,
+) -> Result<V7ContinuationControl> {
     boundary(state)?;
     if state.mode == "gameover" {
         return Ok(V7ContinuationControl::Terminal);
@@ -749,6 +758,15 @@ pub(crate) fn after_stationary_hp_v7(
 
 /// main92531-92610. Continue만 root의 일반 endMove로 이어진다.
 pub(crate) fn after_middle_callbacks_v7(
+    state: &mut GameState,
+    input: &V7MoveContinuationInput,
+) -> Result<V7ContinuationControl> {
+    crate::legal_profile::measure("move_after_middle_callbacks", || {
+        after_middle_callbacks_v7_profiled(state, input)
+    })
+}
+
+pub(crate) fn after_middle_callbacks_v7_profiled(
     state: &mut GameState,
     input: &V7MoveContinuationInput,
 ) -> Result<V7ContinuationControl> {

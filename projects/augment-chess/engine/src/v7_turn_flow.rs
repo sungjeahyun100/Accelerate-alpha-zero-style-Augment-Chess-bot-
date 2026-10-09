@@ -212,6 +212,15 @@ pub(crate) fn check_no_action_loss_for_color_v7(
     state: &mut GameState,
     actor: Color,
 ) -> Result<bool> {
+    crate::legal_profile::measure("no_action_loss", || {
+        check_no_action_loss_for_color_v7_profiled(state, actor)
+    })
+}
+
+pub(crate) fn check_no_action_loss_for_color_v7_profiled(
+    state: &mut GameState,
+    actor: Color,
+) -> Result<bool> {
     if state.ruleset_id != RULES_VERSION_V7 {
         return Err(EngineError::UnsupportedFeature(format!(
             "v7 no-action verdict on rules version {}",

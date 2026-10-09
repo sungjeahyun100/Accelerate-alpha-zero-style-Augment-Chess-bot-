@@ -67,6 +67,8 @@ def _run(provenance: dict, spec: TypedEncoderSpec, expected: str,
         "timing_ms": {name: item["total_ms"] for name, item in timing.items()},
         "timing_detail": timing,
         "unclassified_ms": profile["unclassified_ms"],
+        "transition_unclassified_ms": profile["transition_unclassified_ms"],
+        "movement_targets_callers": profile["movement_targets_callers"],
         "counts": profile["counts"],
         "slowest_candidates": profile["slowest_candidates"],
     }

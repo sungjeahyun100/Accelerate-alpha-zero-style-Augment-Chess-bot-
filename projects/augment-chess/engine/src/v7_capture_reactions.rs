@@ -616,11 +616,34 @@ pub(crate) fn capture_at(
     square: Square,
     options: &CaptureOptions,
 ) -> Result<Option<Piece>> {
+    crate::legal_profile::measure("move_capture", || {
+        capture_at_profiled(state, attacker, square, options)
+    })
+}
+
+pub(crate) fn capture_at_profiled(
+    state: &mut GameState,
+    attacker: &mut Piece,
+    square: Square,
+    options: &CaptureOptions,
+) -> Result<Option<Piece>> {
     let capturer = attacker.color.owner().ok_or(EngineError::WrongActor)?;
     capture_at_with_optional_attacker(state, square, capturer, Some(attacker), options)
 }
 
 pub(crate) fn capture_at_with_optional_attacker(
+    state: &mut GameState,
+    square: Square,
+    capturer: Color,
+    attacker: Option<&mut Piece>,
+    options: &CaptureOptions,
+) -> Result<Option<Piece>> {
+    crate::legal_profile::measure("move_capture_inner", || {
+        capture_at_with_optional_attacker_profiled(state, square, capturer, attacker, options)
+    })
+}
+
+pub(crate) fn capture_at_with_optional_attacker_profiled(
     state: &mut GameState,
     square: Square,
     capturer: Color,

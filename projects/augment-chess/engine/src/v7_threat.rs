@@ -118,6 +118,16 @@ pub(crate) fn probe_royal_capture(
     defender: Color,
     include_danger: bool,
 ) -> Result<RoyalThreatProbe> {
+    crate::legal_profile::measure("threat_probe_royal_capture", || {
+        probe_royal_capture_profiled(state, defender, include_danger)
+    })
+}
+
+pub(crate) fn probe_royal_capture_profiled(
+    state: &mut GameState,
+    defender: Color,
+    include_danger: bool,
+) -> Result<RoyalThreatProbe> {
     if state.ruleset_id != RULES_VERSION_V7 {
         return Err(EngineError::UnsupportedFeature(format!(
             "v7 royal threat on rules version {}",
@@ -1053,6 +1063,12 @@ pub(crate) fn resolve_herald_for_color_v7(state: &mut GameState, actor: Color) -
 /// using the normalized current depth, and the first physical royal in board
 /// order is the Racing King even if the side has several royal identities.
 pub(crate) fn check_racing_kings_v7(state: &mut GameState) -> Result<bool> {
+    crate::legal_profile::measure("game_over_racing_kings_check", || {
+        check_racing_kings_v7_profiled(state)
+    })
+}
+
+pub(crate) fn check_racing_kings_v7_profiled(state: &mut GameState) -> Result<bool> {
     if state.mode == "gameover" {
         return Ok(false);
     }
@@ -1110,6 +1126,16 @@ pub(crate) fn resolve_herald_threats_v7(state: &mut GameState, actor: Color) -> 
 /// The source suppression flag belongs to its probe context, not to the wire
 /// state. Pass the context explicitly when simulating a threat move.
 pub(crate) fn resolve_herald_threats_v7_with_probe(
+    state: &mut GameState,
+    actor: Color,
+    threat_probe: bool,
+) -> Result<bool> {
+    crate::legal_profile::measure("threat_herald", || {
+        resolve_herald_threats_v7_with_probe_profiled(state, actor, threat_probe)
+    })
+}
+
+pub(crate) fn resolve_herald_threats_v7_with_probe_profiled(
     state: &mut GameState,
     actor: Color,
     threat_probe: bool,
@@ -1543,6 +1569,18 @@ fn source_move_destination(target: &crate::MoveTarget) -> Result<Square> {
 /// Errors stay visible to placement, castling and fog callers: an unsupported
 /// attack branch must never be interpreted as a safe or invisible square.
 pub(crate) fn is_square_attacked_v7(
+    state: &GameState,
+    target: Square,
+    by: Color,
+    target_override: Option<&Piece>,
+    ignored_attacker_ids: Option<&BTreeSet<String>>,
+) -> Result<bool> {
+    crate::legal_profile::measure("threat_square_attacked", || {
+        is_square_attacked_v7_profiled(state, target, by, target_override, ignored_attacker_ids)
+    })
+}
+
+pub(crate) fn is_square_attacked_v7_profiled(
     state: &GameState,
     target: Square,
     by: Color,
@@ -2961,6 +2999,15 @@ fn shotgun_attacks_square(
 }
 
 pub(crate) fn break_initiative_by_check_v7(state: &mut GameState, attacker: Color) -> Result<bool> {
+    crate::legal_profile::measure("threat_initiative", || {
+        break_initiative_by_check_v7_profiled(state, attacker)
+    })
+}
+
+pub(crate) fn break_initiative_by_check_v7_profiled(
+    state: &mut GameState,
+    attacker: Color,
+) -> Result<bool> {
     let defender = attacker.opponent();
     if state
         .extra

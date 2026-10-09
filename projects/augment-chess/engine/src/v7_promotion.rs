@@ -785,6 +785,17 @@ pub(crate) fn resolve_landing_promotion_v7(
     moved_as_type: &str,
     privacy: Option<&Value>,
 ) -> Result<V7LandingPromotionControl> {
+    crate::legal_profile::measure("move_landing", || {
+        resolve_landing_promotion_v7_profiled(state, square, moved_as_type, privacy)
+    })
+}
+
+pub(crate) fn resolve_landing_promotion_v7_profiled(
+    state: &mut GameState,
+    square: Square,
+    moved_as_type: &str,
+    privacy: Option<&Value>,
+) -> Result<V7LandingPromotionControl> {
     boundary(state)?;
     let mut piece = state.at(square).cloned().ok_or_else(|| {
         EngineError::InvalidState("v7 landing promotion has no surviving landed piece".into())

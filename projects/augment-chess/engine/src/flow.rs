@@ -5,6 +5,16 @@ use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
 pub(crate) fn end_game(state: &mut GameState, winner: Option<Color>, reason: &str) -> Result<()> {
+    crate::legal_profile::measure("game_over_apply", || {
+        end_game_profiled(state, winner, reason)
+    })
+}
+
+pub(crate) fn end_game_profiled(
+    state: &mut GameState,
+    winner: Option<Color>,
+    reason: &str,
+) -> Result<()> {
     end_game_with_source_winner(state, winner.map(Color::as_str), reason)
 }
 
@@ -97,6 +107,17 @@ fn end_game_with_source_winner(
 }
 
 pub(crate) fn check_democracy_defeat(
+    state: &mut GameState,
+    color: Color,
+    winner: Color,
+    cause: &str,
+) -> Result<bool> {
+    crate::legal_profile::measure("game_over_democracy_check", || {
+        check_democracy_defeat_profiled(state, color, winner, cause)
+    })
+}
+
+pub(crate) fn check_democracy_defeat_profiled(
     state: &mut GameState,
     color: Color,
     winner: Color,

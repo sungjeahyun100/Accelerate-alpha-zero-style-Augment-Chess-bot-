@@ -2089,6 +2089,17 @@ pub(crate) fn end_move_for_decision(
     count_move: bool,
     history_reason: Option<&str>,
 ) -> Result<()> {
+    crate::legal_profile::measure("end_move_for_decision", || {
+        end_move_for_decision_profiled(state, actor, count_move, history_reason)
+    })
+}
+
+pub(crate) fn end_move_for_decision_profiled(
+    state: &mut GameState,
+    actor: Color,
+    count_move: bool,
+    history_reason: Option<&str>,
+) -> Result<()> {
     if state.ruleset_id != RULES_VERSION_V7 {
         return Err(EngineError::UnsupportedFeature(
             "decision endMove requires v7 source semantics".into(),
@@ -2102,6 +2113,17 @@ fn finish_move_with_count(state: &mut GameState, actor: Color, count_move: bool)
 }
 
 fn finish_move_with_history(
+    state: &mut GameState,
+    actor: Color,
+    count_move: bool,
+    history_reason: Option<&str>,
+) -> Result<()> {
+    crate::legal_profile::measure("finish_move_with_history", || {
+        finish_move_with_history_profiled(state, actor, count_move, history_reason)
+    })
+}
+
+fn finish_move_with_history_profiled(
     state: &mut GameState,
     actor: Color,
     count_move: bool,
@@ -2139,6 +2161,17 @@ fn finish_move_with_history(
 }
 
 fn finish_move_with_count_inner(
+    state: &mut GameState,
+    actor: Color,
+    count_move: bool,
+    context: &mut crate::v7_end_move_reactions::V7EndMoveContext,
+) -> Result<()> {
+    crate::legal_profile::measure("finish_move_with_count_inner", || {
+        finish_move_with_count_inner_profiled(state, actor, count_move, context)
+    })
+}
+
+fn finish_move_with_count_inner_profiled(
     state: &mut GameState,
     actor: Color,
     count_move: bool,
@@ -2640,6 +2673,12 @@ fn automatic_card_failure_message(effect: &str) -> Result<&'static str> {
 // owner-turn counter advances. It is separate from finishCard: an automatic
 // card is marked used, but does not consume a card action or add progress.
 fn resolve_first_move_cards(state: &mut GameState, actor: Color) -> Result<()> {
+    crate::legal_profile::measure("end_move_auto_effects", || {
+        resolve_first_move_cards_profiled(state, actor)
+    })
+}
+
+fn resolve_first_move_cards_profiled(state: &mut GameState, actor: Color) -> Result<()> {
     if state.flag("firstMoveCardsForced", actor) || *state.turns_taken.get(actor) != 0 {
         return Ok(());
     }
