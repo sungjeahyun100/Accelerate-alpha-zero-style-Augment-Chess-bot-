@@ -65,9 +65,9 @@ pub struct Timing {
     pub calls: u64,
     pub total_ms: f64,
     pub exclusive_ms: f64,
-    pub mean_ms: Option<f64>,
-    pub min_ms: Option<f64>,
-    pub max_ms: Option<f64>,
+    pub mean_ms: f64,
+    pub min_ms: f64,
+    pub max_ms: f64,
 }
 
 impl Timing {
@@ -76,9 +76,13 @@ impl Timing {
         self.calls += 1;
         self.total_ms += ms;
         self.exclusive_ms += exclusive.as_secs_f64() * 1000.0;
-        self.mean_ms = Some(self.total_ms / self.calls as f64);
-        self.min_ms = Some(self.min_ms.map_or(ms, |old| old.min(ms)));
-        self.max_ms = Some(self.max_ms.map_or(ms, |old| old.max(ms)));
+        self.mean_ms = self.total_ms / self.calls as f64;
+        self.min_ms = if self.calls == 1 {
+            ms
+        } else {
+            self.min_ms.min(ms)
+        };
+        self.max_ms = self.max_ms.max(ms);
     }
 }
 

@@ -39,10 +39,42 @@ ID를 검증합니다. 재생 시간 `replay_ms`는 각 경로의 합법 행동 
 
 `state_clone`은 커서 초기화와 후보 검증에서 명시적으로 호출한 `GameState::clone`을
 측정합니다. 카드 효과는 `transition_apply` 안의 `card_effect_apply`로 분리합니다.
-내부 규칙 함수의 다른 상태 복제와 카드 인스턴스 내부 할당은 아직 개별 계측하지
-않습니다. `movement_targets`는 `movement_generation` 또는 전이 적용 안에서 호출될
-수 있습니다. `canonicalization`은 성공한 후보의 JCS 직렬화·역직렬화와 프레임
+`replay_state_clone`은 Replay 시작과 active capture 처리에서 복제하는 상태·capture를
+별도로 측정합니다. 그 밖의 내부 상태 복제와 카드 인스턴스 내부 할당은 아직 개별
+계측하지 않습니다. `movement_targets`는 `movement_generation` 또는 전이 적용 안에서
+호출될 수 있습니다. `movement_targets_callers`는 가장 가까운 계측 상위 함수별 호출
+횟수이며 Rust의 전체 call stack을 뜻하지 않습니다. `canonicalization`은 성공한 후보의 JCS 직렬화·역직렬화와 프레임
 교체를 포함합니다. 공개 intent의 JCS 중복 제거는 `public_deduplication`입니다.
+
+`transition_apply` 안에서는 다음 단계만 추가 계측합니다. 각 항목은 `timing_detail`의
+`calls`, `total_ms`, `exclusive_ms`, `mean_ms`, `min_ms`, `max_ms`로 확인합니다.
+호출되지 않은 항목은 호출 횟수와 시간이 모두 0입니다. 포함 시간은 부모·자식에
+중복 표시되므로 항목별 `total_ms`를 합산하지 않습니다.
+
+- 이동: `move_execute`는 `v7_move_transition::execute` 전체, `move_core`는 내부
+  이동 실행 본체입니다. `move_prepare`, `move_capture`, `move_capture_inner`,
+  `move_landing`, `move_after_placement`, `move_after_surviving`과 네 가지
+  `move_*callbacks`·`move_finish_*` 항목은 실제 도달한 준비·포획·착지·후속 함수를
+  각각 측정합니다.
+- Replay: `replay_begin_move`, `replay_commit_active_move`, `replay_commit_move`,
+  `replay_record`, `replay_record_pipeline`은 함수 전체입니다. `replay_frame`은
+  상태 JSON 직렬화를 포함한 frame 생성, `replay_delta`와 `replay_board_delta`는
+  delta 계산, `replay_json_compare`는 source식 JSON 비교·문자열화,
+  `replay_record_update`는 delta 생성 이후 event·timeline·history 갱신입니다.
+- 턴 종료: `end_move_for_decision`, `finish_move_with_history`,
+  `finish_move_with_count_inner`, `settle_end_move_before_count`,
+  `settle_end_move_after_count`는 호출 계층 그대로입니다. `end_move_piece_effects`는
+  완료 턴의 기물 효과, `end_move_auto_effects`는 첫 이동 자동 카드 처리입니다.
+  `no_action_loss`는 추가 합법 행동 존재 검사를 포함합니다.
+- 위협·종료: `threat_probe_royal_capture`, `threat_square_attacked`, `threat_herald`,
+  `threat_initiative`는 해당 실제 판정 함수입니다. `game_over_*check`는 각 승패
+  조건 검사, `game_over_apply`는 `flow::end_game` 호출입니다.
+
+새 단계 항목은 `transition_apply` 스택 안에서만 측정합니다. `transition_unclassified_ms`는
+`transition_apply.exclusive_ms`와 같으며, 직접 측정한 자식 구간 밖의 시간입니다.
+`move_core.exclusive_ms` 등 상위 함수 자체 시간은 각 함수에 남으므로 이를 전체
+미분류 시간으로 해석하지 않습니다. `unclassified_ms`는 기존의 전체 진단 루트 값입니다.
+컴파일 및 실제 진단을 다시 실행하기 전에는 어느 단계가 병목인지 확정하지 않습니다.
 
 `counts`에는 생성한 이동·카드 후보, 검사·승인·거절한 후보, 측정 경계의 상태
 복제·전이·정규화 횟수가 기록됩니다. `slowest_candidates`는 검사 순번과 시간만
