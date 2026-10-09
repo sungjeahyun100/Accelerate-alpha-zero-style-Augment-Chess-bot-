@@ -39,8 +39,8 @@
 ```text
 node projects/augment-chess/tests/differential/v7-native-differential.cjs --oracle-only --export-cases
 cargo run -p augment-chess-engine --bin augment-chess-semantic-pairs -- <절대-source-report.json> <절대-source-cases.jsonl> <절대-paired.jsonl>
-python projects/augment-chess/tests/differential/semantic_differential.py --pairs <절대-paired.jsonl> --report <절대-semantic-report.json>
-python -m unittest discover -s projects/augment-chess/tests/differential -p test_rule_projection.py
+python3 projects/augment-chess/tests/differential/semantic_differential.py --pairs <절대-paired.jsonl> --report <절대-semantic-report.json>
+python3 -m unittest discover -s projects/augment-chess/tests/differential -p test_rule_projection.py
 cargo test -p augment-chess-engine --lib replay_capture_probe_can_change_the_next_committed_undo_frame
 cargo test -p augment-chess-engine --lib replay_capture_probe_does_not_change_the_recorded_capture_cue
 ```
