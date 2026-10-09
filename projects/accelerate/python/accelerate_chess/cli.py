@@ -102,13 +102,15 @@ def _search(args, spec, manifest, backend):
     evaluator = ProductionEvaluator(manifest, spec, backend, threads=args.threads)
     if args.model_family == "legacy-resnet":
         return InformationSetSearch(PublicEncoder(spec), evaluator, limits=limits,
-                                    profile=getattr(args, "mcts_profile", False))
+                                    profile=getattr(args, "mcts_profile", False),
+                                    cache=not getattr(args, "no_mcts_cache", False))
     from .ir import TypedEncoder
 
     if evaluator.architecture_family != args.model_family:
         raise ValueError("typed manifest architecture differs from the explicit CLI family")
     return TypedInformationSetSearch(TypedEncoder(spec), evaluator, limits=limits,
-                                     profile=getattr(args, "mcts_profile", False))
+                                     profile=getattr(args, "mcts_profile", False),
+                                     cache=not getattr(args, "no_mcts_cache", False))
 
 
 def _typed_model(args, spec):
@@ -796,6 +798,8 @@ def parser():
     staged.add_argument("--iterations", type=int, default=8)
     staged.add_argument("--mcts-profile", action="store_true",
                         help="record bounded numeric MCTS timing diagnostics")
+    staged.add_argument("--no-mcts-cache", action="store_true",
+                        help="disable run-local MCTS action and inference caches for comparison")
     staged.add_argument("--leaf-batch-size", type=int, default=2)
     staged.add_argument("--depth", type=int, default=4)
     staged.add_argument("--search-ms", type=int, default=1000)

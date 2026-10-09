@@ -22,7 +22,7 @@ from accelerate_chess.search import (BeliefLimits, InformationMismatchError, Inf
     MissingHistoryError, NativeSourceFactory, ParticleBelief, ParticleExhaustedError,
     PublicTracker, SearchBudgetError, SearchLimits, SourceCapabilityError, TransitionProposal,
     TypedInformationSetSearch, _SearchState, _allowed, _bind_source_public_intent, _stream)
-from accelerate_chess.search import _MctsProfile
+from accelerate_chess.search import _MctsProfile, _RunCache
 from test_ir import frame as v7_public_frame, source as v7_source
 from test_model_stack import observation_policy
 
@@ -682,8 +682,8 @@ def test_puct_value_sign_uses_decision_actor_and_chance_is_sampled():
     assert -.5 < stochastic.policy[0]["value"] < .5
     assert stochastic.policy[0]["visits"] == stochastic.policy[0]["availability"] == 80
     assert stochastic.legal_actions_exhausted
-    assert stochastic.max_inference_batch == 4 and stochastic.inference_batches == 20
-    assert all(len(board) == 4 for board, _, _ in chance_search.evaluator.calls)
+    assert stochastic.max_inference_batch == 1 and stochastic.inference_batches == 1
+    assert all(len(board) == 1 for board, _, _ in chance_search.evaluator.calls)
 
 
 @pytest.mark.parametrize("depth,nodes", [(1, 2), (2, 1), (2, 2)])
@@ -726,6 +726,99 @@ def test_hidden_execution_flags_do_not_change_public_features_or_choice():
     with pytest.raises(ValueError, match="public-decision-intent"):
         old = replace(contract, action_encoding="exact-payload")
         InformationSetSearch(PublicEncoder(old), TestEvaluator(old))
+
+
+def test_run_action_pages_replay_resume_and_isolate_source_positions(monkeypatch):
+    class ManyPosition(TestPosition):
+        def __init__(self, latent):
+            super().__init__(latent)
+            self.opens = 0
+
+        def action_stream(self):
+            self.opens += 1
+            actions = []
+            for col in range(3):
+                action = TestAction(0, self.latent)
+                action.public_intent = lambda col=col: {
+                    "type": "move", "color": "white", "from": {"row": 6, "col": 1},
+                    "destination": {"row": 5, "col": col}}
+                actions.append(action)
+            return TestStream(actions)
+
+        def observe(self, viewer):
+            public = super().observe(viewer)
+            public["publicState"]["legalHints"]["moves"][0]["destinations"] = [
+                {"row": 5, "col": col} for col in range(3)]
+            return sign(public)
+
+    monkeypatch.setattr(_RunCache, "source_key", staticmethod(lambda position: (type(position), position.latent)))
+    cache = _RunCache()
+    profile = _MctsProfile(3)
+    limits = SearchLimits(page_size=1, max_examined_actions=3)
+    first = ManyPosition(0)
+    entry = cache.action_entry(first, profile)
+    pages = cache.pages(entry, first, first.observe("white"), limits, profile, {"pages": []})
+    assert len(next(pages)[0]) == 1
+    pages.close()
+    assert len(list(cache.pages(entry, first, first.observe("white"), limits, profile, {"pages": []}))) == 3
+    assert first.opens == 1 and entry.exhausted
+    assert cache.action_entry(first, profile) is entry
+    second = ManyPosition(1)
+    assert cache.action_entry(second, profile) is not entry
+    assert second.opens == 1
+    assert profile.data["action_stream_resumes"] == 1
+    assert profile.data["action_stream_reuses"] == 1
+
+
+def test_run_inference_cache_deduplicates_batch_and_separates_candidate_sets():
+    evaluator = TestEvaluator(spec())
+    search = InformationSetSearch(PublicEncoder(spec()), evaluator)
+    state = _SearchState(profile=_MctsProfile(3))
+    request = (TestPosition().observe("white"), [TestAction(0, 0).public_intent()], None)
+    first = search._evaluate_cached([request, request], state)
+    repeated = search._evaluate_cached([request], state)
+    assert len(evaluator.calls) == 1
+    np.testing.assert_array_equal(first[0][0], first[1][0])
+    np.testing.assert_array_equal(first[0][0], repeated[0][0])
+    search._evaluate_cached([(request[0], [], None)], state)
+    assert len(evaluator.calls) == 2
+    assert state.profile.data["inference_cache_hits"] == 2
+    assert state.profile.data["inference_cache_misses"] == 2
+    assert state.profile.data["native_inference_calls"] == 2
+
+
+def test_cached_root_still_updates_availability_visits_and_values(monkeypatch):
+    class CountingPosition(TestPosition):
+        opens = 0
+
+        def action_stream(self):
+            type(self).opens += 1
+            return super().action_stream()
+
+    class CountingFactory(TestFactory):
+        def sample_initial(self, initial, seed):
+            return CountingPosition(seed % 2)
+
+    monkeypatch.setattr(_RunCache, "source_key", staticmethod(
+        lambda position: (type(position), position.latent, position.stage)))
+    tracker = PublicTracker(CountingPosition().observe("white"))
+    posterior = ParticleBelief(tracker, CountingFactory(), seed=19,
+        limits=BeliefLimits(particles=2, proposals=2, elapsed_ms=None))
+    result = InformationSetSearch(PublicEncoder(spec()), TestEvaluator(spec()),
+        limits=SearchLimits(iterations=8, max_depth=1, elapsed_ms=None), profile=True).run(posterior)
+    assert result.policy[0]["visits"] == result.policy[0]["availability"] == 8
+    assert result.policy[0]["value"] == pytest.approx(-.6)
+    assert result.mcts_profile["action_cache_hits"] > 0
+    assert result.mcts_profile["inference_cache_hits"] > 0
+    assert CountingPosition.opens == result.mcts_profile["action_cache_misses"]
+    uncached = InformationSetSearch(PublicEncoder(spec()), TestEvaluator(spec()),
+        limits=SearchLimits(iterations=8, max_depth=1, elapsed_ms=None),
+        profile=True, cache=False).run(ParticleBelief(tracker, CountingFactory(), seed=19,
+            limits=BeliefLimits(particles=2, proposals=2, elapsed_ms=None)))
+    assert result.intent == uncached.intent and result.policy == uncached.policy
+    assert uncached.mcts_profile["action_cache_hits"] == 0
+    assert uncached.mcts_profile["inference_cache_hits"] == 0
+    assert uncached.mcts_profile["native_inference_calls"] > result.mcts_profile["native_inference_calls"]
 
 
 def test_mcts_profile_preserves_search_and_bounds_numeric_details():
@@ -813,16 +906,20 @@ def test_progressive_widening_cancellation_and_finite_budgets():
     # A completed group survives cancellation during the next native batch;
     # incomplete paths get no fabricated visits/value or dangling reservations.
     evaluator = TestEvaluator(spec())
-    original_evaluate = evaluator.evaluate
     stopped = False
-    def cancel_in_batch(*args):
-        nonlocal stopped
-        result = original_evaluate(*args)
-        if len(evaluator.calls) == 3:
-            stopped = True
-        return result
-    evaluator.evaluate = cancel_in_batch
-    cancelled_search = InformationSetSearch(PublicEncoder(spec()), evaluator,
+
+    class CancelOnSecondLeafBatch(InformationSetSearch):
+        batches = 0
+
+        def _evaluate_cached(self, requests, state):
+            nonlocal stopped
+            result = super()._evaluate_cached(requests, state)
+            self.batches += 1
+            if self.batches == 2:
+                stopped = True
+            return result
+
+    cancelled_search = CancelOnSecondLeafBatch(PublicEncoder(spec()), evaluator,
                           limits=SearchLimits(iterations=12, max_depth=1, elapsed_ms=1000),
                           profile=True)
     result = cancelled_search.run(belief(), cancelled=lambda: stopped)
