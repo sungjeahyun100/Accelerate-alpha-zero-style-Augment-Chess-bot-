@@ -168,6 +168,49 @@ function sourcePublicIntents(runtime, contract, position, actions) {
   return { publicIntents, byActionId };
 }
 
+// Continue a committed move through the actual frozen action stream. A Replay
+// sequence is evidence only when the card is admitted by that stream.
+function sourceReplaySequence(adapter, contract, runtime, start, actor) {
+  let position = start;
+  const steps = [];
+  const take = (kind, action, available) => {
+    const { publicIntents, byActionId } = sourcePublicIntents(runtime, contract, position, available);
+    const intent = byActionId.get(action.actionId)?.[0];
+    if (!intent) throw new Error("Replay sequence action has no public intent");
+    const applied = adapter.apply(position, action, { recordHistory: true });
+    if (!applied.ok) throw new Error("Frozen Replay sequence action was rejected");
+    position = applied.position;
+    const { actions: nextActions } = sourceActions(adapter, position);
+    const nextIntents = sourcePublicIntents(runtime, contract, position, nextActions).publicIntents;
+    const observations = Object.fromEntries(["white", "black"].map(viewer => [viewer, adapter.observe(position, viewer)]));
+    steps.push({ kind, publicIntent: intent, beforeActions: publicIntents,
+      position, actions: nextIntents, observations, result: adapter.result(position) });
+  };
+  try {
+    for (let bridge = 0; position.state.turn !== actor && bridge < 2; bridge++) {
+      const { actions } = sourceActions(adapter, position);
+      const move = actions.find(action => action.payload.type === "move");
+      if (!move) return { status: "unsupported", reason: "no natural bridge move returns the Replay owner to turn", steps: [] };
+      take("bridge", move, actions);
+    }
+    if (position.state.turn !== actor)
+      return { status: "unsupported", reason: "Replay owner did not regain the turn", steps: [] };
+    const { actions } = sourceActions(adapter, position);
+    const replay = actions.find(action => action.payload.type === "card" && action.payload.cardId === "replay");
+    if (!replay) return { status: "unavailable",
+      reason: "Replay card is absent from the full frozen legal stream", steps,
+      beforeActions: sourcePublicIntents(runtime, contract, position, actions).publicIntents };
+    take("replay", replay, actions);
+    const { actions: after } = sourceActions(adapter, position);
+    const follow = after.find(action => action.payload.type === "move") || after[0];
+    if (!follow) return { status: "unsupported", reason: "no legal follow-up action after Replay", steps: [] };
+    take("follow", follow, after);
+    return { status: "complete", steps };
+  } catch (error) {
+    return { status: "unsupported", reason: `frozen Replay continuation: ${error.message}`, steps: [] };
+  }
+}
+
 function buildCase(adapter, contract, name, position, requiredSampleId = null, publicRuntime = null) {
   contract.validatePosition(position);
   const { actions, examined } = sourceActions(adapter, position);
@@ -182,10 +225,16 @@ function buildCase(adapter, contract, name, position, requiredSampleId = null, p
   const first = actions[0];
   const rejectPayload = first ? contract.jsonCopy({ ...first.payload, color: first.payload.color === "white" ? "black" : "white" }) : null;
   const rejectPublicIntent = first ? contract.jsonCopy({ ...byActionId.get(first.actionId)[0], color: first.payload.color === "white" ? "black" : "white" }) : null;
+  let sourceRejection = null;
   if (rejectPayload) {
     const rejected = adapter.apply(position, contract.action(position, rejectPayload));
-    if (rejected.ok || contract.canonical(rejected.position) !== contract.canonical(position) ||
-        contract.canonical(rejected.result) !== contract.canonical(adapter.result(position)))
+    sourceRejection = {
+      rejected: rejected.ok === false,
+      unchanged: contract.canonical(rejected.position) === contract.canonical(position) &&
+        contract.canonical(rejected.result) === contract.canonical(adapter.result(position)),
+      method: "frozen-adapter-apply",
+    };
+    if (!sourceRejection.rejected || !sourceRejection.unchanged)
       throw new Error(`${name}: source wrong-actor rejection changed the full position or result`);
   }
   const samples = [];
@@ -214,13 +263,16 @@ function buildCase(adapter, contract, name, position, requiredSampleId = null, p
     }));
     const publicIntentAliases = byActionId.get(action.actionId);
     samples.push({ action, publicIntent: publicIntentAliases[0], publicIntentAliases,
-      position: step.position, result: step.result, observations: nextObservations });
+      position: step.position, result: step.result, observations: nextObservations,
+      replaySequence: action.payload.type === "move"
+        ? sourceReplaySequence(adapter, contract, publicRuntime, step.position, action.payload.color)
+        : { status: "unsupported", reason: "initial action is not a committed move", steps: [] } });
   }
   const result = adapter.result(position);
   contract.validateResult(result);
   const actionTypes = [...new Set(actions.map(action => action.payload.type))].sort();
   return {
-    input: { name, position, result, observations, actions, publicIntents, rejectPayload, rejectPublicIntent, samples },
+    input: { name, position, result, observations, actions, publicIntents, rejectPayload, rejectPublicIntent, sourceRejection, samples },
     summary: { name, mode: position.state.mode, positionDigest: contract.digest(position), legalCount: actions.length,
       sourceExamined: examined, publicIntentCount: publicIntents.length, actionTypes, sampleTypes: samples.map(sample => sample.action.payload.type),
       sampleCount: samples.length, rejectCount: rejectPayload ? 1 : 0, staleRejectCount: samples.length,

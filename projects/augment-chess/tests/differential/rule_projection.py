@@ -47,10 +47,43 @@ def rule_projection(position: Mapping[str, Any]) -> dict[str, Any]:
         raise NotImplementedError("pending notation can change replay history")
     for key in PRESENTATION_FIELDS:
         state.pop(key, None)
-    last_move = state.get("lastMove")
-    if isinstance(last_move, dict):
-        # soundColor is retained: Idol Encore reads it as the moving owner.
-        last_move.pop("soundName", None)
+    # replayMoveCard compares the complete current lastMove with its captured
+    # after value before deciding whether to restore enPassant and trail data.
+    # Preserve that rule branch even though soundName itself is presentation.
+    replay = state.get("moveReplay")
+    if isinstance(replay, dict):
+        branches = {}
+        for color, frame in replay.items():
+            if isinstance(frame, dict) and "lastMoveAfter" in frame:
+                branches[color] = state.get("lastMove") == frame["lastMoveAfter"]
+        if branches:
+            if "replayLastMoveMatch" in result:
+                raise ValueError("position uses a reserved projection field")
+            result["replayLastMoveMatch"] = branches
+    def normalize_move_records(value: Any, key: str = "") -> None:
+        if isinstance(value, list):
+            for item in value:
+                normalize_move_records(item, key)
+        elif isinstance(value, dict):
+            # The frozen client reads soundName for audio and notation. Replay
+            # snapshots restore the whole move record, so normalize its copies
+            # at every depth while retaining every other restoration field.
+            if key in ("lastMove", "lastMoveAfter", "previousLastMove"):
+                value.pop("soundName", None)
+            if key == "delta" and isinstance(value.get("fields"), list):
+                for field in value["fields"]:
+                    if isinstance(field, dict) and field.get("key") == "lastMove":
+                        for side in ("before", "after"):
+                            if isinstance(field.get(side), dict):
+                                field[side].pop("soundName", None)
+            if key == "replayEvents" and isinstance(value.get("visuals"), list):
+                for visual in value["visuals"]:
+                    if isinstance(visual, dict) and isinstance(visual.get("move"), dict):
+                        visual["move"].pop("soundName", None)
+            for child_key, child in value.items():
+                normalize_move_records(child, child_key)
+
+    normalize_move_records(state)
     result.pop("rng", None)
     result.pop("positionId", None)
     return result

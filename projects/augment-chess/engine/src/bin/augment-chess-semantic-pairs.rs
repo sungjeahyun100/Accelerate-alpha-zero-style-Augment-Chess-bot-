@@ -38,6 +38,71 @@ fn rule_result(host: &V7HostPosition) -> Value {
     })
 }
 
+fn replay_sequence(start: &V7HostPosition, source: &Value) -> Result<Value, String> {
+    let source_unavailable = source["status"] == "unavailable";
+    if source["status"] != "complete" && !source_unavailable {
+        return Ok(json!({"status": "unsupported", "reason": source["reason"]}));
+    }
+    let source_steps = source["steps"].as_array().ok_or("source Replay steps missing")?;
+    if (source_unavailable && (source_steps.len() > 2
+        || source_steps.iter().any(|step| step["kind"] != "bridge")))
+        || (!source_unavailable && (source_steps.len() < 2 || source_steps.len() > 4
+            || source_steps.iter().filter(|step| step["kind"] == "replay").count() != 1
+            || source_steps.last().and_then(|step| step["kind"].as_str()) != Some("follow")))
+    {
+        return Err("source Replay sequence lacks a bounded Replay and follow-up".into());
+    }
+    let mut current = start.clone();
+    let mut rust_steps = Vec::new();
+    for (index, step) in source_steps.iter().enumerate() {
+        let before_actions = v7_adapter_actions::legal_public_intents(&current)
+            .map_err(|error| format!("Replay step {index} legal intents: {error}"))?;
+        let intent = step["publicIntent"].clone();
+        let admitted = match v7_adapter_actions::bind_public_intent(&current, intent) {
+            Ok(admitted) => admitted,
+            Err(error) => return Ok(json!({
+                "status": "unavailable", "failedStep": index,
+                "sourceSteps": source_steps, "rustSteps": rust_steps,
+                "rustBeforeActions": before_actions,
+                "reason": format!("Replay step {index} intent binding: {error}"),
+            })),
+        };
+        let applied = v7_adapter_actions::apply_admitted(&current, &admitted)
+            .map_err(|error| format!("Replay step {index} apply: {error}"))?;
+        current = applied.position;
+        rust_steps.push(json!({
+            "kind": step["kind"], "beforeActions": before_actions,
+            "position": current.export_envelope().map_err(|error| error.to_string())?,
+            "actions": v7_adapter_actions::legal_public_intents(&current)
+                .map_err(|error| format!("Replay step {index} next intents: {error}"))?,
+            "observations": observations(&current)?, "result": rule_result(&current),
+        }));
+    }
+    if source_unavailable {
+        return Ok(json!({
+            "status": "availability", "sourceSteps": source_steps,
+            "rustSteps": rust_steps, "sourceBeforeActions": source["beforeActions"],
+            "rustBeforeActions": v7_adapter_actions::legal_public_intents(&current)
+                .map_err(|error| format!("Replay availability intents: {error}"))?,
+        }));
+    }
+    Ok(json!({"status": "complete", "sourceSteps": source_steps, "rustSteps": rust_steps}))
+}
+
+fn classify_transition(sample: &Value) -> Value {
+    // The available source export is one realized path. In each family the
+    // listed callback can reach rule-visible effects outside that one path.
+    // Do not infer determinism from seed equality or absence of an RNG call.
+    let reason = match sample["publicIntent"]["type"].as_str() {
+        Some("move") => "move/endMove can activate cards, hazards, capture and turn-entry effects",
+        Some("card") => "card effect and finishCard callbacks have state-dependent rule branches",
+        Some("draftPick" | "draftBundlePick") => "draft replacement offers and acquired effects can sample rule outcomes",
+        _ => "no complete rule-effect dependency proof for this action family",
+    };
+    json!({"kind": "unknown", "method": "static-dependency-triage-v1",
+        "reason": reason, "unresolved": "conditional rule effects and future Replay dependencies"})
+}
+
 fn paired_sample(case: &Value, sample: &Value, index: usize) -> Result<Value, String> {
     let name = case["name"].as_str().ok_or("source case name missing")?;
     let host = V7HostPosition::from_envelope(case["position"].clone())
@@ -66,22 +131,26 @@ fn paired_sample(case: &Value, sample: &Value, index: usize) -> Result<Value, St
     let rust_next = applied.position.export_envelope()
         .map_err(|error| format!("next export: {error}"))?;
     let rust_next_observations = observations(&applied.position)?;
+    let replay = replay_sequence(&applied.position, &sample["replaySequence"])
+        .unwrap_or_else(|reason| json!({"status": "unsupported", "reason": reason}));
+    let classification = classify_transition(sample);
     Ok(json!({
         "name": format!("{name}/sample[{index}]"),
         "generationStatus": "complete",
-        "transitionKind": "unknown",
-        "classificationReason": "a single source/Rust execution cannot establish whether the conditional transition is deterministic",
+        "transitionKind": classification["kind"],
+        "classificationEvidence": classification,
         "source": case["position"], "rust": rust,
         "sourceActions": case["publicIntents"], "rustActions": rust_actions,
         "sourceAction": intent, "rustAction": sample["publicIntent"],
         "rustBoundPayload": bound_payload,
         "sourceObservations": case["observations"], "rustObservations": rust_observations,
-        "sourceRejection": {"rejected": true, "unchanged": true},
+        "sourceRejection": case["sourceRejection"],
         "rustRejection": rejected,
         "sourceNext": sample["position"], "rustNext": rust_next,
         "sourceNextObservations": sample["observations"],
         "rustNextObservations": rust_next_observations,
         "sourceResult": sample["result"], "rustResult": rule_result(&applied.position),
+        "replaySequence": replay,
     }))
 }
 
@@ -132,7 +201,7 @@ fn run(report_path: &Path, cases_path: &Path, output_path: &Path) -> Result<(), 
             if pairs >= MAX_CASES {
                 return Err("paired row count exceeds the 10,000 row budget".into());
             }
-            let pair = match paired_sample(&case, sample, sample_index) {
+            let mut pair = match paired_sample(&case, sample, sample_index) {
                 Ok(pair) => pair,
                 Err(reason) => {
                     incomplete += 1;
@@ -142,6 +211,12 @@ fn run(report_path: &Path, cases_path: &Path, output_path: &Path) -> Result<(), 
                     })
                 }
             };
+            pair["provenance"] = json!({
+                "sourceSha256": SOURCE_SHA256, "profile": PROFILE,
+                "sourceExportSha256": digest.as_str(), "sourceCaseLine": line_index + 1,
+                "sourceCaseSha256": format!("{:x}", Sha256::digest(line.as_bytes())),
+                "sampleIndex": sample_index,
+            });
             serde_json::to_writer(&mut output, &pair).map_err(|error| error.to_string())?;
             output.write_all(b"\n").map_err(|error| error.to_string())?;
             pairs += 1;

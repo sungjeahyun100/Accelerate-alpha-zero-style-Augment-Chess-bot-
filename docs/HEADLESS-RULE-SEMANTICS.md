@@ -26,11 +26,11 @@
 
 ## 새 투영과 판정
 
-`rule_projection.py`는 Position envelope에서 RNG와 원본 Position ID를 제외한다. 정산된 `pendingReplayVisuals`·`pendingNotation`·`pendingNotations` 및 애니메이션 Set을 제외하고 `lastMove.soundName`만 제외한다. `lastMove.soundColor`, `boardHistory`, Replay frames/events, 공개 history와 **모든 미분류 필드**는 남긴다. 기물 ID 대응 관계를 검증하는 일반 알고리즘이 아직 없으므로 서로 다른 ID를 가진 동등 상태는 현재 `MISMATCH`가 될 수 있다. 이것은 미지원 범위이며 통과로 완화하지 않는다.
+`rule_projection.py`는 Position envelope에서 RNG와 원본 Position ID를 제외한다. 정산된 `pendingReplayVisuals`·`pendingNotation`·`pendingNotations` 및 애니메이션 Set을 제외한다. `lastMove`, `boardHistory[*].lastMove`, `moveReplay.*.lastMoveAfter/previousLastMove`, Replay delta의 `lastMove` 전후 값과 Replay 시각 이벤트의 이동 기록에서 `soundName`만 정규화한다. 동결 JS의 효과음 재생·기보 표기 외에 `replayMoveCard`가 현재 `lastMove`와 저장된 `lastMoveAfter`를 통째로 비교하여 복원 분기를 선택한다. 그래서 정규화 전 이 일치 여부를 투영 불변식으로 남긴다. `soundColor`, 나머지 `boardHistory`·Replay frames/events·공개 history와 **모든 미분류 필드**는 보존한다. 기물 ID 대응 관계를 검증하는 일반 알고리즘이 아직 없으므로 서로 다른 ID를 가진 동등 상태는 현재 `MISMATCH`가 될 수 있다.
 
 `semantic_differential.py`는 paired JSONL의 시작 규칙 상태, ID·Position ID를 뺀 payload 기준 전체 합법 행동 집합과 동일 선택 행동, 두 관측자의 공개 상태, 잘못된 행동 거절·불변성을 검사한다. `transitionKind: deterministic`일 때 행동 후 규칙 상태·두 관측·결과를 정확히 비교한다. `stochastic`일 때 독립 단일 추첨끼리는 비교하지 않고, 같은 시작 투영 상태·행동에 조건화된 **다음 규칙 상태 + 두 관측 + 결과의 결합 결과 키**에 대한 분포를 비교한다. 실제로 나온 양쪽 결합 결과가 분포 지지집합에 포함돼야 한다. `exact`는 `complete: true`와 합계 1의 유리수 확률 지도가 필요하다. `sample`은 사전 허용오차 `tolerance`, 유의수준 `alpha`, 결과별 독립 표본 수가 필요하다. 표본 판정은 결과별 빈도 차이의 union-bound 범위이며 완전 동등성 증명은 아니다.
 
-`PASS`는 제출된 모든 증거가 비교 계약을 만족함, `MISMATCH`는 관측 불일치, `UNSUPPORTED`는 입력·기능·투영의 미지원, `INCONCLUSIVE`는 전이 분류 또는 표본 수로 판정 불가를 뜻한다. 시간 초과와 공급되지 않은 결과 공간은 `PASS`가 아니다. `augment-chess-semantic-pairs`는 동결 오라클의 `source-cases.jsonl`과 공개 Rust v7 host 실행을 묶어 paired JSONL을 만든다. 생성 행은 난수 사용 여부가 증명되지 않았으므로 `transitionKind: unknown`이다. 따라서 자료 생성만으로 동등성이 확인되지 않는다. 분류 근거와 확률적 분포 수집은 별도 검증이 필요하다.
+`PASS`는 제출된 모든 증거가 비교 계약을 만족함, `MISMATCH`는 관측 불일치, `UNSUPPORTED`는 입력·기능·투영의 미지원, `INCONCLUSIVE`는 전이 분류 또는 표본 수로 판정 불가를 뜻한다. 시간 초과와 공급되지 않은 결과 공간은 `PASS`가 아니다. 새 source export는 잘못된 행동자 거절의 실제 `adapter.apply` 결과를 저장한다. 과거 export에는 이 증거가 없으므로 거절 검사는 `UNSUPPORTED`다. paired 행은 원본 SHA·실행 프로필·source export 및 원본 행 digest를 기록하고 검증기는 원본 보고서와 사례 파일을 받아 출처를 대조한다. 자동 정적 triage는 이동·카드·draft의 아직 닫히지 않은 규칙 효과 경로를 기록하고 해당 행을 `unknown`으로 둔다. 안전하게 증명된 결정적 범위는 아직 0개이며, Replay 연속 경로의 단일 실현도 `INCONCLUSIVE`다.
 
 ## 사용자가 실행할 수 있는 명령
 
@@ -39,13 +39,17 @@
 ```text
 node projects/augment-chess/tests/differential/v7-native-differential.cjs --oracle-only --export-cases
 cargo run -p augment-chess-engine --bin augment-chess-semantic-pairs -- <절대-source-report.json> <절대-source-cases.jsonl> <절대-paired.jsonl>
-python3 projects/augment-chess/tests/differential/semantic_differential.py --pairs <절대-paired.jsonl> --report <절대-semantic-report.json>
+python3 projects/augment-chess/tests/differential/semantic_differential.py --pairs <절대-paired.jsonl> --source-report <절대-source-report.json> --source-cases <절대-source-cases.jsonl> --report <절대-semantic-report.json>
 python3 -m unittest discover -s projects/augment-chess/tests/differential -p test_rule_projection.py
 cargo test -p augment-chess-engine --lib replay_capture_probe_can_change_the_next_committed_undo_frame
 cargo test -p augment-chess-engine --lib replay_capture_probe_does_not_change_the_recorded_capture_cue
 ```
 
-첫 명령의 `--oracle-only` 종료 코드는 의도적으로 실패이며, `report.json`의 `sourceExport` SHA·건수와 `source-cases.jsonl`을 확인한 뒤 둘째 명령에 같은 실행의 파일을 준다. 둘째 명령은 공개 Rust host가 거부한 사례를 `.partial`에 기록하고 실패한다. 성공해도 모든 행의 전이 분류가 `unknown`이어서 셋째 명령은 `INCONCLUSIVE`로 종료한다. 결정성을 별도 근거로 입증한 행만 `deterministic`으로 바꿔 정확 비교한다. 확률적 행은 독립 실행의 단일 결과를 비교하지 않고 동일 조건의 완전 분포 또는 표본 분포를 별도로 수집해 `distribution`을 부여한다. `conditionedOn`은 `[시작 RuleProjection, 정렬된 선택 행동 JSON 문자열]`의 정규 JSON이며 분포 키는 `[다음 RuleProjection, 양측 공개 관측, 표현 reason을 뺀 결과]`의 정규 JSON이다. 생성한 JSONL은 원시 비공개 상태를 포함하므로 Git에 넣지 않는다. 기존 전체 실행 비교의 RNG·UI 차이는 새 semantic gate의 성공/실패 근거로 승격하지 않는다.
+첫 명령의 `--oracle-only` 종료 코드는 의도적으로 실패이며, `report.json`의 `sourceExport` SHA·건수와 `source-cases.jsonl`을 확인한 뒤 둘째·셋째 명령에 **같은 실행**의 파일을 준다. 과거 export는 새 거절·Replay 연속 증거가 없으므로 다시 생성해야 한다. 둘째 명령은 공개 Rust host가 거부한 사례를 `.partial`에 기록하고 실패한다. 성공해도 아직 모든 자동 전이 분류가 `unknown`이어서 셋째 명령은 `INCONCLUSIVE` 또는 미지원 증거가 있으면 `UNSUPPORTED`로 종료한다. source 연속 도구는 이동 뒤 자연 합법 행동으로 상대 턴을 넘기고, Replay 카드가 실제 합법 목록에 있을 때만 적용한 뒤 다시 한 행동을 실행한다. 불가능한 경로는 `UNSUPPORTED`이며 자연 도달 Replay·포획·왕 위협 journal 사례의 실제 확보는 미실행이다. 확률적 행은 독립 단일 결과를 비교하지 않고 동일 조건의 완전 분포 또는 표본 분포를 별도로 수집해야 한다. 생성한 JSONL은 원시 비공개 상태를 포함하므로 Git에 넣지 않는다.
+
+## 왕 위협 Replay capture 계산 의존성
+
+`reconcile_move_replay_capture_v7`은 재생 가능한 `GameState` 전체를 복제하고 `ReplayCaptureScope`를 자식 clone에 붙인다. 양쪽 방어자에 대한 왕 위협 후보·가상 행동을 검사하되 첫 확인된 check에서는 중단한다. 실제 반환값으로 쓰는 것은 왕 위협 보고서가 아니라 자식의 마지막 활성 `MoveReplayCapture`이며, 이 값이 다음 `commit_active_move`에서 행동자와 일치하면 `moveReplay` frame으로 기록된다. 기존 내부 재현은 probe 실행 여부가 이 frame을 바꿀 수 있음을 보여준다. 따라서 Replay 복원·이후 행동의 JS↔Rust 검증 전에는 probe 전체를 제거하거나 단순 체크 계산으로 치환할 근거가 없다. 후보별 clone·완전한 위협 목록 중 journal에 영향을 주지 않는 부분은 향후 최적화 후보지만, 본 단계에서 Fast Path를 적용하거나 성능 향상률을 추정하지 않았다.
 
 | UI 제거 단위 | 규칙 영향 | 직접 확인 절차 |
 |---|---|---|
