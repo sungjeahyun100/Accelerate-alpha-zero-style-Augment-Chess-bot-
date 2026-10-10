@@ -67,13 +67,30 @@ function options(argv) {
   return selected;
 }
 
-function sourceActions(adapter, position) {
+function markReplayDiagnostic(trace, stage, position, actionCategory = null) {
+  if (trace) {
+    if (stage !== "legal enumeration") trace.searchPhase = stage;
+    Object.assign(trace, { stage, actionCategory, stateMode: position.state.mode,
+      turn: position.state.turn, positionHistoryLength: position.history.length });
+  }
+}
+
+function sourceActions(adapter, position, trace = null) {
+  markReplayDiagnostic(trace, "legal enumeration", position, "source candidate enumeration");
   const cursor = adapter.actionStream(position);
   const actions = [];
   let examined = 0;
   try {
     for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex++) {
-      const page = cursor.nextPage(PAGE_SIZE, { maxExamined: 4096 });
+      let page;
+      try { page = cursor.nextPage(PAGE_SIZE, { maxExamined: 4096 }); }
+      catch (error) {
+        if (error.code === "JSON_BUDGET_EXCEEDED") {
+          error.failureStage ||= "legal enumeration";
+          error.actionCategory ||= "source candidate enumeration";
+        }
+        throw error;
+      }
       actions.push(...page.actions);
       examined += page.examined;
       if (actions.length > MAX_ACTIONS || examined > MAX_EXAMINED)
@@ -183,17 +200,18 @@ function sourcePublicIntents(runtime, contract, position, actions) {
 
 // Continue a committed move through the actual frozen action stream. A Replay
 // sequence is evidence only when the card is admitted by that stream.
-function sourceReplaySequence(adapter, contract, runtime, start, actor) {
+function sourceReplaySequence(adapter, contract, runtime, start, actor, trace = null) {
   let position = start;
   const steps = [];
   const take = (kind, action, available) => {
+    markReplayDiagnostic(trace, kind === "follow" ? "follow-up" : kind === "replay" ? "Replay" : "bridge", position, action.payload.type);
     const { publicIntents, byActionId } = sourcePublicIntents(runtime, contract, position, available);
     const intent = byActionId.get(action.actionId)?.[0];
     if (!intent) throw new Error("Replay sequence action has no public intent");
     const applied = adapter.apply(position, action, { recordHistory: true });
     if (!applied.ok) throw new Error("Frozen Replay sequence action was rejected");
     position = applied.position;
-    const { actions: nextActions } = sourceActions(adapter, position);
+    const { actions: nextActions } = sourceActions(adapter, position, trace);
     const nextIntents = sourcePublicIntents(runtime, contract, position, nextActions).publicIntents;
     const observations = Object.fromEntries(["white", "black"].map(viewer => [viewer, adapter.observe(position, viewer)]));
     steps.push({ kind, publicIntent: intent, beforeActions: publicIntents,
@@ -202,12 +220,14 @@ function sourceReplaySequence(adapter, contract, runtime, start, actor) {
   };
   try {
     for (let bridge = 0; position.state.turn !== actor && bridge < 2; bridge++) {
-      const { actions } = sourceActions(adapter, position);
+      markReplayDiagnostic(trace, "bridge", position, "bridge move");
+      const { actions } = sourceActions(adapter, position, trace);
       const moves = actions.filter(action => action.payload.type === "move").slice(0, 8);
       const move = moves.find(action => {
+        markReplayDiagnostic(trace, "candidate trial", position, action.payload.type);
         const trial = adapter.apply(position, action, { recordHistory: false });
         if (!trial.ok || trial.position.state.turn !== actor) return false;
-        return sourceActions(adapter, trial.position).actions.some(candidate =>
+        return sourceActions(adapter, trial.position, trace).actions.some(candidate =>
           candidate.payload.type === "card" && candidate.payload.cardId === "replay");
       }) || moves[0];
       if (!move) return { status: "unsupported", reason: "no natural bridge move returns the Replay owner to turn", steps: [] };
@@ -215,18 +235,21 @@ function sourceReplaySequence(adapter, contract, runtime, start, actor) {
     }
     if (position.state.turn !== actor)
       return { status: "unsupported", reason: "Replay owner did not regain the turn", steps: [] };
-    const { actions } = sourceActions(adapter, position);
+    markReplayDiagnostic(trace, "Replay", position, "replay availability");
+    const { actions } = sourceActions(adapter, position, trace);
     const replay = actions.find(action => action.payload.type === "card" && action.payload.cardId === "replay");
     if (!replay) return { status: "unavailable", actor,
       reason: replayAbsence(position, actor, runtime), steps,
       beforeActions: sourcePublicIntents(runtime, contract, position, actions).publicIntents };
     take("replay", replay, actions);
-    const { actions: after } = sourceActions(adapter, position);
+    markReplayDiagnostic(trace, "follow-up", position, "follow-up availability");
+    const { actions: after } = sourceActions(adapter, position, trace);
     const follow = after.find(action => action.payload.type === "move") || after[0];
     if (!follow) return { status: "unsupported", reason: "no legal follow-up action after Replay", steps: [] };
     take("follow", follow, after);
     return { status: "complete", actor, steps };
   } catch (error) {
+    if (error.code === "JSON_BUDGET_EXCEEDED") throw error;
     return { status: "unsupported", reason: `frozen Replay continuation: ${error.message}`, steps: [] };
   }
 }
@@ -281,11 +304,18 @@ function searchReplaySeed(source, contract, { style, seed, decisions }) {
   const adapter = new GameAdapter({ source, contract });
   const runtime = new OracleRuntime({ source, contract });
   const trace = [], draft = [];
+  const diagnostic = process.env.ACCELERATE_JSON_BUDGET_DIAGNOSTICS === "1" ?
+    { style, seed, decision: null, stage: "new game", actionCategory: "setup",
+      stateMode: null, turn: null, positionHistoryLength: null } : null;
   let acquired = null, attempts = 0, unavailable = "Replay not acquired";
   try {
     let position = adapter.newGame({ gameStyle: style }, seed);
     for (let decision = 0; decision < decisions; decision++) {
-      const { actions } = sourceActions(adapter, position);
+      if (diagnostic) {
+        diagnostic.decision = decision;
+        diagnostic.searchPhase = position.state.mode === "draft" ? "draft" : "play";
+      }
+      const { actions } = sourceActions(adapter, position, diagnostic);
       if (!actions.length) { unavailable = "source has no legal action"; break; }
       if (position.state.mode === "draft") {
         const chosen = replayDraftChoice(position, actions) || actions[0];
@@ -295,6 +325,7 @@ function searchReplaySeed(source, contract, { style, seed, decisions }) {
         draft.push({ decision, phase: position.state.draft?.phase, color: chosen.payload.color,
           publicIntent: chosen.payload, selectedCardIds: cardIds.map(id => offered.get(id) || null) });
         const replayIds = cardIds.filter(id => offered.get(id) === "replay");
+        markReplayDiagnostic(diagnostic, "draft apply", position, chosen.payload.type);
         const step = adapter.apply(position, chosen, { recordHistory: false });
         if (!step.ok) throw new Error("source rejected its own draft choice");
         position = step.position;
@@ -314,12 +345,14 @@ function searchReplaySeed(source, contract, { style, seed, decisions }) {
       if (owned) {
         for (const move of actions.filter(action => action.payload.type === "move").slice(0, 8)) {
           attempts++;
+          markReplayDiagnostic(diagnostic, "candidate trial", position, move.payload.type);
           const next = adapter.apply(position, move, { recordHistory: false });
           if (!next.ok) continue;
-          const continuation = sourceReplaySequence(adapter, contract, runtime, next.position, actor);
+          const continuation = sourceReplaySequence(adapter, contract, runtime, next.position, actor, diagnostic);
           if (continuation.status !== "complete") { unavailable = continuation.reason; continue; }
+          markReplayDiagnostic(diagnostic, "candidate trial", position, "witness reconstruction");
           const item = buildCase(adapter, contract, `${style}-seed${seed}-replay-${decision}`,
-            position, move.actionId, runtime);
+            position, move.actionId, runtime, diagnostic);
           const sample = item.input.samples.find(value => value.action.actionId === move.actionId);
           if (sample?.replaySequence.status !== "complete") {
             unavailable = sample?.replaySequence.reason || "Replay witness could not be reconstructed";
@@ -349,20 +382,28 @@ function searchReplaySeed(source, contract, { style, seed, decisions }) {
       }
       const moves = actions.filter(action => action.payload.type === "move");
       const chosen = moves.length ? moves[Math.floor(decision / 2) % moves.length] : actions[0];
+      markReplayDiagnostic(diagnostic, "ordinary move", position, chosen.payload.type);
       trace.push({ decision, publicIntent: sourcePublicIntents(runtime, contract, position, actions)
         .byActionId.get(chosen.actionId)[0] });
+      markReplayDiagnostic(diagnostic, "ordinary move", position, chosen.payload.type);
       const next = adapter.apply(position, chosen, { recordHistory: false });
       if (!next.ok) throw new Error("source rejected its own search action");
       position = next.position;
     }
     return { item: null, summary: { style, seed, status: acquired ? "inconclusive" : "unsupported",
       reason: unavailable, attempts, acquired, draftChoices: draft.length, decisions: trace.length } };
+  } catch (error) {
+    if (error.code === "JSON_BUDGET_EXCEEDED" && diagnostic) {
+      error.searchContext = { ...diagnostic, stage: error.failureStage || diagnostic.stage,
+        actionCategory: error.actionCategory || diagnostic.actionCategory };
+    }
+    throw error;
   } finally { adapter.dispose(); }
 }
 
-function buildCase(adapter, contract, name, position, requiredSampleId = null, publicRuntime = null) {
+function buildCase(adapter, contract, name, position, requiredSampleId = null, publicRuntime = null, trace = null) {
   contract.validatePosition(position);
-  const { actions, examined } = sourceActions(adapter, position);
+  const { actions, examined } = sourceActions(adapter, position, trace);
   if (!actions.length && position.state.mode !== "gameover") throw new Error(`${name}: nonterminal source has no action for reject/apply probes`);
   if (!publicRuntime) throw new TypeError(`${name}: pinned public projection runtime is required`);
   const { publicIntents, byActionId } = sourcePublicIntents(publicRuntime, contract, position, actions);
@@ -391,6 +432,7 @@ function buildCase(adapter, contract, name, position, requiredSampleId = null, p
   for (const action of [first, actions[actions.length - 1], firstCard,
     actions.find(action => action.actionId === requiredSampleId)].filter(Boolean)) {
     if (samples.some(sample => sample.action.actionId === action.actionId)) continue;
+    markReplayDiagnostic(trace, "candidate trial", position, action.payload.type);
     const step = adapter.apply(position, action, { recordHistory: true });
     if (!step.ok || step.position.history.length !== position.history.length + 1)
       throw new Error(`${name}: source sample failed full-history apply`);
@@ -414,7 +456,7 @@ function buildCase(adapter, contract, name, position, requiredSampleId = null, p
     samples.push({ action, publicIntent: publicIntentAliases[0], publicIntentAliases,
       position: step.position, result: step.result, observations: nextObservations,
       replaySequence: action.payload.type === "move"
-        ? sourceReplaySequence(adapter, contract, publicRuntime, step.position, action.payload.color)
+        ? sourceReplaySequence(adapter, contract, publicRuntime, step.position, action.payload.color, trace)
         : { status: "unsupported", reason: "initial action is not a committed move", steps: [] } });
   }
   const result = adapter.result(position);
@@ -627,6 +669,33 @@ function caseBudgetError(item) {
     `context=${JSON.stringify(caseBudgetContext(item))}`;
 }
 
+function sanitizedStack(error) {
+  const root = `${path.resolve(__dirname, "../../../..")}${path.sep}`;
+  return String(error.stack || `${error.name}: ${error.message}`).split("\n").map(line =>
+    line.replaceAll(root, "")
+      .replace(/(^|[\s(])(?:[A-Za-z]:[\\/]|\/)[^\s():]+(?=:\d+:\d+)/g, "$1[absolute path]"))
+    .join("\n");
+}
+
+function jsonBudgetFailure(error) {
+  return { code: "JSON_BUDGET_EXCEEDED", failureStage: error.searchContext?.stage ?? null,
+    searchPhase: error.searchContext?.searchPhase ?? null,
+    style: error.searchContext?.style ?? null, seed: error.searchContext?.seed ?? null,
+    decision: error.searchContext?.decision ?? null,
+    actionCategory: error.searchContext?.actionCategory ?? null,
+    actionType: error.actionType ?? null,
+    stateMode: error.failedStateMode ?? error.searchContext?.stateMode ?? null,
+    turn: error.failedStateTurn ?? error.searchContext?.turn ?? null,
+    inputStateMode: error.searchContext?.stateMode ?? null,
+    inputTurn: error.searchContext?.turn ?? null,
+    positionHistoryLength: error.searchContext?.positionHistoryLength ?? null,
+    jsonRoot: error.jsonRoot ?? null,
+    exceededBudget: error.budget ?? null, exceededJsonPath: error.budget?.path ?? null,
+    topLevelFieldSizeSummary: error.stateFields ?? null,
+    stateSummaryError: error.stateSummaryError ?? null,
+    originalExceptionStack: sanitizedStack(error) };
+}
+
 function nativeProbe(python, request, budgetContext = null) {
   const input = JSON.stringify(request);
   if (Buffer.byteLength(input) > MAX_BATCH_BYTES)
@@ -681,6 +750,7 @@ function compareCases(python, identity, items, report, oracleOnly, exportCase = 
   let bytes = Buffer.byteLength(JSON.stringify({ phase: "compare", ...identity, cases: [] }));
   let batchContext = null;
   let status = oracleOnly ? "oracle-only" : "pass";
+  report.native = { status, cases: nativeCases };
   const flush = () => {
     if (!batch.length || oracleOnly) { batch = []; return; }
     const response = nativeProbe(python, { phase: "compare", ...identity, cases: batch }, batchContext);
@@ -690,6 +760,7 @@ function compareCases(python, identity, items, report, oracleOnly, exportCase = 
       if (status === "pass") { status = failure.status; report.nativeFailure = failure; }
       (report.nativeFailures ??= []).push(failure);
     }
+    report.native.status = status;
     batch = [];
     batchContext = null;
     bytes = Buffer.byteLength(JSON.stringify({ phase: "compare", ...identity, cases: [] }));
@@ -797,8 +868,12 @@ function main() {
       replayFollowUpExecuted: report.replaySearch.filter(item => item.status === "complete").length,
     };
   } catch (error) {
-    report.status = "setup-error";
+    report.status = error.code === "JSON_BUDGET_EXCEEDED" ? "JSON_BUDGET_EXCEEDED" : "setup-error";
     report.reason = `${error.name}: ${error.message}`;
+    if (error.code === "JSON_BUDGET_EXCEEDED") {
+      report.jsonBudgetFailure = jsonBudgetFailure(error);
+      if (report.native) { report.native.partial = true; report.native.interruptedBy = error.code; }
+    }
   }
   report.decision = report.status === "pass" ? "bounded-P8-probe-pass-only" : "NO-GO";
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });
@@ -814,5 +889,5 @@ module.exports = Object.freeze({ SOURCE_SHA256, PROFILE, ACTIVE_SEED19, STYLES,
   sourceActions, sourcePublicPayloads, sourcePublicIntents, buildCase, firstActiveDraftAction, advanceInitialDraft, sourceCases,
   syntheticTerminalCases, syntheticTimedStatusCases, inspectNativeComparison,
   replayAbsence, replayDraftChoice, validateReplayWitness, searchReplaySeed, sourceReplaySequence,
-  caseBudgetContext, caseBudgetError, options });
+  caseBudgetContext, caseBudgetError, jsonBudgetFailure, options });
 if (require.main === module) main();

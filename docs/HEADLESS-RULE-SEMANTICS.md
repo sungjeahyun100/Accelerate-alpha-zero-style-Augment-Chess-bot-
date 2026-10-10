@@ -72,7 +72,15 @@ cargo test -p augment-chess-engine --lib replay_capture_probe_does_not_change_th
 
 `v7-native-differential.cjs --replay-search=STYLE:START_SEED:SEED_COUNT:DECISIONS`는 seed마다 정상 새 대국에서 시작해 오라클의 합법 드래프트 행동 중 Replay 포함 선택을 우선한다. 선택한 인스턴스가 실제 덱 슬롯에 저장됐는지 검사하고, 이후 합법 이동만 사용한다. Replay 소유자 차례에는 최대 8개 자기 이동을 시험하고, 각 이동 뒤 최대 8개 상대 이동 중 Replay가 실제 합법 행동에 나타나는 경로를 우선한다. 실제 Replay와 후속 합법 행동까지 완료한 경우에만 source case를 export한다. seed 수 1~32, 결정 수 1~128, 한 호출의 범위 3개가 상한이다. 상한·무행동·게임 종료·획득 실패·frame 부재·턴 미복귀·사용 조건 거절은 보고서에 남긴다. 이 탐색은 유한 휴리스틱이며 상태 공간 전체를 탐색하지 않는다.
 
-장기 탐색의 드래프트·일반 진행과 후보 시험은 `recordHistory:false`로 외부 `Position.history` event 사본 누적을 생략한다. 오라클의 `state.boardHistory`, `moveReplay`, 덱·포획 및 나머지 규칙 상태와 RNG는 그대로 snapshot한다. 실제 export 사례를 만드는 `buildCase`와 Replay·후속 단계의 공개 event 기록은 유지한다. 두 기록 방식의 같은 드래프트·이동 행동에서 전체 `state`·RNG가 같은지 검증하는 회귀 테스트 코드를 추가했다. 16 MiB JSON 한도 초과 시 한도를 늘리거나 사례를 생략하지 않고 style·seed·decision·phase·`position.history.length`를 오류에 남긴다.
+장기 탐색의 드래프트·일반 진행과 후보 시험은 `recordHistory:false`로 외부 `Position.history` event 사본 누적을 생략한다. 오라클의 `state.boardHistory`, `moveReplay`, 덱·포획 및 나머지 규칙 상태와 RNG는 그대로 snapshot한다. 실제 export 사례를 만드는 `buildCase`와 Replay·후속 단계의 공개 event 기록은 유지한다. 두 기록 방식의 같은 드래프트·이동 행동에서 전체 `state`·RNG가 같은지 검증하는 회귀 테스트 코드를 추가했다. 16 MiB native batch 한도 초과 시 한도를 늘리거나 사례를 생략하지 않고 style·seed·decision·phase·`position.history.length`를 오류에 남긴다.
+
+JSON 상태 예산 조사에는 `ACCELERATE_JSON_BUDGET_DIAGNOSTICS=1`을 지정한다. `report.json`의 `status=JSON_BUDGET_EXCEEDED`, `jsonBudgetFailure`는 초과 제한(depth/nodes/bytes), 초과 순간과 직전 계수, JSON Pointer 형태의 경로와 상위 필드 경로, style/seed/decision, 상태 mode/turn, 행동 종류, 실패 단계, 입력 `Position.history` 길이, 경로를 저장소 상대 경로로 정리한 원래 스택을 기록한다. `topLevelFieldSizeSummary`는 실패한 `snapshot()`에서 이미 인코딩한 상태의 각 최상위 필드를 독립적으로 센 대략적 노드·바이트·상대 깊이이며, 20만 노드 또는 32 MiB에서 멈춘 필드는 `truncated=true`인 하한값이다. 존재하지 않는 필드는 나타나지 않는다. 원시 상태 값과 RNG 값은 이 진단 항목에 기록하지 않는다. 합법 행동 열거 중 오라클이 가상 후보를 적용하다 실패하면 `candidate trial`/`virtual candidate`로 구분한다. 이전에 완료한 source case와 seed 결과는 보고서에 남기고 전체 상태는 실패로 유지한다. 이 경로는 추가 게임 행동이나 RNG 호출 없이 인코딩된 객체만 읽는다. 진단 실행과 새 회귀 검사는 아직 **미실행**이다.
+
+기존 결과를 보존하기 위해 새 출력 루트를 지정하고 처음에는 원문 탐색만 실행한다. 아래 명령은 **미실행** 예시이며 `<새-출력-절대-루트>`는 Windows `%APPDATA%/Accelerate/reports` 아래의 사용하지 않은 디렉터리로 지정한다. 기존에 실패한 style/seed 범위를 알고 있다면 해당 범위로 바꾸어 한 seed부터 좁힌다.
+
+```text
+ACCELERATE_JSON_BUDGET_DIAGNOSTICS=1 node projects/augment-chess/tests/differential/v7-native-differential.cjs --oracle-only --source <고정-client-절대-경로> --output-root <새-출력-절대-루트> --replay-search=normal:0:1:128
+```
 
 성공한 source case에는 source SHA/profile과 시작 seed·스타일, 선택한 드래프트·일반 행동의 공개 intent, 획득 인스턴스, Replay/후속 intent 및 최종 digest가 포함된다. 실제 Position과 양측 공개 관측은 Git 밖 `source-cases.jsonl`에만 쓴다. 기존 paired 생성기는 이 상태를 Rust 공개 host로 import한 뒤 최초 이동, 상대 bridge, Replay, 후속 행동을 같은 공개 intent로 연속 실행한다. 각 단계의 전체 합법 intent, RuleProjection, 양측 관측, 결과 및 `moveReplay` frame은 해당 단계의 Position을 통해 비교한다. 단일 확률적 실행의 다음 상태 차이는 `INCONCLUSIVE`; 동일한 규칙 상태에 대한 완전 합법 intent 차이는 `MISMATCH`다. source에서만 카드 사용이 완료되거나 Rust가 중간 intent를 수용하지 못하면 `UNSUPPORTED`다. 성공한 실행 자체를 규칙 동등성 `PASS`로 승격하지 않는다.
 

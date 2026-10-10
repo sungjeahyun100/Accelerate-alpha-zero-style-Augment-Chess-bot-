@@ -322,7 +322,17 @@ class OracleRuntime {
   }
   snapshot(history = []) {
     this.evaluate("__settleMicrotasks()");
-    return this.contract.position(this.state(), this.random, history);
+    const encodedState = this.state();
+    try { return this.contract.position(encodedState, this.random, history); }
+    catch (error) {
+      if (process.env.ACCELERATE_JSON_BUDGET_DIAGNOSTICS === "1" && error.code === "JSON_BUDGET_EXCEEDED") {
+        error.failedStateMode = encodedState.mode;
+        error.failedStateTurn = encodedState.turn;
+        try { error.stateFields = this.contract.summarizeStateFields(encodedState); }
+        catch (diagnosticError) { error.stateSummaryError = `${diagnosticError.name}: ${diagnosticError.message}`; }
+      }
+      throw error;
+    }
   }
   newGame(config = {}, seed = 0, tape = []) {
     const ownedConfig = this.contract.jsonCopy(config);
@@ -515,7 +525,19 @@ class OracleRuntime {
           if (next.done) { exhausted = true; break; }
           examined++;
           const candidate = this.contract.action(owned, next.value);
-          if (!legal || special || this.apply(owned, candidate, { recordHistory: false }).ok) actions.push(candidate);
+          let admitted = !legal || special;
+          if (!admitted) {
+            try { admitted = this.apply(owned, candidate, { recordHistory: false }).ok; }
+            catch (error) {
+              if (error.code === "JSON_BUDGET_EXCEEDED") {
+                error.failureStage = "candidate trial";
+                error.actionCategory = "virtual candidate";
+                error.actionType = candidate.payload.type;
+              }
+              throw error;
+            }
+          }
+          if (admitted) actions.push(candidate);
         }
         return this.contract.deepFreeze({ actions, exhausted, examined, stopReason: exhausted ? "exhausted" : actions.length === limit ? "page-limit" : "examined-budget" });
       },

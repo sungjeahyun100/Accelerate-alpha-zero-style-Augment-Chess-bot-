@@ -3,7 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { options, replayAbsence, replayDraftChoice, validateReplayWitness,
-  caseBudgetContext, caseBudgetError } = require("./v7-native-differential.cjs");
+  caseBudgetContext, caseBudgetError, jsonBudgetFailure, sourceReplaySequence } = require("./v7-native-differential.cjs");
 
 test("Replay search has finite seed and decision bounds", () => {
   assert.deepEqual(options(["--replay-search=normal:10:2:64"]).replaySearches,
@@ -60,4 +60,22 @@ test("JSON budget failure identifies the bounded search position without state c
   for (const marker of ["normal", "7", "52", "END", "position.history.length"])
     assert.ok(error.includes(marker));
   assert.ok(!error.includes("private"));
+});
+test("JSON budget failure remains a failure across Replay continuation and reports only diagnostics", () => {
+  const budgetError = new TypeError("JSON exceeds depth64/nodes100000/bytes8MiB limits.");
+  budgetError.code = "JSON_BUDGET_EXCEEDED";
+  budgetError.budget = { exceeded: "bytes", path: "$/boardHistory/0", topLevelFieldPath: "$/boardHistory" };
+  budgetError.stateFields = { boardHistory: { nodes: 42, bytes: 1234, depth: 7 } };
+  const adapter = { actionStream: () => ({ nextPage: () => { throw budgetError; }, dispose: () => {} }) };
+  const position = { state: { mode: "play", turn: "white", board: "private" }, history: [] };
+  assert.throws(() => sourceReplaySequence(adapter, null, null, position, "white"),
+    error => error === budgetError);
+  budgetError.searchContext = { style: "normal", seed: 7, decision: 52,
+    stage: "legal enumeration", actionCategory: "source candidate enumeration",
+    stateMode: "play", turn: "white", positionHistoryLength: 0 };
+  const report = jsonBudgetFailure(budgetError);
+  assert.equal(report.code, "JSON_BUDGET_EXCEEDED");
+  assert.equal(report.exceededJsonPath, "$/boardHistory/0");
+  assert.equal(report.positionHistoryLength, 0);
+  assert.ok(!JSON.stringify(report).includes("private"));
 });
