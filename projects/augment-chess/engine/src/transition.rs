@@ -347,6 +347,9 @@ pub(crate) fn apply_without_public_event(
 }
 
 pub(crate) fn apply(state: &mut GameState, action: &Action) -> Result<Vec<Piece>> {
+    if state.ruleset_id == RULES_VERSION_OCTOBER {
+        return crate::october_switcheroo::apply(state, action);
+    }
     let actor = action.color;
     let before_v7 = (state.ruleset_id == RULES_VERSION_V7).then(|| state.clone());
     let before = if before_v7.is_some() {

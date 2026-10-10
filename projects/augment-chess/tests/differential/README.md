@@ -30,6 +30,56 @@ legal actions, action 적용 결과, 보드·턴·카드·특수 기물 상태, 
 - `fixtures/oracle-v1.jsonl.gz`: JS oracle(`engine-merged.js`) 기준 2,072개.
 - `fixtures/site-reference-v1/`: **사이트 규칙 코드 기준** reference fixture 349개(약 5.5 MB). 규칙 차이 분석과 Rust 포팅의 참고 데이터. JS와 사이트가 다를 때의 최종 처리 기준은 [O-002](../../../../docs/DECISIONS.md#o-002-정답-기준을-사이트-원본으로-명시할지)에 남아 있다. 형식은 oracle-v1의 상위 호환이며 생성 방법·커버리지·한계는 그 폴더의 README.md 참고.
 
+## 10월 원본 전이 영수증
+
+### 첫 Rust 차분: switcheroo
+
+`october-native-switcheroo.cjs`는 10월 원본에서 카드 사용 전, 카드 사용 후,
+왕·폰 교환 후의 투영을 재생성한다. 영수증의 `rustInput`은 원시 내부
+`sourceEvidence`를 그대로 Rust에 입력하지 않고 보드·덱·턴·카드 효과·완료 반수 등 검토한 필드만 추려
+규칙 버전, 원본 SHA, catalog hash, 실행 profile과 함께 전달한다. Rust JSON
+바이너리의 `apply_public_intent`가 카드 행동과 교환 행동을 각각 바인딩·검증·
+적용한다. 별도로 직렬화한 Rust 결과를 `sourceExpected`와 비교한다.
+Rust import는 이 제한된 입력 필드 집합 밖의 10월 상태를 unsupported로 거부한다.
+
+```sh
+CARGO_TARGET_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/accelerate/october-rust" \
+  cargo build -p augment-chess-engine --bin augment-chess-engine-json --offline
+node projects/augment-chess/tests/differential/october-native-switcheroo.cjs \
+  "$OCTOBER_SOURCE_MAIN" "$OCTOBER_ACORN_PARSER" \
+  "${XDG_CACHE_HOME:-$HOME/.cache}/accelerate/october-rust/debug/augment-chess-engine-json"
+```
+
+이 경로는 활성 `switcheroo`의 카드 사용과 왕·아군 폰 교환만 지원한다.
+10월 전체 합법 행동 열거와 action stream은 unsupported다. viewer별 비교는
+이 사례에서 양측 모두 볼 수 있는 보드 기물의 투영에 한정된다. 전체 공개
+observation, replay, 특수 자동 효과와 다른 10월 카드의 동등성은 검증하지 않는다.
+원본 번들과 생성한 영수증은 Git에 넣지 않는다.
+
+`october-source-transition.cjs`는 SHA가 고정된 10월 원본과 Acorn을 외부
+절대 경로에서 읽어 `switcheroo`, `holdout`, `monster`, `chimera`,
+`reaper` 사례를 원문 행동으로 재생한다. 출력은 JSON 한 줄이며
+`sourceExpected`가 원본의 전후 상태 투영, `sourceEvidence`가
+`JSON.stringify(state)`로 만든 조사 자료다. 비교 대상인 Rust 결과는
+`--actual`로 따로 전달하고, 실제 양측 입력은 합치지 않는다.
+
+```sh
+node projects/augment-chess/tests/differential/october-source-transition.cjs \
+  "$OCTOBER_SOURCE_MAIN" "$OCTOBER_ACORN_PARSER" switcheroo \
+  > "$REPORTS/october-switcheroo.json"
+```
+
+`--actual` JSON에는 `schemaVersion`, `caseName`, `rulesVersion`,
+`sourceMainSha256`, `sourcePublicCatalogHash`, `executionProfileVersion`,
+`publicIntent`, `before`, `after`가 필요하다. 비교는 기물 ID·종류·
+위치·이동 표지, 양측 카드 사용, 턴·완료 반수·종료, 두 viewer의
+`pieceVisibleToColorAt` 보드 투영에서 값과 배열 순서를 보존한다.
+누락이나 불일치는 실패다. 이 파일만으로 Rust 실행이나 전체 합법 행동,
+전체 공개 observation, chance 분포의 일치를 선언하지 않는다.
+`sourceEvidence`의 JSON 직렬화는 원본의 비 JSON 내부 자료를 보존하지
+않으므로 Rust 입력은 별도 검토한 공개 계약으로 구성해야 한다. 생성된
+영수증과 원본 번들은 Git에 추가하지 않는다.
+
 ## v7 행동 표면 경계
 
 `node --test projects/augment-chess/tests/differential/v7-action-surface.test.cjs`는 SHA-256으로 고정된

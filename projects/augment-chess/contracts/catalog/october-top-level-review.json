@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "sourceMainSha256": "958e8e6787d8d107152e4c07e45736d2ffbf05ad8fad4e7de63558c3c70d024c",
+  "indexMeaning": "Zero-based order among non-declaration, non-import module statements. Inclusive ranges cover all 359 statements.",
+  "categories": {
+    "rule": "Rules execution needs the side effect or an explicitly invoked entry point.",
+    "dependency": "Rule code references this data or entry point, but the top-level side effect is not needed for the supported local path.",
+    "observation": "Player-visible label, card text, or help metadata.",
+    "ui": "DOM, animation, input wiring, sound, diagnostics, or browser startup.",
+    "network": "Online play, account, route, storage, or record integration.",
+    "uncertain": "Rule relevance requires further execution evidence."
+  },
+  "ranges": [
+    [0, 0, "dependency"], [1, 1, "ui"], [2, 98, "dependency"],
+    [99, 99, "rule"], [100, 108, "dependency"], [109, 109, "uncertain"],
+    [110, 118, "dependency"], [119, 126, "ui"], [127, 168, "observation"],
+    [169, 170, "dependency"], [171, 174, "rule"], [175, 185, "observation"],
+    [186, 186, "rule"], [187, 188, "observation"], [189, 190, "rule"],
+    [191, 191, "observation"], [192, 194, "rule"], [195, 196, "network"],
+    [197, 198, "ui"], [199, 202, "network"], [203, 217, "ui"],
+    [218, 224, "network"], [225, 291, "ui"], [292, 293, "network"],
+    [294, 313, "ui"], [314, 319, "network"], [320, 322, "ui"],
+    [323, 324, "network"], [325, 327, "ui"], [328, 330, "network"],
+    [331, 331, "rule"], [332, 333, "ui"], [334, 336, "network"],
+    [337, 344, "ui"], [345, 357, "network"], [358, 358, "dependency"]
+  ],
+  "executeBeforeReset": [[99, 99], [127, 168], [171, 194]],
+  "explicitEntryPoints": {
+    "331": "resetGame(false, []) is invoked after local mode selection; module startup is suppressed."
+  },
+  "reviewNotes": [
+    "Indices 2-98 and 100-118 are authority/catalog validations or immutable metadata construction. Source declarations retain their values; the local oracle does not execute those top-level checks as a substitute for the source SHA and catalog assertions.",
+    "Index 109 registers an AI worker. Its influence on local action ordering is unresolved; exhaustive local legality must not claim coverage from this profile.",
+    "Indices 127-168 populate TYPE_LABELS used by source messages and player-visible labels.",
+    "Indices 171-194 mutate card categories, definitions, aliases, stars, targets, and help. They execute in source order before a new game.",
+    "Index 331 is the browser's startup reset. The headless profile invokes the same source function at a controlled initialization boundary.",
+    "Indices 203-319 bind browser input or online callbacks. Their callbacks are not a rules execution path in the local VM; the source functions they call remain available from declarations.",
+    "VM context and frozen source digest limit accidental execution drift. Node vm is not a security boundary for hostile code."
+  ]
+}
