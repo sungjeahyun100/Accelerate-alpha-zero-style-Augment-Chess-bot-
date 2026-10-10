@@ -483,7 +483,8 @@ def tests():
     if bf16_probe.stdout.strip() not in {"0", "1"}:
         raise RuntimeError(f"unexpected CUDA BF16 capability result: {bf16_probe.stdout!r}")
     cuda_bf16_available = bf16_probe.stdout.strip() == "1"
-    optional_bf16_case = "projects/accelerate/python/tests/test_session.py::test_cuda_bf16_training_keeps_fp32_master_and_adamw_state"
+    # pytest selects node IDs relative to projects/accelerate (its rootdir).
+    optional_bf16_case = "python/tests/test_session.py::test_cuda_bf16_training_keeps_fp32_master_and_adamw_state"
     optional_selection = [] if cuda_bf16_available else [f"--deselect={optional_bf16_case}"]
     if not cuda_bf16_available:
         print(f"optional CUDA BF16 hardware unsupported; deselecting {optional_bf16_case}", flush=True)

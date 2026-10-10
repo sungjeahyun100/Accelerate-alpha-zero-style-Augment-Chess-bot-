@@ -393,7 +393,7 @@ class SuccessCacheTests(unittest.TestCase):
             (marker.parent / "test-scope.json").write_text(json.dumps({
                 "skips": 0, "default_weighted_conditioning_modes": ["normal", "chaos", "grand"],
                 "optional_cuda_bf16": "unsupported",
-                "deselected_optional_tests": ["projects/accelerate/python/tests/test_session.py::test_cuda_bf16_training_keeps_fp32_master_and_adamw_state"],
+                "deselected_optional_tests": ["python/tests/test_session.py::test_cuda_bf16_training_keeps_fp32_master_and_adamw_state"],
                 "game_adapter_draft_modes": ["normal", "chaos", "grand"],
             }), encoding="utf-8")
             differential.write_text(json.dumps({
