@@ -9,6 +9,7 @@ mod draft;
 mod eligibility;
 mod flow;
 pub mod geometry;
+pub mod legal_profile;
 pub mod move_program;
 mod movement;
 mod observation;

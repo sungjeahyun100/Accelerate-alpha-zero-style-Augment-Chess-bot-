@@ -16,3 +16,7 @@ sha2 = "0.10"
 [[bin]]
 name = "augment-chess-engine-json"
 path = "src/bin/augment-chess-engine-json.rs"
+
+[[bin]]
+name = "augment-chess-semantic-pairs"
+path = "src/bin/augment-chess-semantic-pairs.rs"

@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict
 import json
+import math
 import os
 from pathlib import Path
 import signal
@@ -100,12 +101,16 @@ def _search(args, spec, manifest, backend):
                           leaf_batch_size=args.leaf_batch_size)
     evaluator = ProductionEvaluator(manifest, spec, backend, threads=args.threads)
     if args.model_family == "legacy-resnet":
-        return InformationSetSearch(PublicEncoder(spec), evaluator, limits=limits)
+        return InformationSetSearch(PublicEncoder(spec), evaluator, limits=limits,
+                                    profile=getattr(args, "mcts_profile", False),
+                                    cache=not getattr(args, "no_mcts_cache", False))
     from .ir import TypedEncoder
 
     if evaluator.architecture_family != args.model_family:
         raise ValueError("typed manifest architecture differs from the explicit CLI family")
-    return TypedInformationSetSearch(TypedEncoder(spec), evaluator, limits=limits)
+    return TypedInformationSetSearch(TypedEncoder(spec), evaluator, limits=limits,
+                                     profile=getattr(args, "mcts_profile", False),
+                                     cache=not getattr(args, "no_mcts_cache", False))
 
 
 def _typed_model(args, spec):
@@ -213,7 +218,10 @@ def choose(args, root, spec, cancelled):
     belief = ParticleBelief(tracker, factory, seed=args.belief_seed,
               limits=BeliefLimits(particles=args.particles, proposals=args.proposals, elapsed_ms=args.belief_ms), cancelled=cancelled)
     search = _search(args, spec, _manifest(args, root, spec), args.backend)
-    return asdict(search.run(belief, cancelled=cancelled))
+    result = asdict(search.run(belief, cancelled=cancelled))
+    if result["mcts_profile"] is None:
+        del result["mcts_profile"]
+    return result
 
 
 def _record_selfplay_failure(root, run_id, path, recorder, error, *, save_attempted, replay_saved):
@@ -341,6 +349,165 @@ def selfplay(args, root, spec, cancelled):
     return report
 
 
+def stage_sample(args, root, spec, cancelled):
+    """Generate a legal source position and one bounded student rollout."""
+    start = time.monotonic()
+    from dataclasses import replace
+    from .staged import END, MIDDLE, SyntheticConfig, generate_position, replay_position, rollout_stage
+
+    if not args.generate_only and (args.stage == "middle") != bool(args.teacher_manifest):
+        raise ValueError("only middle stage requires a frozen --teacher-manifest")
+    config = _configuration(args)
+    style = config.get("gameStyle", "normal")
+    if set(config) != {"gameStyle"} or style not in ("normal", "chaos"):
+        raise ValueError("stage experiment currently accepts only plain Basic or Chaos GameConfig")
+    stage = replace(MIDDLE if args.stage == "middle" else END, max_actions=args.max_stage_actions)
+    search = _search(args, spec, args.manifest, args.backend)
+    teacher = ProductionEvaluator(args.teacher_manifest, spec, args.backend, threads=args.threads) if args.teacher_manifest else None
+    generation = SyntheticConfig(stage, args.seed, max_actions=args.max_generation_actions,
+                                 capture_bias=args.capture_bias,
+                                 assumed_ply_center=25 if stage.name == "middle" else 45)
+    def peak_rss_bytes():
+        if os.name != "posix":
+            return None
+        import resource
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
+    output = reserve_slot(root, "datasets", args.run_id)
+    generated_seconds = None
+    try:
+        if args.source_provenance:
+            source_provenance = read_json(args.source_provenance)
+            if (not isinstance(source_provenance, dict)
+                    or source_provenance.get("seed") != args.seed
+                    or source_provenance.get("format") != style):
+                raise ValueError("source provenance differs from requested seed or format")
+            if source_provenance.get("stage") == stage.name:
+                position, trackers = replay_position(source_provenance, spec)
+                provenance = source_provenance
+                candidate_probes = 0
+                generation_method = "replay"
+            elif stage.name == "end" and source_provenance.get("stage") == "middle":
+                position, trackers, provenance = generate_position(generation, spec,
+                    game_style=style, search=search, prefix_provenance=source_provenance)
+                candidate_probes = provenance["candidate_probe_transitions"]
+                generation_method = "extend"
+            else:
+                raise ValueError("source provenance does not precede the requested stage")
+        else:
+            position, trackers, provenance = generate_position(generation, spec, game_style=style,
+                                                               search=search)
+            candidate_probes = provenance["candidate_probe_transitions"]
+            generation_method = "sample"
+        generated_seconds = time.monotonic() - start
+        atomic_json(output / "position-provenance.json", provenance)
+        if args.generate_only:
+            report = {"status": "complete", "stage": stage.name, "format": style,
+                      "generation_seconds": generated_seconds,
+                      "generation_actions": len(provenance["actions"]),
+                      "candidate_probe_transitions": candidate_probes,
+                      "generation_method": generation_method,
+                      "provenance": str(output / "position-provenance.json"),
+                      "statistics": provenance["statistics"]}
+            atomic_json(slot(root, "reports", args.run_id) / "stage-generation.json", report)
+            return report
+        result = rollout_stage(position, trackers, stage, search, teacher, config,
+                               belief_seed=args.belief_seed, belief_ms=args.belief_ms,
+                               particles=args.particles, proposals=args.proposals,
+                               cancelled=cancelled)
+        if not result["samples"]:
+            raise ValueError("stage rollout produced no root policy samples")
+        teacher_deployment = ({"manifest_sha256": file_sha256(args.teacher_manifest),
+             "base_hash": load_manifest(args.teacher_manifest, spec)["base_hash"],
+             "model_sha256": teacher.session.model_sha256}
+             if result["teacher_checkpoint_sha256"] is not None else None)
+        payload = {"version": "accelerate-staged-v1", "encoder_hash": spec.digest,
+                   "architecture_family": args.model_family, "student_model_sha256": search.evaluator.session.model_sha256,
+                   "teacher_checkpoint_sha256": result["teacher_checkpoint_sha256"],
+                   "teacher_deployment": teacher_deployment,
+                   "provenance": provenance, **result}
+        path = output / "samples.json"
+        atomic_json(path, payload)
+        elapsed = time.monotonic() - start
+        report = {"status": "complete", "stage": stage.name, "format": style,
+                  "dataset": str(path), "generated_samples": len(result["samples"]),
+                  "seed": args.seed, "rules_version": spec.rules_version,
+                  "student_model_sha256": search.evaluator.session.model_sha256,
+                  "backend": args.backend, "threads": args.threads,
+                  "search_budget": {"iterations": args.iterations, "depth": args.depth,
+                                    "search_ms": args.search_ms, "nodes": args.nodes,
+                                    "edges": args.edges, "candidates": args.candidates},
+                  "generation_actions": len(provenance["actions"]),
+                  "candidate_probe_transitions": candidate_probes,
+                  "generation_method": generation_method,
+                  "stage_actions": len(result["samples"]) + len(result["boundary_actions"]),
+                  "generation_seconds": generated_seconds, "wall_seconds": elapsed,
+                  "samples_per_second": len(result["samples"]) / elapsed,
+                  "transitions_per_second": (len(provenance["actions"]) + candidate_probes + len(result["samples"]) + len(result["boundary_actions"])) / elapsed,
+                  "mcts_nodes_per_sample": sum(item["mcts_nodes"] for item in result["samples"]) / len(result["samples"]),
+                  "bootstrap_ratio": float(result["outcome"].startswith("bootstrap:")),
+                  "terminal_ratio": float(result["outcome"] == "terminal"),
+                  "teacher_inference_count": int(result["outcome"].startswith("bootstrap:")),
+                  "teacher_inference_seconds": result["teacher_inference_seconds"],
+                  "belief_initialization_seconds": result["belief_initialization_seconds"],
+                  "root_belief_seconds": result["root_belief_seconds"],
+                  "belief_diagnostics": result["belief_diagnostics"],
+                  "terminal_rollout_length": len(result["samples"]) if result["outcome"] == "terminal" else None,
+                  "invalid_generated_state_rejection_ratio": 0.0,
+                  "teacher_checkpoint_sha256": result["teacher_checkpoint_sha256"],
+                  "teacher_deployment": teacher_deployment,
+                  "peak_rss_bytes": peak_rss_bytes(),
+                  "gpu_memory_bytes": None,
+                  "statistics": result["statistics"]}
+        if args.mcts_profile:
+            report["mcts_profiles"] = result["mcts_profiles"]
+        if args.compare_full:
+            # Same seed, model and search limits; use the staged wall budget for
+            # the full arm. An unfinished full game remains explicitly unfinished.
+            full_args = argparse.Namespace(**vars(args))
+            full_args.run_id = f"{args.run_id}-full"
+            full_args.games = 1
+            full_args.max_plies = args.full_max_plies
+            full_args.elapsed_ms = min(86_400_000, max(1000, math.ceil(elapsed * 1000)))
+            full_args.verification = False
+            full_args.particles = args.particles
+            full_args.proposals = args.proposals
+            full_args.belief_ms = args.belief_ms
+            full_started = time.monotonic()
+            full_report = selfplay(full_args, root, spec, cancelled)
+            full_seconds = time.monotonic() - full_started
+            episode = ReplayEpisode.load(full_report["episodes"][0]["path"], spec) if full_report["episodes"] else None
+            full_decisions = len(episode.decisions) if episode is not None else 0
+            full_terminal = episode is not None and episode.outcome["status"] == "terminal"
+            full_samples = full_decisions if full_terminal else 0
+            report["full_comparison"] = {
+                "seed": args.seed, "full_wall_seconds": full_seconds,
+                "full_decisions": full_decisions,
+                "full_training_samples": full_samples,
+                "full_samples_per_second": full_samples / full_seconds,
+                "full_mcts_iterations_per_decision": (sum(item["search"]["iterations"]
+                    for item in episode.decisions) / full_decisions) if full_decisions else None,
+                "full_terminal": full_terminal,
+                "full_stop_reason": full_report["stop_reason"],
+                "full_transitions": episode.trackers["white"].steps if episode is not None else 0,
+                "budget_ms": full_args.elapsed_ms,
+                "same_search_config": True}
+        atomic_json(slot(root, "reports", args.run_id) / "stage-sample.json", report)
+        return report
+    except (Exception, KeyboardInterrupt) as error:
+        atomic_json(slot(root, "reports", args.run_id) / "stage-sample-failure.json",
+                    {"status": "failed", "error": type(error).__name__, "reason": str(error),
+                     "dataset_slot": str(output),
+                     "belief_diagnostics": getattr(error, "belief_diagnostics", None),
+                     "belief_initialization_seconds": getattr(error, "belief_initialization_seconds", None),
+                     "root_belief_seconds": getattr(error, "root_belief_seconds", None),
+                     "stage_samples_completed": getattr(error, "stage_samples_completed", None),
+                     "search_diagnostics": getattr(error, "search_diagnostics", None),
+                     "generation_seconds": generated_seconds,
+                     "wall_seconds": time.monotonic() - start,
+                     "peak_rss_bytes": peak_rss_bytes()})
+        raise
+
+
 def train(args, root, spec, cancelled):
     if (root / "runs" / args.run_id).is_symlink():
         raise ValueError("training run slot is a symlink; choose a new --run-id")
@@ -367,7 +534,13 @@ def train(args, root, spec, cancelled):
             raise ValueError("requested CUDA device is unavailable")
         model.to(args.device)
         optimizer = create_optimizer(model, mode=args.mode, learning_rate=args.learning_rate)
-        dataset = ReplayDataset(args.replay, spec, architecture_family=args.model_family if typed else None)
+        if args.staged:
+            if not typed:
+                raise ValueError("staged samples require the v7 typed model contract")
+            from .staged import StagedDataset
+            dataset = StagedDataset(args.replay, spec, args.model_family)
+        else:
+            dataset = ReplayDataset(args.replay, spec, architecture_family=args.model_family if typed else None)
         cursor = DatasetCursor(dataset, args.seed)
         previous = load_training_checkpoint(model, optimizer, spec, cursor, args.resume) if args.resume else 0
         limits = TrainingLimits(steps=args.steps, batch_size=args.batch_size, elapsed_ms=args.elapsed_ms,
@@ -593,6 +766,7 @@ def parser():
     command.add_argument("--adapter")
     command.add_argument("--mode", choices=("base", "adapter"), default="base")
     command.add_argument("--replay", nargs="+", required=True)
+    command.add_argument("--staged", action="store_true", help="train on validated staged public samples")
     command.add_argument("--resume", help="existing training checkpoint; must be this slot's checkpoint when the run ID already exists")
     command.add_argument("--checkpoint-every", type=int, default=100)
     command.add_argument("--run-id", default="training")
@@ -603,6 +777,38 @@ def parser():
     command.add_argument("--memory-mib", type=int, default=1024)
     command.add_argument("--learning-rate", type=float, default=3e-4)
     command.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    staged = commands.add_parser("stage-sample")
+    staged.add_argument("--stage", choices=("end", "middle"), required=True)
+    staged.add_argument("--generate-only", action="store_true")
+    staged.add_argument("--source-provenance",
+                        help="replay an earlier generated position by verified source actions")
+    staged.add_argument("--config", help="public GameConfig JSON; Basic by default")
+    staged.add_argument("--manifest", required=True, help="frozen student deployment manifest")
+    staged.add_argument("--teacher-manifest", help="frozen next-stage deployment manifest; required for middle")
+    staged.add_argument("--backend", choices=("ort", "tract"), default="ort")
+    staged.add_argument("--seed", type=int, default=37)
+    staged.add_argument("--belief-seed", type=int, default=71)
+    staged.add_argument("--belief-ms", type=int, default=30000)
+    staged.add_argument("--particles", type=int, default=1)
+    staged.add_argument("--proposals", type=int, default=4)
+    staged.add_argument("--run-id", required=True)
+    staged.add_argument("--max-generation-actions", type=int, default=256)
+    staged.add_argument("--max-stage-actions", type=int, default=128)
+    staged.add_argument("--capture-bias", type=float, default=2.)
+    staged.add_argument("--iterations", type=int, default=8)
+    staged.add_argument("--mcts-profile", action="store_true",
+                        help="record bounded numeric MCTS timing diagnostics")
+    staged.add_argument("--no-mcts-cache", action="store_true",
+                        help="disable run-local MCTS action and inference caches for comparison")
+    staged.add_argument("--leaf-batch-size", type=int, default=2)
+    staged.add_argument("--depth", type=int, default=4)
+    staged.add_argument("--search-ms", type=int, default=1000)
+    staged.add_argument("--nodes", type=int, default=1024)
+    staged.add_argument("--edges", type=int, default=8192)
+    staged.add_argument("--candidates", type=int, default=128)
+    staged.add_argument("--compare-full", action="store_true",
+                        help="run existing full selfplay for the staged wall-time budget")
+    staged.add_argument("--full-max-plies", type=int, default=4096)
     command = commands.add_parser("export")
     command.add_argument("--base", required=True)
     command.add_argument("--adapter")
@@ -640,12 +846,12 @@ def main(arguments=None):
             raise ValueError("command seed must fit uint32 without silent normalization")
         if hasattr(args, "belief_seed") and not 0 <= args.belief_seed < 2**32 - 1:
             raise ValueError("independent belief seed must fit uint32 including its second viewer")
-        if args.command in ("choose", "selfplay") and args.model_family == "legacy-resnet":
+        if args.command in ("choose", "selfplay", "stage-sample") and args.model_family == "legacy-resnet":
             raise ValueError("v6 game execution is retired; choose and selfplay require a v7 typed model family")
         torch.set_num_threads(args.threads)
         policy = read_json(args.observation_policy) if args.observation_policy else None
         spec = default_spec(args.catalog, observation_policy=policy, model_family=args.model_family)
-        if args.command in ("choose", "selfplay") and spec.rules_version != V7_RULES_VERSION:
+        if args.command in ("choose", "selfplay", "stage-sample") and spec.rules_version != V7_RULES_VERSION:
             raise ValueError("v6 game execution is retired; choose and selfplay require the pinned v7 rules")
         root = artifact_root(args.artifact_root)
         cancelled = lambda: stopped
@@ -655,6 +861,8 @@ def main(arguments=None):
             result = choose(args, root, spec, cancelled)
         elif args.command == "selfplay":
             result = selfplay(args, root, spec, cancelled)
+        elif args.command == "stage-sample":
+            result = stage_sample(args, root, spec, cancelled)
         elif args.command == "train":
             result = train(args, root, spec, cancelled)
         elif args.command == "export":

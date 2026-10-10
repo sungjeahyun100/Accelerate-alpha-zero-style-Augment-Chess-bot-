@@ -2,6 +2,7 @@
 //! game state stay in augment-chess-engine; this module only converts bounded
 //! values and forwards exact versioned requests.
 
+use std::collections::BTreeSet;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -14,6 +15,7 @@ use adapter_runtime::{
 use augment_chess_engine::adapter::{
     GameAdapterPayload, GameAdapterSession as EngineGameAdapterSession,
 };
+use augment_chess_engine::legal_profile;
 use augment_chess_engine::v7_action_admission::AdmissionErrorKind;
 use augment_chess_engine::v7_adapter_actions::{self, V7ActionHostError};
 use augment_chess_engine::v7_conditioning;
@@ -250,6 +252,39 @@ impl GameAdapterSession {
 
 #[pymethods]
 impl GameAdapterSession {
+    /// Explicit diagnostic transport, separate from public adapter responses.
+    fn begin_legal_profile(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let inner = self.inner.clone();
+        let stats = py.detach(move || {
+            let guard = inner.lock().map_err(|_| NativeError::new_err("game adapter session lock poisoned"))?;
+            let state = guard.position().state();
+            let pieces: BTreeSet<&str> = state.board.iter().flatten().flatten()
+                .map(|piece| piece.id.as_str()).collect();
+            let serialization_started = Instant::now();
+            let serialized_state_bytes = serde_json::to_vec(state)
+                .map_err(|error| NativeError::new_err(error.to_string()))?.len();
+            let serialization_ms = serialization_started.elapsed().as_secs_f64() * 1000.0;
+            let stats = serde_json::json!({
+                "board_piece_count": pieces.len(),
+                "current_player_card_instances": state.deck_slots.get(state.decision_actor()).iter().filter(|card| !card.vacant).count(),
+                "all_card_instances": state.deck_slots.white.iter().chain(&state.deck_slots.black).filter(|card| !card.vacant).count(),
+                "history_len": state.history.len(),
+                "capture_count": state.captures.white.len() + state.captures.black.len(),
+                "serialized_state_bytes": serialized_state_bytes,
+                "state_size_serialization_ms": serialization_ms,
+            });
+            Ok::<_, PyErr>(stats)
+        })?;
+        let stats = conversion::to_python(py, &stats)?;
+        legal_profile::start().map_err(NativeError::new_err)?;
+        Ok(stats)
+    }
+
+    fn finish_legal_profile(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let profile = legal_profile::finish().map_err(NativeError::new_err)?;
+        conversion::to_python(py, &json_value(profile)?)
+    }
+
     /// Independently reconstruct a v7 opening from a signed public frame.
     /// The source environment's hidden seed and position never enter Python.
     #[staticmethod]
@@ -439,6 +474,75 @@ impl GameAdapterSession {
         result.set_item("importance_weight", proposal.importance_weight)?;
         result.set_item("source_probability", proposal.source_probability)?;
         result.set_item("proposal_probability", proposal.proposal_probability)?;
+        Ok(result)
+    }
+
+    #[pyo3(signature = (expected_next_public, independent_seed, *, snapshot_revision=None))]
+    fn condition_hidden_stage_draft<'py>(
+        &self,
+        py: Python<'py>,
+        expected_next_public: &Bound<'_, PyAny>,
+        independent_seed: u32,
+        snapshot_revision: Option<&str>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let expected = conversion::from_python(expected_next_public)?;
+        let position = self.cloned_position(py, snapshot_revision)?;
+        let proposal = py
+            .detach(move || {
+                v7_conditioning::condition_hidden_stage_draft(&position, expected, independent_seed)
+            })
+            .map_err(crate::error)?;
+        proposal_probabilities(
+            proposal.importance_weight,
+            proposal.source_probability,
+            proposal.proposal_probability,
+        )?;
+        let result = PyDict::new(py);
+        result.set_item(
+            "position",
+            Py::new(py, Self::from_position(proposal.position)?)?,
+        )?;
+        result.set_item("importance_weight", proposal.importance_weight)?;
+        result.set_item("source_probability", proposal.source_probability)?;
+        result.set_item("proposal_probability", proposal.proposal_probability)?;
+        Ok(result)
+    }
+
+    /// Count the source public-choice prior in native code and return only
+    /// delta-related public candidates. The complete set never crosses into
+    /// Python. No source payload or private identity is exported.
+    #[pyo3(signature = (origin, destination, *, snapshot_revision=None))]
+    fn public_delta_candidate_intents<'py>(
+        &self,
+        py: Python<'py>,
+        origin: &Bound<'_, PyAny>,
+        destination: &Bound<'_, PyAny>,
+        snapshot_revision: Option<&str>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let origin = conversion::from_python(origin)?;
+        let destination = conversion::from_python(destination)?;
+        for square in [&origin, &destination] {
+            let fields = square
+                .as_object()
+                .ok_or_else(|| PyValueError::new_err("public delta square must be a coordinate"))?;
+            if fields.len() != 2
+                || !fields.contains_key("row")
+                || !fields.contains_key("col")
+                || !matches!(fields.get("row").and_then(Value::as_u64), Some(0..=7))
+                || !matches!(fields.get("col").and_then(Value::as_u64), Some(0..=7))
+            {
+                return Err(PyValueError::new_err("public delta square is outside 8x8"));
+            }
+        }
+        let position = self.cloned_position(py, snapshot_revision)?;
+        let (intents, legal_count, examined) = py.detach(move || {
+            v7_adapter_actions::public_delta_candidate_intents(&position, &origin, &destination)
+                .map_err(v7_action_error)
+        })?;
+        let result = PyDict::new(py);
+        result.set_item("intents", conversion::to_python(py, &json_value(intents)?)?)?;
+        result.set_item("legal_count", legal_count)?;
+        result.set_item("examined", examined)?;
         Ok(result)
     }
 

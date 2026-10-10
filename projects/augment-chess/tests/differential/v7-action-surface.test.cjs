@@ -32,6 +32,45 @@ function playPosition() {
 }
 
 const base = playPosition();
+
+test("bounded search omits only external Position history during draft and play", () => {
+  const adapter = new GameAdapter({ source, contract });
+  try {
+    let position = adapter.newGame({ gameStyle: "normal" }, 12345);
+    const compareApply = action => {
+      const recorded = adapter.apply(position, action, { recordHistory: true });
+      const lean = adapter.apply(position, action, { recordHistory: false });
+      assert.equal(recorded.ok, true);
+      assert.equal(lean.ok, true);
+      assert.deepEqual(lean.position.state, recorded.position.state,
+        "source rule state, including boardHistory and moveReplay, must survive");
+      assert.deepEqual(lean.position.rng, recorded.position.rng);
+      for (const key of ["boardHistory", "moveReplay", "deckSlots", "captures"])
+        assert.deepEqual(lean.position.state[key], recorded.position.state[key], key);
+      assert.equal(lean.position.history.length, position.history.length);
+      assert.equal(recorded.position.history.length, position.history.length + 1);
+      assert.notEqual(lean.position.positionId, recorded.position.positionId);
+      return lean.position;
+    };
+    const draft = adapter.actions(position)[0];
+    assert.ok(draft);
+    position = compareApply(draft);
+    for (let pick = 1; position.state.mode === "draft" && pick < 64; pick++) {
+      const choice = adapter.actions(position)[0];
+      assert.ok(choice);
+      const step = adapter.apply(position, choice, { recordHistory: false });
+      assert.equal(step.ok, true);
+      position = step.position;
+    }
+    assert.equal(position.state.mode, "play");
+    assert.equal(position.history.length, 0);
+    const move = adapter.actions(position).find(action => action.payload.type === "move");
+    assert.ok(move);
+    position = compareApply(move);
+    assert.equal(position.history.length, 0);
+  } finally { adapter.dispose(); }
+});
+
 function cardPosition(cardId, bounded = true) {
   const direct = new OracleRuntime({ source, contract });
   direct.restore(base);

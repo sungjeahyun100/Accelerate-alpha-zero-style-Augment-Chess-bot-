@@ -2,6 +2,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const contract = require("./runtime-contract");
+const { OracleRuntime } = require("../../oracle/game-adapter/src/game-adapter");
 const { validate, resolveRef } = require("./validate");
 const state = () => ({ board: Array.from({ length: 8 }, () => Array(8).fill(null)), turn: "white", mode: "play" });
 const move = () => ({ type: "move", color: "white", from: { row: 6, col: 0 }, move: { row: 5, col: 0, capture: false } });
@@ -12,6 +13,62 @@ test("RFC 8785 canonical number/string ordering rejects non-JSON input", () => {
   assert.throws(() => contract.canonical(Array(100001).fill(null)), /limits/);
   let deep = null; for (let index = 0; index < 65; index++) deep = [deep];
   assert.throws(() => contract.canonical(deep), /limits/);
+});
+test("opt-in JSON budget diagnostics identify the limit and JSON path without changing canonical output", () => {
+  const value = { z: -0, a: [1, "한글😀"] };
+  assert.equal(contract.canonical(value, { diagnostic: true }), contract.canonical(value));
+  const cases = [
+    { value: { boardHistory: Array.from({ length: 65 }, (_, index) => index).reduceRight((child) => [child], null) },
+      exceeded: "depth", path: "$/boardHistory/0" },
+    { value: { replayEvents: Array(100001).fill(null) }, exceeded: "nodes", path: "$/replayEvents/" },
+    { value: { moveReplay: ["x".repeat(8 * 1024 * 1024)] }, exceeded: "bytes", path: "$/moveReplay/0" },
+  ];
+  for (const sample of cases) {
+    let error;
+    try { contract.canonical(sample.value, { diagnostic: true }); }
+    catch (caught) { error = caught; }
+    assert.ok(error);
+    assert.equal(error.code, "JSON_BUDGET_EXCEEDED");
+    assert.equal(error.budget.exceeded, sample.exceeded);
+    assert.ok(error.budget.path.startsWith(sample.path));
+    assert.ok(error.budget.nodes > 0 && error.budget.bytes > 0);
+    assert.equal(error.budget.topLevelFieldPath, `$/` + Object.keys(sample.value)[0]);
+  }
+});
+test("snapshot field accounting reads encoded values without changing them", () => {
+  const encoded = { boardHistory: [{ board: [[null]] }], moveReplay: { white: null }, turn: "white" };
+  const before = JSON.stringify(encoded);
+  const summary = contract.summarizeStateFields(encoded);
+  assert.equal(JSON.stringify(encoded), before);
+  assert.deepEqual(Object.keys(summary).sort(), Object.keys(encoded).sort());
+  assert.ok(summary.boardHistory.bytes > summary.turn.bytes);
+  assert.equal(contract.canonical(encoded, { diagnostic: true }), contract.canonical(encoded));
+});
+test("snapshot budget diagnostics reuse encoded state and leave rule state and RNG unchanged", () => {
+  const encoded = { ...state(), boardHistory: ["x".repeat(8 * 1024 * 1024)] };
+  const random = contract.rng(17);
+  const originalState = JSON.stringify(encoded), originalRng = JSON.stringify(random);
+  let settlements = 0, encodes = 0;
+  const runtime = { contract, random, evaluate: () => { settlements++; }, state: () => { encodes++; return encoded; } };
+  const previous = process.env.ACCELERATE_JSON_BUDGET_DIAGNOSTICS;
+  try {
+    delete process.env.ACCELERATE_JSON_BUDGET_DIAGNOSTICS;
+    let plain;
+    try { OracleRuntime.prototype.snapshot.call(runtime); } catch (error) { plain = error; }
+    process.env.ACCELERATE_JSON_BUDGET_DIAGNOSTICS = "1";
+    let detailed;
+    try { OracleRuntime.prototype.snapshot.call(runtime); } catch (error) { detailed = error; }
+    assert.equal(plain?.code, "JSON_BUDGET_EXCEEDED");
+    assert.equal(plain?.stateFields, undefined);
+    assert.equal(detailed?.budget.exceeded, "bytes");
+    assert.ok(detailed?.stateFields.boardHistory.bytes > 0);
+    assert.equal(settlements, 2); assert.equal(encodes, 2);
+    assert.equal(JSON.stringify(encoded), originalState);
+    assert.equal(JSON.stringify(random), originalRng);
+  } finally {
+    if (previous === undefined) delete process.env.ACCELERATE_JSON_BUDGET_DIAGNOSTICS;
+    else process.env.ACCELERATE_JSON_BUDGET_DIAGNOSTICS = previous;
+  }
 });
 test("position is immutable and RNG tape roundtrips without lossy identity", () => {
   const original = state(), p = contract.position(original, contract.rng(17, [0.125, 0.75]));

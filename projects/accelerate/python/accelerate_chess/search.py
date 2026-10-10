@@ -8,6 +8,8 @@ and all legal actions, UI intent resolution and game transitions stay native.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections import OrderedDict
+from contextlib import contextmanager, nullcontext
 import hashlib
 import json
 import math
@@ -328,11 +330,15 @@ class NativeSourceFactory:
             raise InformationMismatchError("native conditioned step has no child position")
         profile = "source-weighted-conditional-step-v1"
         if mode == "play":
-            if (proposal["source_probability"] != proposal["proposal_probability"]
-                    or proposal["importance_weight"] != 1.):
-                raise InformationMismatchError(
-                    "native source-prior play transition requires equal source/proposal chance densities and unit importance")
-            profile = "source-prior-v1"
+            stage_offer = expected["publicState"].get("draft")
+            if isinstance(stage_offer, Mapping) and stage_offer.get("phase") in ("MIDDLE", "END"):
+                profile = "source-weighted-conditional-step-v1"
+            else:
+                if (proposal["source_probability"] != proposal["proposal_probability"]
+                        or proposal["importance_weight"] != 1.):
+                    raise InformationMismatchError(
+                        "native source-prior play transition requires equal source/proposal chance densities and unit importance")
+                profile = "source-prior-v1"
         # The former StepResult-only helper proves compatibility, but carries
         # no observed-chance likelihood. It is never a posterior fallback.
         return TransitionProposal(child, proposal["importance_weight"],
@@ -342,13 +348,19 @@ class NativeSourceFactory:
     def prepare_transition(self, position, expected, independent_seed):
         before = _public(position.observe(expected["viewer"]), self.typed_spec)
         public = before["publicState"]
-        if (public.get("mode") != "draft" or public.get("phase") != "OPENING"
+        if (public.get("mode") != "draft" or public.get("phase") not in ("OPENING", "MIDDLE", "END")
                 or _actor(position) == expected["viewer"] or "draft" in public
                 or len(expected["publicState"].get("revealedOpponentCards", ())) <= len(public.get("revealedOpponentCards", ()))):
             return TransitionProposal(position)
-        condition = getattr(position, "condition_hidden_opening_draft", None)
+        # The public phase follows completed drafts and may still read
+        # OPENING during either player's MIDDLE choice. Previously revealed
+        # opposing cards distinguish a later normal draft from the opening.
+        stage = bool(public.get("revealedOpponentCards"))
+        condition = getattr(position, "condition_hidden_stage_draft" if stage
+                            else "condition_hidden_opening_draft", None)
         if condition is None:
-            raise SourceCapabilityError("native hidden opening offer conditioning is unavailable")
+            raise SourceCapabilityError("native hidden stage offer conditioning is unavailable" if stage
+                                        else "native hidden opening offer conditioning is unavailable")
         from ._native import ConditioningMismatchError
         try:
             proposal = condition(expected, independent_seed)
@@ -384,6 +396,81 @@ class NativeSourceFactory:
             return action
         return _bind_source_public_intent(position, intent)
 
+    def public_result_candidates(self, position, expected):
+        """Use only a viewer-visible result to propose source-bound intents.
+
+        A missing candidate set means the result is ambiguous and the general
+        source stream must be used. No provenance or opponent intent enters.
+        """
+        self.public_result_fallback_reason = None
+        self.public_result_candidate_kind = None
+        self.public_result_bind_calls = 0
+        before = _public(position.observe(expected["viewer"]), self.typed_spec)
+        if before["publicState"].get("mode") != "play":
+            self.public_result_fallback_reason = "unsupported_public_transition_shape"
+            return None
+        actor = _actor(position)
+        trolley = before["publicState"].get("activeTrolley") is not None
+        if trolley:
+            self.public_result_candidate_kind = "trolley"
+            # The source admits exactly two branches for this pending window.
+            # Try both as latent proposals; never infer the opponent's choice
+            # or enumerate unrelated intents from an unobserved window.
+            intents = ({"type": "trolleyChoice", "color": actor, "doomedIndex": index}
+                       for index in (0, 1))
+            legal_count = 2
+        else:
+            if (before["ownCards"] != expected["ownCards"]
+                    or before["publicState"].get("revealedOpponentCards")
+                    != expected["publicState"].get("revealedOpponentCards")):
+                self.public_result_fallback_reason = "complex_card_effect"
+                return None
+            changes = expected["history"][-1].get("boardChanges", ())
+            if len(changes) != 2:
+                self.public_result_fallback_reason = "multiple_piece_delta"
+                return None
+            removed = [change for change in changes if isinstance(change.get("before"), dict)
+                       and change["before"].get("color") == actor and change.get("after") is None]
+            added = [change for change in changes if isinstance(change.get("after"), dict)
+                     and change["after"].get("color") == actor]
+            if (len(removed) != 1 or len(added) != 1
+                    or removed[0]["before"].get("type") != added[0]["after"].get("type")):
+                self.public_result_fallback_reason = "ambiguous_board_delta"
+                return None
+            origin, destination = removed[0]["square"], added[0]["square"]
+            targeted = getattr(position, "public_delta_candidate_intents", None)
+            if not callable(targeted):
+                self.public_result_fallback_reason = "targeted_source_unavailable"
+                return None
+            from ._native import UnsupportedFeatureError
+            try:
+                result = targeted(origin, destination)
+            except UnsupportedFeatureError:
+                self.public_result_fallback_reason = "source_candidate_limit"
+                return None
+            self.public_result_candidate_kind = "delta"
+            legal_count = result["legal_count"]
+            intents = result["intents"]
+            source_actions = result.get("actions")
+            if source_actions is not None:
+                if len(source_actions) != len(intents) or any(
+                        type(action) is not self._action_type
+                        or action.revision != position.snapshot_revision
+                        or _intent(action) != intent
+                        for action, intent in zip(source_actions, intents)):
+                    raise InformationMismatchError("targeted source actions differ from public intents")
+                return list(source_actions), legal_count, False
+        actions = []
+        for intent in intents:
+            try:
+                self.public_result_bind_calls += 1
+                actions.append(_bind_source_public_intent(position, intent))
+            except ValueError:
+                continue
+        if trolley and len(actions) != 2:
+            raise SourceCapabilityError("source trolley window does not admit both latent choices")
+        return actions, legal_count, False
+
 
 def _actor(position: Any) -> str:
     actor = position.decision_actor
@@ -418,15 +505,29 @@ def _bind_source_public_intent(position: Any, intent: Mapping[str, Any]):
     return action
 
 
-def _stream(position: Any, limit: int, maximum: int):
-    stream = position.action_stream()
+def _stream(position: Any, limit: int, maximum: int, profile_page=None, profile_open=None):
+    if profile_open is None:
+        stream = position.action_stream()
+    else:
+        open_started = time.perf_counter()
+        try:
+            stream = position.action_stream()
+        finally:
+            profile_open(time.perf_counter() - open_started)
     # Public display aliases may drain from the cursor without examining a
     # new source candidate. Preserve that count and bound returned results too.
     examined, returned = 0, 0
     max_results = maximum
     while examined < maximum and returned < max_results:
         requested = min(limit, maximum - examined, max_results - returned)
-        page = stream.next_page(requested)
+        if profile_page is None:
+            page = stream.next_page(requested)
+        else:
+            page_started = time.perf_counter()
+            try:
+                page = stream.next_page(requested)
+            finally:
+                page_seconds = time.perf_counter() - page_started
         if not isinstance(page, Mapping) or set(page) != {"actions", "exhausted", "examined"}:
             raise InformationMismatchError("native action stream returned an invalid page")
         actions, exhausted = page["actions"], page["exhausted"]
@@ -440,6 +541,8 @@ def _stream(position: Any, limit: int, maximum: int):
             raise InformationMismatchError("native action stream returned an invalid page: no progress (no candidates examined, no actions returned, and not exhausted)")
         examined += page_examined
         returned += len(actions)
+        if profile_page is not None:
+            profile_page(requested, page_examined, len(actions), exhausted, page_seconds)
         yield actions, exhausted
         if exhausted:
             return
@@ -493,7 +596,43 @@ class ParticleBelief:
         self.proposals_used = 0
         self._proposal_profiles: set[str] = set()
         self._effective_sample_size = 0.
-        self.rebuild()
+        self.diagnostics = {"source_proposal_seconds": 0., "public_history_replay_seconds": 0.,
+                            "own_intent_seconds": 0., "opponent_result_seconds": 0.,
+                            "legal_enumeration_seconds": 0., "bind_apply_seconds": 0.,
+                            "targeted_candidate_generation_seconds": 0.,
+                            "targeted_candidate_generations": 0,
+                            "targeted_candidates": 0,
+                            "full_enumeration_fallback_seconds": 0.,
+                            "full_enumeration_fallbacks": 0,
+                            "full_enumeration_fallback_reasons": {},
+                            "candidates_before_cheap_filter": 0,
+                            "candidates_rejected_by_cheap_precheck": 0,
+                            "candidates_reaching_full_comparison": 0,
+                            "full_public_comparison_seconds": 0.,
+                            "native_bind_admission_seconds": 0.,
+                            "native_apply_seconds": 0.,
+                            "conditioning_calls": 0,
+                            "own_action_incremental_advance_seconds": 0.,
+                            "rebuild_seconds": 0., "update_seconds": 0.,
+                            "source_proposals": 0, "latent_source_proposals": 0,
+                            "legal_enumerations": 0,
+                            "transitions": 0, "transitions_per_proposal": [],
+                            "unrecorded_proposal_counts": 0, "rejections": {},
+                            "rejections_by_transition": {}}
+        self._diagnostic_transition = 0
+        try:
+            self.rebuild()
+        except Exception as error:
+            error.belief_diagnostics = _copy(self.diagnostics)
+            raise
+
+    def _reject(self, reason):
+        rejected = self.diagnostics["rejections"]
+        rejected[reason] = rejected.get(reason, 0) + 1
+        by_transition = self.diagnostics["rejections_by_transition"]
+        key = str(self._diagnostic_transition)
+        reasons = by_transition.setdefault(key, {})
+        reasons[reason] = reasons.get(reason, 0) + 1
 
     def _public(self, observation):
         return _public(observation, self.tracker.typed_spec)
@@ -508,11 +647,18 @@ class ParticleBelief:
         return int(self._rng.integers(0, 2**32, dtype=np.uint64))
 
     def _advance(self, position: Any, step: TraceStep, expected: Mapping[str, Any], started: float | None):
+        self.diagnostics["transitions"] += 1
         if _actor(position) != step.events[0]["actor"]:
+            self._reject("actor")
             return None
         prepare = getattr(self.factory, "prepare_transition", None)
+        proposal_started = time.perf_counter()
         proposal = prepare(position, expected, self._seed()) if prepare is not None else TransitionProposal(position)
+        self.diagnostics["source_proposal_seconds"] += time.perf_counter() - proposal_started
+        if isinstance(proposal, TransitionProposal) and proposal.profile != "source-prior-v1":
+            self.diagnostics["latent_source_proposals"] += 1
         if proposal is None:
+            self._reject("source_prepare")
             return None
         if not isinstance(proposal, TransitionProposal):
             raise InformationMismatchError("source transition proposal must carry validated density metadata")
@@ -524,36 +670,123 @@ class ParticleBelief:
         compatibility = getattr(self.factory, "transition_compatible", None)
 
         def compatible(action):
+            checked_started = time.perf_counter()
             result = compatibility(position, action, expected) if compatibility is not None else True
+            if compatibility is not None:
+                self.diagnostics["conditioning_calls"] += 1
+                self.diagnostics["native_bind_admission_seconds"] += time.perf_counter() - checked_started
             if type(result) is not bool:
                 raise InformationMismatchError("source transition compatibility must be boolean")
             return result
 
         def advance(action):
+            self.diagnostics["conditioning_calls"] += 1
+            native_started = time.perf_counter()
             child = self.factory.apply_conditioned(position, action, expected, self._seed())
+            self.diagnostics["native_apply_seconds"] += time.perf_counter() - native_started
             if child is None:
+                self._reject("source_apply")
                 return None
             if not isinstance(child, TransitionProposal):
                 raise InformationMismatchError("conditioned source transition must carry validated density metadata")
             self._proposal_profiles.add(child.profile)
-            if self._public(child.position.observe(self.tracker.viewer)) != expected:
+            observed = child.position.observe(self.tracker.viewer)
+            self.diagnostics["candidates_before_cheap_filter"] += 1
+            public_fields = ("viewer", "turn", "opponentHandCount")
+            state_fields = ("mode", "moveCount", "turnsTaken", "draft")
+            cheap_match = (all(observed.get(key) == expected.get(key) for key in public_fields)
+                and len(observed.get("history", ())) == len(expected["history"])
+                and all(observed["publicState"].get(key) == expected["publicState"].get(key)
+                        for key in state_fields)
+                and observed.get("ownCards") == expected.get("ownCards")
+                and observed["publicState"].get("revealedOpponentCards")
+                    == expected["publicState"].get("revealedOpponentCards")
+                and observed["history"][-1].get("boardChanges")
+                    == expected["history"][-1].get("boardChanges"))
+            if not cheap_match:
+                self.diagnostics["candidates_rejected_by_cheap_precheck"] += 1
+                self._reject("public_precheck")
+                return None
+            self.diagnostics["candidates_reaching_full_comparison"] += 1
+            comparison_started = time.perf_counter()
+            matched = self._public(observed) == expected
+            self.diagnostics["full_public_comparison_seconds"] += time.perf_counter() - comparison_started
+            if not matched:
+                self._reject("public_observation")
                 return None
             return child.position, math.log(child.importance_weight)
 
         known = canonical_json(step.own_intent) if step.own_intent is not None else None
         if known is not None:
+            own_started = time.perf_counter()
             if _actor(position) != self.tracker.viewer:
+                self._reject("own_actor")
                 return None
+            bind_started = time.perf_counter()
             action = _bind_source_public_intent(position, step.own_intent)
+            self.diagnostics["conditioning_calls"] += 1
+            self.diagnostics["bind_apply_seconds"] += time.perf_counter() - bind_started
+            self.diagnostics["native_bind_admission_seconds"] += time.perf_counter() - bind_started
             if not compatible(action):
+                self._reject("own_compatibility")
                 return None
+            apply_started = time.perf_counter()
             child = advance(action)
+            self.diagnostics["bind_apply_seconds"] += time.perf_counter() - apply_started
+            self.diagnostics["own_intent_seconds"] += time.perf_counter() - own_started
+            self.diagnostics["own_action_incremental_advance_seconds"] += time.perf_counter() - own_started
             if child is None:
                 return None
             return child[0], log_weight + child[1]
+        opponent_started = time.perf_counter()
+        candidates = getattr(self.factory, "public_result_candidates", None)
+        if _actor(position) != self.tracker.viewer and callable(candidates):
+            enumerate_started = time.perf_counter()
+            narrowed = candidates(position, expected)
+            generated_seconds = time.perf_counter() - enumerate_started
+            self.diagnostics["conditioning_calls"] += getattr(self.factory, "public_result_bind_calls", 0)
+            if narrowed is not None:
+                if getattr(self.factory, "public_result_candidate_kind", None) == "delta":
+                    self.diagnostics["targeted_candidate_generations"] += 1
+                    self.diagnostics["targeted_candidate_generation_seconds"] += generated_seconds
+                actions, legal_count, enumerated = narrowed
+                if getattr(self.factory, "public_result_candidate_kind", None) == "delta":
+                    self.diagnostics["targeted_candidates"] += len(actions)
+                if enumerated:
+                    self.diagnostics["legal_enumerations"] += 1
+                if legal_count < 1 or len(actions) > legal_count:
+                    raise InformationMismatchError("source public-result candidates have an invalid count")
+                selected, log_mass = None, -math.inf
+                for action in actions:
+                    self._check(started)
+                    # The native conditioned apply rebinds and revalidates the
+                    # source-cursor choice and checks the same complete prior
+                    # history. A separate compatibility call repeats that
+                    # work for every play candidate.
+                    if not isinstance(self.factory, NativeSourceFactory) and not compatible(action):
+                        continue
+                    apply_started = time.perf_counter()
+                    child = advance(action)
+                    self.diagnostics["bind_apply_seconds"] += time.perf_counter() - apply_started
+                    if child is not None:
+                        log_mass = float(np.logaddexp(log_mass, child[1]))
+                        if self._rng.random() < math.exp(child[1] - log_mass):
+                            selected = child[0]
+                self.diagnostics["opponent_result_seconds"] += time.perf_counter() - opponent_started
+                if selected is None:
+                    self._reject("public_result")
+                    return None
+                return selected, log_weight + log_mass - math.log(legal_count)
+            reason = getattr(self.factory, "public_result_fallback_reason", None) or "unsupported_public_transition_shape"
+            reasons = self.diagnostics["full_enumeration_fallback_reasons"]
+            reasons[reason] = reasons.get(reason, 0) + 1
+            self.diagnostics["full_enumeration_fallbacks"] += 1
         selected, log_mass, exhausted = None, -math.inf, False
         seen: set[str] = set()
         bind_streamed = getattr(self.factory, "bind_streamed_public_intent", None)
+        enumerate_started = time.perf_counter()
+        fallback_enumeration_before = self.diagnostics["legal_enumeration_seconds"]
+        self.diagnostics["legal_enumerations"] += 1
         for actions, exhausted in _stream(position, self.limits.page_size, self.limits.actions_per_transition):
             if not actions:
                 self._check(started)
@@ -564,16 +797,26 @@ class ParticleBelief:
                 if key in seen:
                     continue
                 seen.add(key)
+                self.diagnostics["legal_enumeration_seconds"] += time.perf_counter() - enumerate_started
+                bind_started = time.perf_counter()
                 bound = (bind_streamed(position, action, intent) if bind_streamed is not None
                          else _bind_source_public_intent(position, intent))
+                if bind_streamed is None:
+                    self.diagnostics["conditioning_calls"] += 1
+                self.diagnostics["bind_apply_seconds"] += time.perf_counter() - bind_started
+                self.diagnostics["native_bind_admission_seconds"] += time.perf_counter() - bind_started
                 if _intent(bound) != intent:
                     raise InformationMismatchError("native host changed the public intent fields or ordered selections")
                 # Provably incompatible actions retain their prior mass in the
                 # denominator. Source rules, rather than Python heuristics,
                 # decide whether their effects need to be evaluated.
                 if not compatible(bound):
+                    enumerate_started = time.perf_counter()
                     continue
+                apply_started = time.perf_counter()
                 child = advance(bound)
+                self.diagnostics["bind_apply_seconds"] += time.perf_counter() - apply_started
+                enumerate_started = time.perf_counter()
                 if child is not None:
                     # Source-conditioned chance proposals can have different
                     # corrections for different intents. Keep the uniform
@@ -583,6 +826,13 @@ class ParticleBelief:
                         selected = child[0]
         if not exhausted:
             raise SearchBudgetError("belief action enumeration is incomplete; a partial posterior is not accepted")
+        self.diagnostics["legal_enumeration_seconds"] += time.perf_counter() - enumerate_started
+        if _actor(position) != self.tracker.viewer and callable(candidates):
+            self.diagnostics["full_enumeration_fallback_seconds"] += (
+                self.diagnostics["legal_enumeration_seconds"] - fallback_enumeration_before)
+        self.diagnostics["opponent_result_seconds"] += time.perf_counter() - opponent_started
+        if selected is None:
+            self._reject("no_matching_intent")
         return (selected, log_weight + log_mass - math.log(len(seen))) if selected is not None else None
 
     def _resample(self, weighted):
@@ -601,28 +851,49 @@ class ParticleBelief:
         return particles, float(1. / np.square(weights).sum())
 
     def rebuild(self) -> None:
+        wall_started = time.perf_counter()
         started = self._clock() if self.limits.elapsed_ms is not None else None
         initial = self.tracker.initial
         weighted: list[tuple[Any, float]] = []
         proposals = 0
-        while len(weighted) < self.limits.particles and proposals < self.limits.proposals:
-            self._check(started)
-            proposals += 1
-            position = self.factory.sample_initial(initial, self._seed())
-            if position is None:
-                continue
-            if self._public(position.observe(self.tracker.viewer)) != initial:
-                raise InformationMismatchError("source-conditioned initial particle does not match the full public frame")
-            log_weight = 0.
-            for step, frame in self.tracker.frames():
-                advanced = self._advance(position, step, frame, started)
-                if advanced is None:
-                    position = None
-                    break
-                position, transition_weight = advanced
-                log_weight += transition_weight
-            if position is not None:
-                weighted.append((position, log_weight))
+        try:
+            while len(weighted) < self.limits.particles and proposals < self.limits.proposals:
+                self._check(started)
+                proposals += 1
+                self.diagnostics["source_proposals"] += 1
+                proposal_started = time.perf_counter()
+                position = self.factory.sample_initial(initial, self._seed())
+                self.diagnostics["source_proposal_seconds"] += time.perf_counter() - proposal_started
+                if position is None:
+                    self._reject("source_initial")
+                    continue
+                if self._public(position.observe(self.tracker.viewer)) != initial:
+                    raise InformationMismatchError("source-conditioned initial particle does not match the full public frame")
+                log_weight = 0.
+                replay_started = time.perf_counter()
+                transition_before = self.diagnostics["transitions"]
+                try:
+                    for transition, (step, frame) in enumerate(self.tracker.frames(), 1):
+                        self._diagnostic_transition = transition
+                        advanced = self._advance(position, step, frame, started)
+                        if advanced is None:
+                            position = None
+                            break
+                        position, transition_weight = advanced
+                        log_weight += transition_weight
+                finally:
+                    self.diagnostics["public_history_replay_seconds"] += time.perf_counter() - replay_started
+                    counts = self.diagnostics["transitions_per_proposal"]
+                    if len(counts) < 512:
+                        counts.append(self.diagnostics["transitions"] - transition_before)
+                    else:
+                        self.diagnostics["unrecorded_proposal_counts"] += 1
+                if position is not None:
+                    weighted.append((position, log_weight))
+                else:
+                    self._reject("particle_history")
+        finally:
+            self.diagnostics["rebuild_seconds"] += time.perf_counter() - wall_started
         if not weighted:
             raise ParticleExhaustedError("no source-valid particles reproduce the complete public trace within the finite proposal budget")
         particles, effective_size = self._resample(weighted)
@@ -635,16 +906,21 @@ class ParticleBelief:
             return
         if self._revision > self.tracker.steps:
             raise InformationMismatchError("public tracker revision went backwards")
+        update_started = time.perf_counter()
         started = self._clock() if self.limits.elapsed_ms is not None else None
         surviving = self._particles
-        for step, frame in self.tracker._frames_since(self._revision):
-            weighted = [child for position in surviving if (child := self._advance(position, step, frame, started)) is not None]
-            if not weighted:
-                self.rebuild()
-                return
-            surviving, effective_size = self._resample(weighted)
-        self._effective_sample_size = effective_size
-        self._particles, self._revision = surviving, self.tracker.steps
+        try:
+            for transition, (step, frame) in enumerate(self.tracker._frames_since(self._revision), self._revision + 1):
+                self._diagnostic_transition = transition
+                weighted = [child for position in surviving if (child := self._advance(position, step, frame, started)) is not None]
+                if not weighted:
+                    self.rebuild()
+                    return
+                surviving, effective_size = self._resample(weighted)
+            self._effective_sample_size = effective_size
+            self._particles, self._revision = surviving, self.tracker.steps
+        finally:
+            self.diagnostics["update_seconds"] += time.perf_counter() - update_started
 
     def draw(self):
         if not self._particles:
@@ -714,6 +990,134 @@ class _Node:
 
 
 @dataclass
+class _ActionPages:
+    stream: Any
+    pages: list[tuple[list[tuple[str, dict[str, Any], bool]], int, bool]] = field(default_factory=list)
+    exhausted: bool = False
+    bytes_used: int = 0
+
+
+class _RunCache:
+    """Run-owned, byte-bounded source pages and public model predictions."""
+    MAX_ACTION_BYTES = 16 * 1024 * 1024
+    MAX_ACTION_ENTRIES = 16
+    MAX_INFERENCE_BYTES = 16 * 1024 * 1024
+
+    def __init__(self):
+        self.actions: OrderedDict[tuple[type, str], _ActionPages] = OrderedDict()
+        self.predictions: OrderedDict[str, tuple[np.ndarray, float, int]] = OrderedDict()
+        self.action_bytes = 0
+        self.inference_bytes = 0
+
+    @staticmethod
+    def source_key(position):
+        # V7 positionId hashes the complete envelope, including state, RNG,
+        # history and execution versions. Unknown source implementations do
+        # not inherit that identity contract.
+        from .adapter_client import GameAdapterClient
+        if type(position) is not GameAdapterClient:
+            return None
+        revision = position.snapshot_revision
+        if not isinstance(revision, str) or len(revision) != 64 or any(c not in "0123456789abcdef" for c in revision):
+            raise InformationMismatchError("native source position has an invalid snapshot revision")
+        return type(position), revision
+
+    def action_entry(self, position, profile):
+        key = self.source_key(position)
+        if key is None:
+            return None
+        if key in self.actions:
+            self.actions.move_to_end(key)
+            if profile:
+                profile.count("action_cache_hits")
+                profile.count("action_stream_reuses")
+            return self.actions[key]
+        if profile:
+            profile.count("action_cache_misses")
+        started = time.perf_counter()
+        stream = position.action_stream()
+        if profile:
+            profile.data["action_stream_open_seconds"] += time.perf_counter() - started
+            profile.count("action_stream_opens")
+        entry = _ActionPages(stream)
+        self.actions[key] = entry
+        while len(self.actions) > self.MAX_ACTION_ENTRIES:
+            _, removed = self.actions.popitem(last=False)
+            self.action_bytes -= removed.bytes_used
+        return entry
+
+    def add_page(self, entry, page):
+        if not any(owned is entry for owned in self.actions.values()):
+            return
+        size = sum(len(key.encode()) + len(canonical_json(intent).encode()) + 32
+                   for key, intent, _ in page[0]) + 32
+        entry.pages.append(page)
+        entry.bytes_used += size
+        self.action_bytes += size
+        while self.action_bytes > self.MAX_ACTION_BYTES and self.actions:
+            _, removed = self.actions.popitem(last=False)
+            self.action_bytes -= removed.bytes_used
+
+    def pages(self, entry, position, observation, limits, profile, depth):
+        examined = returned = 0
+        for candidates, work, exhausted in entry.pages:
+            examined += work
+            returned += len(candidates)
+            yield candidates, exhausted
+            if exhausted or examined >= limits.max_examined_actions or returned >= limits.max_examined_actions:
+                return
+        if entry.exhausted:
+            return
+        if entry.pages and profile:
+            profile.count("action_stream_resumes")
+        while examined < limits.max_examined_actions and returned < limits.max_examined_actions:
+            requested = min(limits.page_size, limits.max_examined_actions - examined,
+                            limits.max_examined_actions - returned)
+            started = time.perf_counter()
+            page = entry.stream.next_page(requested)
+            seconds = time.perf_counter() - started
+            if not isinstance(page, Mapping) or set(page) != {"actions", "exhausted", "examined"}:
+                raise InformationMismatchError("native action stream returned an invalid page")
+            actions, exhausted, work = page["actions"], page["exhausted"], page["examined"]
+            if (not isinstance(actions, (tuple, list)) or type(exhausted) is not bool
+                    or len(actions) > requested or type(work) is not int or not 0 <= work <= requested
+                    or work == 0 and not actions and not exhausted):
+                raise InformationMismatchError("native action stream returned an invalid page")
+            if profile:
+                profile.page(depth, requested, work, len(actions), exhausted, seconds)
+                profile.data["native_action_enumeration_seconds"] += seconds
+                profile.count("native_action_enumerations")
+            candidates = []
+            for action in actions:
+                intent = _intent(action)
+                key = canonical_json(intent)
+                candidates.append((key, intent, _allowed(intent, observation)))
+            entry.exhausted = exhausted
+            self.add_page(entry, (candidates, work, exhausted))
+            examined += work
+            returned += len(actions)
+            yield candidates, exhausted
+            if exhausted:
+                return
+
+    def prediction(self, key):
+        result = self.predictions.get(key)
+        if result is not None:
+            self.predictions.move_to_end(key)
+        return result
+
+    def add_prediction(self, key, probabilities, value):
+        size = len(key) + probabilities.nbytes + 64
+        if size > self.MAX_INFERENCE_BYTES:
+            return
+        self.predictions[key] = (probabilities.copy(), value, size)
+        self.inference_bytes += size
+        while self.inference_bytes > self.MAX_INFERENCE_BYTES:
+            _, removed = self.predictions.popitem(last=False)
+            self.inference_bytes -= removed[2]
+
+
+@dataclass
 class _SearchState:
     nodes: dict[str, _Node] = field(default_factory=dict)
     edges: int = 0
@@ -723,6 +1127,128 @@ class _SearchState:
     partial: bool = False
     inference_batches: int = 0
     max_inference_batch: int = 0
+    profile: Any = None
+    current_detail: Any = None
+    active_details: Any = None
+    cache: _RunCache = field(default_factory=_RunCache)
+    cache_enabled: bool = True
+
+
+class _MctsProfile:
+    """Run-local, bounded, numeric-only diagnostic data."""
+    TIMES = ("observe", "public_projection_verify", "action_stream", "intent_projection",
+             "allowed_filter", "canonical_intent", "edge_lookup_update", "bind", "observation_ir",
+             "encode", "batch_build", "inference", "postprocess", "apply",
+             "puct_selection", "backup")
+    COUNTS = ("action_stream_pages", "actions_examined", "actions_returned",
+              "bind_count", "apply_count", "observe_count", "action_cache_hits",
+              "action_cache_misses", "action_stream_reuses", "action_stream_resumes",
+              "inference_cache_hits", "inference_cache_misses",
+              "action_stream_opens", "native_action_enumerations", "native_inference_calls")
+    MAX_SIMULATIONS = 16
+    MAX_DEPTH = 8
+    MAX_PAGES = 16
+
+    def __init__(self, requested):
+        self.started = time.perf_counter()
+        self.data = {"version": "mcts-profile-v1", "requested_iterations": requested,
+                     "simulations": [], "batches": [], "detail_limits": {"simulations": self.MAX_SIMULATIONS,
+                     "depth": self.MAX_DEPTH, "pages_per_depth": self.MAX_PAGES},
+                     "details_omitted": 0, "timed_out_during": None}
+        self.data.update({name + "_seconds": 0. for name in self.TIMES})
+        self.data.update({name: 0 for name in self.COUNTS})
+        self.data.update(action_stream_open_seconds=0., native_action_enumeration_seconds=0.,
+                         native_inference_seconds=0.)
+        self.current = None
+        self.phase = None
+        self.last_phase = None
+        self.nodes_seen = {}
+        self.node_visits = {}
+        self.inferred_sets = set()
+
+    def begin(self, index, state):
+        detail = {"simulation_index": index, "completed": False, "wall_seconds": 0.,
+                  "execution_seconds": 0.,
+                  "max_depth_reached": 0, "nodes_created": 0, "edges_created": 0,
+                  "inference_requests": 0, "apply_count": 0, "observe_count": 0,
+                  "stop_reason": None, "depths": [], "_started": time.perf_counter()}
+        if len(self.data["simulations"]) < self.MAX_SIMULATIONS:
+            self.data["simulations"].append(detail)
+        else:
+            self.data["details_omitted"] += 1
+        return detail
+
+    def depth(self, simulation, index):
+        simulation["max_depth_reached"] = max(simulation["max_depth_reached"], index)
+        detail = {"depth": index, "pages": []}
+        if len(simulation["depths"]) < self.MAX_DEPTH:
+            simulation["depths"].append(detail)
+        return detail
+
+    @contextmanager
+    def measure(self, name, detail=None):
+        prior = self.phase
+        self.phase = name
+        started = time.perf_counter()
+        try:
+            yield
+        finally:
+            seconds = time.perf_counter() - started
+            key = name + "_seconds"
+            self.data[key] += seconds
+            if detail is not None:
+                detail[key] = detail.get(key, 0.) + seconds
+            self.last_phase = name
+            self.phase = prior
+
+    def count(self, name, amount=1, detail=None):
+        self.data[name] += amount
+        if detail is not None:
+            detail[name] = detail.get(name, 0) + amount
+
+    def page(self, detail, requested, examined, returned, exhausted, seconds):
+        self.data["action_stream_seconds"] += seconds
+        detail["action_stream_seconds"] = detail.get("action_stream_seconds", 0.) + seconds
+        self.last_phase = "action_stream"
+        self.count("action_stream_pages", detail=detail)
+        self.count("actions_examined", examined, detail)
+        self.count("actions_returned", returned, detail)
+        detail["candidate_generation_seconds"] = detail.get("candidate_generation_seconds", 0.) + seconds
+        if len(detail["pages"]) < self.MAX_PAGES:
+            detail["pages"].append({"requested_limit": requested, "examined": examined,
+                                    "returned": returned, "exhausted": exhausted,
+                                    "wall_seconds": seconds})
+
+    def finish_simulation(self, detail, state, completed):
+        detail["wall_seconds"] = time.perf_counter() - detail.pop("_started")
+        detail["completed"] = completed
+        if not completed:
+            detail["stop_reason"] = state.stop
+
+    def finish(self, state):
+        self.data.update(wall_seconds=time.perf_counter() - self.started,
+                         search_wall_seconds=time.perf_counter() - self.started,
+                         completed_simulations=state.completed, nodes=len(state.nodes),
+                         edges=state.edges, inference_batches=state.inference_batches,
+                         max_inference_batch=state.max_inference_batch,
+                         action_cache_entries=len(state.cache.actions),
+                         action_cache_bytes=state.cache.action_bytes,
+                         inference_cache_entries=len(state.cache.predictions),
+                         inference_cache_bytes=state.cache.inference_bytes,
+                         cache_enabled=state.cache_enabled,
+                         stop_reason=state.stop)
+        if state.stop in ("elapsed", "cancelled"):
+            self.data["timed_out_during"] = self.phase or self.last_phase
+        return self.data
+
+    def batch(self, state, count):
+        detail = {"batch_index": state.inference_batches, "requests": count}
+        if len(self.data["batches"]) < self.MAX_SIMULATIONS:
+            self.data["batches"].append(detail)
+        for simulation in state.active_details:
+            if simulation["depths"]:
+                simulation["depths"][-1]["batch_index"] = detail["batch_index"]
+        return detail
 
 
 class _SimulationStopped(Exception):
@@ -749,6 +1275,7 @@ class SearchResult:
     model_sha256: str | None = None
     inference_batches: int = 0
     max_inference_batch: int = 0
+    mcts_profile: dict[str, Any] | None = None
 
     def bind(self, environment):
         """The caller's execution boundary; no actual state enters search.
@@ -801,7 +1328,7 @@ def _allowed(intent: Mapping[str, Any], observation: Mapping[str, Any]) -> bool:
 
 class InformationSetSearch:
     """Availability-count PUCT, sampled chance, and finite progressive widening."""
-    def __init__(self, encoder: PublicEncoder, evaluator: ProductionEvaluator, *, limits: SearchLimits = SearchLimits(), clock: Callable[[], float] | None = None):
+    def __init__(self, encoder: PublicEncoder, evaluator: ProductionEvaluator, *, limits: SearchLimits = SearchLimits(), clock: Callable[[], float] | None = None, profile: bool = False, cache: bool = True):
         if not isinstance(evaluator, ProductionEvaluator):
             raise TypeError("production search requires the explicit native Rust ProductionEvaluator")
         if clock is not None and not callable(clock):
@@ -810,11 +1337,65 @@ class InformationSetSearch:
             raise ValueError("search encoder and native evaluator contracts differ")
         if encoder.spec.action_encoding != "public-decision-intent-v1":
             raise ValueError("production search requires an explicit public-decision-intent-v1 model contract")
+        if type(cache) is not bool:
+            raise TypeError("search cache switch must be boolean")
         self.encoder, self.evaluator, self.limits = encoder, evaluator, limits
         self._clock = clock if clock is not None else time.monotonic
+        self.profile = profile
+        self.cache = cache
 
     def _verify_public(self, observation):
         return _public(observation)
+
+    def _evaluate_cached(self, requests, state):
+        # This key contains only values passed to the public encoder. The
+        # evaluator and encoder are fixed for one run; the contract and model
+        # identity still make invalidation explicit.
+        profile = state.profile
+        if not state.cache_enabled:
+            if profile:
+                profile.count("inference_cache_misses", len(requests))
+            return self._evaluate_many(requests, state)
+        pending = []
+        indices = {}
+        outputs = [None] * len(requests)
+        pending_keys = []
+        identities = []
+        for request in requests:
+            observation, intents, summary = request
+            identity = (SEARCH_VERSION, self.encoder.spec.digest,
+                        getattr(self.evaluator, "architecture_family", "legacy"),
+                        getattr(getattr(self.evaluator, "session", None), "model_sha256", None),
+                        observation, intents, summary)
+            identities.append(hashlib.sha256(canonical_json(identity).encode()).hexdigest())
+        # Batch padding is determined by the distinct encoded rows. Preserve
+        # that input condition when reusing a prediction from a later batch.
+        batch_context = tuple(sorted(set(identities)))
+        for index, request in enumerate(requests):
+            key = hashlib.sha256(canonical_json((identities[index], batch_context)).encode()).hexdigest()
+            cached = state.cache.prediction(key)
+            if cached is not None:
+                outputs[index] = (cached[0].copy(), cached[1])
+                if profile:
+                    profile.count("inference_cache_hits")
+            elif key in indices:
+                indices[key].append(index)
+                if profile:
+                    profile.count("inference_cache_hits")
+            else:
+                indices[key] = [index]
+                pending_keys.append(key)
+                pending.append(request)
+                if profile:
+                    profile.count("inference_cache_misses")
+        if pending:
+            inferred = self._evaluate_many(pending, state)
+            for key, result in zip(pending_keys, inferred, strict=True):
+                probabilities, value = result
+                state.cache.add_prediction(key, probabilities, value)
+                for index in indices[key]:
+                    outputs[index] = (probabilities.copy(), value)
+        return outputs
 
     def _evaluate_many(self, requests, state):
         # Check before encoding/stacking. Padding is explicit and rows retain
@@ -825,9 +1406,26 @@ class InformationSetSearch:
         elements = count * (64 * spec.board_channels + spec.condition_dim + actions * spec.action_dim)
         if elements > self.limits.max_inference_elements:
             raise SearchBudgetError("requested leaf batch exceeds the declared inference input budget")
-        batch = batch_positions([self.encoder.encode(observation, intents, belief_summary=summary)
-                                 for observation, intents, summary in requests])
-        logits, values = self.evaluator.evaluate(batch.board, batch.condition, batch.action_features)
+        profile = state.profile
+        batch_detail = profile.batch(state, count) if profile else None
+        with profile.measure("encode", batch_detail) if profile else nullcontext():
+            positions = [self.encoder.encode(observation, intents, belief_summary=summary)
+                         for observation, intents, summary in requests]
+        with profile.measure("batch_build", batch_detail) if profile else nullcontext():
+            batch = batch_positions(positions)
+        with profile.measure("inference", batch_detail) if profile else nullcontext():
+            inference_started = time.perf_counter() if profile else None
+            try:
+                logits, values = self.evaluator.evaluate(batch.board, batch.condition, batch.action_features)
+            finally:
+                if profile:
+                    profile.count("native_inference_calls")
+                    profile.data["native_inference_seconds"] += time.perf_counter() - inference_started
+        with profile.measure("postprocess", batch_detail) if profile else nullcontext():
+            return self._postprocess_legacy(requests, state, batch, logits, values, count, actions)
+
+    @staticmethod
+    def _postprocess_legacy(requests, state, batch, logits, values, count, actions):
         if logits.shape != (count, actions) or values.shape != (count, 1) or not np.isfinite(logits).all() or not np.isfinite(values).all() or np.abs(values).max() > 1.00001:
             raise InformationMismatchError("native evaluator returned invalid policy/value")
         state.inference_batches += 1
@@ -862,19 +1460,38 @@ class InformationSetSearch:
         backpropagate values. No worker thread or extra rules implementation is
         involved in preparing a batch of independent particle simulations.
         """
+        profile = state.profile
+        simulation_detail = state.current_detail
+        completed = False
         viewer, root_key = root["viewer"], root["informationStateKey"]
-        position = belief.draw()
-        if _actor(position) != viewer or self._verify_public(position.observe(viewer)) != root:
-            raise InformationMismatchError("root belief viewer must equal the actual decision actor and match the public frame")
         path: list[tuple[_Node, _Edge]] = []
         try:
-            for _ in range(self.limits.max_depth):
+            position = belief.draw()
+            if _actor(position) != viewer:
+                raise InformationMismatchError("root belief viewer must equal the actual decision actor and match the public frame")
+            with profile.measure("observe") if profile else nullcontext():
+                root_observation = position.observe(viewer)
+            if profile:
+                profile.count("observe_count")
+                simulation_detail["observe_count"] += 1
+            with profile.measure("public_projection_verify") if profile else nullcontext():
+                verified_root = self._verify_public(root_observation)
+            if verified_root != root:
+                raise InformationMismatchError("root belief viewer must equal the actual decision actor and match the public frame")
+            for depth_index in range(self.limits.max_depth):
                 check()
+                depth = profile.depth(simulation_detail, depth_index) if profile else None
                 actor = _actor(position)
                 value, value_actor = self._outcome(position, actor), actor
                 if value is not None:
                     break
-                observation = self._verify_public(position.observe(actor))
+                with profile.measure("observe", depth) if profile else nullcontext():
+                    raw_observation = position.observe(actor)
+                if profile:
+                    profile.count("observe_count", detail=depth)
+                    simulation_detail["observe_count"] += 1
+                with profile.measure("public_projection_verify", depth) if profile else nullcontext():
+                    observation = self._verify_public(raw_observation)
                 if observation["viewer"] != actor:
                     raise InformationMismatchError("neural observation viewer must be the decision actor")
                 key = observation["informationStateKey"]
@@ -884,46 +1501,112 @@ class InformationSetSearch:
                         _, value = yield observation, [], belief.summary if key == root_key else None
                         break
                     state.nodes[key] = _Node(actor)
+                    if profile:
+                        simulation_detail["nodes_created"] += 1
                 node = state.nodes[key]
                 new = node.visits == 0
+                if profile:
+                    if key not in profile.nodes_seen and len(profile.nodes_seen) < profile.MAX_SIMULATIONS * profile.MAX_DEPTH:
+                        profile.nodes_seen[key] = len(profile.nodes_seen)
+                    depth["node_id"] = profile.nodes_seen.get(key)
+                    depth["node_visit_number"] = profile.node_visits.get(key, 0) + 1
+                    if depth["node_id"] is not None:
+                        profile.node_visits[key] = depth["node_visit_number"]
+                    depth["node_visits_before"] = node.visits
+                    depth["existing_edge_count"] = len(node.edges)
                 if node.actor != actor:
                     raise InformationMismatchError("information node actor identity changed")
                 width = min(self.limits.max_candidates, max(1, math.ceil(self.limits.widening_constant * (node.visits + 1)**self.limits.widening_exponent)))
+                if profile:
+                    depth["target_width"] = width
+                    depth["page_size_requested"] = self.limits.page_size
                 available: dict[str, Any] = {}
                 intents: dict[str, dict[str, Any]] = {}
                 exhausted, capped = False, False
                 bind_streamed = getattr(belief.factory, "bind_streamed_public_intent", None)
-                for actions, page_exhausted in _stream(position, self.limits.page_size, self.limits.max_examined_actions):
+                action_entry = state.cache.action_entry(position, profile) if state.cache_enabled else None
+                if not state.cache_enabled and profile:
+                    profile.count("action_cache_misses")
+                if profile:
+                    depth["action_stream_reopened"] = (depth["node_visit_number"] > 1
+                                                       and (action_entry is None or not action_entry.pages))
+                def page_callback(requested, examined, returned, exhausted, seconds):
+                    profile.page(depth, requested, examined, returned, exhausted, seconds)
+                    profile.count("native_action_enumerations")
+                    profile.data["native_action_enumeration_seconds"] += seconds
+                def opened(seconds):
+                    profile.data["action_stream_seconds"] += seconds
+                    depth["action_stream_seconds"] = depth.get("action_stream_seconds", 0.) + seconds
+                    depth["candidate_generation_seconds"] = depth.get("candidate_generation_seconds", 0.) + seconds
+                    profile.last_phase = "action_stream"
+                    profile.count("action_stream_opens")
+                    profile.data["action_stream_open_seconds"] += seconds
+                if action_entry is None:
+                    pages = (([(_intent(action), action) for action in actions], page_exhausted)
+                             for actions, page_exhausted in _stream(position, self.limits.page_size,
+                                 self.limits.max_examined_actions, page_callback if profile else None,
+                                 opened if profile else None))
+                else:
+                    pages = state.cache.pages(action_entry, position, observation, self.limits, profile, depth)
+                for actions, page_exhausted in pages:
                     check()
-                    for action in actions:
-                        intent = _intent(action)
-                        intent_key = canonical_json(intent)
-                        if not _allowed(intent, observation) or intent_key in available:
+                    for candidate in actions:
+                        if action_entry is None:
+                            intent, action = candidate
+                            with profile.measure("canonical_intent", depth) if profile else nullcontext():
+                                intent_key = canonical_json(intent)
+                            with profile.measure("allowed_filter", depth) if profile else nullcontext():
+                                allowed = _allowed(intent, observation)
+                        else:
+                            intent_key, intent, allowed = candidate
+                            action = None
+                        if not allowed or intent_key in available:
                             continue
-                        if intent_key not in node.edges:
-                            if len(node.edges) >= width:
-                                capped = True
-                                continue
-                            if state.edges >= self.limits.max_edges:
-                                state.stop, state.partial, capped = "edges", True, True
-                                continue
-                            node.edges[intent_key] = _Edge(intent)
-                            state.edges += 1
-                        bound = (bind_streamed(position, action, intent)
-                                 if bind_streamed is not None
-                                 else _bind_source_public_intent(position, intent))
-                        if _intent(bound) != intent:
-                            raise InformationMismatchError("native host changed the public intent fields or ordered selections")
+                        with profile.measure("edge_lookup_update", depth) if profile else nullcontext():
+                            if intent_key not in node.edges:
+                                if len(node.edges) >= width:
+                                    capped = True
+                                    continue
+                                if state.edges >= self.limits.max_edges:
+                                    state.stop, state.partial, capped = "edges", True, True
+                                    continue
+                                node.edges[intent_key] = _Edge(intent)
+                                state.edges += 1
+                                if profile:
+                                    simulation_detail["edges_created"] += 1
+                        if action is not None:
+                            with profile.measure("bind", depth) if profile else nullcontext():
+                                bound = (bind_streamed(position, action, intent)
+                                         if bind_streamed is not None
+                                         else _bind_source_public_intent(position, intent))
+                                if _intent(bound) != intent:
+                                    raise InformationMismatchError("native host changed the public intent fields or ordered selections")
+                            if profile:
+                                profile.count("bind_count", detail=depth)
+                        else:
+                            bound = None
                         available[intent_key] = bound
                         intents[intent_key] = intent
                     exhausted = page_exhausted
                     if capped or len(available) >= width:
                         break
                 covered = exhausted and not capped
+                if profile:
+                    depth["candidate_cap_hit"] = capped
+                    depth["stream_exhausted"] = exhausted
+                    depth["new_edges_added"] = len(node.edges) - depth["existing_edge_count"]
+                    depth["candidate_count"] = len(available)
                 if key == root_key:
                     state.root_exhausted &= covered
                 state.partial |= not covered
                 ordered = sorted(available)
+                if profile:
+                    candidate_set = (depth["node_id"], tuple(ordered))
+                    depth["inference_repeated"] = candidate_set in profile.inferred_sets
+                    if (depth["node_id"] is not None and len(profile.inferred_sets)
+                            < profile.MAX_SIMULATIONS * profile.MAX_DEPTH):
+                        profile.inferred_sets.add(candidate_set)
+                    simulation_detail["inference_requests"] += 1
                 # The belief was conditioned on the root public trace only.
                 # A simulated child has a longer public history, but no child
                 # posterior has been reconstructed for it.
@@ -941,13 +1624,24 @@ class InformationSetSearch:
                     break
                 if new and path:
                     break
-                selected = max(ordered, key=lambda item: (
-                    node.edges[item].q + self.limits.cpuct * (node.edges[item].prior_sum / node.edges[item].availability)
-                    * math.sqrt(node.edges[item].availability) / (1 + node.edges[item].visits + node.edges[item].in_flight), item))
+                with profile.measure("puct_selection", depth) if profile else nullcontext():
+                    selected = max(ordered, key=lambda item: (
+                        node.edges[item].q + self.limits.cpuct * (node.edges[item].prior_sum / node.edges[item].availability)
+                        * math.sqrt(node.edges[item].availability) / (1 + node.edges[item].visits + node.edges[item].in_flight), item))
                 edge = node.edges[selected]
                 edge.in_flight += 1
                 path.append((node, edge))
-                position = position.apply(available[selected]).position
+                selected_action = available[selected]
+                if selected_action is None:
+                    with profile.measure("bind", depth) if profile else nullcontext():
+                        selected_action = _bind_source_public_intent(position, intents[selected])
+                    if profile:
+                        profile.count("bind_count", detail=depth)
+                with profile.measure("apply", depth) if profile else nullcontext():
+                    position = position.apply(selected_action).position
+                if profile:
+                    profile.count("apply_count", detail=depth)
+                    simulation_detail["apply_count"] += 1
                 # Independent native particle RNG samples future chance;
                 # alternative random outcomes are never maximized.
             else:
@@ -958,13 +1652,17 @@ class InformationSetSearch:
                 if value is None:
                     _, value = yield self._verify_public(position.observe(value_actor)), [], None
             check()
-            for node, edge in reversed(path):
-                edge.visits += 1
-                edge.value_sum += value if node.actor == value_actor else -value
+            with profile.measure("backup") if profile else nullcontext():
+                for node, edge in reversed(path):
+                    edge.visits += 1
+                    edge.value_sum += value if node.actor == value_actor else -value
             state.completed += 1
+            completed = True
         finally:
             for _, edge in path:
                 edge.in_flight -= 1
+            if profile:
+                profile.finish_simulation(simulation_detail, state, completed)
 
     def run(self, belief: ParticleBelief, *, cancelled: Callable[[], bool] | None = None) -> SearchResult:
         if not isinstance(belief, ParticleBelief):
@@ -979,7 +1677,9 @@ class InformationSetSearch:
         belief.synchronize()
         root = belief.tracker.latest
         root_key = root["informationStateKey"]
-        state = _SearchState()
+        state = _SearchState(cache_enabled=self.cache)
+        profile = _MctsProfile(self.limits.iterations) if self.profile else None
+        state.profile = profile
         started = self._clock() if self.limits.elapsed_ms is not None else None
         cancelled = cancelled or (lambda: False)
 
@@ -992,35 +1692,65 @@ class InformationSetSearch:
                 raise _SimulationStopped()
 
         issued = 0
-        while issued < self.limits.iterations:
-            active = []
-            try:
-                check()
-                count = min(self.limits.leaf_batch_size, self.limits.iterations - issued)
-                issued += count
-                for _ in range(count):
-                    simulation = self._simulation(belief, root, state, check)
-                    active.append((simulation, next(simulation)))
-                while active:
+        try:
+            while issued < self.limits.iterations:
+                active = []
+                details = {}
+                try:
                     check()
-                    outputs = self._evaluate_many([request for _, request in active], state)
-                    next_active = []
-                    for (simulation, _), output in zip(active, outputs):
+                    count = min(self.limits.leaf_batch_size, self.limits.iterations - issued)
+                    issued += count
+                    for _ in range(count):
+                        simulation = self._simulation(belief, root, state, check)
+                        if profile:
+                            detail = profile.begin(issued - count + len(active), state)
+                            details[simulation] = detail
+                            state.current_detail = detail
+                        resume_started = time.perf_counter() if profile else None
                         try:
-                            next_active.append((simulation, simulation.send(output)))
-                        except StopIteration:
-                            pass
-                    active = next_active
-            except _SimulationStopped:
-                break
-            finally:
-                for simulation, _ in active:
-                    simulation.close()
-            if state.stop != "iterations":
-                break
+                            request = next(simulation)
+                        finally:
+                            if profile:
+                                detail["execution_seconds"] += time.perf_counter() - resume_started
+                        active.append((simulation, request))
+                    while active:
+                        check()
+                        if profile:
+                            state.active_details = [details[simulation] for simulation, _ in active]
+                        outputs = self._evaluate_cached([request for _, request in active], state)
+                        next_active = []
+                        for (simulation, _), output in zip(active, outputs):
+                            try:
+                                if profile:
+                                    state.current_detail = details[simulation]
+                                    resume_started = time.perf_counter()
+                                try:
+                                    request = simulation.send(output)
+                                finally:
+                                    if profile:
+                                        details[simulation]["execution_seconds"] += time.perf_counter() - resume_started
+                                next_active.append((simulation, request))
+                            except StopIteration:
+                                pass
+                        active = next_active
+                except _SimulationStopped:
+                    break
+                finally:
+                    for simulation, _ in active:
+                        simulation.close()
+                if state.stop != "iterations":
+                    break
+        except Exception as error:
+            if profile:
+                error.mcts_profile = profile.finish(state)
+            raise
+        profile_data = profile.finish(state) if profile else None
         root_node = state.nodes.get(root_key)
         if root_node is None or not root_node.edges or not any(edge.visits for edge in root_node.edges.values()):
-            raise SearchBudgetError(f"no public decision was evaluated before {state.stop}")
+            error = SearchBudgetError(f"no public decision was evaluated before {state.stop}")
+            if profile:
+                error.mcts_profile = profile_data
+            raise error
         selected = max(root_node.edges, key=lambda item: (root_node.edges[item].visits, root_node.edges[item].q, item))
         total = sum(edge.visits for edge in root_node.edges.values())
         policy = tuple({"action_key": key, "intent": _copy(edge.intent), "visits": edge.visits,
@@ -1030,13 +1760,14 @@ class InformationSetSearch:
                             state.root_exhausted, state.partial, len(state.nodes), state.edges, self.encoder.spec.digest,
                             belief_summary=_copy(belief.summary),
                             model_sha256=getattr(getattr(self.evaluator, "session", None), "model_sha256", None),
-                            inference_batches=state.inference_batches, max_inference_batch=state.max_inference_batch)
+                            inference_batches=state.inference_batches, max_inference_batch=state.max_inference_batch,
+                            mcts_profile=profile_data)
 
 
 class TypedInformationSetSearch(InformationSetSearch):
     """The same information-set tree with the explicit typed v3 model input."""
 
-    def __init__(self, encoder, evaluator: ProductionEvaluator, *, limits: SearchLimits = SearchLimits(), clock: Callable[[], float] | None = None):
+    def __init__(self, encoder, evaluator: ProductionEvaluator, *, limits: SearchLimits = SearchLimits(), clock: Callable[[], float] | None = None, profile: bool = False, cache: bool = True):
         from .ir import TypedEncoder
 
         if not isinstance(encoder, TypedEncoder) or not isinstance(evaluator, ProductionEvaluator):
@@ -1047,8 +1778,12 @@ class TypedInformationSetSearch(InformationSetSearch):
             raise ValueError("typed search requires a validated v3 architecture family")
         if clock is not None and not callable(clock):
             raise TypeError("search clock must be callable")
+        if type(cache) is not bool:
+            raise TypeError("search cache switch must be boolean")
         self.encoder, self.evaluator, self.limits = encoder, evaluator, limits
         self._clock = clock if clock is not None else time.monotonic
+        self.profile = profile
+        self.cache = cache
 
     def _verify_public(self, observation):
         return _public(observation, self.encoder.spec)
@@ -1061,10 +1796,14 @@ class TypedInformationSetSearch(InformationSetSearch):
 
     def _evaluate_many(self, requests, state):
         from .ir import ObservationIR, batch_typed_positions
-
-        positions = [self.encoder.encode(ObservationIR.from_public(observation, self.encoder.spec,
-                        belief_summary=summary), intents)
-                     for observation, intents, summary in requests]
+        profile = state.profile
+        batch_detail = profile.batch(state, len(requests)) if profile else None
+        positions = []
+        for observation, intents, summary in requests:
+            with profile.measure("observation_ir", batch_detail) if profile else nullcontext():
+                ir = ObservationIR.from_public(observation, self.encoder.spec, belief_summary=summary)
+            with profile.measure("encode", batch_detail) if profile else nullcontext():
+                positions.append(self.encoder.encode(ir, intents))
         if not positions:
             raise InformationMismatchError("typed leaf batch is empty")
         family = self.evaluator.architecture_family
@@ -1090,8 +1829,9 @@ class TypedInformationSetSearch(InformationSetSearch):
             raise SearchBudgetError("requested typed leaf batch exceeds the declared inference element budget")
         if estimated_bytes > min(self.limits.max_inference_bytes, self.encoder.spec.max_input_bytes):
             raise SearchBudgetError("requested typed leaf batch exceeds the declared inference input budget")
-        batch = batch_typed_positions(positions)
-        inputs = dict(zip(order, batch.as_family_inputs(family), strict=True))
+        with profile.measure("batch_build", batch_detail) if profile else nullcontext():
+            batch = batch_typed_positions(positions)
+            inputs = dict(zip(order, batch.as_family_inputs(family), strict=True))
         if not all(isinstance(array, np.ndarray) for array in inputs.values()):
             raise InformationMismatchError("typed encoder returned a non-array model input")
         if sum(array.size for array in inputs.values()) > self.limits.max_inference_elements:
@@ -1099,7 +1839,19 @@ class TypedInformationSetSearch(InformationSetSearch):
         if sum(array.nbytes for array in inputs.values()) > min(self.limits.max_inference_bytes,
                                                                  self.encoder.spec.max_input_bytes):
             raise SearchBudgetError("requested typed leaf batch exceeds the declared inference input budget")
-        logits, values = self.evaluator.evaluate_typed(inputs)
+        with profile.measure("inference", batch_detail) if profile else nullcontext():
+            inference_started = time.perf_counter() if profile else None
+            try:
+                logits, values = self.evaluator.evaluate_typed(inputs)
+            finally:
+                if profile:
+                    profile.count("native_inference_calls")
+                    profile.data["native_inference_seconds"] += time.perf_counter() - inference_started
+        with profile.measure("postprocess", batch_detail) if profile else nullcontext():
+            return self._postprocess_typed(requests, state, batch, logits, values)
+
+    @staticmethod
+    def _postprocess_typed(requests, state, batch, logits, values):
         count = len(requests)
         candidates = batch.candidate_mask
         if (candidates.dtype != np.bool_ or candidates.shape[0] != count

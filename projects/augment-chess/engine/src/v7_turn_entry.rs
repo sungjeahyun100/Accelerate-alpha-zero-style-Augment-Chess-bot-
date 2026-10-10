@@ -553,7 +553,7 @@ fn resolve_baby_bear_growth(state: &mut GameState, incoming: Color) -> Result<()
         )?;
     }
     if !grown.is_empty() {
-        crate::threat::play_move_sound(state, "promote", incoming)?;
+        crate::v7_threat::reconcile_move_replay_capture_v7(state)?;
     }
     Ok(())
 }
@@ -1243,7 +1243,7 @@ fn relocate_panicked_piece(
         "moveOpponent"
     };
     crate::card_effects::set_last_move(state, from, to, sound, owner, hidden_from, None)?;
-    crate::threat::play_move_sound(state, sound, owner)?;
+    crate::v7_threat::reconcile_move_replay_capture_v7(state)?;
     crate::replay::add_log(
         state,
         if fog_log_redaction_active(state) {
@@ -1516,7 +1516,7 @@ fn resolve_vanishing_for_turn_start(state: &mut GameState, incoming: Color) -> R
     let capture_owner = incoming.opponent();
     next.captures.get_mut(capture_owner).push(victim.clone());
     crate::v7_rule_bombs::mark_deathmatch_progress(&mut next)?;
-    crate::threat::play_move_sound(&mut next, "capture", incoming)?;
+    crate::v7_threat::reconcile_move_replay_capture_v7(&mut next)?;
     crate::replay::add_piece_action_log(
         &mut next,
         &victim,

@@ -105,16 +105,26 @@ impl V7PublicActionCursor {
         Ok(Self {
             position_id: position.position_id().to_owned(),
             revision: position.revision(),
-            source: crate::v7_action_surface::SourceActionCursor::new(
-                position.state(),
-                card_filter,
-            )?,
+            source: crate::legal_profile::measure("cursor_init", || {
+                crate::v7_action_surface::SourceActionCursor::new(position.state(), card_filter)
+            })?,
             pending_public: VecDeque::new(),
             seen_movement: BTreeSet::new(),
         })
     }
 
     pub fn next_page(
+        &mut self,
+        position: &V7HostPosition,
+        limit: usize,
+        max_examined: usize,
+    ) -> V7ActionHostResult<V7PublicActionPage> {
+        crate::legal_profile::measure("cursor_page", || {
+            self.next_page_unprofiled(position, limit, max_examined)
+        })
+    }
+
+    fn next_page_unprofiled(
         &mut self,
         position: &V7HostPosition,
         limit: usize,
@@ -152,11 +162,16 @@ impl V7PublicActionCursor {
             if !staged.source.accepts(&action)? {
                 continue;
             }
-            for intent in public_intents_for_source_action(staged.source.state(), &action)? {
+            for intent in crate::legal_profile::measure("public_projection", || {
+                public_intents_for_source_action(staged.source.state(), &action)
+            })? {
                 if action.kind == ActionKind::Move {
-                    let canonical =
-                        serde_jcs::to_vec(&intent).map_err(EngineError::serialization)?;
-                    if !staged.seen_movement.insert(canonical) {
+                    let new = crate::legal_profile::measure("public_deduplication", || {
+                        let canonical =
+                            serde_jcs::to_vec(&intent).map_err(EngineError::serialization)?;
+                        Ok::<_, EngineError>(staged.seen_movement.insert(canonical))
+                    })?;
+                    if !new {
                         continue;
                     }
                 }
@@ -454,9 +469,14 @@ pub fn legal_public_intents(position: &V7HostPosition) -> V7ActionHostResult<Vec
     let mut intents = Vec::new();
     let mut seen = BTreeSet::new();
     for (action, _, _) in verified.source_entries() {
-        for intent in public_intents_for_source_action(position.state(), action)? {
-            let canonical = serde_jcs::to_vec(&intent).map_err(EngineError::serialization)?;
-            if seen.insert(canonical) {
+        for intent in crate::legal_profile::measure("public_projection", || {
+            public_intents_for_source_action(position.state(), action)
+        })? {
+            let new = crate::legal_profile::measure("public_deduplication", || {
+                let canonical = serde_jcs::to_vec(&intent).map_err(EngineError::serialization)?;
+                Ok::<_, EngineError>(seen.insert(canonical))
+            })?;
+            if new {
                 if intents.len() >= MAX_LEGAL_ACTIONS {
                     return Err(EngineError::UnsupportedFeature(format!(
                         "v7 public choices exceed the eager limit of {MAX_LEGAL_ACTIONS}; use the action cursor"
@@ -467,6 +487,49 @@ pub fn legal_public_intents(position: &V7HostPosition) -> V7ActionHostResult<Vec
         }
     }
     Ok(intents)
+}
+
+/// Count the complete source public-choice prior without exporting the full
+/// choice set, and return only choices that can explain a visible two-square
+/// move. Non-move and presentation-mode choices remain candidates: their
+/// effects cannot be excluded from coordinates alone. The caller must still
+/// execute and compare the complete public observation.
+pub fn public_delta_candidate_intents(
+    position: &V7HostPosition,
+    origin: &Value,
+    destination: &Value,
+) -> V7ActionHostResult<(Vec<Value>, usize, usize)> {
+    require_decision(position)?;
+    // The verified set performs source admission once. The cursor replays
+    // admission while paging every candidate, which is costly when the
+    // posterior needs only a count and a small matching subset.
+    let verified = VerifiedV7ActionSet::complete(position)?;
+    let mut seen = BTreeSet::new();
+    let mut candidates = Vec::new();
+    let mut examined = 0;
+    for (action, _, _) in verified.source_entries() {
+        examined += 1;
+        for intent in public_intents_for_source_action(position.state(), action)? {
+            let key = serde_jcs::to_vec(&intent).map_err(EngineError::serialization)?;
+            if !seen.insert(key) {
+                continue;
+            }
+            if seen.len() > MAX_LEGAL_ACTIONS {
+                return Err(EngineError::UnsupportedFeature(format!(
+                    "v7 public choices exceed the eager limit of {MAX_LEGAL_ACTIONS}"
+                ))
+                .into());
+            }
+            if intent.get("type").and_then(Value::as_str) != Some("move")
+                || intent.get("selectionMode").is_some()
+                || intent.get("from") == Some(origin)
+                    && intent.get("destination") == Some(destination)
+            {
+                candidates.push(intent);
+            }
+        }
+    }
+    Ok((candidates, seen.len(), examined))
 }
 
 /// Bind a public intent. The caller supplies only public coordinates and
@@ -871,6 +934,20 @@ mod tests {
         let before = host.export_envelope().unwrap();
         let source = legal_action_envelopes(&host).unwrap();
         let public = legal_public_intents(&host).unwrap();
+        let (targeted, count, examined) = public_delta_candidate_intents(
+            &host,
+            &json!({"row":6,"col":0}),
+            &json!({"row":5,"col":0}),
+        )
+        .unwrap();
+        assert_eq!(count, public.len());
+        assert!(examined >= count);
+        assert!(targeted.iter().any(|choice| choice == &public[0]));
+        assert!(targeted.iter().all(|choice| {
+            choice["type"] != "move"
+                || choice.get("selectionMode").is_some()
+                || choice == &public[0]
+        }));
         assert_eq!(source.len(), 21);
         assert_eq!(public.len(), 21);
         let intent = json!({"type":"move","color":"white","from":{"row":6,"col":0},"destination":{"row":5,"col":0}});

@@ -670,7 +670,9 @@ impl SourceActionCursor {
             pending.retain(|action| action.card_id.as_ref() == Some(id));
         }
         Ok(Self {
-            state: Arc::new(state.clone()),
+            state: Arc::new(crate::legal_profile::measure("state_clone", || {
+                state.clone()
+            })),
             stage,
             pending: Arc::new(pending),
             pending_index: 0,
@@ -700,8 +702,10 @@ impl SourceActionCursor {
         loop {
             if let Some(cursor) = &mut self.lazy {
                 if !cursor.is_exhausted()
-                    && let Some(action) = cursor.next_candidate()
+                    && let Some(action) =
+                        crate::legal_profile::measure("card_generation", || cursor.next_candidate())
                 {
+                    crate::legal_profile::count("card_candidates_generated", 1);
                     self.emitted = true;
                     return Ok(Some(action));
                 }
@@ -715,8 +719,13 @@ impl SourceActionCursor {
             }
             match self.stage {
                 SourceCursorStage::Movement => {
-                    let actions =
-                        crate::movement::v7_source_ordered_move_candidates(&self.state, false)?;
+                    let actions = crate::legal_profile::measure("movement_generation", || {
+                        crate::movement::v7_source_ordered_move_candidates(&self.state, false)
+                    })?;
+                    crate::legal_profile::count(
+                        "movement_candidates_generated",
+                        actions.len() as u64,
+                    );
                     require_source_family_budget(actions.len(), "movement")?;
                     self.pending = Arc::new(actions);
                     self.pending_index = 0;
@@ -748,19 +757,23 @@ impl SourceActionCursor {
                     {
                         continue;
                     }
-                    if !crate::card_registry::source_candidate_available(&self.state, card)? {
+                    if !crate::legal_profile::measure("card_generation", || {
+                        crate::card_registry::source_candidate_available(&self.state, card)
+                    })? {
                         continue;
                     }
-                    if let Some(cursor) =
-                        card_cursor(&self.state, card, self.ui_completion.as_ref())?
-                    {
+                    if let Some(cursor) = crate::legal_profile::measure("card_generation", || {
+                        card_cursor(&self.state, card, self.ui_completion.as_ref())
+                    })? {
                         self.lazy = Some(cursor);
                     } else {
-                        let actions = nonlazy_card_candidates(
-                            &self.state,
-                            card,
-                            self.ui_completion.as_ref(),
-                        )?;
+                        let actions = crate::legal_profile::measure("card_generation", || {
+                            nonlazy_card_candidates(&self.state, card, self.ui_completion.as_ref())
+                        })?;
+                        crate::legal_profile::count(
+                            "card_candidates_generated",
+                            actions.len() as u64,
+                        );
                         require_source_family_budget(actions.len(), "card")?;
                         self.pending = Arc::new(actions);
                         self.pending_index = 0;
@@ -771,8 +784,13 @@ impl SourceActionCursor {
                     // Raw emissions, including later rejected selections,
                     // suppress fallback just as iterateCandidatePayloads does.
                     if !self.emitted && self.card_filter.is_none() && self.ui_completion.is_none() {
-                        let actions =
-                            crate::movement::v7_source_ordered_move_candidates(&self.state, true)?;
+                        let actions = crate::legal_profile::measure("movement_generation", || {
+                            crate::movement::v7_source_ordered_move_candidates(&self.state, true)
+                        })?;
+                        crate::legal_profile::count(
+                            "movement_candidates_generated",
+                            actions.len() as u64,
+                        );
                         require_source_family_budget(actions.len(), "friendly-crush fallback")?;
                         self.pending = Arc::new(actions);
                         self.pending_index = 0;
@@ -787,6 +805,21 @@ impl SourceActionCursor {
     }
 
     pub(crate) fn accepts(&self, action: &Action) -> Result<bool> {
+        let result = crate::legal_profile::candidate(|| self.accepts_unprofiled(action));
+        if let Ok(accepted) = &result {
+            crate::legal_profile::count(
+                if *accepted {
+                    "candidates_accepted"
+                } else {
+                    "candidates_rejected"
+                },
+                1,
+            );
+        }
+        result
+    }
+
+    fn accepts_unprofiled(&self, action: &Action) -> Result<bool> {
         if action.color != self.state.decision_actor() || action.position_key.is_some() {
             return Err(EngineError::InvalidState(
                 "v7 source candidate has the wrong actor or a private Position key".into(),
@@ -802,10 +835,15 @@ impl SourceActionCursor {
         {
             return Ok(false);
         }
-        let mut owned = self.state.as_ref().clone();
-        match crate::transition::apply_without_public_event(&mut owned, action) {
+        let mut owned =
+            crate::legal_profile::measure("state_clone", || self.state.as_ref().clone());
+        match crate::legal_profile::measure("transition_apply", || {
+            crate::transition::apply_without_public_event(&mut owned, action)
+        }) {
             Ok(_) => {
-                crate::replay::canonicalize_position_frames(&mut owned)?;
+                crate::legal_profile::measure("canonicalization", || {
+                    crate::replay::canonicalize_position_frames(&mut owned)
+                })?;
                 Ok(true)
             }
             Err(EngineError::IllegalAction) => Ok(false),
@@ -1122,27 +1160,43 @@ fn transition_accepted_actions(state: &GameState, candidates: Vec<Action>) -> Re
     let ui_completion = ui_card_completion(state)?;
     let mut accepted = Vec::with_capacity(candidates.len());
     for action in candidates {
-        if action.color != actor || action.position_key.is_some() {
-            return Err(EngineError::InvalidState(
-                "v7 source candidate has the wrong actor or a private Position key".into(),
-            ));
-        }
-        if ui_completion
-            .as_ref()
-            .is_some_and(|completion| !completion.permits(&action))
-        {
-            continue;
-        }
-        // Source `actionStream(legal:true)` tests each candidate on an owned
-        // restored Position. A rejected selection cannot mutate this state.
-        let mut owned = state.clone();
-        match crate::transition::apply_without_public_event(&mut owned, &action) {
-            Ok(_) => {
-                crate::replay::canonicalize_position_frames(&mut owned)?;
-                accepted.push(action);
+        let result = crate::legal_profile::candidate(|| -> Result<bool> {
+            if action.color != actor || action.position_key.is_some() {
+                return Err(EngineError::InvalidState(
+                    "v7 source candidate has the wrong actor or a private Position key".into(),
+                ));
             }
-            Err(EngineError::IllegalAction) => {}
-            Err(error) => return Err(error),
+            if ui_completion
+                .as_ref()
+                .is_some_and(|completion| !completion.permits(&action))
+            {
+                return Ok(false);
+            }
+            // A rejected selection cannot mutate the source Position.
+            let mut owned = crate::legal_profile::measure("state_clone", || state.clone());
+            match crate::legal_profile::measure("transition_apply", || {
+                crate::transition::apply_without_public_event(&mut owned, &action)
+            }) {
+                Ok(_) => {
+                    crate::legal_profile::measure("canonicalization", || {
+                        crate::replay::canonicalize_position_frames(&mut owned)
+                    })?;
+                    Ok(true)
+                }
+                Err(EngineError::IllegalAction) => Ok(false),
+                Err(error) => Err(error),
+            }
+        })?;
+        crate::legal_profile::count(
+            if result {
+                "candidates_accepted"
+            } else {
+                "candidates_rejected"
+            },
+            1,
+        );
+        if result {
+            accepted.push(action);
         }
     }
     Ok(accepted)
@@ -1153,7 +1207,8 @@ fn ordered_play_candidates(state: &GameState) -> Result<Vec<Action>> {
     // one card instance at a time in deck order. Its friendly-crush fallback
     // runs only if no ordinary movement or card candidate was emitted, even
     // if every emitted candidate is later rejected by apply.
-    let mut cursor = SourceActionCursor::new(state, None)?;
+    let mut cursor =
+        crate::legal_profile::measure("cursor_init", || SourceActionCursor::new(state, None))?;
     let mut candidates = Vec::new();
     while let Some(action) = cursor.next_candidate()? {
         candidates.push(action);

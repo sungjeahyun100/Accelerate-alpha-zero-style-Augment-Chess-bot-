@@ -341,6 +341,17 @@ pub(crate) fn after_placement_before_last_move(
     context: &V7MovePieceEffectsContext<'_>,
     phase: V7PlacementPhase,
 ) -> Result<V7PlacementEffectsOutcome> {
+    crate::legal_profile::measure("move_after_placement", || {
+        after_placement_before_last_move_profiled(state, moving, context, phase)
+    })
+}
+
+pub(crate) fn after_placement_before_last_move_profiled(
+    state: &mut GameState,
+    moving: &mut Piece,
+    context: &V7MovePieceEffectsContext<'_>,
+    phase: V7PlacementPhase,
+) -> Result<V7PlacementEffectsOutcome> {
     let owner = boundary(state, moving, Some(context))?;
     let mut outcome = V7PlacementEffectsOutcome::default();
     match phase {
@@ -606,6 +617,16 @@ pub(crate) fn resolve_witch_trial_capture(
 /// main92356–92398. 호출자는 bomb/feudal/Trojan 뒤 생존과 source terminal
 /// 반환 조건을 확인한다. 일반 이동 로그·enPassant·폭발보다 앞에서 실행한다.
 pub(crate) fn after_surviving_move(
+    state: &mut GameState,
+    moving: &mut Piece,
+    context: &V7MovePieceEffectsContext<'_>,
+) -> Result<V7SurvivingMoveEffectsOutcome> {
+    crate::legal_profile::measure("move_after_surviving", || {
+        after_surviving_move_profiled(state, moving, context)
+    })
+}
+
+pub(crate) fn after_surviving_move_profiled(
     state: &mut GameState,
     moving: &mut Piece,
     context: &V7MovePieceEffectsContext<'_>,

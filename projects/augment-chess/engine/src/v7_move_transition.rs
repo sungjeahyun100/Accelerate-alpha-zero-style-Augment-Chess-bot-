@@ -132,6 +132,16 @@ fn finish_control(
     actor: Color,
     control: V7ContinuationControl,
 ) -> Result<()> {
+    crate::legal_profile::measure("move_finish_control", || {
+        finish_control_profiled(state, actor, control)
+    })
+}
+
+fn finish_control_profiled(
+    state: &mut GameState,
+    actor: Color,
+    control: V7ContinuationControl,
+) -> Result<()> {
     if let V7ContinuationControl::FinishMove(color) = control {
         crate::transition::end_move_for_decision(state, color, true, Some("move"))?;
     } else if control == V7ContinuationControl::Continue {
@@ -141,6 +151,19 @@ fn finish_control(
 }
 
 fn finish_removed_mover(
+    state: &mut GameState,
+    moving: &mut Piece,
+    start: &V7MoveContinuationSnapshot,
+    from: Square,
+    to: Square,
+    captured: bool,
+) -> Result<()> {
+    crate::legal_profile::measure("move_finish_removed_mover", || {
+        finish_removed_mover_profiled(state, moving, start, from, to, captured)
+    })
+}
+
+fn finish_removed_mover_profiled(
     state: &mut GameState,
     moving: &mut Piece,
     start: &V7MoveContinuationSnapshot,
@@ -380,6 +403,16 @@ pub(crate) fn execute(
     action: &Action,
     threat_probe: bool,
 ) -> Result<Vec<Piece>> {
+    crate::legal_profile::measure("move_execute", || {
+        execute_profiled(state, action, threat_probe)
+    })
+}
+
+pub(crate) fn execute_profiled(
+    state: &mut GameState,
+    action: &Action,
+    threat_probe: bool,
+) -> Result<Vec<Piece>> {
     let mut effective_action = action.clone();
     let mut from = action.from.ok_or(EngineError::IllegalAction)?;
     let target = action
@@ -425,6 +458,16 @@ pub(crate) fn execute(
 }
 
 fn execute_core(state: &mut GameState, action: &Action, threat_probe: bool) -> Result<Vec<Piece>> {
+    crate::legal_profile::measure("move_core", || {
+        execute_core_profiled(state, action, threat_probe)
+    })
+}
+
+fn execute_core_profiled(
+    state: &mut GameState,
+    action: &Action,
+    threat_probe: bool,
+) -> Result<Vec<Piece>> {
     crate::v7_card_context::begin_board_action(state);
     let mut from = action.from.ok_or(EngineError::IllegalAction)?;
     let target = action
@@ -977,11 +1020,7 @@ fn execute_core(state: &mut GameState, action: &Action, threat_probe: bool) -> R
         trail["clearOnTurnStart"] = json!(actor);
     }
     crate::card_effects::mark_animation(state, &moving)?;
-    if moving.kind == "crown" && ledger.captured_something {
-        crate::v7_threat::play_crown_capture_sound_v7(state, actor)?;
-    } else {
-        crate::v7_threat::play_move_sound_v7(state, sound, actor)?;
-    }
+    crate::v7_threat::reconcile_move_replay_capture_v7(state)?;
     crate::v7_rule_bombs::resolve_under_pieces(state, actor, false)?;
     if state.mode == "gameover" {
         crate::replay::record(state, "gameover")?;

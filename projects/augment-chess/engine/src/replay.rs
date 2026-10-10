@@ -38,7 +38,9 @@ impl ReplayCaptureScope {
     pub(crate) fn for_probe(state: &GameState) -> Self {
         state.move_replay_scope.clone().unwrap_or_else(|| {
             Self(Arc::new(Mutex::new(ReplayCaptureJournal {
-                pending: state.active_move_replay_before.clone(),
+                pending: crate::legal_profile::measure("replay_state_clone", || {
+                    state.active_move_replay_before.clone()
+                }),
                 commands: 0,
             })))
         })
@@ -56,7 +58,9 @@ impl ReplayCaptureScope {
     fn pending(&self) -> Result<Option<MoveReplayCapture>> {
         self.0
             .lock()
-            .map(|journal| journal.pending.clone())
+            .map(|journal| {
+                crate::legal_profile::measure("replay_state_clone", || journal.pending.clone())
+            })
             .map_err(|_| {
                 EngineError::InvalidState("v7 replay capture scope mutex is poisoned".into())
             })
@@ -80,7 +84,9 @@ impl ReplayCaptureScope {
 pub(crate) fn active_move_capture(state: &GameState) -> Result<Option<MoveReplayCapture>> {
     match &state.move_replay_scope {
         Some(scope) => scope.pending(),
-        None => Ok(state.active_move_replay_before.clone()),
+        None => Ok(crate::legal_profile::measure("replay_state_clone", || {
+            state.active_move_replay_before.clone()
+        })),
     }
 }
 
@@ -95,7 +101,9 @@ pub(crate) fn replace_active_move_capture(
         capture.before.move_replay_scope = None;
     }
     if let Some(scope) = &state.move_replay_scope {
-        scope.replace(capture.clone())?;
+        scope.replace(crate::legal_profile::measure("replay_state_clone", || {
+            capture.clone()
+        }))?;
     }
     state.active_move_replay_before = capture;
     Ok(())
@@ -341,6 +349,12 @@ pub(crate) fn normalize_winter_after_turn(state: &mut GameState) -> Result<()> {
     Ok(())
 }
 fn canonical_equal(first: &Value, second: &Value) -> Result<bool> {
+    crate::legal_profile::measure("replay_json_compare", || {
+        canonical_equal_profiled(first, second)
+    })
+}
+
+fn canonical_equal_profiled(first: &Value, second: &Value) -> Result<bool> {
     // Source valuesEqual uses JSON.stringify, including object insertion order.
     // Numeric spelling still follows JavaScript, where 0.0 and 0 stringify alike.
     fn stringify(value: &Value) -> Result<String> {
@@ -1946,7 +1960,11 @@ pub(crate) fn queue_move(
 /// Begin/commit is kept local to an atomic transition, matching the source's
 /// activeMoveReplayCapture control variable without leaking it into snapshots.
 pub(crate) fn begin_move(state: &mut GameState, actor: Color) -> Result<GameState> {
-    let mut before = state.clone();
+    crate::legal_profile::measure("replay_begin_move", || begin_move_profiled(state, actor))
+}
+
+pub(crate) fn begin_move_profiled(state: &mut GameState, actor: Color) -> Result<GameState> {
+    let mut before = crate::legal_profile::measure("replay_state_clone", || state.clone());
     before.active_move_replay_before = None;
     let old = state
         .extra
@@ -1979,7 +1997,9 @@ pub(crate) fn begin_move(state: &mut GameState, actor: Color) -> Result<GameStat
         } else {
             Some(MoveReplayCapture {
                 actor,
-                before: Box::new(before.clone()),
+                before: Box::new(crate::legal_profile::measure("replay_state_clone", || {
+                    before.clone()
+                })),
             })
         };
         replace_active_move_capture(state, capture)?;
@@ -1987,6 +2007,12 @@ pub(crate) fn begin_move(state: &mut GameState, actor: Color) -> Result<GameStat
     Ok(before)
 }
 pub(crate) fn commit_active_move(state: &mut GameState, actor: Color) -> Result<()> {
+    crate::legal_profile::measure("replay_commit_active_move", || {
+        commit_active_move_profiled(state, actor)
+    })
+}
+
+pub(crate) fn commit_active_move_profiled(state: &mut GameState, actor: Color) -> Result<()> {
     let capture = active_move_capture(state)?;
     replace_active_move_capture(state, None)?;
     if let Some(capture) = capture
@@ -2026,6 +2052,10 @@ fn board_dimensions(board: &Value) -> Result<(usize, usize)> {
 }
 
 fn board_delta(before: &Value, after: &Value) -> Result<Vec<Value>> {
+    crate::legal_profile::measure("replay_board_delta", || board_delta_profiled(before, after))
+}
+
+fn board_delta_profiled(before: &Value, after: &Value) -> Result<Vec<Value>> {
     let (rows, cols) = board_dimensions(before)?;
     if board_dimensions(after)? != (rows, cols) {
         // Source behavior for a rule that resizes the board needs its own
@@ -2047,6 +2077,16 @@ fn board_delta(before: &Value, after: &Value) -> Result<Vec<Value>> {
     Ok(cells)
 }
 pub(crate) fn commit_move(state: &mut GameState, before: &GameState, actor: Color) -> Result<()> {
+    crate::legal_profile::measure("replay_commit_move", || {
+        commit_move_profiled(state, before, actor)
+    })
+}
+
+pub(crate) fn commit_move_profiled(
+    state: &mut GameState,
+    before: &GameState,
+    actor: Color,
+) -> Result<()> {
     if state.ruleset_id == RULES_VERSION_V7 {
         replace_active_move_capture(state, None)?;
     }
@@ -2120,6 +2160,10 @@ fn card_snapshot(card: &Value, color: Color, slot: usize) -> Value {
     snapshot
 }
 fn capture_frame(state: &GameState) -> Result<Value> {
+    crate::legal_profile::measure("replay_frame", || capture_frame_profiled(state))
+}
+
+fn capture_frame_profiled(state: &GameState) -> Result<Value> {
     let raw = serde_json::to_value(state).map_err(EngineError::serialization)?;
     let mut frame = serde_json::Map::new();
     let constants = if state.ruleset_id == RULES_VERSION_V7 {
@@ -2177,6 +2221,10 @@ fn capture_frame(state: &GameState) -> Result<Value> {
     Ok(frame)
 }
 fn replay_delta(before: &Value, after: &Value) -> Result<Value> {
+    crate::legal_profile::measure("replay_delta", || replay_delta_profiled(before, after))
+}
+
+fn replay_delta_profiled(before: &Value, after: &Value) -> Result<Value> {
     let mut fields = Vec::new();
     let before_fields = before
         .as_object()
@@ -2209,6 +2257,10 @@ fn notation_key(event: &Value) -> String {
     event["id"].as_str().unwrap_or("").to_owned()
 }
 pub(crate) fn record(state: &mut GameState, label: &str) -> Result<()> {
+    crate::legal_profile::measure("replay_record", || record_profiled(state, label))
+}
+
+pub(crate) fn record_profiled(state: &mut GameState, label: &str) -> Result<()> {
     record_with_effects(state, label, &[])
 }
 
@@ -2228,6 +2280,16 @@ pub(crate) fn record_with_trolley_effects(
 }
 
 fn record_with_effects(state: &mut GameState, label: &str, effects: &[Value]) -> Result<()> {
+    crate::legal_profile::measure("replay_record_pipeline", || {
+        record_with_effects_profiled(state, label, effects)
+    })
+}
+
+fn record_with_effects_profiled(
+    state: &mut GameState,
+    label: &str,
+    effects: &[Value],
+) -> Result<()> {
     if state.ruleset_id == RULES_VERSION_V7 {
         crate::v7_move_transition::sync_active_metal(state)?;
     }
@@ -2422,69 +2484,71 @@ fn record_with_effects(state: &mut GameState, label: &str, effects: &[Value]) ->
         .cloned()
         .collect::<Vec<_>>();
     state.extra.insert("pendingReplayVisuals".into(), json!([]));
-    let changed = !delta["board"]["cells"]
-        .as_array()
-        .expect("cells")
-        .is_empty()
-        || !delta["fields"].as_array().expect("fields").is_empty()
-        || !visuals.is_empty()
-        || !unique.is_empty();
-    let events = state
-        .extra
-        .get("replayEvents")
-        .and_then(Value::as_array)
-        .ok_or_else(|| EngineError::InvalidState("replayEvents must be an array".into()))?;
-    let index = events.len() + usize::from(changed);
-    if changed {
-        let nonce = state
+    crate::legal_profile::measure("replay_record_update", || {
+        let changed = !delta["board"]["cells"]
+            .as_array()
+            .expect("cells")
+            .is_empty()
+            || !delta["fields"].as_array().expect("fields").is_empty()
+            || !visuals.is_empty()
+            || !unique.is_empty();
+        let events = state
             .extra
-            .get("replayEventNonce")
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-            + 1;
-        state.extra.insert("replayEventNonce".into(), json!(nonce));
-        let first = unique.first();
-        let event = json!({"id":first.map(|n|n["id"].clone()).unwrap_or_else(||json!(format!("replay-{nonce}"))),"label":label,"moveNumber":first.and_then(|n|n["moveNumber"].as_u64()).unwrap_or(u64::from(state.full_move)),"color":first.map(|n|n["color"].clone()).unwrap_or_else(||json!(state.turn)),"notations":unique,"visuals":visuals,"delta":delta});
-        state
-            .extra
-            .get_mut("replayEvents")
-            .and_then(Value::as_array_mut)
-            .expect("validated events")
-            .push(event);
-        let timeline = state
-            .extra
-            .entry("notationTimeline")
-            .or_insert_with(|| json!([]))
-            .as_array_mut()
-            .ok_or_else(|| {
-                EngineError::InvalidState("notation timeline must be an array".into())
-            })?;
-        for notation in unique {
-            timeline.push(json!({"moveNumber":notation["moveNumber"].as_u64().unwrap_or(u64::from(state.full_move)),"color":notation["color"],"notation":notation,"replayIndex":index}));
+            .get("replayEvents")
+            .and_then(Value::as_array)
+            .ok_or_else(|| EngineError::InvalidState("replayEvents must be an array".into()))?;
+        let index = events.len() + usize::from(changed);
+        if changed {
+            let nonce = state
+                .extra
+                .get("replayEventNonce")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                + 1;
+            state.extra.insert("replayEventNonce".into(), json!(nonce));
+            let first = unique.first();
+            let event = json!({"id":first.map(|n|n["id"].clone()).unwrap_or_else(||json!(format!("replay-{nonce}"))),"label":label,"moveNumber":first.and_then(|n|n["moveNumber"].as_u64()).unwrap_or(u64::from(state.full_move)),"color":first.map(|n|n["color"].clone()).unwrap_or_else(||json!(state.turn)),"notations":unique,"visuals":visuals,"delta":delta});
+            state
+                .extra
+                .get_mut("replayEvents")
+                .and_then(Value::as_array_mut)
+                .expect("validated events")
+                .push(event);
+            let timeline = state
+                .extra
+                .entry("notationTimeline")
+                .or_insert_with(|| json!([]))
+                .as_array_mut()
+                .ok_or_else(|| {
+                    EngineError::InvalidState("notation timeline must be an array".into())
+                })?;
+            for notation in unique {
+                timeline.push(json!({"moveNumber":notation["moveNumber"].as_u64().unwrap_or(u64::from(state.full_move)),"color":notation["color"],"notation":notation,"replayIndex":index}));
+            }
         }
-    }
-    state.extra.insert("replayTailFrame".into(), after);
-    entry["replayIndex"] = json!(index);
-    state.extra.insert("pendingNotation".into(), Value::Null);
-    state.extra.insert("pendingNotations".into(), json!([]));
-    let history = state
-        .extra
-        .get_mut("boardHistory")
-        .and_then(Value::as_array_mut)
-        .ok_or_else(|| EngineError::InvalidState("board history must be an array".into()))?;
-    history.push(entry);
-    if history.len() > 12 {
-        history.drain(..history.len() - 12);
-    }
-    let preserved = state
-        .extra
-        .get("historyViewIndex")
-        .and_then(Value::as_u64)
-        .filter(|n| *n < index as u64)
-        .map(|n| json!(n.min(index.saturating_sub(1) as u64)))
-        .unwrap_or(Value::Null);
-    state.extra.insert("historyViewIndex".into(), preserved);
-    Ok(())
+        state.extra.insert("replayTailFrame".into(), after);
+        entry["replayIndex"] = json!(index);
+        state.extra.insert("pendingNotation".into(), Value::Null);
+        state.extra.insert("pendingNotations".into(), json!([]));
+        let history = state
+            .extra
+            .get_mut("boardHistory")
+            .and_then(Value::as_array_mut)
+            .ok_or_else(|| EngineError::InvalidState("board history must be an array".into()))?;
+        history.push(entry);
+        if history.len() > 12 {
+            history.drain(..history.len() - 12);
+        }
+        let preserved = state
+            .extra
+            .get("historyViewIndex")
+            .and_then(Value::as_u64)
+            .filter(|n| *n < index as u64)
+            .map(|n| json!(n.min(index.saturating_sub(1) as u64)))
+            .unwrap_or(Value::Null);
+        state.extra.insert("historyViewIndex".into(), preserved);
+        Ok(())
+    })
 }
 
 /// Settle the source's queued terminal record at the atomic snapshot boundary,

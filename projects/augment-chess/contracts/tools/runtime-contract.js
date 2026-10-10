@@ -51,16 +51,32 @@ if (executionProfile) {
     throw new Error(`Runtime baseline ${baseline} execution profile identity mismatch.`);
   }
 }
-function canonical(value) {
-  const budget = { nodes: 0, bytes: 0 };
-  const charge = (depth, bytes = 8) => {
+function canonical(value, options = undefined) {
+  const diagnostic = options?.diagnostic === true || process.env.ACCELERATE_JSON_BUDGET_DIAGNOSTICS === "1";
+  const budget = { nodes: 0, bytes: 0, lastDepth: null };
+  const charge = (depth, path, bytes = 8) => {
+    const previous = diagnostic ? { nodes: budget.nodes, bytes: budget.bytes, depth: budget.lastDepth } : null;
     budget.nodes++; budget.bytes += bytes;
-    if (depth > 64 || budget.nodes > 100000 || budget.bytes > 8 * 1024 * 1024) throw new TypeError("JSON exceeds depth64/nodes100000/bytes8MiB limits.");
+    const exceeded = depth > 64 ? "depth" : budget.nodes > 100000 ? "nodes" : budget.bytes > 8 * 1024 * 1024 ? "bytes" : null;
+    if (exceeded) {
+      const error = new TypeError("JSON exceeds depth64/nodes100000/bytes8MiB limits.");
+      error.code = "JSON_BUDGET_EXCEEDED";
+      if (diagnostic) {
+        const segments = path.split("/");
+        error.budget = { exceeded, depth, priorDepth: previous.depth,
+          nodes: budget.nodes, priorNodes: previous.nodes, bytes: budget.bytes, priorBytes: previous.bytes,
+          path, parentPath: segments.length > 1 ? segments.slice(0, -1).join("/") || "$" : null,
+          topLevelFieldPath: segments.length > 1 ? `${segments[0]}/${segments[1]}` : "$" };
+      }
+      throw error;
+    }
+    if (diagnostic) budget.lastDepth = depth;
   };
-  function visit(value, depth) {
-  charge(depth);
+  const childPath = (path, key) => diagnostic ? `${path}/${String(key).replace(/~/g, "~0").replace(/\//g, "~1")}` : "";
+  function visit(value, depth, path) {
+  charge(depth, path);
   if (typeof value === "string") {
-    charge(depth, Buffer.byteLength(value, "utf8"));
+    charge(depth, path, Buffer.byteLength(value, "utf8"));
     for (let index = 0; index < value.length; index++) {
       const unit = value.charCodeAt(index);
       if (unit >= 0xd800 && unit <= 0xdbff) { const low = value.charCodeAt(++index); if (!(low >= 0xdc00 && low <= 0xdfff)) throw new TypeError("Lone Unicode surrogate is not JCS data."); }
@@ -76,12 +92,44 @@ function canonical(value) {
   }
   if (Array.isArray(value)) {
     for (let index = 0; index < value.length; index++) if (!Object.hasOwn(value, index)) throw new TypeError("Sparse arrays are not JSON data.");
-    return "[" + value.map(child => visit(child, depth + 1)).join(",") + "]";
+    return "[" + value.map((child, index) => visit(child, depth + 1, diagnostic ? childPath(path, index) : "")).join(",") + "]";
   }
-  if (value && typeof value === "object" && [Object.prototype, null].includes(Object.getPrototypeOf(value))) return "{" + Object.keys(value).sort().map(key => visit(key, depth + 1) + ":" + visit(value[key], depth + 1)).join(",") + "}";
+  if (value && typeof value === "object" && [Object.prototype, null].includes(Object.getPrototypeOf(value))) return "{" + Object.keys(value).sort().map(key => {
+    const fieldPath = diagnostic ? childPath(path, key) : "";
+    return visit(key, depth + 1, fieldPath) + ":" + visit(value[key], depth + 1, fieldPath);
+  }).join(",") + "}";
   throw new TypeError("Expected JSON data; undefined, sparse arrays, prototypes and executable values are not allowed.");
   }
-  return visit(value, 0);
+  return visit(value, 0, "$");
+}
+// Read-only accounting over the already encoded snapshot. Counts follow the
+// canonical charge model; capped entries are lower bounds, not raw values.
+function summarizeStateFields(state) {
+  const fields = Object.create(null);
+  for (const key of Object.keys(state)) {
+    const stack = [{ value: state[key], depth: 0 }];
+    const size = { nodes: 0, bytes: 0, depth: 0, truncated: false };
+    while (stack.length) {
+      if (size.nodes >= 200000 || size.bytes >= 32 * 1024 * 1024) { size.truncated = true; break; }
+      const { value, depth } = stack.pop();
+      size.nodes++; size.bytes += 8; size.depth = Math.max(size.depth, depth);
+      if (typeof value === "string") { size.nodes++; size.bytes += Buffer.byteLength(value, "utf8"); }
+      else if (Array.isArray(value)) {
+        for (let index = value.length - 1; index >= 0; index--) {
+          if (stack.length + size.nodes >= 200000) { size.truncated = true; break; }
+          stack.push({ value: value[index], depth: depth + 1 });
+        }
+      } else if (value && typeof value === "object") {
+        for (const name of Object.keys(value)) {
+          if (stack.length + size.nodes + 2 >= 200000) { size.truncated = true; break; }
+          stack.push({ value: value[name], depth: depth + 1 });
+          stack.push({ value: name, depth: depth + 1 });
+        }
+      }
+    }
+    fields[key] = size;
+  }
+  return fields;
 }
 function jsonCopy(value) { return JSON.parse(canonical(value)); }
 function deepFreeze(value) { if (value && typeof value === "object") { for (const child of Object.values(value)) deepFreeze(child); Object.freeze(value); } return value; }
@@ -125,7 +173,10 @@ function validateState(state, history) {
   color(state.turn);
   if (!Array.isArray(state.board) || state.board.length !== 8 || state.board.some(row => !Array.isArray(row) || row.length !== 8 || row.some(cell => cell !== null && (!cell || typeof cell !== "object" || Array.isArray(cell))))) throw new TypeError("Position requires an 8x8 board.");
   if (typeof state.mode !== "string" || !state.mode) throw new TypeError("Position requires the actual site phase.");
-  canonical(state); canonical(history);
+  try { canonical(state); }
+  catch (error) { if (error.code === "JSON_BUDGET_EXCEEDED") error.jsonRoot = "state"; throw error; }
+  try { canonical(history); }
+  catch (error) { if (error.code === "JSON_BUDGET_EXCEEDED") error.jsonRoot = "history"; throw error; }
   for (const event of history) validateGameEvent(event);
 }
 function exactKeys(value, keys, label) {
@@ -262,6 +313,6 @@ function validateObservation(value) {
   if (informationStateKey !== digest(content)) throw new TypeError("Information state identity mismatch.");
   return value;
 }
-return Object.freeze({ baseline, catalog, observationPolicy, executionProfile, executionProfileSha256, ORACLE_PROFILE_VERSION, RUNTIME_SCHEMA_NAME, VERSIONS, canonical, digest, jsonCopy, deepFreeze, rng, nextRandom, validateRng, position, validatePosition, action, validateAction, validatePayload, validateObservation, validateGameEvent, validateResult });
+return Object.freeze({ baseline, catalog, observationPolicy, executionProfile, executionProfileSha256, ORACLE_PROFILE_VERSION, RUNTIME_SCHEMA_NAME, VERSIONS, canonical, summarizeStateFields, digest, jsonCopy, deepFreeze, rng, nextRandom, validateRng, position, validatePosition, action, validateAction, validatePayload, validateObservation, validateGameEvent, validateResult });
 }
 module.exports = Object.freeze({ ...createRuntimeContract(), createRuntimeContract });

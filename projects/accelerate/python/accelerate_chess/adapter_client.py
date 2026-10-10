@@ -8,6 +8,7 @@ observations and intents cross into Python model/search input.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from copy import deepcopy
 from functools import lru_cache
 from hashlib import sha256
 from threading import RLock
@@ -172,6 +173,8 @@ class GameAdapterClient:
         self._selected = _descriptors(session)
         self._lock = RLock()
         self._sequence = 0
+        self._observed_revision: str | None = None
+        self._observations: dict[str, dict[str, Any]] = {}
 
     @classmethod
     def new_game(cls, config: Mapping[str, Any], seed: int, *, spec: TypedEncoderSpec | None = None) -> GameAdapterClient:
@@ -281,12 +284,21 @@ class GameAdapterClient:
     def observe(self, viewer: str) -> dict[str, Any]:
         if viewer not in ("white", "black"):
             raise ValueError("game adapter viewer must be white or black")
-        result = self._call("public-observation", "observe", {"kind": "observe", "viewer": viewer})
-        if set(result) != {"kind", "observation"}:
-            raise ValueError("native game adapter observation result has unknown fields")
-        observation = result["observation"]
-        ObservationIR.from_public(observation, self.spec)
-        return observation
+        with self._lock:
+            revision = self.snapshot_revision
+            if self._observed_revision != revision:
+                self._observed_revision = revision
+                self._observations.clear()
+            if viewer not in self._observations:
+                result = self._call("public-observation", "observe", {"kind": "observe", "viewer": viewer})
+                if set(result) != {"kind", "observation"}:
+                    raise ValueError("native game adapter observation result has unknown fields")
+                observation = result["observation"]
+                ObservationIR.from_public(observation, self.spec)
+                if self.snapshot_revision != revision:
+                    raise ValueError("game adapter revision changed while observing")
+                self._observations[viewer] = observation
+            return deepcopy(self._observations[viewer])
 
     def bind_public_intent(self, intent: Mapping[str, Any]) -> _PublicIntentAction:
         if not isinstance(intent, Mapping):
@@ -385,6 +397,8 @@ class GameAdapterClient:
                 or result["result"] not in (None, "white", "black", "draw")
                 or self.snapshot_revision == previous_revision):
             raise ValueError("native game adapter apply result or committed revision is invalid")
+        self._observations.clear()
+        self._observed_revision = None
         return result
 
     def apply(self, action: _PublicIntentAction) -> _AdapterStep:
@@ -410,6 +424,17 @@ class GameAdapterClient:
                                                                      snapshot_revision=revision)
         return self._proposal(proposal)
 
+    def condition_hidden_stage_draft(self, expected_next_public: Mapping[str, Any],
+                                     independent_seed: int) -> dict[str, Any]:
+        _independent_seed(independent_seed)
+        ObservationIR.from_public(expected_next_public, self.spec)
+        with self._lock:
+            revision = self.snapshot_revision
+            proposal = self._session.condition_hidden_stage_draft(_owned(expected_next_public),
+                                                                   independent_seed,
+                                                                   snapshot_revision=revision)
+        return self._proposal(proposal)
+
     def public_transition_compatible(self, action: _PublicIntentAction,
                                      expected_next_public: Mapping[str, Any]) -> bool:
         ObservationIR.from_public(expected_next_public, self.spec)
@@ -419,6 +444,30 @@ class GameAdapterClient:
                                                                   snapshot_revision=action.revision)
         if type(result) is not bool:
             raise ValueError("native game adapter compatibility response is not boolean")
+        return result
+
+    def public_delta_candidate_intents(self, origin: Mapping[str, Any],
+                                       destination: Mapping[str, Any]) -> dict[str, Any]:
+        for square in (origin, destination):
+            if (not isinstance(square, Mapping) or set(square) != {"row", "col"}
+                    or any(type(square[key]) is not int or not 0 <= square[key] < 8
+                           for key in ("row", "col"))):
+                raise ValueError("public delta square must be an 8x8 coordinate")
+        with self._lock:
+            revision = self.snapshot_revision
+            result = self._session.public_delta_candidate_intents(
+                _owned(origin), _owned(destination), snapshot_revision=revision)
+        if (not isinstance(result, dict) or set(result) != {"intents", "legal_count", "examined"}
+                or not isinstance(result["intents"], list)
+                or type(result["legal_count"]) is not int or result["legal_count"] < 1
+                or type(result["examined"]) is not int or result["examined"] < 0
+                or len(result["intents"]) > result["legal_count"]):
+            raise ValueError("native public delta candidates have invalid accounting")
+        result["intents"] = list(self._validated_intents(result["intents"]))
+        # These intents came from the source-admitted cursor for this exact
+        # revision. Compatibility and apply rebind and revalidate each chosen
+        # action, as with action_stream(), without a separate Python bind call.
+        result["actions"] = tuple(_action(intent, revision) for intent in result["intents"])
         return result
 
     def apply_weighted_conditioned_public(self, action: _PublicIntentAction,

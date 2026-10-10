@@ -1,0 +1,97 @@
+# Headless 규칙 동등성 계약 초안
+
+이 문서는 PR #43의 `5bc0182` 뒤에서 수행한 UI 실행 경로 제거와 차분 도구의 범위를 기록한다. JS 오라클은 수정하지 않았다. 이 변경에서 빌드·테스트·벤치마크·E2E·성능 측정은 실행하지 않았다. 따라서 아래의 분류는 정적 호출·필드 접근 근거이며 규칙 동등성 통과 결과가 아니다.
+
+## 비교 기준
+
+같은 규칙 상태와 합법 행동에서 보드·기물·카드·턴·종료·관측자별 공개 정보·규칙 이력을 비교한다. 무작위 전이는 단일 결과나 RNG seed/cursor/호출 순서를 맞추지 않고 **다음 규칙 상태의 조건부 결합분포**를 비교한다. 공유 숨은 변수와 다음 턴의 의존성은 결과 키에 함께 담아야 한다. 주변분포만 비교한 자료는 `UNSUPPORTED`다.
+
+기존 `v7-native-differential.cjs`와 `v7-native-probe.py`는 source Position ID, RNG, 전체 Replay/표현 상태와 ordered action envelope를 요구하는 **전체 실행 비교**다. 새 `rule_projection.py` 및 `semantic_differential.py`는 별도의 **규칙 의미 비교 초안**이다. 현재 production Position ID는 전체 envelope 해시이므로 규칙 상태 식별자로 재사용하지 않는다. 새 MCTS cache key를 도입하거나 기존 학습 데이터의 식별자를 변경하지 않았다.
+
+## 필드·호출 의존성 조사
+
+| 범주 | 경로와 호출·필드 | 읽기·쓰기 및 처리 |
+|---|---|---|
+| A 표현 | `v7_threat::play_move_sound_v7`, `play_crown_capture_sound_v7` | 두 함수와 실제 실행 호출을 제거했다. v7의 새 `lastMove`는 `soundName`을 쓰지 않는다. 과거 상태의 값도 덮어쓰지 않는다. v6 사운드 경로는 별도 범위다. |
+| A 표현 | `replay::queue_visual`, `pendingReplayVisuals`, `forceAnimatedPieceIds`, `animatedPieceIds` | 시각 이벤트·애니메이션 Set을 생성한다. `replay::record_with_effects_profiled`가 큐를 읽어 이벤트 생성 여부와 번호를 결정한다. 미정산 큐는 새 투영에서 `UNSUPPORTED`다. |
+| B 규칙 | `movement.rs`, `variant_movement.rs`, `observation.rs`의 `highlightCells`·`displayCells` | 목적지·포획 셀·안개 속 합법 행동 투영에 읽힌다. 표현용으로 일괄 삭제할 수 없다. 후속 모델에서 `targetCells` 같은 규칙 개념으로 옮겨야 한다. |
+| B 규칙 | `card_effects::set_last_move`, `v7_end_move_reactions::consume_idol_encore`의 `lastMove.soundColor` | 이름과 달리 Idol Encore의 행동자 소유권 판정에 읽힌다. 새 투영에서도 보존한다. |
+| B 규칙 | 카드 선택의 pending 상태, `moveReplay`, `boardHistory` 및 이전 수 | 카드 대상 순서와 실제 되돌리기·미래 합법성에 영향을 준다. 투영에서 보존한다. |
+| C 혼합 | `replay.rs`의 `begin_move`·`commit_move`·`record`·`settle` | 전체 상태 사본, delta, 기보, 시각 이벤트 및 되돌리기 정보가 한 경로에 있다. Replay 카드가 과거를 복원하므로 frame/event 삭제 전 `RuleHistory`와 undo 정보의 독립 계약이 필요하다. |
+| C 혼합 | `v7_host::commit_working`의 전체 상태 직렬화·재수입, `v7_adapter_actions`·`game_adapter.rs`의 Position ID | 현재 source DTO round-trip와 stale action 계약을 검증한다. 규칙 투영 해시로 즉시 바꾸면 ABI·action binding·학습 cache에 영향이 있다. |
+| C 혼합 | `v7_threat::reconcile_move_replay_capture_v7` | 옛 사운드 콜백이 수행하던 왕실 포획 probe에서 **활성 Replay capture journal만** 현재 상태로 복사한다. probe의 RNG 진행과 `checkDanger` cue 쓰기는 제거했다. `replay::commit_active_move`가 해당 journal을 읽어 `moveReplay` 복원 프레임을 만들 수 있어 이를 단순 삭제할 수 없다. |
+| D 미확정 | 위 probe의 Replay capture 및 RNG 효과 | `replay_capture_probe_can_change_the_next_committed_undo_frame` 재현 사례: 백 왕 (7,4), 흑 퀸 (6,4)에서 probe가 흑 capture를 남긴다. 다음 흑 commit 뒤 `moveReplay.black`은 probe 실행 여부에 따라 달라진다. 이후 흑의 Replay 카드 실행에서 `v7_card_turn::replay_available`는 이 frame의 `delta`와 현재 보드를 읽어 적용 가능 여부를 결정하고, `replay_move`는 frame을 읽어 복원한다. 이 미래 행동·복원 상태의 JS/Rust 비교는 아직 수행하지 않았다. probe가 소비하던 난수 중 이후 확률 전이의 **규칙 분포**를 바꾸는 것이 있는지 역시 조건부 결합분포 비교 전에는 확정할 수 없다. RNG cursor 일치는 요구하지 않는다. |
+
+`replay.rs`의 frame serializing/normalizing, `transition.rs`의 move capture 경계, `v7_action_surface.rs`의 폐기 clone, `v7_action_admission.rs`·`v7_adapter_actions.rs`의 source envelope, `card_effects.rs`의 animation, `projects/accelerate/native/src/game_adapter.rs`의 비공개 Position 경계를 조사했다. Replay 구조 전체의 분리는 수행하지 않았다.
+
+## 새 투영과 판정
+
+`rule_projection.py`는 Position envelope에서 RNG와 원본 Position ID를 제외한다. 정산된 `pendingReplayVisuals`·`pendingNotation`·`pendingNotations` 및 애니메이션 Set을 제외한다. `lastMove`, `boardHistory[*].lastMove`, `moveReplay.*.lastMoveAfter/previousLastMove`, Replay delta의 `lastMove` 전후 값과 Replay 시각 이벤트의 이동 기록에서 `soundName`만 정규화한다. 동결 JS의 효과음 재생·기보 표기 외에 `replayMoveCard`가 현재 `lastMove`와 저장된 `lastMoveAfter`를 통째로 비교하여 복원 분기를 선택한다. 그래서 정규화 전 이 일치 여부를 투영 불변식으로 남긴다. `soundColor`, 나머지 `boardHistory`·Replay frames/events·공개 history와 **모든 미분류 필드**는 보존한다. 기물 ID 대응 관계를 검증하는 일반 알고리즘이 아직 없으므로 서로 다른 ID를 가진 동등 상태는 현재 `MISMATCH`가 될 수 있다.
+
+`semantic_differential.py`는 paired JSONL의 시작 규칙 상태, ID·Position ID를 뺀 payload 기준 전체 합법 행동 집합과 동일 선택 행동, 두 관측자의 공개 상태, 잘못된 행동 거절·불변성을 검사한다. `transitionKind: deterministic`일 때 행동 후 규칙 상태·두 관측·결과를 정확히 비교한다. `stochastic`일 때 독립 단일 추첨끼리는 비교하지 않고, 같은 시작 투영 상태·행동에 조건화된 **다음 규칙 상태 + 두 관측 + 결과의 결합 결과 키**에 대한 분포를 비교한다. 실제로 나온 양쪽 결합 결과가 분포 지지집합에 포함돼야 한다. `exact`는 `complete: true`와 합계 1의 유리수 확률 지도가 필요하다. `sample`은 사전 허용오차 `tolerance`, 유의수준 `alpha`, 결과별 독립 표본 수가 필요하다. 표본 판정은 결과별 빈도 차이의 union-bound 범위이며 완전 동등성 증명은 아니다.
+
+`PASS`는 제출된 모든 증거가 비교 계약을 만족함, `MISMATCH`는 관측 불일치, `UNSUPPORTED`는 입력·기능·투영의 미지원, `INCONCLUSIVE`는 전이 분류 또는 표본 수로 판정 불가를 뜻한다. 시간 초과와 공급되지 않은 결과 공간은 `PASS`가 아니다. 새 source export는 잘못된 행동자 거절의 실제 `adapter.apply` 결과를 저장한다. 과거 export에는 이 증거가 없으므로 거절 검사는 `UNSUPPORTED`다. paired 행은 원본 SHA·실행 프로필·source export 및 원본 행 digest를 기록하고 검증기는 원본 보고서와 사례 파일을 받아 출처를 대조한다. 자동 정적 triage는 이동·카드·draft의 아직 닫히지 않은 규칙 효과 경로를 기록하고 해당 행을 `unknown`으로 둔다. 안전하게 증명된 결정적 범위는 아직 0개이며, Replay 연속 경로의 단일 실현도 `INCONCLUSIVE`다.
+
+## 사용자가 실행할 수 있는 명령
+
+아래 명령은 **제공만 하며 이 작업에서 실행하지 않았다**. Python 3.10 이상과 Rust toolchain이 필요하다. 생성물은 `%APPDATA%/Accelerate/reports` 아래에 두고 WSL에서는 호스트 APPDATA를 확인해 `wslpath`로 변환한다. `<...>`는 해당 실행의 절대 경로다. 보고서에 전체 비공개 상태·비밀을 복사하지 않는다.
+
+```text
+node projects/augment-chess/tests/differential/v7-native-differential.cjs --oracle-only --export-cases
+cargo run -p augment-chess-engine --bin augment-chess-semantic-pairs -- <절대-source-report.json> <절대-source-cases.jsonl> <절대-paired.jsonl>
+python3 projects/augment-chess/tests/differential/semantic_differential.py --pairs <절대-paired.jsonl> --source-report <절대-source-report.json> --source-cases <절대-source-cases.jsonl> --report <절대-semantic-report.json>
+python3 -m unittest discover -s projects/augment-chess/tests/differential -p test_rule_projection.py
+cargo test -p augment-chess-engine --lib replay_capture_probe_can_change_the_next_committed_undo_frame
+cargo test -p augment-chess-engine --lib replay_capture_probe_does_not_change_the_recorded_capture_cue
+```
+
+첫 명령의 `--oracle-only` 종료 코드는 의도적으로 실패이며, `report.json`의 `sourceExport` SHA·건수와 `source-cases.jsonl`을 확인한 뒤 둘째·셋째 명령에 **같은 실행**의 파일을 준다. 과거 export는 새 거절·Replay 연속 증거가 없으므로 다시 생성해야 한다. 둘째 명령은 공개 Rust host가 거부한 사례를 `.partial`에 기록하고 실패한다. 성공해도 아직 모든 자동 전이 분류가 `unknown`이어서 셋째 명령은 `INCONCLUSIVE` 또는 미지원 증거가 있으면 `UNSUPPORTED`로 종료한다. source 연속 도구는 이동 뒤 자연 합법 행동으로 상대 턴을 넘기고, Replay 카드가 실제 합법 목록에 있을 때만 적용한 뒤 다시 한 행동을 실행한다. 불가능한 경로는 `UNSUPPORTED`이며 자연 도달 Replay·포획·왕 위협 journal 사례의 실제 확보는 미실행이다. 확률적 행은 독립 단일 결과를 비교하지 않고 동일 조건의 완전 분포 또는 표본 분포를 별도로 수집해야 한다. 생성한 JSONL은 원시 비공개 상태를 포함하므로 Git에 넣지 않는다.
+
+## 왕 위협 Replay capture 계산 의존성
+
+`reconcile_move_replay_capture_v7`은 재생 가능한 `GameState` 전체를 복제하고 `ReplayCaptureScope`를 자식 clone에 붙인다. 양쪽 방어자에 대한 왕 위협 후보·가상 행동을 검사하되 첫 확인된 check에서는 중단한다. 실제 반환값으로 쓰는 것은 왕 위협 보고서가 아니라 자식의 마지막 활성 `MoveReplayCapture`이며, 이 값이 다음 `commit_active_move`에서 행동자와 일치하면 `moveReplay` frame으로 기록된다. 기존 내부 재현은 probe 실행 여부가 이 frame을 바꿀 수 있음을 보여준다. 따라서 Replay 복원·이후 행동의 JS↔Rust 검증 전에는 probe 전체를 제거하거나 단순 체크 계산으로 치환할 근거가 없다. 후보별 clone·완전한 위협 목록 중 journal에 영향을 주지 않는 부분은 향후 최적화 후보지만, 본 단계에서 Fast Path를 적용하거나 성능 향상률을 추정하지 않았다.
+
+| UI 제거 단위 | 규칙 영향 | 직접 확인 절차 |
+|---|---|---|
+| `play_move_sound_v7` 일반 이동·카드·회피 경로 | `soundName` cue와 probe RNG 복사를 제거하고 Replay capture journal 복사만 보존한다. 합법 행동과 전이의 조건부 분포는 미검증이다. | 위 paired 생성·규칙 비교, Replay capture 사례 검사, 해당 행동의 조건부 분포 수집 |
+| `play_crown_capture_sound_v7` 왕관 포획 경로 | 별도 사운드 함수를 없애고 같은 Replay capture 규칙 경계를 사용한다. 포획 뒤 복원 frame 영향이 미확정이다. | 왕관 포획의 시작/다음 상태·Replay 카드 복원 paired 자료와 조건부 분포 비교 |
+| v7 `lastMove.soundName` 기록 | 신규 기록에서 cue 필드를 제거한다. `soundColor`는 Idol Encore 규칙을 위해 보존한다. | 양측 공개 관측·Idol Encore 행동 전후, 마지막 이동 투영 비교 |
+
+## 남은 구현 위험
+
+- `RuleHistory`/`UndoState`가 아직 분리되지 않아 Replay frame과 표현 event가 규칙 코어에 남는다.
+- 분리된 Replay capture probe가 미래 복원 frame에 영향을 줄 수 있다는 정적·재현 사례는 있으나, JS와 Rust의 실제 복원 상태 및 이후 합법 행동을 검증하지 않았다. probe RNG 소비 제거가 조건부 확률 전이에 미치는 영향, 복수 무작위 효과의 공통 숨은 변수, Trolley 등 큰 결과 공간의 결합분포도 검증되지 않았다.
+- 관측자별 숨은 정보 투영, 다른 기물 ID의 참조 대응, 연속 대국의 미래 의존성, 모든 카드·특수 기물·종료 분기의 확률 열거가 미완료다.
+- 기존 전체 상태 diff는 RNG·UI 표현까지 비교하므로 이번 UI 제거의 규칙 동등성 gate가 아니다. 이 변경은 빌드/검사 미실행이며 Headless Rules Engine 전환의 완료나 규칙 동등성 확인을 뜻하지 않는다.
+
+## Replay 자연 도달 탐색과 연속 진단
+
+동결 원문의 카드 ID는 `replay`, 표시 이름은 `리플레이`, 효과 키는 `replayMove`다. `card-definitions-20260928.json`과 원문 `main-OahWs0tU.js`의 카드 정의는 `END` 드래프트, `REPLAYABLE_LAST_MOVE`, `ACTIVE`, `OWN_TURN`, `PRESERVE_TURN`을 명시한다. 원문 `finishDraftSelection`/`addCardToPlayerDeck`은 선택 카드를 `deckSlots[color]`에 저장한다. normal/chaos는 양쪽이 20턴을 마친 뒤 END 드래프트를 시작할 수 있고, grand는 시작할 때 공용 풀에서 드래프트한다. 풀에 정의된 사실만으로 특정 seed에서 제공되거나 획득된다고 단정하지 않는다.
+
+원문 `canPlayCard`의 `replayMove` 분기는 `moveReplay[color].available === true` 또는 `canReplayLastMove(color)`를 요구한다. 후자는 저장된 board delta와 현재 보드, 저장된 포획 목록의 접두가 맞는지 검사한다. 원문 `beginMoveReplayCapture`/`commitMoveReplayCapture`는 자기 이동의 복원 frame을 생성하며, free move에서는 capture를 취소할 수 있다. `replayMoveCard`는 delta, 자기 포획 기록, 조건에 따른 `lastMove`·앙파상·가속 흔적 및 색상별 효과를 복원하고 frame을 소모한다. 이후 턴 정책은 `PRESERVE_TURN`이다. 원문 전체 합법 행동 목록에 `{type:"card",cardId:"replay"}`가 존재해야 실제 사용 가능하다고 판정한다. Rust의 `v7_card_turn::replay_available`/`replay_move`와 이 조건의 동등성은 실행 결과 전까지 미검증이다.
+
+`v7-native-differential.cjs --replay-search=STYLE:START_SEED:SEED_COUNT:DECISIONS`는 seed마다 정상 새 대국에서 시작해 오라클의 합법 드래프트 행동 중 Replay 포함 선택을 우선한다. 선택한 인스턴스가 실제 덱 슬롯에 저장됐는지 검사하고, 이후 합법 이동만 사용한다. Replay 소유자 차례에는 최대 8개 자기 이동을 시험하고, 각 이동 뒤 최대 8개 상대 이동 중 Replay가 실제 합법 행동에 나타나는 경로를 우선한다. 실제 Replay와 후속 합법 행동까지 완료한 경우에만 source case를 export한다. seed 수 1~32, 결정 수 1~128, 한 호출의 범위 3개가 상한이다. 상한·무행동·게임 종료·획득 실패·frame 부재·턴 미복귀·사용 조건 거절은 보고서에 남긴다. 이 탐색은 유한 휴리스틱이며 상태 공간 전체를 탐색하지 않는다.
+
+장기 탐색의 드래프트·일반 진행과 후보 시험은 `recordHistory:false`로 외부 `Position.history` event 사본 누적을 생략한다. 오라클의 `state.boardHistory`, `moveReplay`, 덱·포획 및 나머지 규칙 상태와 RNG는 그대로 snapshot한다. 실제 export 사례를 만드는 `buildCase`와 Replay·후속 단계의 공개 event 기록은 유지한다. 두 기록 방식의 같은 드래프트·이동 행동에서 전체 `state`·RNG가 같은지 검증하는 회귀 테스트 코드를 추가했다. 16 MiB native batch 한도 초과 시 한도를 늘리거나 사례를 생략하지 않고 style·seed·decision·phase·`position.history.length`를 오류에 남긴다.
+
+JSON 상태 예산 조사에는 `ACCELERATE_JSON_BUDGET_DIAGNOSTICS=1`을 지정한다. `report.json`의 `status=JSON_BUDGET_EXCEEDED`, `jsonBudgetFailure`는 초과 제한(depth/nodes/bytes), 초과 순간과 직전 계수, JSON Pointer 형태의 경로와 상위 필드 경로, style/seed/decision, 상태 mode/turn, 행동 종류, 실패 단계, 입력 `Position.history` 길이, 경로를 저장소 상대 경로로 정리한 원래 스택을 기록한다. `topLevelFieldSizeSummary`는 실패한 `snapshot()`에서 이미 인코딩한 상태의 각 최상위 필드를 독립적으로 센 대략적 노드·바이트·상대 깊이이며, 20만 노드 또는 32 MiB에서 멈춘 필드는 `truncated=true`인 하한값이다. 존재하지 않는 필드는 나타나지 않는다. 원시 상태 값과 RNG 값은 이 진단 항목에 기록하지 않는다. 합법 행동 열거 중 오라클이 가상 후보를 적용하다 실패하면 `candidate trial`/`virtual candidate`로 구분한다. 이전에 완료한 source case와 seed 결과는 보고서에 남기고 전체 상태는 실패로 유지한다. 이 경로는 추가 게임 행동이나 RNG 호출 없이 인코딩된 객체만 읽는다. 진단 실행과 새 회귀 검사는 아직 **미실행**이다.
+
+기존 결과를 보존하기 위해 새 출력 루트를 지정하고 처음에는 원문 탐색만 실행한다. 아래 명령은 **미실행** 예시이며 `<새-출력-절대-루트>`는 Windows `%APPDATA%/Accelerate/reports` 아래의 사용하지 않은 디렉터리로 지정한다. 기존에 실패한 style/seed 범위를 알고 있다면 해당 범위로 바꾸어 한 seed부터 좁힌다.
+
+```text
+ACCELERATE_JSON_BUDGET_DIAGNOSTICS=1 node projects/augment-chess/tests/differential/v7-native-differential.cjs --oracle-only --source <고정-client-절대-경로> --output-root <새-출력-절대-루트> --replay-search=normal:0:1:128
+```
+
+성공한 source case에는 source SHA/profile과 시작 seed·스타일, 선택한 드래프트·일반 행동의 공개 intent, 획득 인스턴스, Replay/후속 intent 및 최종 digest가 포함된다. 실제 Position과 양측 공개 관측은 Git 밖 `source-cases.jsonl`에만 쓴다. 기존 paired 생성기는 이 상태를 Rust 공개 host로 import한 뒤 최초 이동, 상대 bridge, Replay, 후속 행동을 같은 공개 intent로 연속 실행한다. 각 단계의 전체 합법 intent, RuleProjection, 양측 관측, 결과 및 `moveReplay` frame은 해당 단계의 Position을 통해 비교한다. 단일 확률적 실행의 다음 상태 차이는 `INCONCLUSIVE`; 동일한 규칙 상태에 대한 완전 합법 intent 차이는 `MISMATCH`다. source에서만 카드 사용이 완료되거나 Rust가 중간 intent를 수용하지 못하면 `UNSUPPORTED`다. 성공한 실행 자체를 규칙 동등성 `PASS`로 승격하지 않는다.
+
+source 보고서의 검색 `complete`는 Replay와 후속 행동이 원문에서 실행됐다는 뜻이고, `unsupported`는 제한 범위에서 카드를 얻지 못했거나 대국을 계속할 수 없다는 뜻이다. `inconclusive`는 카드를 얻었지만 제한 범위에서 실제 Replay 사용을 완료하지 못했다는 뜻이다. paired 검증의 `MISMATCH`는 동일 상태의 검증 가능한 차이, `INCONCLUSIVE`는 단일 확률 표본이나 아직 분류되지 않은 전이, `UNSUPPORTED`는 필요한 단계·증거의 부재를 나타낸다. 원문 검색 성공 건수와 Rust 동등성 통과 건수는 별도로 읽어야 한다.
+
+`--output-root`는 기존 보고서를 덮어쓰지 않는 새 절대 출력 디렉터리를 지정하며, 해당 디렉터리의 보고서 또는 export가 이미 있으면 중단한다. Windows에서는 `%APPDATA%/Accelerate/reports` 아래의 새 실험별 디렉터리를 지정한다. 사용자 실행 예시는 다음과 같다. 모든 명령은 **미실행**이다.
+
+```text
+node projects/augment-chess/tests/differential/v7-native-differential.cjs --oracle-only --export-cases --source <고정-client-절대-경로> --output-root <새-출력-절대-루트> --replay-search=normal:0:16:128 --replay-search=chaos:0:16:128 --replay-search=grand:0:16:128
+cargo run -p augment-chess-engine --bin augment-chess-semantic-pairs -- <새-출력-절대-루트>/report.json <새-출력-절대-루트>/source-cases.jsonl <새-출력-절대-루트>/paired.jsonl
+python3 projects/augment-chess/tests/differential/semantic_differential.py --pairs <새-출력-절대-루트>/paired.jsonl --source-report <새-출력-절대-루트>/report.json --source-cases <새-출력-절대-루트>/source-cases.jsonl --report <새-출력-절대-루트>/semantic-report.json
+```
+
+원문의 활성 Replay capture는 모듈 전역 상태라 공개 Position/export에 직접 없다. `reconcile_move_replay_capture_v7`의 기존 Rust 재현은 합성 희소 보드 사례이며 자연 도달 동등성 증거가 아니다. 새 경로는 다음 committed move가 남긴 `moveReplay` frame, 실제 Replay 복원 및 후속 행동을 비교할 준비만 한다. 해당 왕 위협 분기를 자연 대국에서 만났는지 별도 판별하는 증거와 JS 활성 journal 직접 비교는 아직 미지원이다. 따라서 일반 이동·포획·백·흑·지속 효과별 Replay와 왕 위협 journal 동등성은 사용자가 해당 source case를 실제 생성하고 단계별 paired 결과를 확인하기 전까지 모두 미검증이다.

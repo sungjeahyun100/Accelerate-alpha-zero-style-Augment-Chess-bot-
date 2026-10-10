@@ -327,7 +327,9 @@ pub(crate) fn apply_without_public_event(
 ) -> Result<Vec<Piece>> {
     let captures = match action.kind {
         ActionKind::Move => apply_move(state, action, false)?,
-        ActionKind::Card => apply_card(state, action)?,
+        ActionKind::Card => {
+            crate::legal_profile::measure("card_effect_apply", || apply_card(state, action))?
+        }
         ActionKind::Promotion if state.ruleset_id == RULES_VERSION_V7 => {
             crate::v7_promotion::start_deferred_promotion_v7(state, action)?;
             Vec::new()
@@ -905,13 +907,15 @@ fn apply_move(state: &mut GameState, action: &Action, threat_probe: bool) -> Res
         Value::Object(memory)
     });
     crate::card_effects::mark_animation(state, &piece)?;
-    state.extra.insert(
-        "lastMove".into(),
-        json!({"from":from,"to":to,"pieceId":piece.id,"pieceType":original_type,
-            "soundName":if target.flag("castle"){"castle"}else if captures.is_empty(){if actor==Color::White {"moveSelf"} else {"moveOpponent"}}else{"capture"},
-            "soundColor":actor,"hiddenFrom":piece.extra.get("hiddenFrom").and_then(Value::as_str).unwrap_or(""),
-            "idolEncoreEligible":false,"idolEncoreId":"","idolEncorePieceId":"","idolEncoreConsumed":false}),
-    );
+    let mut last_move = json!({"from":from,"to":to,"pieceId":piece.id,"pieceType":original_type,
+        "soundColor":actor,"hiddenFrom":piece.extra.get("hiddenFrom").and_then(Value::as_str).unwrap_or(""),
+        "idolEncoreEligible":false,"idolEncoreId":"","idolEncorePieceId":"","idolEncoreConsumed":false});
+    if state.ruleset_id != RULES_VERSION_V7 {
+        last_move["soundName"] = json!(if target.flag("castle") { "castle" } else if captures.is_empty() {
+            if actor == Color::White { "moveSelf" } else { "moveOpponent" }
+        } else { "capture" });
+    }
+    state.extra.insert("lastMove".into(), last_move);
     // queueMoveHistoryNotation creates its identifier before promotion and turn
     // settlement, sharing the source random stream with later rule draws.
     if !threat_probe {
@@ -942,9 +946,9 @@ fn apply_move(state: &mut GameState, action: &Action, threat_probe: bool) -> Res
             "capture"
         };
         replay_interrupted = if state.ruleset_id == RULES_VERSION_V7 {
-            // The v7 threat probe simulates against a private clone. Source
-            // commitMoveReplayCapture still runs after that sound callback.
-            crate::v7_threat::play_move_sound_v7(state, sound, actor)?;
+            // Preserve the private probe's rule-visible Replay capture at
+            // this boundary without invoking an audio callback.
+            crate::v7_threat::reconcile_move_replay_capture_v7(state)?;
             false
         } else {
             crate::threat::play_move_sound(state, sound, actor)?
@@ -952,7 +956,7 @@ fn apply_move(state: &mut GameState, action: &Action, threat_probe: bool) -> Res
     }
     if state.ruleset_id == RULES_VERSION_V7 {
         // Both ordinary moves and the source's child-state threat simulation
-        // settle bombs after the sound boundary, before terminal early return.
+        // settle bombs after the Replay capture boundary, before terminal early return.
         crate::v7_rule_bombs::resolve_under_pieces(state, actor, false)?;
     }
     // Source movePiece returns immediately after the move sound/under-piece
@@ -2087,6 +2091,17 @@ pub(crate) fn end_move_for_decision(
     count_move: bool,
     history_reason: Option<&str>,
 ) -> Result<()> {
+    crate::legal_profile::measure("end_move_for_decision", || {
+        end_move_for_decision_profiled(state, actor, count_move, history_reason)
+    })
+}
+
+pub(crate) fn end_move_for_decision_profiled(
+    state: &mut GameState,
+    actor: Color,
+    count_move: bool,
+    history_reason: Option<&str>,
+) -> Result<()> {
     if state.ruleset_id != RULES_VERSION_V7 {
         return Err(EngineError::UnsupportedFeature(
             "decision endMove requires v7 source semantics".into(),
@@ -2100,6 +2115,17 @@ fn finish_move_with_count(state: &mut GameState, actor: Color, count_move: bool)
 }
 
 fn finish_move_with_history(
+    state: &mut GameState,
+    actor: Color,
+    count_move: bool,
+    history_reason: Option<&str>,
+) -> Result<()> {
+    crate::legal_profile::measure("finish_move_with_history", || {
+        finish_move_with_history_profiled(state, actor, count_move, history_reason)
+    })
+}
+
+fn finish_move_with_history_profiled(
     state: &mut GameState,
     actor: Color,
     count_move: bool,
@@ -2137,6 +2163,17 @@ fn finish_move_with_history(
 }
 
 fn finish_move_with_count_inner(
+    state: &mut GameState,
+    actor: Color,
+    count_move: bool,
+    context: &mut crate::v7_end_move_reactions::V7EndMoveContext,
+) -> Result<()> {
+    crate::legal_profile::measure("finish_move_with_count_inner", || {
+        finish_move_with_count_inner_profiled(state, actor, count_move, context)
+    })
+}
+
+fn finish_move_with_count_inner_profiled(
     state: &mut GameState,
     actor: Color,
     count_move: bool,
@@ -2638,6 +2675,12 @@ fn automatic_card_failure_message(effect: &str) -> Result<&'static str> {
 // owner-turn counter advances. It is separate from finishCard: an automatic
 // card is marked used, but does not consume a card action or add progress.
 fn resolve_first_move_cards(state: &mut GameState, actor: Color) -> Result<()> {
+    crate::legal_profile::measure("end_move_auto_effects", || {
+        resolve_first_move_cards_profiled(state, actor)
+    })
+}
+
+fn resolve_first_move_cards_profiled(state: &mut GameState, actor: Color) -> Result<()> {
     if state.flag("firstMoveCardsForced", actor) || *state.turns_taken.get(actor) != 0 {
         return Ok(());
     }

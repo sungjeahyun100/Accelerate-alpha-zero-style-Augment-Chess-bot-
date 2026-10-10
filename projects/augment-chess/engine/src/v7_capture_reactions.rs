@@ -616,11 +616,34 @@ pub(crate) fn capture_at(
     square: Square,
     options: &CaptureOptions,
 ) -> Result<Option<Piece>> {
+    crate::legal_profile::measure("move_capture", || {
+        capture_at_profiled(state, attacker, square, options)
+    })
+}
+
+pub(crate) fn capture_at_profiled(
+    state: &mut GameState,
+    attacker: &mut Piece,
+    square: Square,
+    options: &CaptureOptions,
+) -> Result<Option<Piece>> {
     let capturer = attacker.color.owner().ok_or(EngineError::WrongActor)?;
     capture_at_with_optional_attacker(state, square, capturer, Some(attacker), options)
 }
 
 pub(crate) fn capture_at_with_optional_attacker(
+    state: &mut GameState,
+    square: Square,
+    capturer: Color,
+    attacker: Option<&mut Piece>,
+    options: &CaptureOptions,
+) -> Result<Option<Piece>> {
+    crate::legal_profile::measure("move_capture_inner", || {
+        capture_at_with_optional_attacker_profiled(state, square, capturer, attacker, options)
+    })
+}
+
+pub(crate) fn capture_at_with_optional_attacker_profiled(
     state: &mut GameState,
     square: Square,
     capturer: Color,
@@ -1498,19 +1521,11 @@ fn try_evade_capture(
         state,
         json!({"type":"evasion","color":victim.color,"from":origin,"to":destination}),
     )?;
-    let owner = victim
+    victim
         .color
         .owner()
         .ok_or_else(|| EngineError::InvalidState("v7 evasion piece lacks a player color".into()))?;
-    crate::v7_threat::play_move_sound_v7(
-        state,
-        if owner == Color::White {
-            "moveSelf"
-        } else {
-            "moveOpponent"
-        },
-        owner,
-    )?;
+    crate::v7_threat::reconcile_move_replay_capture_v7(state)?;
     crate::replay::add_piece_action_log(
         state,
         victim,

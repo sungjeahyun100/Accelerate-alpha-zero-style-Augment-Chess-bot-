@@ -173,6 +173,16 @@ pub(crate) fn settle_end_move_before_count_with_context(
     actor: Color,
     context: &mut V7EndMoveContext,
 ) -> Result<V7FlowControl> {
+    crate::legal_profile::measure("settle_end_move_before_count", || {
+        settle_end_move_before_count_with_context_profiled(state, actor, context)
+    })
+}
+
+pub(crate) fn settle_end_move_before_count_with_context_profiled(
+    state: &mut GameState,
+    actor: Color,
+    context: &mut V7EndMoveContext,
+) -> Result<V7FlowControl> {
     // Source main99894 keeps actor and snapshot in one private capture. Copy
     // that pair together; snapshot.turn must never be used to infer its actor.
     context.replay_capture = crate::replay::active_move_capture(state)?;
@@ -695,6 +705,12 @@ pub(crate) fn clear_previous_trickster_abilities(state: &mut GameState) {
 /// Source main93249, after undead resurrection and before Otherworld. A
 /// simultaneous five-column completion draws only in September22 profiles.
 pub(crate) fn check_gomoku_victory(state: &mut GameState) -> Result<bool> {
+    crate::legal_profile::measure("game_over_gomoku_check", || {
+        check_gomoku_victory_profiled(state)
+    })
+}
+
+pub(crate) fn check_gomoku_victory_profiled(state: &mut GameState) -> Result<bool> {
     if state.mode == "gameover" {
         return Ok(false);
     }
@@ -884,7 +900,7 @@ pub(crate) fn apply_pending_pawn_storm_for_turn(
                         .collect::<Vec<_>>()
                 ),
             );
-        crate::v7_threat::play_move_sound_v7(&mut next, sound, actor)?;
+        crate::v7_threat::reconcile_move_replay_capture_v7(&mut next)?;
         crate::replay::add_log(
             &mut next,
             format!(
@@ -1527,6 +1543,15 @@ fn stop_automatic_log(state: &mut GameState, log: &mut Piece) -> Result<()> {
 /// The host calls this only after a `Continue` pre-count result in the same
 /// transaction. Any terminal result must stop the remaining turn pipeline.
 pub(crate) fn settle_end_move_after_count(
+    state: &mut GameState,
+    actor: Color,
+) -> Result<V7FlowControl> {
+    crate::legal_profile::measure("settle_end_move_after_count", || {
+        settle_end_move_after_count_profiled(state, actor)
+    })
+}
+
+pub(crate) fn settle_end_move_after_count_profiled(
     state: &mut GameState,
     actor: Color,
 ) -> Result<V7FlowControl> {
