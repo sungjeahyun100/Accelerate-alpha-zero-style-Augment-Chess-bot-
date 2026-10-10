@@ -823,7 +823,7 @@ mod tests {
         changed["moveReplay"] = json!({"white":"changed","black":null});
         assert_eq!(
             first_difference(&baseline, &changed, "state").unwrap()["path"],
-            "state.moveReplay"
+            "state.moveReplay.white"
         );
     }
     #[test]
