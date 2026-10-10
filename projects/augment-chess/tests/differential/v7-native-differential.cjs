@@ -9,6 +9,7 @@ const { spawnSync } = require("node:child_process");
 const { FrozenClientSource, GameAdapter } = require("../../oracle/game-adapter/src");
 const { OracleRuntime } = require("../../oracle/game-adapter/src/game-adapter");
 const { createRuntimeContract } = require("../../contracts/tools/runtime-contract");
+const { replayGrowth } = require("../../contracts/tools/replay-growth");
 
 const SOURCE_SHA256 = "e5ed84fcf8e72a24e6a8cfeb9050787387a616c55184e6501fca2077e302c45c";
 const PROFILE = "accelerate-headless-semantic-v7-faithful-init-v1";
@@ -37,12 +38,13 @@ const ACTIVE_SEED19 = Object.freeze({
 
 function options(argv) {
   const selected = { python: process.env.PYTHON || "python", source: null, outputRoot: null,
-    oracleOnly: false, exportCases: false, playouts: [], replaySearches: [] };
+    oracleOnly: false, exportCases: false, replayGrowth: false, playouts: [], replaySearches: [] };
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === "--python" && argv[index + 1]) selected.python = argv[++index];
     else if (argv[index] === "--source" && argv[index + 1]) selected.source = argv[++index];
     else if (argv[index] === "--output-root" && argv[index + 1]) selected.outputRoot = argv[++index];
     else if (argv[index] === "--oracle-only") selected.oracleOnly = true;
+    else if (argv[index] === "--replay-growth") selected.replayGrowth = true;
     else if (argv[index] === "--export-cases") selected.exportCases = true;
     else if (argv[index].startsWith("--playout=")) {
       const match = /^--playout=(normal|chaos|grand):(\d+):(\d+)$/.exec(argv[index]);
@@ -60,7 +62,7 @@ function options(argv) {
       selected.replaySearches.push({ style: match[1], startSeed: Number(match[2]),
         seedCount: Number(match[3]), decisions: Number(match[4]) });
       if (selected.replaySearches.length > 3) throw new TypeError("At most three Replay search ranges per invocation.");
-    } else throw new TypeError("Usage: node v7-native-differential.cjs [--python PYTHON] [--source ABSOLUTE_PINNED_ROOT] [--output-root ABSOLUTE_NEW_ROOT] [--oracle-only] [--export-cases] [--playout=STYLE:SEED:DECISIONS] [--replay-search=STYLE:START_SEED:SEED_COUNT:DECISIONS]...");
+    } else throw new TypeError("Usage: node v7-native-differential.cjs [--python PYTHON] [--source ABSOLUTE_PINNED_ROOT] [--output-root ABSOLUTE_NEW_ROOT] [--oracle-only] [--replay-growth] [--export-cases] [--playout=STYLE:SEED:DECISIONS] [--replay-search=STYLE:START_SEED:SEED_COUNT:DECISIONS]...");
   }
   if (new Set(selected.playouts.map(item => `${item.style}:${item.seed}`)).size !== selected.playouts.length)
     throw new TypeError("Duplicate style/seed playout.");
@@ -300,7 +302,7 @@ function validateReplayWitness(search, sample) {
 // One bounded source-only search per seed. Every candidate and accepted step
 // comes from the frozen adapter. A witness is exported only after a real card
 // action and follow-up have completed; failures stay in the summary.
-function searchReplaySeed(source, contract, { style, seed, decisions }) {
+function searchReplaySeed(source, contract, { style, seed, decisions }, onGrowth = null) {
   const adapter = new GameAdapter({ source, contract });
   const runtime = new OracleRuntime({ source, contract });
   const trace = [], draft = [];
@@ -311,6 +313,8 @@ function searchReplaySeed(source, contract, { style, seed, decisions }) {
   try {
     let position = adapter.newGame({ gameStyle: style }, seed);
     for (let decision = 0; decision < decisions; decision++) {
+      if (onGrowth) onGrowth(replayGrowth(position.state,
+        { style, seed, decision, stage: "before legal enumeration", mode: position.state.mode }));
       if (diagnostic) {
         diagnostic.decision = decision;
         diagnostic.searchPhase = position.state.mode === "draft" ? "draft" : "play";
@@ -389,6 +393,8 @@ function searchReplaySeed(source, contract, { style, seed, decisions }) {
       const next = adapter.apply(position, chosen, { recordHistory: false });
       if (!next.ok) throw new Error("source rejected its own search action");
       position = next.position;
+      if (onGrowth) onGrowth(replayGrowth(position.state,
+        { style, seed, decision, stage: "after ordinary move", mode: position.state.mode }));
     }
     return { item: null, summary: { style, seed, status: acquired ? "inconclusive" : "unsupported",
       reason: unavailable, attempts, acquired, draftChoices: draft.length, decisions: trace.length } };
@@ -692,6 +698,8 @@ function jsonBudgetFailure(error) {
     jsonRoot: error.jsonRoot ?? null,
     exceededBudget: error.budget ?? null, exceededJsonPath: error.budget?.path ?? null,
     topLevelFieldSizeSummary: error.stateFields ?? null,
+    failedReplayGrowth: error.failedReplayGrowth ?? null,
+    replayGrowthError: error.replayGrowthError ?? null,
     stateSummaryError: error.stateSummaryError ?? null,
     originalExceptionStack: sanitizedStack(error) };
 }
@@ -786,6 +794,10 @@ function main() {
   const parent = process.env.RUNNER_TEMP || process.env.APPDATA;
   if (!parent || !path.isAbsolute(parent)) throw new Error("APPDATA or RUNNER_TEMP must be an absolute report root");
   const args = options(process.argv.slice(2));
+  if (args.replayGrowth) {
+    process.env.ACCELERATE_JSON_BUDGET_DIAGNOSTICS = "1";
+    process.env.ACCELERATE_REPLAY_GROWTH_DIAGNOSTICS = "1";
+  }
   if (args.outputRoot && !path.isAbsolute(args.outputRoot)) throw new Error("--output-root must be absolute");
   const reportPath = args.outputRoot ? path.join(args.outputRoot, "report.json") :
     path.join(parent, "Accelerate", "reports", "v7-native-differential", "report.json");
@@ -821,6 +833,7 @@ function main() {
     report.sourceCases = [];
     report.playouts = args.playouts;
     report.replaySearch = [];
+    if (args.replayGrowth) report.replayGrowth = [];
     const exportPath = path.join(path.dirname(reportPath), "source-cases.jsonl");
     if (args.outputRoot && args.exportCases && fs.existsSync(exportPath))
       throw new Error("source export already exists; choose a new --output-root");
@@ -840,7 +853,8 @@ function main() {
         for (const search of args.replaySearches) {
           for (let offset = 0; offset < search.seedCount; offset++) {
             const result = searchReplaySeed(source, contract,
-              { style: search.style, seed: search.startSeed + offset, decisions: search.decisions });
+              { style: search.style, seed: search.startSeed + offset, decisions: search.decisions },
+              args.replayGrowth ? row => report.replayGrowth.push(row) : null);
             report.replaySearch.push(result.summary);
             if (result.item) yield result.item;
           }

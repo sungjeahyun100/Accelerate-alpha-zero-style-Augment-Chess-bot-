@@ -330,6 +330,10 @@ class OracleRuntime {
         error.failedStateTurn = encodedState.turn;
         try { error.stateFields = this.contract.summarizeStateFields(encodedState); }
         catch (diagnosticError) { error.stateSummaryError = `${diagnosticError.name}: ${diagnosticError.message}`; }
+        if (process.env.ACCELERATE_REPLAY_GROWTH_DIAGNOSTICS === "1") {
+          try { error.failedReplayGrowth = require("../../../contracts/tools/replay-growth").replayGrowth(encodedState, { stage: "failed snapshot" }); }
+          catch (diagnosticError) { error.replayGrowthError = `${diagnosticError.name}: ${diagnosticError.message}`; }
+        }
       }
       throw error;
     }

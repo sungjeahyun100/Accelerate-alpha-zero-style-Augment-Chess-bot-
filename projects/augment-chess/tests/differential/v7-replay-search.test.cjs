@@ -4,6 +4,21 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { options, replayAbsence, replayDraftChoice, validateReplayWitness,
   caseBudgetContext, caseBudgetError, jsonBudgetFailure, sourceReplaySequence } = require("./v7-native-differential.cjs");
+const { measure, replayGrowth } = require("../../contracts/tools/replay-growth");
+
+test("Replay growth diagnostic counts canonical nodes without changing encoded state", () => {
+  const state = { replayEvents: [{ delta: { board: { cells: [null] }, fields: [] } }],
+    boardHistory: [], notationTimeline: [], replayTailFrame: null, moveReplay: { white: null } };
+  const before = JSON.stringify(state);
+  const row = replayGrowth(state, { decision: 1 });
+  assert.equal(JSON.stringify(state), before);
+  assert.equal(row.replayEvents.count, 1);
+  assert.equal(row.replayEvents.nodes, measure(state.replayEvents).nodes);
+  assert.equal(row.replayEvents.latestDelta.nodes, measure(state.replayEvents[0].delta).nodes);
+  assert.equal(row.replayEvents.boardCellChanges, 1);
+  assert.equal(row.replayEvents.fieldChanges, 0);
+  assert.ok(!JSON.stringify(row).includes('"white"'));
+});
 
 test("Replay search has finite seed and decision bounds", () => {
   assert.deepEqual(options(["--replay-search=normal:10:2:64"]).replaySearches,
