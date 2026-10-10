@@ -476,16 +476,30 @@ def tests():
     _, _, _, reports, python = locations()
     reports.mkdir(parents=True, exist_ok=True)
     report = reports / "pytest.xml"
+    bf16_probe = subprocess.run(
+        [str(python), "-c", "import torch; print(int(torch.cuda.is_available() and torch.cuda.is_bf16_supported()))"],
+        cwd=REPOSITORY, capture_output=True, text=True, check=True, timeout=30,
+    )
+    if bf16_probe.stdout.strip() not in {"0", "1"}:
+        raise RuntimeError(f"unexpected CUDA BF16 capability result: {bf16_probe.stdout!r}")
+    cuda_bf16_available = bf16_probe.stdout.strip() == "1"
+    # pytest selects node IDs relative to projects/accelerate (its rootdir).
+    optional_bf16_case = "python/tests/test_session.py::test_cuda_bf16_training_keeps_fp32_master_and_adamw_state"
+    optional_selection = [] if cuda_bf16_available else [f"--deselect={optional_bf16_case}"]
+    if not cuda_bf16_available:
+        print(f"optional CUDA BF16 hardware unsupported; deselecting {optional_bf16_case}", flush=True)
     run(python, "-m", "pytest", "projects/accelerate/python/tests/test_native.py", "projects/accelerate/python/tests/test_model_stack.py",
         "projects/accelerate/python/tests/test_ir.py", "projects/accelerate/python/tests/test_entity_transformer.py",
         "projects/accelerate/python/tests/test_inference_runtime.py", "projects/accelerate/python/tests/test_search.py", "projects/accelerate/python/tests/test_session.py",
         "projects/accelerate/python/tests/test_adapter_client.py", "projects/accelerate/python/tests/test_architecture_v1.py",
         "-p", "no:cacheprovider",
-        "--junitxml", report, "-ra", timeout=1800)
+        "--junitxml", report, "-ra", *optional_selection, timeout=1800)
     suites = ET.parse(report).getroot().findall("testsuite")
     if not suites or any(int(suite.get("skipped", "0")) for suite in suites):
         raise RuntimeError("native bot CI requires real tests with no skips")
     cases = [case for suite in suites for case in suite.findall("testcase")]
+    if cuda_bf16_available and not any(case.get("name") == optional_bf16_case.rsplit("::", 1)[1] for case in cases):
+        raise RuntimeError("CUDA BF16 hardware is available but its optional training check was not executed")
     for module, minimum in (("test_native", 6), ("test_model_stack", 7), ("test_ir", 7),
                             ("test_entity_transformer", 7), ("test_inference_runtime", 6),
                             ("test_search", 11), ("test_session", 4),
@@ -520,6 +534,8 @@ def tests():
     (reports / "test-scope.json").write_text(json.dumps({
         "implementation": "installed wheel; native/typed IR/two model families/ort/tract/search/replay/CLI",
         "skips": 0, "default_weighted_conditioning_modes": list(default_checks),
+        "optional_cuda_bf16": "executed" if cuda_bf16_available else "unsupported",
+        "deselected_optional_tests": [] if cuda_bf16_available else [optional_bf16_case],
         "typed_contract_checks": list(typed_checks),
         "game_adapter_draft_modes": list(adapter_modes),
         "scope": "code and bounded synthetic checks; full rules/catalog coverage is a separate pending gate",

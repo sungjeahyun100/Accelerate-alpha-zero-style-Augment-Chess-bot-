@@ -1200,8 +1200,8 @@ class TypedEncoder:
         return condition
 
 
-def batch_typed_positions(positions: Sequence[TypedPosition]) -> TypedBatch:
-    """Pad independent public feature tensors without altering real cells."""
+def batch_typed_positions(positions: Sequence[TypedPosition], *, retain_positions: bool = True) -> TypedBatch:
+    """Pad independent public tensors; inference can release source positions."""
     if not positions or any(not isinstance(position, TypedPosition) for position in positions):
         raise ValueError("typed batch needs at least one TypedPosition")
     if (len(positions) > min(position.max_batch for position in positions)
@@ -1247,4 +1247,4 @@ def batch_typed_positions(positions: Sequence[TypedPosition]) -> TypedBatch:
             target = arrays[name]
             slices = (batch_index, *(slice(0, length) for length in source.shape))
             target[slices] = source
-    return TypedBatch(arrays, tuple(positions), positions[0].spec_digest)
+    return TypedBatch(arrays, tuple(positions) if retain_positions else (), positions[0].spec_digest)

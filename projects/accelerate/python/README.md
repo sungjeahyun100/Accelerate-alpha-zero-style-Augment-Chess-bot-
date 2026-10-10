@@ -88,6 +88,13 @@ python -m accelerate_chess.cli selfplay --help
 | `evaluate` | replay의 제한된 sample에 명시한 실제 backend를 실행하고 수치 기록 |
 | `activate` | 지정한 artifact hash를 검사한 뒤 active 참조를 명시적으로 기록 |
 
+`train --dtype`는 기본 `fp32`와 CUDA 전용 `bf16`을 지원합니다. BF16에서는 모델 forward만
+autocast하고 policy/value loss는 FP32로 계산합니다. 모델 파라미터와 AdamW 상태는 FP32로
+유지하며 GradScaler는 사용하지 않습니다. CUDA 또는 BF16을 지원하지 않는 장치에서는 요청을
+오류로 거부합니다. 학습 보고서와 checkpoint에 dtype이 기록되고, 재개 시 요청한 dtype과
+다르면 거부합니다. 이전 v1/v2 학습 checkpoint는 정확한 구버전 스키마에 한해 FP32로 해석합니다.
+합성 학습 벤치마크도 같은 `--dtype fp32|bf16` 정책을 사용합니다.
+
 기본 모델은 8 block·128 channel·LoRA rank 8이고 봇 encoding은 public intent와 공개 이력
 요약을 사용합니다. 기본 추론 backend는 `ort`, `tract`는 명시적으로 선택합니다.
 `--threads`는 Torch와 native ort에 적용되며 tract는 1만 허용합니다. artifact 활성화는

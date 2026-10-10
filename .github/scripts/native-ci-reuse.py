@@ -178,10 +178,15 @@ def validate_evidence(scope: str, marker: Path) -> None:
                                    "source-pinned native differential report")
         installed_policy = packaging.get("observation_policy")
         conditioned_modes = tests.get("default_weighted_conditioning_modes")
+        optional_bf16_case = "python/tests/test_session.py::test_cuda_bf16_training_keeps_fp32_master_and_adamw_state"
+        optional_bf16 = tests.get("optional_cuda_bf16")
+        optional_deselected = tests.get("deselected_optional_tests")
         if (packaging.get("installed") is not True
                 or not isinstance(installed_policy, dict)
                 or installed_policy.get("source_distribution_match") is not True
                 or tests.get("skips") != 0
+                or optional_bf16 not in {"executed", "unsupported"}
+                or optional_deselected != ([] if optional_bf16 == "executed" else [optional_bf16_case])
                 or not isinstance(conditioned_modes, list)
                 or sorted(conditioned_modes) != ["chaos", "grand", "normal"]
                 or differential.get("status") != "pass"
