@@ -803,6 +803,16 @@ mod tests {
             assert!(
                 result["checkpoints"][1]["measurement"]["metrics"]["replayEventCount"].is_number()
             );
+            if mode == ReplayMode::FullReplay {
+                let at_zero =
+                    result["checkpoints"][0]["measurement"]["metrics"]["replayEventCount"]
+                        .as_u64()
+                        .unwrap();
+                let at_ten = result["checkpoints"][1]["measurement"]["metrics"]["replayEventCount"]
+                    .as_u64()
+                    .unwrap();
+                assert!(at_ten > at_zero);
+            }
         }
     }
     #[test]
