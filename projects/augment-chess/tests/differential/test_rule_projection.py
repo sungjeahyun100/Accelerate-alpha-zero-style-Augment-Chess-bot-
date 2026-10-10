@@ -144,6 +144,7 @@ class TransitionTests(unittest.TestCase):
     def test_replay_chain_needs_transition_evidence(self) -> None:
         step = {"kind": "replay", "beforeActions": [self.action],
                 "position": self.position, "actions": [self.action],
+                "replayFrame": None,
                 "observations": {"white": {}, "black": {}},
                 "result": {"status": "ongoing", "winner": None, "outcome": None}}
         follow = deepcopy(step)
@@ -163,7 +164,7 @@ class TransitionTests(unittest.TestCase):
             "sourceBeforeActions": [self.action], "rustBeforeActions": [],
         }
         result = compare_case(self.case)
-        self.assertEqual(result["checks"]["replaySequence"]["status"], "INCONCLUSIVE")
+        self.assertEqual(result["checks"]["replaySequence"]["status"], "MISMATCH")
         self.assertEqual(result["replaySteps"][0]["checks"]["legalActions"]["status"], "MISMATCH")
 
 

@@ -2,7 +2,8 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { options, replayAbsence, replayDraftChoice, validateReplayWitness } = require("./v7-native-differential.cjs");
+const { options, replayAbsence, replayDraftChoice, validateReplayWitness,
+  caseBudgetContext, caseBudgetError } = require("./v7-native-differential.cjs");
 
 test("Replay search has finite seed and decision bounds", () => {
   assert.deepEqual(options(["--replay-search=normal:10:2:64"]).replaySearches,
@@ -46,4 +47,17 @@ test("a natural witness requires draft ownership, legal Replay and follow-up", (
   assert.throws(() => validateReplayWitness(search, { replaySequence: {
     ...sample.replaySequence, steps: sample.replaySequence.steps.slice(0, 1),
   } }));
+});
+
+test("JSON budget failure identifies the bounded search position without state contents", () => {
+  const item = { summary: { name: "normal-seed7-replay-52",
+    replaySearch: { style: "normal", seed: 7, decision: 52, phase: "END" } },
+  input: { position: { state: { mode: "play", board: "private" }, history: [] } } };
+  assert.deepEqual(caseBudgetContext(item), {
+    style: "normal", seed: 7, decision: 52, phase: "END", "position.history.length": 0,
+  });
+  const error = caseBudgetError(item);
+  for (const marker of ["normal", "7", "52", "END", "position.history.length"])
+    assert.ok(error.includes(marker));
+  assert.ok(!error.includes("private"));
 });

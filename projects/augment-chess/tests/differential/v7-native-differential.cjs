@@ -205,7 +205,7 @@ function sourceReplaySequence(adapter, contract, runtime, start, actor) {
       const { actions } = sourceActions(adapter, position);
       const moves = actions.filter(action => action.payload.type === "move").slice(0, 8);
       const move = moves.find(action => {
-        const trial = adapter.apply(position, action, { recordHistory: true });
+        const trial = adapter.apply(position, action, { recordHistory: false });
         if (!trial.ok || trial.position.state.turn !== actor) return false;
         return sourceActions(adapter, trial.position).actions.some(candidate =>
           candidate.payload.type === "card" && candidate.payload.cardId === "replay");
@@ -295,7 +295,7 @@ function searchReplaySeed(source, contract, { style, seed, decisions }) {
         draft.push({ decision, phase: position.state.draft?.phase, color: chosen.payload.color,
           publicIntent: chosen.payload, selectedCardIds: cardIds.map(id => offered.get(id) || null) });
         const replayIds = cardIds.filter(id => offered.get(id) === "replay");
-        const step = adapter.apply(position, chosen, { recordHistory: true });
+        const step = adapter.apply(position, chosen, { recordHistory: false });
         if (!step.ok) throw new Error("source rejected its own draft choice");
         position = step.position;
         if (replayIds.length) {
@@ -314,7 +314,7 @@ function searchReplaySeed(source, contract, { style, seed, decisions }) {
       if (owned) {
         for (const move of actions.filter(action => action.payload.type === "move").slice(0, 8)) {
           attempts++;
-          const next = adapter.apply(position, move, { recordHistory: true });
+          const next = adapter.apply(position, move, { recordHistory: false });
           if (!next.ok) continue;
           const continuation = sourceReplaySequence(adapter, contract, runtime, next.position, actor);
           if (continuation.status !== "complete") { unavailable = continuation.reason; continue; }
@@ -331,8 +331,10 @@ function searchReplaySeed(source, contract, { style, seed, decisions }) {
           item.summary.replayMoveCapture =
             (sample.position.state.captures?.[actor]?.length || 0) >
             (position.state.captures?.[actor]?.length || 0);
+          runtime.restore(position);
+          const phase = runtime.evaluate("getPhase()");
           item.summary.replaySearch = { sourceSha256: SOURCE_SHA256, profile: PROFILE,
-            style, seed, decision, attempts, draft, acquired,
+            style, seed, decision, phase, attempts, draft, acquired,
             preReplayActions: trace, selectedMove: sample.publicIntent,
             availability: sample.replaySequence.steps.find(step => step.kind === "replay")?.beforeActions
               .some(intent => intent.type === "card" && intent.cardId === "replay"),
@@ -349,7 +351,7 @@ function searchReplaySeed(source, contract, { style, seed, decisions }) {
       const chosen = moves.length ? moves[Math.floor(decision / 2) % moves.length] : actions[0];
       trace.push({ decision, publicIntent: sourcePublicIntents(runtime, contract, position, actions)
         .byActionId.get(chosen.actionId)[0] });
-      const next = adapter.apply(position, chosen, { recordHistory: true });
+      const next = adapter.apply(position, chosen, { recordHistory: false });
       if (!next.ok) throw new Error("source rejected its own search action");
       position = next.position;
     }
@@ -609,10 +611,27 @@ function syntheticTimedStatusCases(source, contract) {
   return cases;
 }
 
-function nativeProbe(python, request) {
+function caseBudgetContext(item) {
+  const position = item.input.position;
+  return {
+    style: item.summary.replaySearch?.style ?? item.summary.style ?? null,
+    seed: item.summary.replaySearch?.seed ?? item.summary.seed ?? null,
+    decision: item.summary.replaySearch?.decision ?? item.summary.playoutDecision ?? null,
+    phase: item.summary.replaySearch?.phase ?? position.state.draft?.phase ?? position.state.mode,
+    "position.history.length": position.history.length,
+  };
+}
+
+function caseBudgetError(item) {
+  return `${item.summary.name}: one source case exceeds the 16 MiB native batch budget; ` +
+    `context=${JSON.stringify(caseBudgetContext(item))}`;
+}
+
+function nativeProbe(python, request, budgetContext = null) {
   const input = JSON.stringify(request);
   if (Buffer.byteLength(input) > MAX_BATCH_BYTES)
-    throw new Error("v7 native probe batch exceeds 16 MiB; narrow the generated scenarios");
+    throw new Error("v7 native probe batch exceeds 16 MiB; narrow the generated scenarios" +
+      (budgetContext ? `; context=${JSON.stringify(budgetContext)}` : ""));
   const child = spawnSync(python, [path.join(__dirname, "v7-native-probe.py")], {
     input, encoding: "utf8", timeout: 60000, maxBuffer: 4 * 1024 * 1024,
     windowsHide: true,
@@ -660,10 +679,11 @@ function compareCases(python, identity, items, report, oracleOnly, exportCase = 
   const nativeCases = [];
   let batch = [];
   let bytes = Buffer.byteLength(JSON.stringify({ phase: "compare", ...identity, cases: [] }));
+  let batchContext = null;
   let status = oracleOnly ? "oracle-only" : "pass";
   const flush = () => {
     if (!batch.length || oracleOnly) { batch = []; return; }
-    const response = nativeProbe(python, { phase: "compare", ...identity, cases: batch });
+    const response = nativeProbe(python, { phase: "compare", ...identity, cases: batch }, batchContext);
     const { cases: observedCases, failure } = inspectNativeComparison(response, batch);
     nativeCases.push(...observedCases);
     if (failure) {
@@ -671,16 +691,18 @@ function compareCases(python, identity, items, report, oracleOnly, exportCase = 
       (report.nativeFailures ??= []).push(failure);
     }
     batch = [];
+    batchContext = null;
     bytes = Buffer.byteLength(JSON.stringify({ phase: "compare", ...identity, cases: [] }));
   };
   for (const item of items) {
     const itemBytes = Buffer.byteLength(JSON.stringify(item.input)) + 1;
     if (itemBytes + bytes > MAX_BATCH_BYTES) flush();
-    if (itemBytes + bytes > MAX_BATCH_BYTES) throw new Error(`${item.summary.name}: one source case exceeds the 16 MiB native batch budget`);
+    if (itemBytes + bytes > MAX_BATCH_BYTES) throw new Error(caseBudgetError(item));
     if (exportCase) exportCase(item.input);
     report.sourceCases.push(item.summary);
     if (!oracleOnly) {
       batch.push(item.input);
+      batchContext = caseBudgetContext(item);
       bytes += itemBytes;
       if (batch.length >= MAX_BATCH_CASES) flush();
     }
@@ -791,5 +813,6 @@ function main() {
 module.exports = Object.freeze({ SOURCE_SHA256, PROFILE, ACTIVE_SEED19, STYLES,
   sourceActions, sourcePublicPayloads, sourcePublicIntents, buildCase, firstActiveDraftAction, advanceInitialDraft, sourceCases,
   syntheticTerminalCases, syntheticTimedStatusCases, inspectNativeComparison,
-  replayAbsence, replayDraftChoice, validateReplayWitness, searchReplaySeed, sourceReplaySequence, options });
+  replayAbsence, replayDraftChoice, validateReplayWitness, searchReplaySeed, sourceReplaySequence,
+  caseBudgetContext, caseBudgetError, options });
 if (require.main === module) main();
