@@ -147,7 +147,7 @@ fn mcts(
             };
             leaf = apply_intent(&leaf, intent)?;
         }
-        let material = leaf
+        let material: f64 = leaf
             .state()
             .board
             .iter()
