@@ -1303,7 +1303,7 @@ pub(crate) fn execute_position_swap_with_privacy(
     let before = if relay && !allowed {
         None
     } else {
-        Some(crate::replay::begin_move(&mut next, actor)?)
+        crate::replay::begin_move(&mut next, actor)?
     };
     if !allowed {
         if substitution {
@@ -2099,7 +2099,7 @@ pub(crate) enum SiegeRamPreCapture {
         captured_something: bool,
         chameleon_victim: Option<Piece>,
         captures: Vec<Piece>,
-        replay_before: Box<GameState>,
+        replay_before: Option<Box<GameState>>,
     },
 }
 
@@ -2207,7 +2207,7 @@ pub(crate) fn execute_siege_ram_pre_capture(
         captured_something,
         chameleon_victim,
         captures,
-        replay_before: Box::new(before),
+        replay_before: before.map(Box::new),
     }))
 }
 
@@ -2376,8 +2376,8 @@ pub(crate) fn push_mad_knight_undo_before_move(
         "kingDead":fallback("kingDead",json!({"white":false,"black":false})),
         "castled":fallback("castled",json!({"white":false,"black":false})),
         "enPassant":next.en_passant,"lastMove":fallback("lastMove",Value::Null),"logs":fallback("logs",json!([])),
-        "boardHistoryLength":next.extra.get("boardHistory").and_then(Value::as_array).map_or(0,Vec::len),
-        "replayEventLength":next.extra.get("replayEvents").and_then(Value::as_array).map_or(0,Vec::len),
+        "boardHistoryLength":crate::replay_experiment::history_count(&next,"boardHistory"),
+        "replayEventLength":crate::replay_experiment::history_count(&next,"replayEvents"),
         "winner":fallback("winner",Value::Null),"mode":next.mode,"turn":next.turn,"moveCount":next.move_count,"fullMove":next.full_move,
     });
     next.extra
@@ -2638,7 +2638,7 @@ pub(crate) fn execute_grappler_pull(
         },
         replay_before: None,
     };
-    outcome.replay_before = Some(Box::new(before));
+    outcome.replay_before = before.map(Box::new);
     *state = next;
     Ok(Some(outcome))
 }
@@ -3219,7 +3219,7 @@ fn execute_large_piece_move_at(
         StationaryMoveOutcome::end_move(actor, "ROOK 이동", String::new(), captures)
     };
     if matches!(outcome.completion, StationaryCompletion::EndMove { .. }) {
-        outcome.replay_before = Some(Box::new(before));
+        outcome.replay_before = before.map(Box::new);
     }
     *state = next;
     Ok(Some(outcome))
@@ -3379,7 +3379,7 @@ pub(crate) fn execute_castle(
         StationaryMoveOutcome::end_move(actor, "캐슬링", String::new(), Vec::new())
     };
     if matches!(outcome.completion, StationaryCompletion::EndMove { .. }) {
-        outcome.replay_before = Some(Box::new(before));
+        outcome.replay_before = before.map(Box::new);
     }
     *state = next;
     Ok(Some(outcome))
@@ -3586,7 +3586,7 @@ pub(crate) fn execute_football_move(
         String::new(),
         removed.into_iter().collect(),
     );
-    outcome.replay_before = Some(Box::new(before));
+    outcome.replay_before = before.map(Box::new);
     *state = next;
     Ok(Some(outcome))
 }

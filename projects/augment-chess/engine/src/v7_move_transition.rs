@@ -552,7 +552,7 @@ fn execute_core(state: &mut GameState, action: &Action, threat_probe: bool) -> R
                 captures,
                 replay_before,
             } => {
-                siege_replay = Some(*replay_before);
+                siege_replay = replay_before.map(|before| *before);
                 siege_captures = captures;
                 siege_captured_something = captured_something;
                 siege_chameleon_victim = chameleon_victim;

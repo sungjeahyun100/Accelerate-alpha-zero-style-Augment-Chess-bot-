@@ -998,11 +998,7 @@ fn ensure_v7_relay_after_opening(state: &GameState) -> Result<()> {
         || state.cards_used_this_turn.white != 1
         || state.cards_used_this_turn.black != 0
         || state.extra.get("replayEventNonce") != Some(&json!(3))
-        || state
-            .extra
-            .get("replayEvents")
-            .and_then(Value::as_array)
-            .is_none_or(|events| events.len() != 3)
+        || crate::replay_experiment::history_count(state, "replayEvents") != 3
     {
         return Err(unsupported("effect or replay counters"));
     }
@@ -1044,6 +1040,11 @@ fn ensure_v7_relay_after_opening(state: &GameState) -> Result<()> {
     {
         events.pop();
     }
+    if !baseline.replay_mode.keeps_history() {
+        baseline
+            .extra
+            .insert("replayExperimentEventCount".into(), json!(2));
+    }
     ensure_v7_orthodox_opening(&baseline)
 }
 
@@ -1078,6 +1079,8 @@ fn ensure_v7_orthodox_opening_inner(
         "replayBaseFrame",
         "replayEventNonce",
         "replayEvents",
+        "replayExperimentEventCount",
+        "replayExperimentBoardCount",
         "replayStartedAt",
         "replayTailFrame",
     ];
@@ -1144,13 +1147,8 @@ fn ensure_v7_orthodox_opening_inner(
     {
         return Err(unsupported("active clock window"));
     }
-    if state
-        .extra
-        .get("replayEvents")
-        .and_then(Value::as_array)
-        .is_none_or(|events| {
-            events.len() != draft_events && !(allow_cleared_virtual_replay && events.is_empty())
-        })
+    if (crate::replay_experiment::history_count(state, "replayEvents") != draft_events
+        && !(allow_cleared_virtual_replay && state.extra.get("replayEvents") == Some(&json!([]))))
         || state.extra.get("replayEventNonce") != Some(&json!(draft_events))
         || state.extra.get("cardAcquisitionNonce") != Some(&json!(cards_per_side * 2))
         || state.extra.get("endDraftDone") != Some(&json!(style == "grand"))

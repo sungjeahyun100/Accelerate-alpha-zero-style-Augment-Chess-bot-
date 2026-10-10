@@ -823,6 +823,9 @@ pub struct GameState {
     pub rng: RngState,
     #[serde(default)]
     pub history: Vec<Value>,
+    /// Local experiment setting. Never enters the source snapshot or position ID.
+    #[serde(skip)]
+    pub replay_mode: crate::replay_experiment::ReplayMode,
     #[serde(skip)]
     pub(crate) gameover_replay_pending: bool,
     /// Owned execution-only likelihood. Source identities and hypothetical

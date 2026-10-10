@@ -56,6 +56,26 @@ pub struct V7ColossusCompletion {
 }
 
 impl V7HostPosition {
+    /// Construct one shared initial state for the local replay experiment.
+    pub fn new_replay_experiment(config: crate::GameConfig, seed: u64) -> Result<Self> {
+        Self::from_state(crate::v7_new_game::new_game(config, seed)?)
+    }
+    /// Start a separate local experiment session after source admission.
+    pub fn with_replay_mode(&self, mode: crate::replay_experiment::ReplayMode) -> Result<Self> {
+        if self.state.replay_mode != crate::replay_experiment::ReplayMode::FullReplay {
+            return Err(EngineError::InvalidConfig(
+                "replay experiment must fork from a FullReplay position".into(),
+            ));
+        }
+        if mode == crate::replay_experiment::ReplayMode::FullReplay {
+            return Ok(self.clone());
+        }
+        let mut state = self.state.as_ref().clone();
+        crate::replay_experiment::prepare_state(&mut state, mode);
+        let mut session = Self::from_state(state)?;
+        Arc::make_mut(&mut session.state).replay_mode = mode;
+        Ok(session)
+    }
     /// Import the exact public v7 position envelope. Identity covers state,
     /// RNG, history and version metadata, excluding only `positionId` itself.
     pub fn from_envelope(envelope: Value) -> Result<Self> {

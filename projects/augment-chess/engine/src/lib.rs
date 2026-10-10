@@ -14,6 +14,7 @@ mod movement;
 mod observation;
 mod opening;
 mod replay;
+pub mod replay_experiment;
 mod source_chance_trace;
 mod spatial_state;
 mod state;
@@ -99,6 +100,21 @@ pub struct ConditionedStepProposal {
 }
 
 impl Position {
+    /// Create an isolated experiment session from this exact position.
+    pub fn with_replay_mode(&self, mode: replay_experiment::ReplayMode) -> Result<Self> {
+        if self.state().replay_mode != replay_experiment::ReplayMode::FullReplay {
+            return Err(EngineError::InvalidConfig(
+                "replay experiment must fork from a FullReplay position".into(),
+            ));
+        }
+        if mode == replay_experiment::ReplayMode::FullReplay {
+            return Ok(self.clone());
+        }
+        let mut state = self.state().clone();
+        replay_experiment::prepare_state(&mut state, mode);
+        state.validate_and_identify()?;
+        Ok(Self(Arc::new(state), None))
+    }
     pub(crate) fn with_state(&self, mut state: GameState) -> Result<Self> {
         state.validate_and_identify()?;
         Ok(Self(Arc::new(state), self.1.clone()))

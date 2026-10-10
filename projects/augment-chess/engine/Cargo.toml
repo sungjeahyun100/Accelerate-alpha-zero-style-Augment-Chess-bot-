@@ -16,3 +16,7 @@ sha2 = "0.10"
 [[bin]]
 name = "augment-chess-engine-json"
 path = "src/bin/augment-chess-engine-json.rs"
+
+[[bin]]
+name = "rust-replay-ab"
+path = "src/bin/rust-replay-ab.rs"

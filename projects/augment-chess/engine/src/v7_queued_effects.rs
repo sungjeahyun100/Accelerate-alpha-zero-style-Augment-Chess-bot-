@@ -1465,11 +1465,7 @@ fn free_move_normalized_origin(state: &GameState, square: Square) -> Option<Squa
 }
 
 fn free_move_history_count(state: &GameState, field: &str) -> usize {
-    state
-        .extra
-        .get(field)
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len)
+    crate::replay_experiment::history_count(state, field)
 }
 
 #[cfg(test)]

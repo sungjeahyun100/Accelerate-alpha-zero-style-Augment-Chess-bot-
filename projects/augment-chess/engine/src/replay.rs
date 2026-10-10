@@ -88,6 +88,10 @@ pub(crate) fn replace_active_move_capture(
     state: &mut GameState,
     mut capture: Option<MoveReplayCapture>,
 ) -> Result<()> {
+    if !state.replay_mode.keeps_move_capture() {
+        state.active_move_replay_before = None;
+        return Ok(());
+    }
     if let Some(capture) = capture.as_mut() {
         // source capture는 before snapshot을 보관한다. journal 자신을 snapshot에
         // 넣으면 순환 소유권과 다른 실행에 대한 공유 문맥이 생긴다.
@@ -1945,7 +1949,10 @@ pub(crate) fn queue_move(
 
 /// Begin/commit is kept local to an atomic transition, matching the source's
 /// activeMoveReplayCapture control variable without leaking it into snapshots.
-pub(crate) fn begin_move(state: &mut GameState, actor: Color) -> Result<GameState> {
+pub(crate) fn begin_move(state: &mut GameState, actor: Color) -> Result<Option<GameState>> {
+    if !state.replay_mode.keeps_move_capture() {
+        return Ok(None);
+    }
     let mut before = state.clone();
     before.active_move_replay_before = None;
     let old = state
@@ -1984,9 +1991,12 @@ pub(crate) fn begin_move(state: &mut GameState, actor: Color) -> Result<GameStat
         };
         replace_active_move_capture(state, capture)?;
     }
-    Ok(before)
+    Ok(Some(before))
 }
 pub(crate) fn commit_active_move(state: &mut GameState, actor: Color) -> Result<()> {
+    if !state.replay_mode.keeps_move_capture() {
+        return Ok(());
+    }
     let capture = active_move_capture(state)?;
     replace_active_move_capture(state, None)?;
     if let Some(capture) = capture
@@ -2047,6 +2057,9 @@ fn board_delta(before: &Value, after: &Value) -> Result<Vec<Value>> {
     Ok(cells)
 }
 pub(crate) fn commit_move(state: &mut GameState, before: &GameState, actor: Color) -> Result<()> {
+    if !state.replay_mode.keeps_move_capture() {
+        return Ok(());
+    }
     if state.ruleset_id == RULES_VERSION_V7 {
         replace_active_move_capture(state, None)?;
     }
@@ -2233,6 +2246,9 @@ fn record_with_effects(state: &mut GameState, label: &str, effects: &[Value]) ->
     }
     if !state.extra.contains_key("boardHistory") {
         return Ok(());
+    }
+    if !state.replay_mode.keeps_history() {
+        return record_without_history(state, label);
     }
     if state.ruleset_id == RULES_VERSION_V7 && state.threat_probe_depth > 0 {
         // main89241: threat probe는 frame/history 대신 실행 횟수를 담은
@@ -2487,10 +2503,161 @@ fn record_with_effects(state: &mut GameState, label: &str, effects: &[Value]) ->
     Ok(())
 }
 
+/// Keep the rule effects that the source performs at record time. The compact
+/// event counter treats each non-probe record as changed; exact delta-based
+/// suppression requires constructing the historical frame being removed.
+fn record_without_history(state: &mut GameState, label: &str) -> Result<()> {
+    if state.ruleset_id == RULES_VERSION_V7 && state.threat_probe_depth > 0 {
+        crate::replay_experiment::increment_history_count(state, "replayEvents");
+        let nonce = state
+            .extra
+            .get("replayEventNonce")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or_else(|| EngineError::InvalidState("replay nonce overflow".into()))?;
+        state.extra.insert("replayEventNonce".into(), json!(nonce));
+    } else {
+        if state
+            .extra
+            .get("chainBonds")
+            .and_then(Value::as_array)
+            .is_some_and(|v| !v.is_empty())
+        {
+            if state.ruleset_id == RULES_VERSION_V7 {
+                crate::v7_board_automata::break_out_of_range_chain_bonds(state)?;
+            } else {
+                return Err(EngineError::UnsupportedFeature(
+                    "record-time chain bond breakage".into(),
+                ));
+            }
+        }
+        if state
+            .extra
+            .get("replayTimelineReady")
+            .and_then(Value::as_bool)
+            != Some(true)
+        {
+            return Err(EngineError::UnsupportedFeature(
+                "legacy replay timeline migration".into(),
+            ));
+        }
+        let mut notations = state
+            .extra
+            .get("pendingNotations")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if let Some(notation) = state.extra.get("pendingNotation").filter(|v| !v.is_null()) {
+            notations.push(notation.clone());
+        }
+        let mut seen = BTreeSet::new();
+        notations.retain(|v| {
+            v["text"].as_str().is_some_and(|s| !s.is_empty()) && seen.insert(notation_key(v))
+        });
+        if label != "sync" && state.mode == "play" {
+            let selected = notations
+                .iter()
+                .rposition(|event| event["kind"] == "move")
+                .or_else(|| {
+                    notations
+                        .iter()
+                        .rposition(|event| event["kind"] == "special")
+                });
+            if let Some(index) = selected {
+                let color = notations[index]["color"]
+                    .as_str()
+                    .and_then(|color| match color {
+                        "white" => Some(Color::White),
+                        "black" => Some(Color::Black),
+                        _ => None,
+                    });
+                if let Some(color) = color
+                    && crate::threat::evaluate_royal_capture(state, color.opponent())?.0
+                {
+                    let event = &mut notations[index];
+                    let text = event["text"].as_str().unwrap_or("");
+                    if !text.ends_with(['+', '#']) {
+                        event["text"] =
+                            json!(format!("{}+", text.chars().take(95).collect::<String>()));
+                        if let Some(redactions) =
+                            event.get_mut("redactions").and_then(Value::as_object_mut)
+                        {
+                            for redaction in redactions.values_mut() {
+                                let text = redaction["text"].as_str().unwrap_or("");
+                                redaction["text"] = json!(format!(
+                                    "{}+",
+                                    text.chars().take(95).collect::<String>()
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if !notations.is_empty() {
+            state.extra.insert(
+                "notationEvent".into(),
+                notations.last().expect("nonempty").clone(),
+            );
+            let merged = state
+                .extra
+                .entry("notationEvents")
+                .or_insert_with(|| json!([]))
+                .as_array_mut()
+                .ok_or_else(|| {
+                    EngineError::InvalidState("notationEvents must be an array".into())
+                })?;
+            for notation in &notations {
+                if !merged
+                    .iter()
+                    .any(|v| notation_key(v) == notation_key(notation))
+                {
+                    merged.push(notation.clone());
+                }
+            }
+            if merged.len() > 20 {
+                merged.drain(..merged.len() - 20);
+            }
+        }
+        crate::replay_experiment::increment_history_count(state, "boardHistory");
+        crate::replay_experiment::increment_history_count(state, "replayEvents");
+        let nonce = state
+            .extra
+            .get("replayEventNonce")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or_else(|| EngineError::InvalidState("replay nonce overflow".into()))?;
+        state.extra.insert("replayEventNonce".into(), json!(nonce));
+    }
+    for name in [
+        "pendingNotation",
+        "pendingNotations",
+        "pendingReplayVisuals",
+    ] {
+        state.extra.insert(
+            name.into(),
+            if name == "pendingNotation" {
+                Value::Null
+            } else {
+                json!([])
+            },
+        );
+    }
+    Ok(())
+}
+
 /// Settle the source's queued terminal record at the atomic snapshot boundary,
 /// after card/move bookkeeping has finished. This control flag is not rule
 /// snapshot data and is never serialized into a saved source state.
 pub(crate) fn settle(state: &mut GameState) -> Result<()> {
+    if !state.replay_mode.keeps_history() {
+        if std::mem::take(&mut state.gameover_replay_pending) && state.mode == "gameover" {
+            record(state, "gameover")?;
+        }
+        return Ok(());
+    }
     if !std::mem::take(&mut state.gameover_replay_pending)
         || state.mode != "gameover"
         || !state.extra.contains_key("boardHistory")
