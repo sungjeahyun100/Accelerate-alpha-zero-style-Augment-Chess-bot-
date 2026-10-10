@@ -50,68 +50,130 @@ C는 규칙 동등성 모드가 아니다. `moveReplay`를 읽는 카드와 Repl
 서로 다른 경로 목록은 최대 100개다. `ruleState` 원본도 JSON에 남으므로 사용자가
 전체 차이를 확인할 수 있다.
 
-## 사용자 실행
+## 장기 대국 측정 설계
 
-아래 명령은 **사용자가 직접 실행**한다. Codex는 이번 작업에서 빌드·테스트·
-벤치마크·MCTS·학습을 실행하지 않았다. `--seed`는 공통 초기 v7 게임에 한 번만
-적용한다. `draftDelete=true`의 기본 설정으로 첫 play 위치를 만든 뒤 세 모드로
-복제한다. `--actions`는 공개 intent 객체의 JSON 배열이며, 모든 모드에 같은 순서로
-적용한다. 생략 시 기준선의 첫 합법 공개 행동 하나를 사용한다.
+`rust-replay-ab`는 FullReplay의 첫 play 상태에서 공개 합법 intent만 고른다.
+결정적 정책은 첫 행동에서 기존 기준선처럼 첫 합법 intent를 택한다. 이후에는
+합법 행동 중 보드 `move`를 우선하고 seed와 행동 index로 후보를
+회전 선택한다. 보드 이동이 없을 때만 카드·선택 등 다른 합법 행동을 선택한다.
+이 정책은 강한 대국 정책이 아니며 규칙 상태나 RNG를 보정하지 않는다.
+`--actions`를 주면 해당 JSON 배열을 입력으로 사용한다. 제공된 행동도 FullReplay에서
+순서대로 합법성과 적용을 확인한다. 생성 또는 검증된 공통 시퀀스는
+`--save-actions`로 저장한다. 최대 체크포인트에서 수 적용을 재려면 그 상태의
+**다음 행동**도 필요하므로 `--max-pre-actions`를 최대 체크포인트보다 1 이상 크게 둔다.
+
+체크포인트 `N`은 첫 play 상태 이후 적용을 마친 공개 intent `N`개다. 체스의
+한 수나 반수와 동의어가 아니다. 체크포인트마다 `actualActions`, 공개 `move` 수,
+공개 `card` 수, 나머지 공개 행동 수를 기록한다. 엔진의 `moveCount`는 엔진이
+유지하는 이동 카운터, `fullMove`는 엔진의 전체 수 카운터,
+`turnsTaken`은 색별 완료 턴, `cardsUsedThisTurn`은 현재 턴의 색별 카드 사용 수다.
+복합 카드 선택과 추가 행동 때문에 이 값들은 공개 intent 수와 달라질 수 있다.
+`phase`, `turn`, `decisionActor`를 함께 기록한다.
+
+각 모드는 공통 초기 위치에서 독립적으로 시작하고 같은 intent를 순서대로
+소비한다. B/C에서는 매 행동 직후 FullReplay를 별도로 재실행한 상태와
+직렬화된 규칙 상태, RNG, 종료 판정, 공개 합법 행동을 비교한다. 위치·행동 ID의
+일치는 요구하지 않는다. `moveReplay`는 규칙 상태 비교에 포함한다.
+과거 replay 배열·frame·기보 이력·공개 host history는 의미 비교에서 제외하며
+이벤트 개수와 `replayEventNonce`는 replay metadata로 별도 비교한다.
+`firstDivergence`는 최초 차이이고 `firstRuleDivergence`는 이후 처음 관측된
+semantic 또는 rng 차이다. 각 기록은 mode, 1부터 시작하는 행동 index, intent,
+필드 경로, 양쪽 값, 범주와 비교 가능 여부를 포함한다. 규칙·RNG 차이 뒤의
+벤치마크는 `diagnostic_only`다. 해당 root에서 공통 다음 행동이 불법이면
+수 적용 비교를 생략하고 `comparisonUnavailable`에 이유를 남긴다.
+
+## 결과 스키마와 단위
+
+최상위 `schemaVersion=2`에는 `seed`, `programVersion`, `iterations`,
+`mctsSimulations`, `rolloutDepth`, `checkpointsRequested`, `maxPreActions`,
+`sequenceSource`, `sequence`, `sequenceStopReason`,
+`sequenceGenerationElapsedNs`, `results`가 있다. `results[]`는 mode별로
+`actionsConsumed`, `firstDivergence`, `firstRuleDivergence`, `checkpoints[]`를
+담는다. 각 체크포인트는 `reached`, `actualActions`, `phase`, `reason`,
+`preparationElapsedNs`, `comparisonStatus`, `measurement`를 담는다.
+미도달은 `reached=false`와 실제 진행 수·이유로 표시하며 측정값은 `null`이다.
+기존 최상위 `results`와 mode별 `apply`, `legalEnumeration`, `mcts` 명칭은
+체크포인트의 `measurement` 아래에서 유지한다. 분석기는 `schemaVersion`을 확인해야 한다.
+
+`measurement.metrics`는 `replayEventCount`, `replayEventsJsonBytes`,
+`gameStateJsonBytes`, `moveReplayJsonBytes`를 포함한다. 직렬화 크기는 각
+값을 compact JSON으로 직렬화한 UTF-8 바이트 수다. `gameStateJsonBytes`에는
+전체 `GameState`가 들어가고 Rust 실행 전용 `#[serde(skip)]` 필드는 제외된다.
+B/C의 `replayEventCount`는 제거된 배열 길이가 아니라 유지한 실험 카운터다.
+`maxRssKiBProcessHighWater`는 Linux `/proc/self/status`의 `VmHWM`이다.
+한 프로세스 안에서는 이전 체크포인트·모드의 peak를 포함한다. 독립 peak를
+비교하려면 `--mode`로 모드별 프로세스를 실행해야 하며 그 경우도 공통 시퀀스
+검증·사전 대국 준비 비용을 포함한다.
+
+`apply`, `legalEnumeration`, `gameStateDeepClone`의 `meanNs`, `medianNs`,
+`p95Ns`는 각각 같은 root에서 공개 intent bind+적용, 전체 합법 공개 행동 열거,
+`GameState::clone()`을 반복한 나노초다. 수 적용은 공통 시퀀스의 다음 intent를
+사용한다. 끝에 다음 intent가 없으면 `apply=null`과 이유를 기록한다.
+`mcts`는 실험용 결정적 Rust UCB1만 사용한다. 요청·완료 simulation, rollout
+깊이, 경과 나노초, simulations/sec, 선택 intent, 실패 여부를 기록한다.
+신경망 추론은 사용하지 않는다. 내부 기록 생성 횟수는 핫 패스 계측을 넣지 않아
+`not_instrumented`로 명시한다. `replayPhaseProbe`는 별도 복사본에서 수행한
+사후 진단이며 MCTS나 실제 적용 비용에 합산하지 않는다. root 직렬화 상태가
+반복 측정 전후 같은지도 `rootStateUnchanged`에 기록한다.
+
+`--progress`는 첫 줄에 설정·시퀀스, 이후 완료된 체크포인트마다
+`{mode,checkpointResult}`를 NDJSON 한 줄로 쓰고 동기화한다. 중단되면 이미
+완료된 줄을 보존한다. 정상 종료와 부분 실패 시 최종 JSON은 `--output`에 쓴다.
+사전 시퀀스 생성 자체가 실패하거나 출력 파일을 쓸 수 없는 오류에는 최종 결과가
+없을 수 있다. 오류는 stderr와 비영 종료 코드로 전달한다.
+
+## 사용자 실행 (Ubuntu)
+
+아래 명령은 사용자가 직접 실행한다. Codex는 빌드·테스트·벤치마크·MCTS를
+실행하지 않았다. 출력 파일은 사용자가 관리하는 생성물 루트 아래에 둔다.
 
 ```bash
 cargo run --release -p augment-chess-engine --bin rust-replay-ab -- \
-  --seed 19 --iterations 20 --simulations 32 --rollout-depth 2 \
-  --output /tmp/rust-replay-ab.json
+  --seed 19 --checkpoints 0,10,30,50 --max-pre-actions 51 \
+  --iterations 20 --simulations 16 --rollout-depth 1 \
+  --save-actions "$ARTIFACT_ROOT/reports/replay-actions.json" \
+  --progress "$ARTIFACT_ROOT/reports/replay-progress.ndjson" \
+  --output "$ARTIFACT_ROOT/reports/replay-all.json"
 ```
+
+모드별 독립 프로세스 RSS 및 공통 시퀀스 재사용:
 
 ```bash
-cargo run --release -p augment-chess-engine --bin rust-replay-ab -- \
-  --seed 19 --actions /tmp/public-intents.json \
-  --iterations 20 --simulations 32 --rollout-depth 2 \
-  --output /tmp/rust-replay-ab.json
+for mode in full_replay no_history_replay no_replay; do
+  cargo run --release -p augment-chess-engine --bin rust-replay-ab -- \
+    --seed 19 --actions "$ARTIFACT_ROOT/reports/replay-actions.json" \
+    --checkpoints 0,10,30,50 --max-pre-actions 51 \
+    --iterations 20 --simulations 16 --rollout-depth 1 --mode "$mode" \
+    --progress "$ARTIFACT_ROOT/reports/$mode.ndjson" \
+    --output "$ARTIFACT_ROOT/reports/$mode.json"
+done
 ```
 
-사용자 검사 명령:
+세 독립 결과의 설정·시퀀스·체크포인트를 결합하기 전 확인하는 분석 명령:
 
 ```bash
-cargo test -p augment-chess-engine replay_experiment
+python3 - "$ARTIFACT_ROOT/reports" <<'PY_COMPARE'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+names = ('full_replay', 'no_history_replay', 'no_replay')
+files = {name: json.loads((root / f'{name}.json').read_text()) for name in names}
+base = files[names[0]]
+keys = ('schemaVersion', 'seed', 'sequence', 'checkpointsRequested',
+        'iterations', 'mctsSimulations', 'rolloutDepth')
+for name, report in files.items():
+    assert all(report[key] == base[key] for key in keys), f'{name}: settings differ'
+    result = report['results'][0]
+    assert result['mode'] == name
+    for checkpoint in result['checkpoints']:
+        measure = checkpoint['measurement']
+        rate = measure.get('mcts', {}).get('simulationsPerSecond') if isinstance(measure, dict) else None
+        print(name, checkpoint['checkpoint'], checkpoint['reached'],
+              checkpoint['comparisonStatus'], rate,
+              measure.get('maxRssKiBProcessHighWater') if isinstance(measure, dict) else None)
+PY_COMPARE
 ```
 
-## 측정 정의
-
-각 모드에서 같은 root 위치를 반복 사용한다. `apply`는 같은 공개 intent의 bind 및
-적용 전체 시간, `legalEnumeration`은 전체 공개 합법 intent 열거,
-`gameStateDeepClone`은 `GameState::clone` 시간이다. `meanNs`, `medianNs`, `p95Ns`는
-각 반복의 나노초이고 `applyActionsPerSecond`는 적용 수/적용 시간 합계다.
-`replayPhaseProbe`는 시간 루프 밖에서 수행하며, 적용 전후 상태의 `commit_move`
-delta 생성과 이미 정산된 적용 후 상태에 대한 추가 `record` 호출을 각각 측정한다.
-이 record는 변경 없는 이벤트를 억제할 수 있어 실제 행동 중 record 비용과 같은
-값으로 해석하면 안 된다.
-
-`mcts`는 Rust 규칙 엔진만 쓰는 결정적 root UCB1 탐색이다. 신경망 추론은 꺼져 있고,
-고정 simulation 수와 rollout 깊이, 같은 초기 위치를 사용한다. leaf 평가는 고정
-기물 가치의 물질 점수이며 정식 학습 모델의 MCTS 성능이 아니다. 선택한 공개 intent,
-완료 simulation 수, 전체 소요 시간과 초당 simulation 수를 기록한다.
-상세 상태 비교는 시간 측정 후 별도로 실행한다. `/proc/self/status`의 `VmHWM`은
-프로세스 시작 후 최대 RSS로, 순차 모드별 독립 peak가 아니라 누적 high-water다.
-Linux 이외에는 `null`이다. seed, 반복 수, simulation 수, 깊이, 추론 설정을 JSON에
-기록한다. CPU, Rust 버전, 빌드 프로필, 환경 부하와 입력 행동 파일은 사용자가
-결과와 함께 별도 보존해야 한다.
-모드 실행 오류가 있으면 해당 모드의 `error`와 비교 불가 이유를 JSON에 남긴 뒤
-프로세스가 비영(非零) exit code로 종료한다.
-
-모드별 독립 최대 RSS가 필요하면 동일 옵션으로 프로세스를 세 번 실행한다.
-`--mode full_replay`, `--mode no_history_replay`, `--mode no_replay`가 각각 한 모드만
-실행한다. 이 경우 `comparisons`는 비어 있으므로 세 JSON의 `ruleState`, `rng`,
-`legalIntents`, `result`, `mcts.selectedIntent`를 비교한다.
-
-## 변경 파일 및 미검증 범위
-
-- 엔진 모드/기록: `projects/augment-chess/engine/src/replay_experiment.rs`, `replay.rs`, `state.rs`
-- 상태·호스트 전달: `projects/augment-chess/engine/src/lib.rs`, `v7_host.rs`
-- 적용 및 횟수 소비 경로: `transition.rs`, `movement.rs`, `v7_move_execution.rs`, `v7_move_transition.rs`, `v7_queued_effects.rs`
-- 실행 도구: `projects/augment-chess/engine/src/bin/rust-replay-ab.rs`, 엔진 `Cargo.toml`
-
-빌드·테스트·실험은 사용자 실행 정책에 따라 미실행이다. 위의 동등성 한계와
-컴파일/실행 결과는 아직 검증되지 않았다. 이 문서는 기준선 성능 수치나 향상률을
-제시하지 않는다.
+사용자 검사 명령: `cargo test -p augment-chess-engine --bin rust-replay-ab` 및
+`cargo test -p augment-chess-engine replay_experiment`. 이번 변경의 테스트·빌드·
+실험 결과는 아직 없다. 특히 10/30/50 행동 도달성과 규칙 동등성, 성능 수치는
+사용자 실행 전까지 미검증이다.
