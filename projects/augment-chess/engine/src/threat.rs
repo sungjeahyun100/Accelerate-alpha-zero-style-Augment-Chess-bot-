@@ -123,6 +123,14 @@ fn clone_window(state: &GameState, defender: Color) -> GameState {
         effects.insert("extraMove".into(), json!(0));
     }
     state.history.clear();
+    if !state.replay_mode.keeps_history() {
+        state
+            .extra
+            .insert("replayExperimentEventCount".into(), json!(0));
+        state
+            .extra
+            .insert("replayExperimentBoardCount".into(), json!(0));
+    }
     state.gameover_replay_pending = false;
     state
 }

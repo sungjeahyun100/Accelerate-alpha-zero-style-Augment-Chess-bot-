@@ -801,10 +801,10 @@ fn apply_move(state: &mut GameState, action: &Action, threat_probe: bool) -> Res
         if state.ruleset_id == RULES_VERSION_V7
             && crate::observation::truth(piece.extra.get("pendingReaperDefeat"))
         {
-            if !threat_probe {
+            if !threat_probe && let Some(replay_before) = &replay_before {
                 crate::replay::queue_move(
                     state,
-                    &replay_before,
+                    replay_before,
                     &original_piece,
                     from,
                     to,
@@ -914,10 +914,10 @@ fn apply_move(state: &mut GameState, action: &Action, threat_probe: bool) -> Res
     );
     // queueMoveHistoryNotation creates its identifier before promotion and turn
     // settlement, sharing the source random stream with later rule draws.
-    if !threat_probe {
+    if !threat_probe && let Some(replay_before) = &replay_before {
         crate::replay::queue_move(
             state,
-            &replay_before,
+            replay_before,
             &original_piece,
             from,
             to,
@@ -1042,8 +1042,11 @@ fn apply_move(state: &mut GameState, action: &Action, threat_probe: bool) -> Res
         transform_chimera_after_move(state, &mut piece, to)?;
         finish_move(state, actor)?;
     }
-    if !replay_interrupted && !terminal_after_move_sound {
-        crate::replay::commit_move(state, &replay_before, actor)?;
+    if !replay_interrupted
+        && !terminal_after_move_sound
+        && let Some(replay_before) = &replay_before
+    {
+        crate::replay::commit_move(state, replay_before, actor)?;
     }
     if !threat_probe {
         crate::replay::record(

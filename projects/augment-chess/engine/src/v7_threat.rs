@@ -893,6 +893,14 @@ fn clone_for_threat_simulation(state: &GameState) -> GameState {
         window.extra.insert(field.into(), json!([]));
     }
     window.history.clear();
+    if !window.replay_mode.keeps_history() {
+        window
+            .extra
+            .insert("replayExperimentEventCount".into(), json!(0));
+        window
+            .extra
+            .insert("replayExperimentBoardCount".into(), json!(0));
+    }
     window.gameover_replay_pending = false;
     window
 }

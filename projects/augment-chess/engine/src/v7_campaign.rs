@@ -181,6 +181,12 @@ pub(crate) fn initialize_campaign(
         next.extra.insert(field.into(), Value::Null);
     }
     next.extra.insert("replayEventNonce".into(), json!(0));
+    if !next.replay_mode.keeps_history() {
+        next.extra
+            .insert("replayExperimentEventCount".into(), json!(0));
+        next.extra
+            .insert("replayExperimentBoardCount".into(), json!(0));
+    }
     // Source ensureReplayTimeline (main88873) migrates an empty campaign
     // timeline to these same initial values before recording its first frame.
     next.extra.insert("replayTimelineReady".into(), json!(true));
