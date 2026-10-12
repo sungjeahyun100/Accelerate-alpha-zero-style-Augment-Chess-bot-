@@ -31,12 +31,16 @@
 상태에서 일반 이동 후보 20개를 한 번만 순수 생성한다. 상태 전체, RNG, history를
 확인한 프로필에만 이 판정을 사용한다. 동일한 cursor 상태의 이동은 후보 집합
 소속으로 수락하며 매 후보마다 전체 전이·Replay 정산을 실행하지 않는다.
-프로필 밖의 상태, 카드, 특수 선택은 기존 실행 기반 판정으로 남는다.
+같은 동결 상태의 Relay와 Quantum Mechanics 카드는 사용 가능 정책과 효과의
+입력·색별 플래그 형태를 순수 검사한다. 효과 적용과 턴 정산은 실제 적용 단계에
+남는다. 프로필 밖의 상태, 다른 카드, 특수 선택은 기존 실행 기반 판정으로 남는다.
 이 proof는 cursor의 불변 상태와 함께 소유하므로 다른 revision에 재사용하지 않는다.
 
 `first_play_move_validator_matches_transition_without_mutating_state`는 세 스타일의
 20개 이동에 대해 기존 전이의 수락 결과와 새 판정의 수락을 비교하고,
 변조된 이동 거절·상태/RNG 불변·프로필 이탈 시 fallback을 검사한다.
+`first_play_flag_cards_match_transition_without_consuming_rng`는 두 카드의
+기존 전이 수락, 순수 판정, 잘못된 대상 거절, 원본 상태·RNG 불변을 비교한다.
 이 검사는 아직 실행되지 않았다. 검사 통과 전에는 일반 v7 이동 전체로
 확장하거나 기본 MCTS 경로를 전환하지 않는다.
 
@@ -46,18 +50,19 @@
 
 ```bash
 cargo test -p augment-chess-engine first_play_move_validator_matches_transition_without_mutating_state
+cargo test -p augment-chess-engine first_play_flag_cards_match_transition_without_consuming_rng
 cargo test -p augment-chess-engine source_ordered_generic_candidate_path_matches_normal_opening
 node --test .github/scripts/check-repository-policy.test.mjs
 node .github/scripts/check-repository-policy.mjs
 git diff --cached --check
 ```
 
-첫 단계의 완료 조건은 세 스타일의 기존 전이와 새 판정의 수락 일치,
-변조 이동 거절, 상태·RNG 불변, 변경한 구조 검사 통과다. 전체 규칙·양측
+첫 단계의 완료 조건은 세 스타일의 이동과 두 카드에서 기존 전이와 새 판정의
+수락 일치, 변조 입력 거절, 상태·RNG 불변, 변경한 구조 검사 통과다. 전체 규칙·양측
 관측·성능 동등성을 의미하지 않는다. 성능 측정은 #45의 공통 행동 시퀀스와
 FullReplay 기준선, #43의 합법성 계측을 같은 규칙 프로필·SHA·입력에서
 재실행한 뒤 사용자 결과로만 판정한다. 현재 측정 결과는 `NOT RUN`이다.
 
 다음 단계는 실제 MCTS가 사용하는 `movement::ActionCursor`의 지원 범위를
-명시하고, 일반 이동 외 카드 판정의 pure 조건을 분리하는 것이다. Headless,
+명시하고, 더 많은 카드의 합법 조건을 효과 적용에서 분리하는 것이다. Headless,
 왕 위협, Replay history의 기본 경로 변경은 해당 동등성 검증 뒤에 진행한다.

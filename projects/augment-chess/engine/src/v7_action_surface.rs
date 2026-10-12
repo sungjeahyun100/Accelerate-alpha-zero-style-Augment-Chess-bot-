@@ -825,6 +825,39 @@ impl SourceActionCursor {
         {
             return Ok(moves.contains(action));
         }
+        if action.kind == crate::ActionKind::Card
+            && self.verified_opening_moves.is_some()
+            && matches!(
+                action.card_id.as_deref(),
+                Some("relay" | "quantum-mechanics")
+            )
+        {
+            let Some(card) = self
+                .state
+                .deck_slots
+                .get(self.state.turn)
+                .iter()
+                .find(|card| {
+                    Some(card.id.as_str()) == action.card_id.as_deref()
+                        && Some(card.instance_id.as_str()) == action.card_instance_id.as_deref()
+                })
+            else {
+                return Ok(false);
+            };
+            match crate::card_registry::action_policy(&self.state, card) {
+                Ok(_) => {}
+                Err(EngineError::IllegalAction) => return Ok(false),
+                Err(error) => return Err(error),
+            }
+            return match crate::card_effects::validate_side_flag_action(&self.state, card, action) {
+                Ok(Some(accepted)) => Ok(accepted),
+                Ok(None) => Err(EngineError::InvalidState(
+                    "verified opening flag card lost its pure validator".into(),
+                )),
+                Err(EngineError::IllegalAction) => Ok(false),
+                Err(error) => Err(error),
+            };
+        }
         let mut owned = self.state.as_ref().clone();
         match crate::transition::apply_without_public_event(&mut owned, action) {
             Ok(_) => {
@@ -1700,6 +1733,45 @@ mod tests {
                     .is_none(),
                 "{style}"
             );
+        }
+    }
+
+    #[test]
+    fn first_play_flag_cards_match_transition_without_consuming_rng() {
+        for (style, card_id) in [("normal", "relay"), ("chaos", "quantum-mechanics")] {
+            let state = first_play(style);
+            let before = state.clone();
+            let cursor = SourceActionCursor::new(&state, None).unwrap();
+            let card = state
+                .deck_slots
+                .get(state.turn)
+                .iter()
+                .find(|card| card.id == card_id)
+                .unwrap();
+            let action = Action::card(state.turn, card, None);
+            assert!(
+                seed19_first_play_legal_actions(&state)
+                    .unwrap()
+                    .contains(&action)
+            );
+            let mut legacy = state.clone();
+            let old = crate::transition::apply_without_public_event(&mut legacy, &action)
+                .and_then(|_| crate::replay::canonicalize_position_frames(&mut legacy));
+            assert!(old.is_ok(), "{style}: {old:?}");
+            assert_eq!(
+                crate::card_effects::validate_side_flag_action(&state, card, &action).unwrap(),
+                Some(true)
+            );
+            assert!(cursor.accepts(&action).unwrap(), "{style}");
+
+            let mut invalid = action.clone();
+            invalid.target = Some(json!({"row":0,"col":0}));
+            assert_eq!(
+                crate::card_effects::validate_side_flag_action(&state, card, &invalid).unwrap(),
+                Some(false)
+            );
+            assert!(!cursor.accepts(&invalid).unwrap(), "{style}");
+            assert_eq!(state, before, "{style}");
         }
     }
 
