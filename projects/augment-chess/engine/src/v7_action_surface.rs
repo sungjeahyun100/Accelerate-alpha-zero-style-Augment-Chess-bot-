@@ -628,6 +628,9 @@ pub(crate) struct SourceActionCursor {
     card_window: Option<bool>,
     card_filter: Option<String>,
     ui_completion: Option<UiCardCompletion>,
+    // This proof belongs to the immutable cursor snapshot. It must never be
+    // applied to a later Position or to a card/choice window.
+    verified_opening_moves: Option<Arc<Vec<Action>>>,
     special: bool,
     emitted: bool,
     exhausted: bool,
@@ -654,6 +657,20 @@ impl SourceActionCursor {
         } else {
             ui_card_completion(state)?
         };
+        let verified_opening_moves = if !special
+            && card_filter.is_none()
+            && ui_completion.is_none()
+            && require_source_opening(state).is_ok()
+        {
+            // The pinned source profile proves that these exact ordinary
+            // movement payloads survive the source legal action stream.
+            // Generate them through the pure movement rules once per cursor.
+            Some(Arc::new(crate::movement::v7_opening_legal_move_actions(
+                state,
+            )?))
+        } else {
+            None
+        };
         let (stage, mut pending) = if special {
             (SourceCursorStage::Done, special_candidates(state)?)
         } else {
@@ -679,6 +696,7 @@ impl SourceActionCursor {
             card_window: None,
             card_filter,
             ui_completion,
+            verified_opening_moves,
             special,
             emitted: false,
             exhausted: false,
@@ -801,6 +819,11 @@ impl SourceActionCursor {
             .is_some_and(|completion| !completion.permits(action))
         {
             return Ok(false);
+        }
+        if action.kind == crate::ActionKind::Move
+            && let Some(moves) = &self.verified_opening_moves
+        {
+            return Ok(moves.contains(action));
         }
         let mut owned = self.state.as_ref().clone();
         match crate::transition::apply_without_public_event(&mut owned, action) {
@@ -1645,6 +1668,39 @@ mod tests {
             digest(&candidates).unwrap(),
             opening_for("normal").unwrap().legal_digest
         );
+    }
+
+    #[test]
+    fn first_play_move_validator_matches_transition_without_mutating_state() {
+        for style in ["normal", "chaos", "grand"] {
+            let state = first_play(style);
+            let before = state.clone();
+            let cursor = SourceActionCursor::new(&state, None).unwrap();
+            let moves = crate::movement::v7_opening_legal_move_actions(&state).unwrap();
+            assert_eq!(moves.len(), 20, "{style}");
+            assert!(cursor.verified_opening_moves.is_some(), "{style}");
+            for action in &moves {
+                let mut legacy = state.clone();
+                let old = crate::transition::apply_without_public_event(&mut legacy, action)
+                    .and_then(|_| crate::replay::canonicalize_position_frames(&mut legacy));
+                assert!(old.is_ok(), "{style}: {action:?}: {old:?}");
+                assert!(cursor.accepts(action).unwrap(), "{style}: {action:?}");
+            }
+            let mut invalid = moves[0].clone();
+            invalid.destination.as_mut().unwrap().col = 7;
+            assert!(!cursor.accepts(&invalid).unwrap(), "{style}");
+            assert_eq!(state, before, "{style}");
+
+            let mut changed = state.clone();
+            changed.rng.state ^= 1;
+            assert!(
+                SourceActionCursor::new(&changed, None)
+                    .unwrap()
+                    .verified_opening_moves
+                    .is_none(),
+                "{style}"
+            );
+        }
     }
 
     #[test]
