@@ -6,8 +6,8 @@
 `git fetch origin develop`로 이 SHA가 현재 원격의 `develop`임을 확인했다.
 로컬 ref의 #43, #44, #45 head는 각각 `bc49fccdf98b43fcae98ecb7a38e69451eadd009`,
 `22c42603dbdb61110391f15e7fd629534a710da8`,
-`fd63778df749dced142825afaac9fb110d8ccb37`이다. GitHub API 연결이
-응답하지 않아 세 PR의 현재 서버 head와 일치는 확인되지 않았다.
+`fd63778df749dced142825afaac9fb110d8ccb37`이다. GitHub API에서 세 PR이
+모두 열린 `develop` 대상이고 서버 head도 위 SHA와 일치함을 확인했다.
 
 - Python 탐색: `search.py`의 `_stream` → native `Position.action_stream()` →
   `movement::ActionCursor::examine()` → `piece_moves` 또는 카드 후보 →
@@ -41,6 +41,7 @@
 변조된 이동 거절·상태/RNG 불변·프로필 이탈 시 fallback을 검사한다.
 `first_play_flag_cards_match_transition_without_consuming_rng`는 두 카드의
 기존 전이 수락, 순수 판정, 잘못된 대상 거절, 원본 상태·RNG 불변을 비교한다.
+또한 MCTS가 호출하는 `movement::ActionCursor`의 첫 플레이 Relay 후보도 확인한다.
 이 검사는 아직 실행되지 않았다. 검사 통과 전에는 일반 v7 이동 전체로
 확장하거나 기본 MCTS 경로를 전환하지 않는다.
 

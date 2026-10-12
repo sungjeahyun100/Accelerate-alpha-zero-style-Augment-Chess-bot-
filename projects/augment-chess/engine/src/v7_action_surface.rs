@@ -1764,6 +1764,23 @@ mod tests {
             );
             assert!(cursor.accepts(&action).unwrap(), "{style}");
 
+            if style == "normal" {
+                // This is the cursor used by Position.action_stream() and
+                // Python MCTS, distinct from the v7 public Host cursor.
+                let mut search = crate::movement::ActionCursor::new(&state).unwrap();
+                let mut found = false;
+                for _ in 0..100 {
+                    if search.is_exhausted(&state) {
+                        break;
+                    }
+                    if search.examine(&state, 1).unwrap().action == Some(action.clone()) {
+                        found = true;
+                        break;
+                    }
+                }
+                assert!(found, "MCTS action cursor omitted Relay");
+            }
+
             let mut invalid = action.clone();
             invalid.target = Some(json!({"row":0,"col":0}));
             assert_eq!(
