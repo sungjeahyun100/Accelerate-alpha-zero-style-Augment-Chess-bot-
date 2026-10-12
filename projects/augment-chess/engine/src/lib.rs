@@ -1,14 +1,18 @@
 //! Independent rules and immutable snapshots. No language or inference runtime is used here.
 pub mod adapter;
+mod card_catalog;
 mod card_constraints;
 mod card_effects;
+mod card_incompatibility;
 mod card_registry;
 mod card_target_hints;
 mod conditioning;
 mod draft;
+pub mod draft_policy;
 mod eligibility;
 mod flow;
 pub mod geometry;
+pub mod legal_experiment;
 pub mod move_program;
 mod movement;
 mod observation;

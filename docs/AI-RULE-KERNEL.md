@@ -67,3 +67,77 @@ FullReplay 기준선, #43의 합법성 계측을 같은 규칙 프로필·SHA·�
 다음 단계는 실제 MCTS가 사용하는 `movement::ActionCursor`의 지원 범위를
 명시하고, 더 많은 카드의 합법 조건을 효과 적용에서 분리하는 것이다. Headless,
 왕 위협, Replay history의 기본 경로 변경은 해당 동등성 검증 뒤에 진행한다.
+
+## PR #46 후속: 드래프트 정책과 합법 수 실험 실행기
+
+`card_catalog.rs`가 9월 27일/28일 카드 카테고리와 상대 가중치를 소유하고,
+`card_registry.rs`가 ID·종류·효과·활성화를 소유한다. `eligibility.rs`는
+보드·RULE에 따른 자격을, `card_incompatibility.rs`는 배타 그룹을 판정한다.
+`draft_policy.rs`는 Normal의 단계별 혼합 추첨, Chaos의 6장 추첨과 묶음
+재배치, Grand의 별도 카테고리 풀 진입을 구분한다. Grand 풀의 단계별
+4/10/7/7장 추첨과 Normal/Chaos의 흑 점수 균형 조정은 기존 실행 경로에 남긴다.
+일반/Chaos에서는 가중 선택 뒤 선택 ID가 제외 집합에 들어가고, 다음
+선택에서 현재 상태의 자격과 배타성을 다시 계산한다. RULE 시작 선택은
+일반 카드 풀과 별도로 유지한다.
+
+10월 조사 근거는 PR #44의
+`docs/research/2026-10-08--october-client-rules-audit--sungjeahyun100.md`의
+드래프트 가중치·`completeRandom` 절과
+`projects/augment-chess/oracle/tools/site-parity/october-draft-distribution.js`다.
+확인된 상대 가중치는 Common 85, Rare 70, Epic 58, Legendary 44다.
+`october_complete_random_step`은 가중 선택한 카드를 호환성 판정 **전에**
+풀에서 제거하고, 거절된 카드도 재추첨하지 않는 순서를 제공한다. 이 함수는
+주어진 후보 풀 한 단계의 P를 반환한다. 10월 전체 후보 풀·색별 자격·공개
+관측·실행 프로필은 아직 검증되지 않았으므로 `October07Probe`는 게임용
+P 프로필로 실행할 수 없게 명시적으로 거절한다. 9월 가중치와 10월 희귀도
+가중치를 섞지 않는다. `ChanceDensity`는 실제 P와 제안 Q를 별도 필드로
+보존한다. Q 사용 시 이 값만으로 학습 편향이 자동 보정되지는 않는다.
+
+v7 일반 합법 수 집합은 `SourceActionCursor`가 후보를 지연 열거하고 즉시
+합법성을 확인해 모은다. 중간 전체 후보 배열과 중복 UI 필터를 제거했다.
+이미 순수 검증이 확인된 첫 플레이 이동·플래그 카드 외의 일반 행동은
+기존 전이 검증을 유지한다. 따라서 모든 행동의 `GameState` 복제가
+제거되었다거나 전체 합법 수 생성이 빨라졌다고 주장하지 않는다.
+
+### 사용자가 실행할 8개 실험
+
+Ubuntu 저장소 루트에서 Release 빌드 후 실행한다. 아래 명령은 예시이며
+Codex는 이 실행기나 Rust 테스트를 실행하지 않았다.
+
+```bash
+cargo build --release -p augment-chess-engine --bin legal-action-experiment
+./target/release/legal-action-experiment --scenario all --mode all \
+  --seed 19 --warmup 3 --repeats 20 --cpu-mode performance \
+  --threads 1 --output "${REPORT_PATH}"
+
+./target/release/legal-action-experiment --scenario 3 --mode normal \
+  --seed 19 --warmup 5 --repeats 100 --output "${REPORT_PATH}"
+```
+
+`--scenario`는 1~8 또는 `all`, `--mode`는 `normal`, `chaos`, `grand`,
+`all`을 받는다. 1은 무카드 기본 보드, 2는 미사용 OPENING `holdout`, 3은
+그 카드를 실제 행동으로 사용한 뒤, 4는 실제 발동한 `diagonal-chess` RULE,
+5는 같은 20반수 보드의 MIDDLE `e4` 유무, 6은 카드 없는 20반수 보드,
+7과 8은 현재 카탈로그의 공개 ACTIVE/PASSIVE 카드를 각각 한 장씩 단독
+추가한 상태다. 20반수는 해당 seed에서 매번 합법 이동 집합으로부터
+고정 방식으로 선택한다. 카드 추가는 재현 가능한 합성 지급이며 원본
+드래프트에서 해당 ID가 나올 확률의 증거가 아니다. 구성 또는 적용이
+불가능한 항목은 이유와 함께 `UNSUPPORTED`로 남긴다.
+
+JSON 각 행에는 규칙 버전, 모드, seed·포지션 ID/hash, RULE·카드 ID,
+전체/이동/카드 행동 수, 원시 ns 값, 평균·중앙값·p95, 워밍업·반복 수,
+빌드 프로필, 사용자가 기록한 CPU 전력 모드·스레드 수, 검증 상태와
+사유가 들어간다. 시간 측정은 완성된 상태에서 전체 합법 수를 생성하는
+호출만 감싼다. 상태 구성, 워밍업, 기준 집합 비교, JSON 저장은 제외한다.
+전체 집합 대신 일부만 반환하는 경로는 성공한 전체 측정으로 기록하지
+않고 `UNSUPPORTED`가 된다.
+
+`--oracle path/to/reference.json`은 원본 JS나 별도로 검증된 고정 기준에서
+작성한 의미적 행동 ID 배열을 읽는다. 키 형식은
+`s<번호>-<모드>-<variant>`이며, 결과의 `semanticIds`가 비교 형식이다.
+이 형식에는 행동 종류·색·출발점·도착점과 플래그·카드 ID·선택 대상이
+포함된다. 원본과 Rust의 열거 순서나 표시용 JSON 필드는 비교하지 않는다.
+기준이 없으면 특히 3·4·5를 포함한 모든 성공한 생성 결과를
+`UNVERIFIED`로 표시한다. 동일 Rust 엔진 출력물을 그대로 기준으로
+복사해 원본 동등성 `PASS`를 주장해서는 안 된다. 이 8개 실험은
+드래프트 전체 확률분포 검증을 수행하지 않는다.

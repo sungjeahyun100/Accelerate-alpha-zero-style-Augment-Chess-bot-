@@ -1172,38 +1172,7 @@ fn trolley_choices(window: &Value, actor: Color) -> Result<Vec<Action>> {
     Ok(actions)
 }
 
-fn transition_accepted_actions(state: &GameState, candidates: Vec<Action>) -> Result<Vec<Action>> {
-    require_budget(candidates.len(), "candidate set")?;
-    let actor = state.decision_actor();
-    let ui_completion = ui_card_completion(state)?;
-    let mut accepted = Vec::with_capacity(candidates.len());
-    for action in candidates {
-        if action.color != actor || action.position_key.is_some() {
-            return Err(EngineError::InvalidState(
-                "v7 source candidate has the wrong actor or a private Position key".into(),
-            ));
-        }
-        if ui_completion
-            .as_ref()
-            .is_some_and(|completion| !completion.permits(&action))
-        {
-            continue;
-        }
-        // Source `actionStream(legal:true)` tests each candidate on an owned
-        // restored Position. A rejected selection cannot mutate this state.
-        let mut owned = state.clone();
-        match crate::transition::apply_without_public_event(&mut owned, &action) {
-            Ok(_) => {
-                crate::replay::canonicalize_position_frames(&mut owned)?;
-                accepted.push(action);
-            }
-            Err(EngineError::IllegalAction) => {}
-            Err(error) => return Err(error),
-        }
-    }
-    Ok(accepted)
-}
-
+#[cfg(test)]
 fn ordered_play_candidates(state: &GameState) -> Result<Vec<Action>> {
     // Frozen iterateCandidatePayloads yields ordinary movement first, then
     // one card instance at a time in deck order. Its friendly-crush fallback
@@ -1252,8 +1221,20 @@ pub(crate) fn legal_source_actions(state: &GameState) -> Result<Vec<Action>> {
     if require_source_opening(state).is_ok() {
         return seed19_first_play_legal_actions(state);
     }
-    let candidates = ordered_play_candidates(state)?;
-    transition_accepted_actions(state, candidates)
+    // The cursor owns one immutable snapshot and lazy card families. Complete
+    // enumeration still checks each emitted action, but no eager intermediate
+    // candidate vector or second UI filter is needed.
+    let mut cursor = SourceActionCursor::new(state, None)?;
+    let mut accepted = Vec::new();
+    let mut seen = 0;
+    while let Some(action) = cursor.next_candidate()? {
+        seen += 1;
+        require_budget(seen, "complete candidate set")?;
+        if cursor.accepts(&action)? {
+            accepted.push(action);
+        }
+    }
+    Ok(accepted)
 }
 
 /// Prove one source selection without exhausting an unrelated card family.
