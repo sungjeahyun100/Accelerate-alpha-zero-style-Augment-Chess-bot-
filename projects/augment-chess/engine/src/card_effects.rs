@@ -5611,6 +5611,9 @@ pub(crate) fn validate(
         return Ok(None);
     }
     validate_pinned_card(state, card)?;
+    if let Some(accepted) = validate_side_flag_action(state, card, action)? {
+        return Ok(Some(accepted));
+    }
     let mut candidate = state.clone();
     match apply(&mut candidate, card, action) {
         Ok(Some(_)) => Ok(Some(true)),
@@ -5618,6 +5621,127 @@ pub(crate) fn validate(
         Err(EngineError::IllegalAction) => Ok(Some(false)),
         Err(error) => Err(error),
     }
+}
+
+/// Read-only admission for the card families whose effect preconditions are
+/// exactly their source target predicate. An unported effect fails closed;
+/// it must never be probed by applying the effect to a cloned GameState.
+pub(crate) fn validate_pure_candidate(
+    state: &GameState,
+    card: &CardSlot,
+    action: &Action,
+) -> Result<bool> {
+    require_pure_candidate_family(state, card)?;
+    if let Some(accepted) = validate_side_flag_action(state, card, action)? {
+        return Ok(accepted);
+    }
+    let plan = plan(state, card).ok_or_else(|| {
+        EngineError::InvalidState(format!(
+            "v7 pure card family {} lost its target plan",
+            card.id
+        ))
+    })?;
+    if action.kind != ActionKind::Card
+        || action.color != state.turn
+        || action.card_id.as_deref() != Some(card.id.as_str())
+        || action.card_instance_id.as_deref() != Some(card.instance_id.as_str())
+        || action.from.is_some()
+        || action.destination.is_some()
+        || !action.extra.is_empty()
+        || has_card_selection(action)
+    {
+        return Ok(false);
+    }
+    let square = target_square(action)?;
+    let square = if matches!(
+        plan.mutation,
+        Mutation::Grant("nullification" | "outpostProtected")
+    ) {
+        normalize_square(state, square)
+    } else {
+        square
+    };
+    let Some(piece) = state.at(square) else {
+        return Ok(false);
+    };
+    if piece.id.is_empty() {
+        return Err(EngineError::InvalidState(format!(
+            "v7 pure card {} target identity is missing",
+            card.id
+        )));
+    }
+    matches_plan(state, piece, square, plan)
+}
+
+/// Reject an unported family before its candidate enumerator can run an
+/// effect probe. This also prevents a partial list from looking complete.
+pub(crate) fn require_pure_candidate_family(state: &GameState, card: &CardSlot) -> Result<()> {
+    require_v7_manual_effect_owner(state, card)?;
+    validate_pinned_card(state, card)?;
+    if matches!(card.id.as_str(), "relay" | "quantum-mechanics") {
+        return Ok(());
+    }
+    if let Some(plan) = plan(state, card) {
+        validate_profile(state, plan)?;
+        if matches!(
+            plan.mutation,
+            Mutation::Grant(_)
+                | Mutation::Transform(_)
+                | Mutation::GenericTransform(_)
+                | Mutation::InternalTransform(_)
+        ) {
+            return Ok(());
+        }
+    }
+    Err(EngineError::UnsupportedFeature(format!(
+        "v7 pure legality has no card effect predicate for {} ({})",
+        card.id, card.effect
+    )))
+}
+
+/// Validate the two source-pinned ACTIVE flag cards without running their
+/// effect or consuming RNG. Other cards retain their existing effect probe.
+/// Hand ownership and use cost are checked by the caller's action policy.
+pub(crate) fn validate_side_flag_action(
+    state: &GameState,
+    card: &CardSlot,
+    action: &Action,
+) -> Result<Option<bool>> {
+    if state.ruleset_id != RULES_VERSION_V7
+        || !matches!(card.id.as_str(), "relay" | "quantum-mechanics")
+    {
+        return Ok(None);
+    }
+    require_v7_manual_effect_owner(state, card)?;
+    crate::card_registry::require_source_effect_window(state, card)?;
+    validate_pinned_card(state, card)?;
+    let plan = plan(state, card).ok_or_else(|| {
+        EngineError::InvalidState(format!("v7 flag card {} has no rule plan", card.id))
+    })?;
+    validate_profile(state, plan)?;
+    let Mutation::SideFlag(field, _) = plan.mutation else {
+        return Err(EngineError::InvalidState(format!(
+            "v7 flag card {} lost its side-flag effect",
+            card.id
+        )));
+    };
+    if action.kind != ActionKind::Card
+        || action.color != state.turn
+        || action.card_id.as_deref() != Some(card.id.as_str())
+        || action.card_instance_id.as_deref() != Some(card.instance_id.as_str())
+        || action.from.is_some()
+        || action.destination.is_some()
+        || !action.extra.is_empty()
+        || has_card_selection(action)
+    {
+        return Ok(Some(false));
+    }
+    if truthy(state.extra.get(field)) && !state.extra.get(field).is_some_and(Value::is_object) {
+        return Err(EngineError::InvalidState(format!(
+            "{field} color map missing"
+        )));
+    }
+    Ok(Some(true))
 }
 
 /// One immutable RULE object owns one frozen source effect. Selection and

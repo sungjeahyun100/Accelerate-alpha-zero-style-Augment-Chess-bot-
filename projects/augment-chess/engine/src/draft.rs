@@ -2,10 +2,7 @@
 use crate::*;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::{
-    collections::{BTreeSet, HashMap},
-    sync::OnceLock,
-};
+use std::{collections::BTreeSet, sync::OnceLock};
 
 #[derive(Deserialize)]
 pub(crate) struct Definitions {
@@ -143,47 +140,11 @@ pub(crate) fn frozen_timestamp_for_ruleset(rules_version: &str) -> Result<i64> {
     };
     timestamp.clone().map_err(EngineError::InvalidState)
 }
-#[derive(Deserialize)]
-struct Weights {
-    constants: Value,
-    weights: Vec<Weight>,
-}
-#[derive(Deserialize)]
-struct Weight {
-    id: String,
-    phase: String,
-    weight: f64,
-    #[serde(rename = "openingWeight")]
-    opening_weight: f64,
-}
-fn weights() -> &'static Weights {
-    static DATA: OnceLock<Weights> = OnceLock::new();
-    DATA.get_or_init(|| {
-        serde_json::from_str(include_str!("../../contracts/catalog/draft-20260927.json"))
-            .expect("adopted draft weights")
-    })
-}
-fn weights_for_ruleset(rules_version: &str) -> Result<&'static Weights> {
-    static V7: OnceLock<Weights> = OnceLock::new();
-    match rules_version {
-        RULES_VERSION_V6 => Ok(weights()),
-        RULES_VERSION_V7 => Ok(V7.get_or_init(|| {
-            serde_json::from_str(include_str!("../../contracts/catalog/draft-20260928.json"))
-                .expect("adopted v7 draft weights")
-        })),
-        other => Err(EngineError::UnsupportedFeature(format!(
-            "draft weights for rules version {other}"
-        ))),
-    }
-}
-
-/// The weight table is source data, separate from the hand-card definition.
-/// A missing ID is rejected rather than silently assigned zero draw weight.
 #[cfg_attr(
     not(test),
     expect(
         dead_code,
-        reason = "typed draft weight query awaits v7 RULE selection integration"
+        reason = "typed catalog query is used by registry verification"
     )
 )]
 pub(crate) fn draft_weight_for_ruleset(
@@ -191,70 +152,13 @@ pub(crate) fn draft_weight_for_ruleset(
     card_id: &str,
     opening: bool,
 ) -> Result<(String, f64)> {
-    let entry = weights_for_ruleset(rules_version)?
-        .weights
-        .iter()
-        .find(|entry| entry.id == card_id)
-        .ok_or_else(|| EngineError::InvalidState(format!("draft weight missing for {card_id}")))?;
-    let weight = if opening {
-        entry.opening_weight
-    } else {
-        entry.weight
-    };
-    if !weight.is_finite() || weight < 0.0 {
-        return Err(EngineError::InvalidState(format!(
-            "draft weight invalid for {card_id}"
-        )));
-    }
-    Ok((entry.phase.clone(), weight))
-}
-fn weights_by_id() -> &'static HashMap<&'static str, &'static Weight> {
-    static DATA: OnceLock<HashMap<&'static str, &'static Weight>> = OnceLock::new();
-    DATA.get_or_init(|| {
-        let mut by_id = HashMap::with_capacity(weights().weights.len());
-        for weight in &weights().weights {
-            // The source lookup uses find(), so duplicate IDs keep their first entry.
-            by_id.entry(weight.id.as_str()).or_insert(weight);
-        }
-        by_id
-    })
-}
-fn weights_by_id_v7() -> &'static HashMap<&'static str, &'static Weight> {
-    static DATA: OnceLock<HashMap<&'static str, &'static Weight>> = OnceLock::new();
-    DATA.get_or_init(|| {
-        let weights = weights_for_ruleset(RULES_VERSION_V7).expect("adopted v7 draft weights");
-        let mut by_id = HashMap::with_capacity(weights.weights.len());
-        for weight in &weights.weights {
-            // Source find() chooses the first definition if IDs repeat.
-            by_id.entry(weight.id.as_str()).or_insert(weight);
-        }
-        by_id
-    })
-}
-fn weight_for_card(rules_version: &str, card: &Value) -> Option<&'static Weight> {
-    card.get("id")
-        .and_then(Value::as_str)
-        .and_then(|id| match rules_version {
-            RULES_VERSION_V6 => weights_by_id().get(id).copied(),
-            RULES_VERSION_V7 => weights_by_id_v7().get(id).copied(),
-            _ => None,
-        })
+    crate::card_catalog::draft_weight_for_ruleset(rules_version, card_id, opening)
 }
 pub(crate) fn category_with_ruleset(rules_version: &str, card: &Value) -> &'static str {
-    weight_for_card(rules_version, card)
-        .map(|weight| weight.phase.as_str())
-        .unwrap_or("")
+    crate::card_catalog::category_with_ruleset(rules_version, card)
 }
 fn weight_with_ruleset(rules_version: &str, card: &Value, opening: bool) -> f64 {
-    weight_for_card(rules_version, card)
-        .map(|weight| {
-            if opening {
-                weight.opening_weight
-            } else {
-                weight.weight
-            }
-        })
-        .unwrap_or(0.0)
+    crate::card_catalog::weight_with_ruleset(rules_version, card, opening)
 }
 
 // Bounded fractional radix conversion uses the f64 interval and rounds the
@@ -353,128 +257,10 @@ pub(crate) fn conflicts_with_ruleset(
     id: &str,
     unavailable: &BTreeSet<String>,
 ) -> bool {
-    // `hasLatestMutuallyExclusiveDraftCard` checks pawn direction before its
-    // catalog-backed groups. Omitting it changes grand END draws once an
-    // earlier pick has acquired Rule Ticket (for example seed u32::MAX).
-    if id == "reverse-pawns"
-        && (unavailable.contains("rule-ticket") || unavailable.contains("macho-chess"))
-        || matches!(id, "rule-ticket" | "macho-chess") && unavailable.contains("reverse-pawns")
-    {
-        return true;
-    }
-    let definitions = match rules_version {
-        RULES_VERSION_V6 => definitions(),
-        RULES_VERSION_V7 => {
-            definitions_for_ruleset(RULES_VERSION_V7).expect("adopted v7 definitions")
-        }
-        _ => return true,
-    };
-    definitions.constants["LATEST_MUTUALLY_EXCLUSIVE_DRAFT_CARD_GROUPS"]
-        .as_array()
-        .expect("conflict groups")
-        .iter()
-        .any(|group| {
-            group
-                .as_array()
-                .expect("conflict group")
-                .iter()
-                .any(|value| value.as_str() == Some(id))
-                && group
-                    .as_array()
-                    .expect("group")
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .any(|other| other != id && unavailable.contains(other))
-        })
+    crate::card_incompatibility::conflicts(rules_version, id, unavailable)
 }
 fn grand_conflicts(rules_version: &str, id: &str, unavailable: &BTreeSet<String>) -> bool {
-    conflicts_with_ruleset(rules_version, id, unavailable)
-        || matches!(id, "democracy" | "queens-gambit")
-            && unavailable.contains(if id == "democracy" {
-                "queens-gambit"
-            } else {
-                "democracy"
-            })
-}
-
-/// Source `isRuleBlockedDraftCard` runs before the grand pool and every normal
-/// weighted draw. Its active RULE checks are separate from conflicts between
-/// cards already acquired during this draft.
-fn v7_rule_blocked_draft_card(state: &GameState, id: &str) -> bool {
-    if state.ruleset_id != RULES_VERSION_V7 {
-        return false;
-    }
-    if state.extra.get("monochromeChess") == Some(&Value::Bool(true))
-        && matches!(id, "horse-riding" | "horde")
-    {
-        return true;
-    }
-    if state.extra.get("machoChess") == Some(&Value::Bool(true)) && id == "reverse-pawns" {
-        return true;
-    }
-    let applied = state
-        .extra
-        .get("appliedRuleCard")
-        .and_then(|card| card.get("id"))
-        .and_then(Value::as_str)
-        .filter(|id| !v7_rule_presentation_only(state, id));
-    let rule = if v7_diagonal_chess_active(state) {
-        Some("diagonal-chess")
-    } else {
-        applied
-    };
-    match id {
-        "summon-colossus" => matches!(
-            rule,
-            Some("chess-344200" | "chess-n-pow-30" | "chess-45-pow-30")
-        ),
-        "big-rook" | "big-bishop" => matches!(
-            rule,
-            Some(
-                "diagonal-chess"
-                    | "chess-960"
-                    | "chess-344200"
-                    | "chess-n-pow-30"
-                    | "chess-45-pow-30"
-            )
-        ),
-        _ => false,
-    }
-}
-
-fn v7_rule_presentation_only(state: &GameState, rule_id: &str) -> bool {
-    state.extra.get("simpleBoardEditor").is_some_and(|editor| {
-        editor.get("enabled") == Some(&Value::Bool(true))
-            && editor.get("ruleApplicationDisabled") == Some(&Value::Bool(true))
-            && editor
-                .get("ruleId")
-                .and_then(Value::as_str)
-                .filter(|id| !id.is_empty())
-                .or_else(|| {
-                    editor
-                        .get("startConfig")
-                        .and_then(|start| start.get("ruleId"))
-                        .and_then(Value::as_str)
-                        .filter(|id| !id.is_empty())
-                })
-                == Some(rule_id)
-    })
-}
-
-fn v7_diagonal_chess_active(state: &GameState) -> bool {
-    let applied = state
-        .extra
-        .get("appliedRuleCard")
-        .and_then(|card| card.get("id"))
-        .and_then(Value::as_str)
-        == Some("diagonal-chess")
-        && !v7_rule_presentation_only(state, "diagonal-chess");
-    applied
-        || state
-            .extra
-            .get("additionalRuleCards")
-            .and_then(Value::as_array)
-            .is_some_and(|cards| cards.iter().any(|card| card["id"] == "diagonal-chess"))
+    crate::card_incompatibility::grand_conflicts(rules_version, id, unavailable)
 }
 
 /// Source `startClockForTurn` settles Siren exposure before testing clock
@@ -500,6 +286,12 @@ fn shuffled(state: &mut GameState, items: &mut [Value]) -> Result<()> {
     Ok(())
 }
 fn grand_pool(state: &mut GameState) -> Result<Vec<Value>> {
+    crate::draft_policy::DraftProfile::for_ruleset(&state.ruleset_id)?.executable()?;
+    if crate::draft_policy::DraftMode::from_state(state)? != crate::draft_policy::DraftMode::Grand {
+        return Err(EngineError::InvalidState(
+            "grand pool requested in another draft mode".into(),
+        ));
+    }
     let mut unavailable = BTreeSet::new();
     let mut choices = Vec::new();
     for (phase, count) in [("OPENING", 4), ("MIDDLE", 10), ("PIECE", 7), ("END", 7)] {
@@ -511,7 +303,10 @@ fn grand_pool(state: &mut GameState) -> Result<Vec<Value>> {
                 .filter(|card| {
                     category_with_ruleset(&state.ruleset_id, card) == phase
                         && card["id"] != "shotgun-king"
-                        && !v7_rule_blocked_draft_card(state, card["id"].as_str().expect("card id"))
+                        && !crate::eligibility::v7_rule_blocked_draft_card(
+                            state,
+                            card["id"].as_str().expect("card id"),
+                        )
                         && !unavailable.contains(card["id"].as_str().expect("card id"))
                         && !grand_conflicts(
                             &state.ruleset_id,
@@ -540,7 +335,7 @@ fn acquired_ids(state: &GameState) -> BTreeSet<String> {
         .map(|card| card.id.clone())
         .collect()
 }
-fn draw_mixed(
+pub(crate) fn draw_mixed(
     state: &mut GameState,
     categories: &[&str],
     count: usize,
@@ -575,11 +370,11 @@ fn mixed_pool(
         if id == "shotgun-king"
             || unavailable.contains(id)
             || conflicts_with_ruleset(&state.ruleset_id, id, unavailable)
-            || v7_rule_blocked_draft_card(state, id)
+            || crate::eligibility::v7_rule_blocked_draft_card(state, id)
             // Source `isDiagonalChessDraftCardExcluded` is only in
             // `isCardDrawableForColor`; grand draft does not call it.
             || state.ruleset_id == RULES_VERSION_V7
-                && v7_diagonal_chess_active(state)
+                && crate::eligibility::v7_diagonal_chess_active(state)
                 && matches!(id, "london-system" | "horde")
             || !categories.contains(&category_with_ruleset(&state.ruleset_id, card))
         {
@@ -721,7 +516,9 @@ fn balanced_normal_proposal(
         best.iter()
             .any(|card| category_with_ruleset(&state.ruleset_id, card) == "OPENING")
     );
-    Ok((source_probability, proposal_probability))
+    let density =
+        crate::draft_policy::ChanceDensity::new(source_probability, proposal_probability)?;
+    Ok((density.game_p, density.proposal_q))
 }
 
 fn observed_normal_trace(
@@ -1061,7 +858,11 @@ fn forbidden_bundle(rules_version: &str, first: &Value, second: &Value) -> bool 
         || (first["id"] == "democracy" && second["id"] == "queens-gambit")
         || (first["id"] == "queens-gambit" && second["id"] == "democracy")
 }
-fn arrange_chaos(state: &mut GameState, choices: Vec<Value>, color: Color) -> Result<Vec<Value>> {
+pub(crate) fn arrange_chaos(
+    state: &mut GameState,
+    choices: Vec<Value>,
+    color: Color,
+) -> Result<Vec<Value>> {
     arrange_chaos_with(state, choices, |state, excluded| {
         Ok(draw_mixed(state, &["MIDDLE", "PIECE"], 1, color, excluded, false)?.pop())
     })
@@ -1145,45 +946,9 @@ fn arrange_chaos_with(
     }
     Ok(choices)
 }
-fn draw_raw(state: &mut GameState, phase: &str, count: usize, color: Color) -> Result<Vec<Value>> {
-    let mut excluded = BTreeSet::new();
-    let mut choices = match phase {
-        "OPENING" => draw_mixed(
-            state,
-            &["OPENING", "MIDDLE", "PIECE"],
-            count,
-            color,
-            &excluded,
-            true,
-        )?,
-        "MIDDLE" => {
-            let pieces = ((count as f64 / 3.0).round() as usize).max(1);
-            let mut choices = Vec::new();
-            for (category, count) in [("MIDDLE", count - pieces), ("PIECE", pieces)] {
-                for card in draw_mixed(state, &[category], count, color, &excluded, false)? {
-                    excluded.insert(card["id"].as_str().expect("id").into());
-                    choices.push(card);
-                }
-            }
-            if choices.len() < count {
-                choices.extend(draw_mixed(
-                    state,
-                    &["MIDDLE", "PIECE"],
-                    count - choices.len(),
-                    color,
-                    &excluded,
-                    false,
-                )?);
-            }
-            choices
-        }
-        "END" => draw_mixed(state, &["MIDDLE", "END"], count, color, &excluded, false)?,
-        other => draw_mixed(state, &[other], count, color, &excluded, false)?,
-    };
-    if state.extra.get("gameStyle").and_then(Value::as_str) == Some("chaos") {
-        choices = arrange_chaos(state, choices, color)?;
-    }
-    Ok(choices)
+fn draw_raw(state: &mut GameState, phase: &str, color: Color) -> Result<Vec<Value>> {
+    crate::draft_policy::DraftProfile::for_ruleset(&state.ruleset_id)?.executable()?;
+    crate::draft_policy::DraftMode::from_state(state)?.draw_offer(state, phase, color)
 }
 fn average_score(choices: &[Value]) -> Option<f64> {
     (!choices.is_empty()).then(|| {
@@ -1194,13 +959,8 @@ fn average_score(choices: &[Value]) -> Option<f64> {
             / choices.len() as f64
     })
 }
-fn draw_choices(
-    state: &mut GameState,
-    phase: &str,
-    count: usize,
-    color: Color,
-) -> Result<Vec<Value>> {
-    let mut best = draw_raw(state, phase, count, color)?;
+fn draw_choices(state: &mut GameState, phase: &str, color: Color) -> Result<Vec<Value>> {
+    let mut best = draw_raw(state, phase, color)?;
     let target = state
         .extra
         .get("draftBalance")
@@ -1216,8 +976,8 @@ fn draw_choices(
     if best_gap <= 2.0 {
         return Ok(best);
     }
-    for _ in 0..2 {
-        let candidate = draw_raw(state, phase, count, color)?;
+    for _ in 0..crate::draft_policy::DraftMode::from_state(state)?.black_balance_retries() {
+        let candidate = draw_raw(state, phase, color)?;
         if candidate.is_empty() {
             continue;
         }
@@ -1255,12 +1015,7 @@ pub(crate) fn start_draft(state: &mut GameState, color: Color, phase: &str) -> R
         state.extra.insert(field.into(), json!([]));
     }
     state.extra.insert("shotgunAction".into(), json!("move"));
-    let count = if state.extra.get("gameStyle").and_then(Value::as_str) == Some("chaos") {
-        6
-    } else {
-        3
-    };
-    let choices = draw_choices(state, phase, count, color)?;
+    let choices = draw_choices(state, phase, color)?;
     if choices.is_empty() {
         return Err(EngineError::UnsupportedFeature(
             "empty draft skip settlement".into(),
@@ -1401,8 +1156,9 @@ pub(crate) fn condition_opening_offer(
     public: &[Value],
     color: Color,
 ) -> Result<()> {
-    let chaos = state.extra.get("gameStyle").and_then(Value::as_str) == Some("chaos");
-    if public.len() != if chaos { 6 } else { 3 } {
+    let chaos =
+        crate::draft_policy::DraftMode::from_state(state)? == crate::draft_policy::DraftMode::Chaos;
+    if public.len() != crate::draft_policy::DraftMode::from_state(state)?.offer_count() {
         return Err(EngineError::InvalidState(
             "initial public offer count violates source mode".into(),
         ));
@@ -1488,7 +1244,7 @@ fn validate_v7_opening_rule_selection(ids: &[String], deathmatch_enabled: bool) 
     if ids.is_empty() {
         return Ok(());
     }
-    let constants = &weights_for_ruleset(RULES_VERSION_V7)?.constants;
+    let constants = crate::card_catalog::constants_for_ruleset(RULES_VERSION_V7)?;
     let pool = constants["CARD_CATEGORY_GROUPS"]["RULE"]
         .as_array()
         .ok_or_else(|| EngineError::InvalidState("v7 RULE selection pool missing".into()))?;
@@ -2131,22 +1887,35 @@ fn passive_priority_for_ruleset(rules_version: &str, id: &str) -> u8 {
     }
 }
 
-fn apply_draft_passive_for_ruleset(state: &mut GameState, color: Color, slot: usize) -> Result<()> {
+pub(crate) fn apply_draft_passive_for_ruleset(
+    state: &mut GameState,
+    color: Color,
+    slot: usize,
+) -> Result<()> {
+    let _ = apply_draft_passive_with_outcome(state, color, slot)?;
+    Ok(())
+}
+
+pub(crate) fn apply_draft_passive_with_outcome(
+    state: &mut GameState,
+    color: Color,
+    slot: usize,
+) -> Result<bool> {
     let card = state
         .deck_slots
         .get(color)
         .get(slot)
         .ok_or(EngineError::IllegalAction)?;
     if state.ruleset_id == RULES_VERSION_V7 && card.id == "white-box" {
-        let _ = crate::card_effects::apply_v7_white_box_acquisition(state, color, slot)?;
+        crate::card_effects::apply_v7_white_box_acquisition(state, color, slot)
     } else if state.ruleset_id == RULES_VERSION_V7 && crate::v7_card_passive::owns(&card.id) {
         // A source-declined v7 effect returns false. It must not be applied
         // again through the older handler.
-        let _ = crate::v7_card_passive::apply_acquisition(state, color, slot)?;
+        crate::v7_card_passive::apply_acquisition(state, color, slot)
     } else {
         crate::transition::apply_draft_passive(state, color, slot)?;
+        Ok(true)
     }
-    Ok(())
 }
 fn apply_regular_pick(state: &mut GameState, action: &Action, draft: &Value) -> Result<Vec<Piece>> {
     let choices = draft["choices"]

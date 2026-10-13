@@ -975,6 +975,39 @@ pub(crate) fn start_deferred_promotion_v7(state: &mut GameState, action: &Action
     Ok(())
 }
 
+/// Read-only admission for the deferred promotion action emitted by the
+/// source movement collector. The pending window is created only by apply.
+pub(crate) fn is_legal_deferred_promotion(state: &GameState, action: &Action) -> Result<bool> {
+    boundary(state)?;
+    if action.kind != ActionKind::Promotion
+        || action.destination.is_some()
+        || action.card_id.is_some()
+        || action.card_instance_id.is_some()
+        || crate::card_effects::has_card_selection(action)
+        || !action.extra.is_empty()
+        || action.color != state.turn
+        || state.mode != "play"
+        || crate::observation::truth(state.extra.get("pendingPromotion"))
+        || crate::observation::truth(state.extra.get("targeting"))
+    {
+        return Ok(false);
+    }
+    let Some(square) = action.from else {
+        return Ok(false);
+    };
+    let Some(piece) = state.at(square).filter(|piece| piece.color == state.turn) else {
+        return Ok(false);
+    };
+    let reaches_rank = matches!(piece.kind.as_str(), "pawn" | "squire" | "standardBearer")
+        && should_promote_v7(state, piece, square)?;
+    let field_promotion = is_field_promotion_recycling_ready_v7(state, piece);
+    if !reaches_rank && !field_promotion {
+        return Ok(false);
+    }
+    let choices = promotion_choices_for_v7(state, piece, square)?;
+    Ok(!field_promotion || should_promote_v7(state, piece, square)? || !choices.is_empty())
+}
+
 fn pending_square(pending: &Value, row: &str, col: &str) -> Result<Square> {
     serde_json::from_value(json!({"row":pending.get(row),"col":pending.get(col)})).map_err(|_| {
         EngineError::InvalidState(format!("v7 pending promotion {row}/{col} outside board"))

@@ -5,6 +5,86 @@ use crate::*;
 use serde_json::Value;
 use std::{collections::BTreeSet, sync::OnceLock};
 
+/// Source `isRuleBlockedDraftCard` runs before the grand pool and every normal
+/// weighted draw. Its active RULE checks are separate from conflicts between
+/// cards already acquired during this draft.
+pub(crate) fn v7_rule_blocked_draft_card(state: &GameState, id: &str) -> bool {
+    if state.ruleset_id != RULES_VERSION_V7 {
+        return false;
+    }
+    if state.extra.get("monochromeChess") == Some(&Value::Bool(true))
+        && matches!(id, "horse-riding" | "horde")
+    {
+        return true;
+    }
+    if state.extra.get("machoChess") == Some(&Value::Bool(true)) && id == "reverse-pawns" {
+        return true;
+    }
+    let applied = state
+        .extra
+        .get("appliedRuleCard")
+        .and_then(|card| card.get("id"))
+        .and_then(Value::as_str)
+        .filter(|id| !v7_rule_presentation_only(state, id));
+    let rule = if v7_diagonal_chess_active(state) {
+        Some("diagonal-chess")
+    } else {
+        applied
+    };
+    match id {
+        "summon-colossus" => matches!(
+            rule,
+            Some("chess-344200" | "chess-n-pow-30" | "chess-45-pow-30")
+        ),
+        "big-rook" | "big-bishop" => matches!(
+            rule,
+            Some(
+                "diagonal-chess"
+                    | "chess-960"
+                    | "chess-344200"
+                    | "chess-n-pow-30"
+                    | "chess-45-pow-30"
+            )
+        ),
+        _ => false,
+    }
+}
+
+fn v7_rule_presentation_only(state: &GameState, rule_id: &str) -> bool {
+    state.extra.get("simpleBoardEditor").is_some_and(|editor| {
+        editor.get("enabled") == Some(&Value::Bool(true))
+            && editor.get("ruleApplicationDisabled") == Some(&Value::Bool(true))
+            && editor
+                .get("ruleId")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .or_else(|| {
+                    editor
+                        .get("startConfig")
+                        .and_then(|start| start.get("ruleId"))
+                        .and_then(Value::as_str)
+                        .filter(|id| !id.is_empty())
+                })
+                == Some(rule_id)
+    })
+}
+
+pub(crate) fn v7_diagonal_chess_active(state: &GameState) -> bool {
+    let applied = state
+        .extra
+        .get("appliedRuleCard")
+        .and_then(|card| card.get("id"))
+        .and_then(Value::as_str)
+        == Some("diagonal-chess")
+        && !v7_rule_presentation_only(state, "diagonal-chess");
+    applied
+        || state
+            .extra
+            .get("additionalRuleCards")
+            .and_then(Value::as_array)
+            .is_some_and(|cards| cards.iter().any(|card| card["id"] == "diagonal-chess"))
+}
+
 fn truth(value: Option<&Value>) -> bool {
     match value {
         None | Some(Value::Null) => false,

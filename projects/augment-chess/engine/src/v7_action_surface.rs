@@ -628,6 +628,9 @@ pub(crate) struct SourceActionCursor {
     card_window: Option<bool>,
     card_filter: Option<String>,
     ui_completion: Option<UiCardCompletion>,
+    // This proof belongs to the immutable cursor snapshot. It must never be
+    // applied to a later Position or to a card/choice window.
+    verified_opening_actions: Option<Arc<Vec<Action>>>,
     special: bool,
     emitted: bool,
     exhausted: bool,
@@ -654,6 +657,14 @@ impl SourceActionCursor {
         } else {
             ui_card_completion(state)?
         };
+        let verified_opening_actions =
+            if !special && ui_completion.is_none() && require_source_opening(state).is_ok() {
+                // The complete pinned action digest is checked once for this
+                // snapshot, including cards. No candidate executes an effect.
+                Some(Arc::new(seed19_first_play_legal_actions(state)?))
+            } else {
+                None
+            };
         let (stage, mut pending) = if special {
             (SourceCursorStage::Done, special_candidates(state)?)
         } else {
@@ -679,6 +690,7 @@ impl SourceActionCursor {
             card_window: None,
             card_filter,
             ui_completion,
+            verified_opening_actions,
             special,
             emitted: false,
             exhausted: false,
@@ -751,6 +763,9 @@ impl SourceActionCursor {
                     if !crate::card_registry::source_candidate_available(&self.state, card)? {
                         continue;
                     }
+                    if self.verified_opening_actions.is_none() {
+                        crate::card_effects::require_pure_candidate_family(&self.state, card)?;
+                    }
                     if let Some(cursor) =
                         card_cursor(&self.state, card, self.ui_completion.as_ref())?
                     {
@@ -802,15 +817,65 @@ impl SourceActionCursor {
         {
             return Ok(false);
         }
-        let mut owned = self.state.as_ref().clone();
-        match crate::transition::apply_without_public_event(&mut owned, action) {
-            Ok(_) => {
-                crate::replay::canonicalize_position_frames(&mut owned)?;
-                Ok(true)
-            }
-            Err(EngineError::IllegalAction) => Ok(false),
-            Err(error) => Err(error),
+        if let Some(actions) = &self.verified_opening_actions {
+            return Ok(actions.contains(action));
         }
+        is_legal(&self.state, action)
+    }
+}
+
+/// Admission for a source candidate. Candidate membership is established by
+/// the cursor (or by validate_source_selection); this reads the live rule
+/// state without committing a move, settling Replay or sampling RNG.
+fn is_legal(state: &GameState, action: &Action) -> Result<bool> {
+    let verdict = (|| -> Result<bool> {
+        match action.kind {
+            crate::ActionKind::Move => {
+                let from = action.from.ok_or(EngineError::IllegalAction)?;
+                let target = action
+                    .destination
+                    .as_ref()
+                    .ok_or(EngineError::IllegalAction)?;
+                if target.flags.contains_key("quantumFrom") {
+                    return Err(EngineError::UnsupportedFeature(
+                    "v7 pure legality: quantum UI move requires a non-mutating quantum origin check".into(),
+                ));
+                }
+                let piece = state.at(from).ok_or(EngineError::IllegalAction)?;
+                let origin = crate::movement::v7_normalize_origin(piece, from)?;
+                crate::movement::v7_move_attempt_origin_verdict(state, piece, origin, target)
+                    .map(|verdict| verdict == crate::movement::V7MoveOriginVerdict::Allowed)
+            }
+            crate::ActionKind::Card => {
+                let card = state
+                    .deck_slots
+                    .get(state.turn)
+                    .iter()
+                    .find(|card| {
+                        !card.vacant
+                            && Some(card.id.as_str()) == action.card_id.as_deref()
+                            && Some(card.instance_id.as_str()) == action.card_instance_id.as_deref()
+                    })
+                    .ok_or(EngineError::IllegalAction)?;
+                crate::card_registry::action_policy(state, card)?;
+                crate::card_effects::validate_pure_candidate(state, card, action)
+            }
+            crate::ActionKind::WizardSpell
+            | crate::ActionKind::ShotgunReload
+            | crate::ActionKind::FileSurgeSkip => {
+                crate::v7_decision_actions::is_legal_candidate(state, action)
+            }
+            crate::ActionKind::Promotion => {
+                crate::v7_promotion::is_legal_deferred_promotion(state, action)
+            }
+            kind => Err(EngineError::UnsupportedFeature(format!(
+                "v7 pure legality has no predicate for candidate {kind:?}"
+            ))),
+        }
+    })();
+    match verdict {
+        Err(EngineError::IllegalAction) => Ok(false),
+        other => other,
     }
 }
 
@@ -1038,11 +1103,6 @@ pub(crate) fn seed19_first_play_legal_actions(state: &GameState) -> Result<Vec<A
         if offered.len() != expected_count {
             return Err(unsupported("card action count"));
         }
-        for action in &offered {
-            if crate::card_effects::validate(state, card, action)? != Some(true) {
-                return Err(unsupported("card action validation"));
-            }
-        }
         actions.extend(offered);
     }
     if actions.len() != source.legal_count || digest(&actions)? != source.legal_digest {
@@ -1116,38 +1176,7 @@ fn trolley_choices(window: &Value, actor: Color) -> Result<Vec<Action>> {
     Ok(actions)
 }
 
-fn transition_accepted_actions(state: &GameState, candidates: Vec<Action>) -> Result<Vec<Action>> {
-    require_budget(candidates.len(), "candidate set")?;
-    let actor = state.decision_actor();
-    let ui_completion = ui_card_completion(state)?;
-    let mut accepted = Vec::with_capacity(candidates.len());
-    for action in candidates {
-        if action.color != actor || action.position_key.is_some() {
-            return Err(EngineError::InvalidState(
-                "v7 source candidate has the wrong actor or a private Position key".into(),
-            ));
-        }
-        if ui_completion
-            .as_ref()
-            .is_some_and(|completion| !completion.permits(&action))
-        {
-            continue;
-        }
-        // Source `actionStream(legal:true)` tests each candidate on an owned
-        // restored Position. A rejected selection cannot mutate this state.
-        let mut owned = state.clone();
-        match crate::transition::apply_without_public_event(&mut owned, &action) {
-            Ok(_) => {
-                crate::replay::canonicalize_position_frames(&mut owned)?;
-                accepted.push(action);
-            }
-            Err(EngineError::IllegalAction) => {}
-            Err(error) => return Err(error),
-        }
-    }
-    Ok(accepted)
-}
-
+#[cfg(test)]
 fn ordered_play_candidates(state: &GameState) -> Result<Vec<Action>> {
     // Frozen iterateCandidatePayloads yields ordinary movement first, then
     // one card instance at a time in deck order. Its friendly-crush fallback
@@ -1196,8 +1225,20 @@ pub(crate) fn legal_source_actions(state: &GameState) -> Result<Vec<Action>> {
     if require_source_opening(state).is_ok() {
         return seed19_first_play_legal_actions(state);
     }
-    let candidates = ordered_play_candidates(state)?;
-    transition_accepted_actions(state, candidates)
+    // The cursor owns one immutable snapshot and lazy card families. Complete
+    // enumeration still checks each emitted action, but no eager intermediate
+    // candidate vector or second UI filter is needed.
+    let mut cursor = SourceActionCursor::new(state, None)?;
+    let mut accepted = Vec::new();
+    let mut seen = 0;
+    while let Some(action) = cursor.next_candidate()? {
+        seen += 1;
+        require_budget(seen, "complete candidate set")?;
+        if cursor.accepts(&action)? {
+            accepted.push(action);
+        }
+    }
+    Ok(accepted)
 }
 
 /// Prove one source selection without exhausting an unrelated card family.
@@ -1259,9 +1300,11 @@ pub(crate) fn validate_source_selection(state: &GameState, action: &Action) -> R
         if !quantum_ui_actions(state, ghost)?.contains(action) {
             return Err(EngineError::IllegalAction);
         }
-        let mut owned = state.clone();
-        crate::transition::apply_without_public_event(&mut owned, action)?;
-        return Ok(());
+        return if is_legal(state, action)? {
+            Ok(())
+        } else {
+            Err(EngineError::IllegalAction)
+        };
     }
     let member = if action.kind == crate::ActionKind::Card {
         if !crate::movement::v7_card_action_window_open(state)? {
@@ -1280,6 +1323,7 @@ pub(crate) fn validate_source_selection(state: &GameState, action: &Action) -> R
         if !crate::card_registry::source_candidate_available(state, card)? {
             return Err(EngineError::IllegalAction);
         }
+        crate::card_effects::require_pure_candidate_family(state, card)?;
         if let Some(cursor) = card_cursor(state, card, ui_completion.as_ref())? {
             cursor.contains_candidate(action)?
         } else {
@@ -1299,9 +1343,11 @@ pub(crate) fn validate_source_selection(state: &GameState, action: &Action) -> R
     if !member {
         return Err(EngineError::IllegalAction);
     }
-    let mut owned = state.clone();
-    crate::transition::apply_without_public_event(&mut owned, action)?;
-    Ok(())
+    if is_legal(state, action)? {
+        Ok(())
+    } else {
+        Err(EngineError::IllegalAction)
+    }
 }
 
 fn friendly_fallback_candidates(state: &GameState) -> Result<Vec<Action>> {
@@ -1645,6 +1691,95 @@ mod tests {
             digest(&candidates).unwrap(),
             opening_for("normal").unwrap().legal_digest
         );
+    }
+
+    #[test]
+    fn first_play_move_validator_matches_transition_without_mutating_state() {
+        for style in ["normal", "chaos", "grand"] {
+            let state = first_play(style);
+            let before = state.clone();
+            let cursor = SourceActionCursor::new(&state, None).unwrap();
+            let moves = crate::movement::v7_opening_legal_move_actions(&state).unwrap();
+            assert_eq!(moves.len(), 20, "{style}");
+            assert!(cursor.verified_opening_actions.is_some(), "{style}");
+            for action in &moves {
+                let mut legacy = state.clone();
+                let old = crate::transition::apply_without_public_event(&mut legacy, action)
+                    .and_then(|_| crate::replay::canonicalize_position_frames(&mut legacy));
+                assert!(old.is_ok(), "{style}: {action:?}: {old:?}");
+                assert!(cursor.accepts(action).unwrap(), "{style}: {action:?}");
+            }
+            let mut invalid = moves[0].clone();
+            invalid.destination.as_mut().unwrap().col = 7;
+            assert!(!cursor.accepts(&invalid).unwrap(), "{style}");
+            assert_eq!(state, before, "{style}");
+
+            let mut changed = state.clone();
+            changed.rng.state ^= 1;
+            assert!(
+                SourceActionCursor::new(&changed, None)
+                    .unwrap()
+                    .verified_opening_actions
+                    .is_none(),
+                "{style}"
+            );
+        }
+    }
+
+    #[test]
+    fn first_play_flag_cards_match_transition_without_consuming_rng() {
+        for (style, card_id) in [("normal", "relay"), ("chaos", "quantum-mechanics")] {
+            let state = first_play(style);
+            let before = state.clone();
+            let cursor = SourceActionCursor::new(&state, None).unwrap();
+            let card = state
+                .deck_slots
+                .get(state.turn)
+                .iter()
+                .find(|card| card.id == card_id)
+                .unwrap();
+            let action = Action::card(state.turn, card, None);
+            assert!(
+                seed19_first_play_legal_actions(&state)
+                    .unwrap()
+                    .contains(&action)
+            );
+            let mut legacy = state.clone();
+            let old = crate::transition::apply_without_public_event(&mut legacy, &action)
+                .and_then(|_| crate::replay::canonicalize_position_frames(&mut legacy));
+            assert!(old.is_ok(), "{style}: {old:?}");
+            assert_eq!(
+                crate::card_effects::validate_side_flag_action(&state, card, &action).unwrap(),
+                Some(true)
+            );
+            assert!(cursor.accepts(&action).unwrap(), "{style}");
+
+            if style == "normal" {
+                // This is the cursor used by Position.action_stream() and
+                // Python MCTS, distinct from the v7 public Host cursor.
+                let mut search = crate::movement::ActionCursor::new(&state).unwrap();
+                let mut found = false;
+                for _ in 0..100 {
+                    if search.is_exhausted(&state) {
+                        break;
+                    }
+                    if search.examine(&state, 1).unwrap().action == Some(action.clone()) {
+                        found = true;
+                        break;
+                    }
+                }
+                assert!(found, "MCTS action cursor omitted Relay");
+            }
+
+            let mut invalid = action.clone();
+            invalid.target = Some(json!({"row":0,"col":0}));
+            assert_eq!(
+                crate::card_effects::validate_side_flag_action(&state, card, &invalid).unwrap(),
+                Some(false)
+            );
+            assert!(!cursor.accepts(&invalid).unwrap(), "{style}");
+            assert_eq!(state, before, "{style}");
+        }
     }
 
     #[test]
