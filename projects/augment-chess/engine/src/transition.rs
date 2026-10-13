@@ -15,6 +15,7 @@ pub(crate) fn card_actions(state: &GameState, card: &CardSlot) -> Result<Vec<Act
             Err(EngineError::IllegalAction) => return Ok(Vec::new()),
             Err(error) => return Err(error),
         }
+        crate::card_effects::require_pure_candidate_family(state, card)?;
     }
     let candidates = card_ui_actions(state, card)?;
     let mut accepted = Vec::new();
@@ -36,6 +37,7 @@ pub(crate) fn validate_card_action(
             Err(EngineError::IllegalAction) => return Ok(false),
             Err(error) => return Err(error),
         }
+        return crate::card_effects::validate_pure_candidate(state, card, action);
     }
     if let Some(accepted) = crate::card_effects::validate(state, card, action)? {
         return Ok(accepted);

@@ -95,6 +95,9 @@ pub fn implemented_piece_types() -> &'static [&'static str] {
 }
 
 pub(crate) fn legal_actions(state: &GameState) -> Result<Vec<Action>> {
+    if state.ruleset_id == RULES_VERSION_V7 {
+        return crate::v7_action_surface::legal_source_actions(state);
+    }
     if state.result().is_some() || state.mode == "gameover" {
         return Ok(Vec::new());
     }
@@ -1549,6 +1552,9 @@ fn has_checker_capture(state: &GameState) -> Result<bool> {
 /// Validate the selected semantic action directly, rather than enumerating all
 /// other card combinations to locate it.
 pub(crate) fn validate_action(state: &GameState, action: &Action) -> Result<()> {
+    if state.ruleset_id == RULES_VERSION_V7 {
+        return crate::v7_action_surface::validate_source_selection(state, action);
+    }
     if state.result().is_some() {
         return Err(EngineError::Terminal);
     }

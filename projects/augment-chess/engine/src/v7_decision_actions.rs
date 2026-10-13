@@ -21,6 +21,87 @@ pub(crate) fn owns(kind: ActionKind) -> bool {
     )
 }
 
+/// Candidate admission before the transactional decision executor. This
+/// evaluates only the source preconditions and leaves spell, reload and skip
+/// effects to apply().
+pub(crate) fn is_legal_candidate(state: &GameState, action: &Action) -> Result<bool> {
+    let check = (|| -> Result<bool> {
+        if state.mode != "play"
+            || action.color != state.decision_actor()
+            || action.card_id.is_some()
+            || action.card_instance_id.is_some()
+            || action.destination.is_some()
+            || crate::observation::truth(state.extra.get("activeTrolley"))
+        {
+            return Ok(false);
+        }
+        let from = origin(action)?;
+        match action.kind {
+            ActionKind::WizardSpell => {
+                exact_fields(action, &["spellId"], true)?;
+                let spell_id = action
+                    .extra
+                    .get("spellId")
+                    .and_then(Value::as_str)
+                    .ok_or(EngineError::IllegalAction)?;
+                let (_, cost) = spell_info(spell_id)?;
+                let wizard = state
+                    .at(from)
+                    .filter(|piece| piece.color == action.color && piece.ability_kind() == "wizard")
+                    .ok_or(EngineError::IllegalAction)?;
+                let stale_zugzwang =
+                    state.flag("democracy", action.color)
+                        && !state.board.iter().flatten().flatten().any(|piece| {
+                            piece.color == action.color && state.royal_identity(piece)
+                        });
+                if state.flag("zugzwang", action.color) && !stale_zugzwang
+                    || nullable_number(wizard, "mana", 0.0)? < cost
+                {
+                    return Ok(false);
+                }
+                let target =
+                    source_square(action.target.as_ref().ok_or(EngineError::IllegalAction)?)?;
+                Ok(match spell_id {
+                    "timeStop" => target == from,
+                    "shield" => state.at(target).is_some_and(|piece| {
+                        piece.color == action.color
+                            && !["wall", "scarecrow"].contains(&piece.kind.as_str())
+                    }),
+                    "lightning" | "meteor" => state
+                        .extra
+                        .get("delayedHazards")
+                        .is_some_and(Value::is_array),
+                    _ => false,
+                })
+            }
+            ActionKind::ShotgunReload => {
+                exact_fields(action, &[], false)?;
+                let shotgun = state
+                    .at(from)
+                    .filter(|piece| piece.color == action.color && piece.kind == "shotgunKing")
+                    .ok_or(EngineError::IllegalAction)?;
+                let maximum = nullable_number(shotgun, "maxAmmo", 3.0)?;
+                let ammo = nullable_number(shotgun, "ammo", 0.0)?;
+                Ok(!ammo_is_full(shotgun, ammo, maximum)?)
+            }
+            ActionKind::FileSurgeSkip => {
+                exact_fields(action, &[], false)?;
+                Ok(forced_extra_origin(state, action.color) == Some(from)
+                    && state
+                        .at(from)
+                        .is_some_and(|piece| optional_presentation(piece).is_some()))
+            }
+            kind => Err(EngineError::UnsupportedFeature(format!(
+                "v7 pure legality has no decision predicate for {kind:?}"
+            ))),
+        }
+    })();
+    match check {
+        Err(EngineError::IllegalAction) => Ok(false),
+        other => other,
+    }
+}
+
 /// The private working copy is necessary even for a spell which retains its
 /// turn: visibility, a replay callback, or the ensuing endMove can fail after
 /// mana, board or RNG changes have already occurred.

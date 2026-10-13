@@ -219,6 +219,11 @@ impl Position {
         Ok(action)
     }
     fn validate_public_selection(&self, action: &Action) -> Result<()> {
+        if self.rules_version() == RULES_VERSION_V7 {
+            // bind_payload already checked the complete source candidate and
+            // its read-only legality, including an active UI card window.
+            return Ok(());
+        }
         if action.kind == ActionKind::Card {
             let card = self
                 .state()
@@ -375,7 +380,14 @@ impl Position {
     pub fn action_stream(&self) -> Result<ActionStream> {
         Ok(ActionStream {
             position: self.clone(),
-            cursor: movement::ActionCursor::new(self.state())?,
+            cursor: if self.rules_version() == RULES_VERSION_V7 {
+                ActionStreamCursor::V7(v7_action_surface::SourceActionCursor::new(
+                    self.state(),
+                    None,
+                )?)
+            } else {
+                ActionStreamCursor::Legacy(movement::ActionCursor::new(self.state())?)
+            },
         })
     }
     pub fn bind_payload(&self, payload: Value) -> Result<Action> {
@@ -445,7 +457,11 @@ impl Position {
 
 pub struct ActionStream {
     position: Position,
-    cursor: movement::ActionCursor,
+    cursor: ActionStreamCursor,
+}
+enum ActionStreamCursor {
+    Legacy(movement::ActionCursor),
+    V7(v7_action_surface::SourceActionCursor),
 }
 #[derive(Clone, Debug)]
 pub struct ActionPage {
@@ -464,31 +480,52 @@ impl ActionStream {
         }
         let mut actions = Vec::with_capacity(limit);
         let mut examined = 0;
-        let mut cursor = self.cursor.clone();
         let key = format!("{:016x}", self.position.key());
-        while examined < limit && !cursor.is_exhausted(self.position.state()) {
-            let work = cursor.examine(self.position.state(), limit - examined)?;
-            if let Some(page) = work.staged {
-                examined += page.examined;
-                actions.extend(page.actions.into_iter().map(|mut action| {
-                    action.position_key = Some(key.clone());
-                    action
-                }));
-            } else {
-                examined += 1;
-                if let Some(mut action) = work.action {
-                    action.position_key = Some(key.clone());
-                    actions.push(action);
+        let exhausted = match &mut self.cursor {
+            ActionStreamCursor::V7(source) => {
+                let mut staged = source.clone();
+                while examined < limit {
+                    let Some(mut action) = staged.next_candidate()? else {
+                        break;
+                    };
+                    examined += 1;
+                    if staged.accepts(&action)? {
+                        action.position_key = Some(key.clone());
+                        actions.push(action);
+                    }
                 }
+                let exhausted = staged.is_exhausted();
+                *source = staged;
+                exhausted
             }
-        }
-        let exhausted = cursor.is_exhausted(self.position.state());
+            ActionStreamCursor::Legacy(cursor) => {
+                let mut staged = cursor.clone();
+                while examined < limit && !staged.is_exhausted(self.position.state()) {
+                    let work = staged.examine(self.position.state(), limit - examined)?;
+                    if let Some(page) = work.staged {
+                        examined += page.examined;
+                        actions.extend(page.actions.into_iter().map(|mut action| {
+                            action.position_key = Some(key.clone());
+                            action
+                        }));
+                    } else {
+                        examined += 1;
+                        if let Some(mut action) = work.action {
+                            action.position_key = Some(key.clone());
+                            actions.push(action);
+                        }
+                    }
+                }
+                let exhausted = staged.is_exhausted(self.position.state());
+                *cursor = staged;
+                exhausted
+            }
+        };
         if actions.len() > examined || examined > limit || !exhausted && examined == 0 {
             return Err(EngineError::InvalidState(
                 "action page examination budget invariant".into(),
             ));
         }
-        self.cursor = cursor;
         Ok(ActionPage {
             actions,
             exhausted,
